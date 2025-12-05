@@ -57,8 +57,43 @@ public:
     // Get the name of this test suite
     const std::string& get_name() const { return suite_name_; }
     
-    // Run all tests and benchmarks
-    int quench() {
+    // Simple wildcard matching (* matches any sequence, no * does substring)
+    static bool matches_filter(const std::string& pattern, const std::string& text) {
+        if (pattern.empty() || pattern == "*") return true;
+
+        // If no wildcards, do substring match
+        if (pattern.find('*') == std::string::npos) {
+            return text.find(pattern) != std::string::npos;
+        }
+
+        // Simple wildcard matching
+        size_t pi = 0, ti = 0;
+        size_t star_pi = std::string::npos, star_ti = 0;
+
+        while (ti < text.size()) {
+            if (pi < pattern.size() && (pattern[pi] == text[ti] || pattern[pi] == '?')) {
+                pi++;
+                ti++;
+            } else if (pi < pattern.size() && pattern[pi] == '*') {
+                star_pi = pi++;
+                star_ti = ti;
+            } else if (star_pi != std::string::npos) {
+                pi = star_pi + 1;
+                ti = ++star_ti;
+            } else {
+                return false;
+            }
+        }
+
+        while (pi < pattern.size() && pattern[pi] == '*') {
+            pi++;
+        }
+
+        return pi == pattern.size();
+    }
+
+    // Run all tests and benchmarks (with optional test name filter)
+    int quench(const std::string& test_filter = "") {
         std::cout << "\n╔══ " << suite_name_ << " ══╗\n";
 
         // Let derived class register its tests
@@ -66,9 +101,16 @@ public:
 
         int passed = 0;
         int failed = 0;
+        int skipped = 0;
 
         // Run tests
         for (const auto& [name, func] : tests_) {
+            // Skip if filter doesn't match
+            if (!test_filter.empty() && !matches_filter(test_filter, name)) {
+                skipped++;
+                continue;
+            }
+
             std::cout << "  " << name << " ... " << std::flush;
 
             auto start = std::chrono::steady_clock::now();
@@ -95,20 +137,23 @@ public:
             }
         }
 
-        // Run benchmarks if any
-        if (!benchmarks_.empty()) {
+        // Run benchmarks if any (and no filter is active or filter matches)
+        if (!benchmarks_.empty() && (test_filter.empty() || test_filter == "*")) {
             std::cout << "\n  Benchmarks:\n";
             for (const auto& [name, func, iterations] : benchmarks_) {
                 run_benchmark(name, func, iterations);
             }
         }
-        
+
         std::cout << "\n  Summary: " << passed << " passed";
         if (failed > 0) {
             std::cout << ", " << failed << " failed";
         }
+        if (skipped > 0) {
+            std::cout << " (" << skipped << " skipped)";
+        }
         std::cout << "\n";
-        
+
         return failed;
     }
     

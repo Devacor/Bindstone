@@ -670,7 +670,10 @@ checked_result<script_value> environment::get(uint64_t id, int depth) const {
     }
 
     if (parent_) {
-        return parent_->get(id, depth + 1);
+        // IMPORTANT: Call the one-parameter virtual get() to ensure proper polymorphic dispatch
+        // This allows derived classes (method_environment, static_method_environment) to
+        // properly check class fields/static fields when looking up variables in nested scopes
+        return parent_->get(id);
     }
 
     // Need to get the name for error message
@@ -947,8 +950,8 @@ checked_result<script_value> method_environment::get(const std::string& name) co
                     }
 
                     // Try to get static field from class definition
-                    if (class_def->has_static_field(name)) {
-                        return class_def->get_static_field(name);
+                    if (class_def->has_static_field(name_id)) {
+                        return class_def->get_static_field(name_id);
                     }
                 }
             }
@@ -995,10 +998,8 @@ checked_result<script_value> method_environment::get(uint64_t id) const {
             // Try to get static field from class definition
             auto class_def = instance->get_class_definition();
             if (class_def) {
-                // Convert ID back to string for static field lookup (public API uses strings)
-                std::string name = std::string(symbolizer_->get_string(id));
-                if (class_def->has_static_field(name)) {
-                    return class_def->get_static_field(name);
+                if (class_def->has_static_field(id)) {
+                    return class_def->get_static_field(id);
                 }
             }
         }
@@ -1009,25 +1010,84 @@ checked_result<script_value> method_environment::get(uint64_t id) const {
 }
 
 checked_result<std::reference_wrapper<const script_value>> method_environment::get_ref(const std::string& name) const {
-    // For 'this', we can't return a reference to this_object_ because it might be temporary
-    // Just delegate to base class which will throw
+    // Convert to ID and use the ID-based override that checks static fields
     uint64_t id = symbolizer_->intern(name);
-    return environment::get_ref(id);
+    return get_ref(id);
 }
 
 checked_result<std::reference_wrapper<const script_value>> method_environment::get_ref(uint64_t id) const {
-    // Delegate to base class - method_environment doesn't support get_ref for 'this' object fields
-    return environment::get_ref(id);
+    // First try normal environment lookup
+    auto env_result = environment::get_ref(id);
+    if (env_result) {
+        return env_result;
+    }
+
+    // If not found, check 'this' object fields and static fields
+    auto this_type = this_object_.type();
+    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
+        auto obj_holder = this_object_.get_object_holder();
+        if (obj_holder && obj_holder->data) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+
+            // Try to get instance field first (return const reference)
+            const script_value& inst_field_ref = instance->get_field(id, false);
+            if (!inst_field_ref.is_invalid()) {
+                return std::cref(inst_field_ref);
+            }
+
+            // Try to get static field from class definition (return const reference)
+            auto class_def = instance->get_class_definition();
+            if (class_def) {
+                const script_value* field_ptr = class_def->get_static_field_ptr(id);
+                if (field_ptr) {
+                    return std::cref(*field_ptr);
+                }
+            }
+        }
+    }
+
+    // Nothing found - return the original error
+    return env_result;
 }
 
 checked_result<std::reference_wrapper<script_value>> method_environment::get_ref(const std::string& name) {
     uint64_t id = symbolizer_->intern(name);
-    return environment::get_ref(id);
+    return get_ref(id);
 }
 
 checked_result<std::reference_wrapper<script_value>> method_environment::get_ref(uint64_t id) {
-    // Delegate to base class - method_environment doesn't support get_ref for 'this' object fields
-    return environment::get_ref(id);
+    // First try normal environment lookup
+    auto env_result = environment::get_ref(id);
+    if (env_result) {
+        return env_result;
+    }
+
+    // If not found, check 'this' object fields and static fields
+    auto this_type = this_object_.type();
+    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
+        auto obj_holder = this_object_.get_object_holder();
+        if (obj_holder && obj_holder->data) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+
+            // Try to get instance field first (return non-const reference)
+            script_value& inst_field_ref = instance->get_field(id, false);
+            if (!inst_field_ref.is_invalid()) {
+                return std::ref(inst_field_ref);
+            }
+
+            // Try to get static field from class definition (return non-const reference)
+            auto class_def = instance->get_class_definition();
+            if (class_def) {
+                script_value* field_ptr = class_def->get_static_field_ptr(id);
+                if (field_ptr) {
+                    return std::ref(*field_ptr);
+                }
+            }
+        }
+    }
+
+    // Nothing found - return the original error
+    return env_result;
 }
 
 void method_environment::assign(const std::string& name, const script_value& value) {
@@ -1058,14 +1118,90 @@ void method_environment::assign(const std::string& name, const script_value& val
         }
     }
     
-    // Not found anywhere - define it locally (this matches normal environment behavior)
-    define(name, value);
+    // Not found anywhere - throw error to prevent typos
+    throw runtime_error("Undefined variable '" + name + "'");
 }
 
 void method_environment::assign(uint64_t id, const script_value& value) {
-    // Convert to string name and use the string version
+    // First check if it's a local variable or parameter
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = value;
+        return;
+    }
+
+    // Check parent environments
+    if (parent_ && parent_->contains(id)) {
+        parent_->assign(id, value);
+        return;
+    }
+
+    // If not found anywhere and 'this' has this field, update it
+    auto this_type = this_object_.type();
+    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
+        auto obj_holder = this_object_.get_object_holder();
+        if (obj_holder && obj_holder->data) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+            if (instance && instance->has_field(id)) {
+                instance->set_field(id, value.clone());
+                return;
+            }
+
+            // Check for static field on class definition
+            auto class_def = instance->get_class_definition();
+            if (class_def) {
+                if (class_def->has_static_field(id)) {
+                    [[maybe_unused]] bool success = class_def->set_static_field(id, value);
+                    return;
+                }
+            }
+        }
+    }
+
+    // Not found anywhere - throw error to prevent typos
     std::string name{symbolizer_->get_string(id)};
-    assign(name, value);
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+void method_environment::assign(uint64_t id, script_value&& value) {
+    // First check if it's a local variable or parameter
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = std::move(value);
+        return;
+    }
+
+    // Check parent environments
+    if (parent_ && parent_->contains(id)) {
+        parent_->assign(id, std::move(value));
+        return;
+    }
+
+    // If not found anywhere and 'this' has this field, update it
+    auto this_type = this_object_.type();
+    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
+        auto obj_holder = this_object_.get_object_holder();
+        if (obj_holder && obj_holder->data) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+            if (instance && instance->has_field(id)) {
+                instance->set_field(id, std::move(value));
+                return;
+            }
+
+            // Check for static field on class definition
+            auto class_def = instance->get_class_definition();
+            if (class_def) {
+                if (class_def->has_static_field(id)) {
+                    [[maybe_unused]] bool success = class_def->set_static_field(id, std::move(value));
+                    return;
+                }
+            }
+        }
+    }
+
+    // Not found anywhere - throw error to prevent typos
+    std::string name{symbolizer_->get_string(id)};
+    throw runtime_error("Undefined variable '" + name + "'");
 }
 
 bool method_environment::contains(const std::string& name) const {
@@ -1094,16 +1230,18 @@ checked_result<script_value> static_method_environment::get(const std::string& n
         return env_result;
     }
 
-    // If not found, check static fields
-    if (class_def_ && class_def_->has_static_field(name)) {
-        return class_def_->get_static_field(name);
-    }
-
-    // Also check static methods (for calling other static methods)
+    // Convert name to ID for class member lookups
     if (class_def_) {
         auto eng = class_def_->get_engine_ref().lock();
         if (eng) {
             uint64_t name_id = eng->symbolize(name);
+
+            // Check static fields
+            if (class_def_->has_static_field(name_id)) {
+                return class_def_->get_static_field(name_id);
+            }
+
+            // Check static methods (for calling other static methods)
             if (class_def_->has_static_method(name_id)) {
                 return class_def_->get_static_method(name_id);
             }
@@ -1121,16 +1259,16 @@ checked_result<script_value> static_method_environment::get(uint64_t id) const {
         return env_result;
     }
 
-    // If not found, check static fields
-    std::string name{symbolizer_->get_string(id)};
+    if (class_def_) {
+        // Check static fields
+        if (class_def_->has_static_field(id)) {
+            return class_def_->get_static_field(id);
+        }
 
-    if (class_def_ && class_def_->has_static_field(name)) {
-        return class_def_->get_static_field(name);
-    }
-
-    // Also check static methods (for calling other static methods)
-    if (class_def_ && class_def_->has_static_method(id)) {
-        return class_def_->get_static_method(id);
+        // Check static methods (for calling other static methods)
+        if (class_def_->has_static_method(id)) {
+            return class_def_->get_static_method(id);
+        }
     }
 
     // Nothing found - return the original error from environment lookup
@@ -1146,8 +1284,8 @@ checked_result<std::reference_wrapper<const script_value>> static_method_environ
     }
 
     // If not found, check static fields (return reference to the field in class_def)
-    if (class_def_ && class_def_->has_static_field(name)) {
-        const script_value* field_ptr = class_def_->get_static_field_ptr(name);
+    if (class_def_) {
+        const script_value* field_ptr = class_def_->get_static_field_ptr(id);
         if (field_ptr) {
             return std::cref(*field_ptr);
         }
@@ -1165,9 +1303,8 @@ checked_result<std::reference_wrapper<const script_value>> static_method_environ
     }
 
     // If not found, check static fields
-    std::string name{symbolizer_->get_string(id)};
-    if (class_def_ && class_def_->has_static_field(name)) {
-        const script_value* field_ptr = class_def_->get_static_field_ptr(name);
+    if (class_def_) {
+        const script_value* field_ptr = class_def_->get_static_field_ptr(id);
         if (field_ptr) {
             return std::cref(*field_ptr);
         }
@@ -1186,8 +1323,8 @@ checked_result<std::reference_wrapper<script_value>> static_method_environment::
     }
 
     // If not found, check static fields (return non-const reference)
-    if (class_def_ && class_def_->has_static_field(name)) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(name);
+    if (class_def_) {
+        script_value* field_ptr = class_def_->get_static_field_ptr(id);
         if (field_ptr) {
             return std::ref(*field_ptr);
         }
@@ -1205,9 +1342,8 @@ checked_result<std::reference_wrapper<script_value>> static_method_environment::
     }
 
     // If not found, check static fields (return non-const reference)
-    std::string name{symbolizer_->get_string(id)};
-    if (class_def_ && class_def_->has_static_field(name)) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(name);
+    if (class_def_) {
+        script_value* field_ptr = class_def_->get_static_field_ptr(id);
         if (field_ptr) {
             return std::ref(*field_ptr);
         }
@@ -1233,7 +1369,7 @@ void static_method_environment::assign(const std::string& name, const script_val
     }
 
     // Check if it's a static field (set_static_field does the lookup)
-    if (class_def_ && class_def_->set_static_field(name, value)) {
+    if (class_def_ && class_def_->set_static_field(id, value)) {
         return;
     }
 
@@ -1257,7 +1393,7 @@ void static_method_environment::assign(const std::string& name, script_value&& v
     }
 
     // Check if it's a static field (set_static_field does the lookup)
-    if (class_def_ && class_def_->set_static_field(name, value)) {
+    if (class_def_ && class_def_->set_static_field(id, std::move(value))) {
         return;
     }
 
@@ -1266,13 +1402,51 @@ void static_method_environment::assign(const std::string& name, script_value&& v
 }
 
 void static_method_environment::assign(uint64_t id, const script_value& value) {
+    // First check if it's a local variable or parameter
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = value;
+        return;
+    }
+
+    // Check parent environments
+    if (parent_ && parent_->contains(id)) {
+        parent_->assign(id, value);
+        return;
+    }
+
+    // Check if it's a static field (set_static_field does the lookup)
+    if (class_def_ && class_def_->set_static_field(id, value)) {
+        return;
+    }
+
+    // Not found anywhere - throw error
     std::string name{symbolizer_->get_string(id)};
-    assign(name, value);
+    throw runtime_error("Undefined variable '" + name + "'");
 }
 
 void static_method_environment::assign(uint64_t id, script_value&& value) {
+    // First check if it's a local variable or parameter
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = std::move(value);
+        return;
+    }
+
+    // Check parent environments
+    if (parent_ && parent_->contains(id)) {
+        parent_->assign(id, std::move(value));
+        return;
+    }
+
+    // Check if it's a static field (set_static_field does the lookup)
+    if (class_def_ && class_def_->set_static_field(id, std::move(value))) {
+        return;
+    }
+
+    // Not found anywhere - throw error
     std::string name{symbolizer_->get_string(id)};
-    assign(name, std::move(value));
+    throw runtime_error("Undefined variable '" + name + "'");
 }
 
 interpreter::interpreter()
@@ -1320,6 +1494,11 @@ interpreter::interpreter()
 	// Initialize cached keyword symbol IDs for fast keyword checks
 	this_id_ = string_symbolizer_->intern("this");
 	super_id_ = string_symbolizer_->intern("super");
+
+	// Verify this_id_ matches symbolizer's cached ID
+	if(this_id_ != string_symbolizer_->get_this_id()){
+        throw std::runtime_error("this_id_ mismatch with symbolizer");
+    }
 	getValue_id_ = string_symbolizer_->intern("getValue");
 	cpp_object_field_id_ = string_symbolizer_->intern(class_constants::CPP_OBJECT_FIELD);
 
@@ -1375,6 +1554,11 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
 	// Initialize cached keyword symbol IDs for fast keyword checks
 	this_id_ = string_symbolizer_->intern("this");
 	super_id_ = string_symbolizer_->intern("super");
+
+	// Verify this_id_ matches symbolizer's cached ID
+	if (this_id_ != string_symbolizer_->get_this_id()) {
+		throw std::runtime_error("this_id_ mismatch with symbolizer");
+	}
 	getValue_id_ = string_symbolizer_->intern("getValue");
 	cpp_object_field_id_ = string_symbolizer_->intern(class_constants::CPP_OBJECT_FIELD);
 
@@ -1497,7 +1681,12 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
             auto result = decl->accept(this);
             if (!result) [[unlikely]] {
                 // Convert error code to exception at boundary
-                throw std::system_error(result.error());
+                // Include the custom error message if available
+                if (!result.message().empty()) {
+                    throw std::system_error(result.error(), result.message());
+                } else {
+                    throw std::system_error(result.error());
+                }
             }
             // std::cerr << "  Finished visiting declaration " << i << "\n";
         } catch (const script_exception& e) {
@@ -1687,8 +1876,8 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
 
                     // Check for static fields of the class
                     auto class_def = instance->get_class_definition();
-                    if (class_def && class_def->has_static_field(expr->name)) {
-                        push_value(class_def->get_static_field(expr->name));
+                    if (class_def && class_def->has_static_field(expr->symbol_id)) {
+                        push_value(class_def->get_static_field(expr->symbol_id));
                         return checked_result<void>();
                     }
                 }
@@ -1845,6 +2034,175 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 				// Fast path didn't handle it - save values to avoid re-fetching
 				pre_fetched_left = std::move(leftVal);
+				pre_fetched_right = std::move(rightVal);
+				already_have_values = true;
+			}
+			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
+			else if (auto* rightLit = dynamic_cast<literal_expr*>(expr->right.get())) {
+				// Get left value from environment, right value is already in AST
+				auto leftResult = environment_->get(leftId->symbol_id);
+				if (!leftResult) {
+					return checked_result<void>(leftResult.error(), leftResult.message());
+				}
+				script_value leftVal = std::move(leftResult.value()).deref();
+				const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
+
+				// Ultra-fast integer path (most common for loop conditions)
+				if (can_use_fast_path(expr->op.type)) {
+					// Use raw_storage_index for fastest type check
+					size_t leftIdx = leftVal.raw_storage_index();
+					size_t rightIdx = rightVal.raw_storage_index();
+
+					if (leftIdx == 1 && rightIdx == 1) {  // Both ints
+						script_int leftInt = leftVal.unchecked_as_int();
+						script_int rightInt = rightVal.unchecked_as_int();
+
+						switch (expr->op.type) {
+						case token_type::less:
+							push_value(make_value(leftInt < rightInt));
+							return {};
+						case token_type::less_equal:
+							push_value(make_value(leftInt <= rightInt));
+							return {};
+						case token_type::greater:
+							push_value(make_value(leftInt > rightInt));
+							return {};
+						case token_type::greater_equal:
+							push_value(make_value(leftInt >= rightInt));
+							return {};
+						case token_type::equal_equal:
+							push_value(make_value(leftInt == rightInt));
+							return {};
+						case token_type::bang_equal:
+							push_value(make_value(leftInt != rightInt));
+							return {};
+						case token_type::plus:
+							push_value(make_value(leftInt + rightInt));
+							return {};
+						case token_type::minus:
+							push_value(make_value(leftInt - rightInt));
+							return {};
+						case token_type::star:
+							push_value(make_value(leftInt * rightInt));
+							return {};
+						case token_type::slash:
+							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+							push_value(make_value(leftInt / rightInt));
+							return {};
+						case token_type::percent:
+							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));
+							push_value(make_value(leftInt % rightInt));
+							return {};
+						default:
+							break;
+						}
+					}
+					// Float/mixed numeric path
+					else if ((leftIdx == 1 || leftIdx == 2) && (rightIdx == 1 || rightIdx == 2)) {
+						script_float leftFloat = leftIdx == 1 ?
+							static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
+						script_float rightFloat = rightIdx == 1 ?
+							static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
+
+						switch (expr->op.type) {
+						case token_type::less:
+							push_value(make_value(leftFloat < rightFloat));
+							return {};
+						case token_type::less_equal:
+							push_value(make_value(leftFloat <= rightFloat));
+							return {};
+						case token_type::greater:
+							push_value(make_value(leftFloat > rightFloat));
+							return {};
+						case token_type::greater_equal:
+							push_value(make_value(leftFloat >= rightFloat));
+							return {};
+						case token_type::plus:
+							push_value(make_value(leftFloat + rightFloat));
+							return {};
+						case token_type::minus:
+							push_value(make_value(leftFloat - rightFloat));
+							return {};
+						case token_type::star:
+							push_value(make_value(leftFloat * rightFloat));
+							return {};
+						case token_type::slash:
+							if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+							push_value(make_value(leftFloat / rightFloat));
+							return {};
+						default:
+							break;
+						}
+					}
+				}
+				// Fast path didn't fully handle - save for slow path
+				pre_fetched_left = std::move(leftVal);
+				pre_fetched_right = rightVal;
+				already_have_values = true;
+			}
+		}
+		// FAST PATH 3: literal + identifier (e.g., "100 > i", "5 + x")
+		else if (auto* leftLit = dynamic_cast<literal_expr*>(expr->left.get())) {
+			if (auto* rightId = dynamic_cast<identifier_expr*>(expr->right.get())) {
+				const script_value& leftVal = leftLit->value;  // Direct access!
+				auto rightResult = environment_->get(rightId->symbol_id);
+				if (!rightResult) {
+					return checked_result<void>(rightResult.error(), rightResult.message());
+				}
+				script_value rightVal = std::move(rightResult.value()).deref();
+
+				// Ultra-fast integer path
+				if (can_use_fast_path(expr->op.type)) {
+					size_t leftIdx = leftVal.raw_storage_index();
+					size_t rightIdx = rightVal.raw_storage_index();
+
+					if (leftIdx == 1 && rightIdx == 1) {  // Both ints
+						script_int leftInt = leftVal.unchecked_as_int();
+						script_int rightInt = rightVal.unchecked_as_int();
+
+						switch (expr->op.type) {
+						case token_type::less:
+							push_value(make_value(leftInt < rightInt));
+							return {};
+						case token_type::less_equal:
+							push_value(make_value(leftInt <= rightInt));
+							return {};
+						case token_type::greater:
+							push_value(make_value(leftInt > rightInt));
+							return {};
+						case token_type::greater_equal:
+							push_value(make_value(leftInt >= rightInt));
+							return {};
+						case token_type::equal_equal:
+							push_value(make_value(leftInt == rightInt));
+							return {};
+						case token_type::bang_equal:
+							push_value(make_value(leftInt != rightInt));
+							return {};
+						case token_type::plus:
+							push_value(make_value(leftInt + rightInt));
+							return {};
+						case token_type::minus:
+							push_value(make_value(leftInt - rightInt));
+							return {};
+						case token_type::star:
+							push_value(make_value(leftInt * rightInt));
+							return {};
+						case token_type::slash:
+							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+							push_value(make_value(leftInt / rightInt));
+							return {};
+						case token_type::percent:
+							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));
+							push_value(make_value(leftInt % rightInt));
+							return {};
+						default:
+							break;
+						}
+					}
+				}
+				// Fast path didn't fully handle - save for slow path
+				pre_fetched_left = leftVal;
 				pre_fetched_right = std::move(rightVal);
 				already_have_values = true;
 			}
@@ -2145,53 +2503,85 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
             
         case token_type::plus_plus:
         case token_type::minus_minus: {
-            // Handle increment/decrement
+            // Handle increment/decrement with in-place mutation (ChaiScript-style)
             if (auto* identifier = dynamic_cast<identifier_expr*>(expr->operand.get())) {
                 // Cache symbol ID if not already cached
                 if (identifier->symbol_id == UINT64_MAX) {
                     identifier->symbol_id = string_symbolizer_->intern(identifier->name);
                 }
-                auto val_result = environment_->get(identifier->symbol_id);
-                if (!val_result) {
-                    return checked_result<void>(val_result.error(), val_result.message());
-                }
-                script_value currentValue = std::move(val_result.value());
-                script_value newValue = make_value();
 
-                // Use single type() call + switch for faster type checking
-                switch (currentValue.type()) {
-                    case script_value_type::jai_int_type: {
-                        int64_t val = currentValue.as_int();
-                        newValue = make_value(expr->op.type == token_type::plus_plus ? val + 1 : val - 1);
-                        break;
-                    }
-                    case script_value_type::jai_float_type: {
-                        double val = currentValue.as_float();
-                        newValue = make_value(expr->op.type == token_type::plus_plus ? val + 1.0 : val - 1.0);
-                        break;
-                    }
-                    default:
-                        return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Cannot increment/decrement non-numeric value
-                }
-
-                // Check if this is a reference variable
+                // Try fast path: direct variable lookup
                 script_value* varPtr = environment_->get_value_ptr(identifier->symbol_id);
-                if (varPtr && varPtr->is_reference()) {
-                    // This is a reference - update the target
-                    varPtr->deref() = newValue.deref();
-                } else {
-                    // Regular variable assignment
-                    environment_->assign(identifier->symbol_id, newValue);
-                }
+                if (varPtr) {
+                    // Fast path: direct in-place mutation for local variables
+                    script_value& target = varPtr->deref();
 
-                // For prefix, return the new value; for postfix, return the old value
-                if (expr->is_postfix) {
-                    push_value(std::move(currentValue));
+                    const bool isIncrement = (expr->op.type == token_type::plus_plus);
+                    switch (target.type()) {
+                        case script_value_type::jai_int_type: {
+                            if (expr->is_postfix) {
+                                push_value(make_value(target.unchecked_as_int()));
+                                if (isIncrement) ++target.unchecked_as_int_ref();
+                                else --target.unchecked_as_int_ref();
+                            } else {
+                                if (isIncrement) ++target.unchecked_as_int_ref();
+                                else --target.unchecked_as_int_ref();
+                                push_value(make_value(target.unchecked_as_int()));
+                            }
+                            return {};
+                        }
+                        case script_value_type::jai_float_type: {
+                            if (expr->is_postfix) {
+                                push_value(make_value(target.unchecked_as_float()));
+                                if (isIncrement) target.unchecked_as_float_ref() += 1.0;
+                                else target.unchecked_as_float_ref() -= 1.0;
+                            } else {
+                                if (isIncrement) target.unchecked_as_float_ref() += 1.0;
+                                else target.unchecked_as_float_ref() -= 1.0;
+                                push_value(make_value(target.unchecked_as_float()));
+                            }
+                            return {};
+                        }
+                        default:
+                            return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                    }
                 } else {
-                    push_value(std::move(newValue));
+                    // Fallback: identifier is an implicit this.member access
+                    // Check if 'this' exists and has this field
+                    auto this_result = environment_->get(this_id_);
+                    if (this_result && this_result.value().is_object()) {
+                        script_value this_val = std::move(this_result.value());
+                        auto obj_holder = this_val.get_object_holder();
+
+                        std::shared_ptr<class_instance> instance = obj_holder->is_class_instance_wrapper
+                            ? std::static_pointer_cast<class_instance>(obj_holder->data)
+                            : nullptr;
+
+                        if (instance && instance->has_field(identifier->symbol_id)) {
+                            script_value currentVal = instance->get_field(identifier->symbol_id);
+                            const bool isIncrement = (expr->op.type == token_type::plus_plus);
+
+                            if (currentVal.is_int()) {
+                                script_int oldVal = currentVal.as_int();
+                                script_int newVal = isIncrement ? oldVal + 1 : oldVal - 1;
+                                instance->set_field(identifier->symbol_id, make_value(newVal));
+                                push_value(make_value(expr->is_postfix ? oldVal : newVal));
+                                return {};
+                            } else if (currentVal.is_float()) {
+                                script_float oldVal = currentVal.as_float();
+                                script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
+                                instance->set_field(identifier->symbol_id, make_value(newVal));
+                                push_value(make_value(expr->is_postfix ? oldVal : newVal));
+                                return {};
+                            } else {
+                                return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                            }
+                        }
+                    }
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
                 }
             } else {
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target));  // [ErrorText] Increment/decrement requires a variable
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target));
             }
             break;
         }
@@ -2212,183 +2602,192 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (identifier->symbol_id == UINT64_MAX) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
-            auto ref_result = environment_->get_ref(identifier->symbol_id);
-            if (!ref_result) {
-                throw runtime_error(ref_result.message());
-            }
-            script_value currentValue = ref_result.value().get();
 
-            // Evaluate the right-hand side
-            JAISCRIPT_TRY(expr->value->accept(this));
-            script_value rightValue = pop_value();
-            
-            // Perform the compound operation - try custom operators first, then built-in types
-            script_value resultValue = make_value();
-            bool customOpFound = false;
-            
-            switch (expr->op.type) {
-                case token_type::plus_equal: {
-                    // Only check for custom operators if we know they exist (fast path optimization)
-                    if (has_custom_numeric_ops_ && environment_ && environment_->contains("+")) {
-                        auto op_result = environment_->get("+");
-                        if (op_result && op_result.value().is_function()) {
-                            script_value opFunc = std::move(op_result.value());
-                            const script_function& func = opFunc.as_function();
-                            std::vector<script_value> args = {currentValue, rightValue};
-                            auto result = func(args);
-                            if (!result) {
-                                // Function returned error - propagate it up
-                                return checked_result<void>(result.error(), result.message());
-                            }
-                            resultValue = std::move(result.value());
-                            customOpFound = true;
-                        }
-                    }
-
-                    // Fall back to built-in operators
-                    if (!customOpFound) {
-                        // Use single type() call + switch for faster type checking
-                        // Dereference if needed to get actual value type
-                        auto& derefCurrent = currentValue.deref();
-                        auto& derefRight = rightValue.deref();
-                        auto leftType = derefCurrent.type();
-                        auto rightType = derefRight.type();
-
-                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
-                            resultValue = make_value(derefCurrent.as_int() + derefRight.as_int());
-                        } else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
-                                   (rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
-                            resultValue = make_value(derefCurrent.as_float() + derefRight.as_float());
-                        } else if (leftType == script_value_type::jai_string_type && rightType == script_value_type::jai_string_type) {
-                            resultValue = make_value(derefCurrent.as_string() + derefRight.as_string());
-                        } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for +=
-                        }
-                    }
-                    break;
-                }
-
-                case token_type::minus_equal: {
-                    // Only check for custom operators if we know they exist (fast path optimization)
-                    customOpFound = false;
-                    if (has_custom_numeric_ops_ && environment_ && environment_->contains("-")) {
-                        auto op_result = environment_->get("-");
-                        if (op_result && op_result.value().is_function()) {
-                            script_value opFunc = std::move(op_result.value());
-                            const script_function& func = opFunc.as_function();
-                            std::vector<script_value> args = {currentValue, rightValue};
-                            auto result = func(args);
-                            if (!result) {
-                                // Function returned error - propagate it up
-                                return checked_result<void>(result.error(), result.message());
-                            }
-                            resultValue = std::move(result.value());
-                            customOpFound = true;
-                        }
-                    }
-                    
-                    // Fall back to built-in operators
-                    if (!customOpFound) {
-                        // Use single type() call + switch for faster type checking
-                        // Dereference if needed to get actual value type
-                        auto& derefCurrent = currentValue.deref();
-                        auto& derefRight = rightValue.deref();
-                        auto leftType = derefCurrent.type();
-                        auto rightType = derefRight.type();
-
-                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
-                            resultValue = make_value(derefCurrent.as_int() - derefRight.as_int());
-                        } else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
-                                   (rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
-                            resultValue = make_value(derefCurrent.as_float() - derefRight.as_float());
-                        } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for -=
-                        }
-                    }
-                    break;
-                }
-
-                case token_type::star_equal: {
-                    // Only check for custom operators if we know they exist (fast path optimization)
-                    customOpFound = false;
-                    if (has_custom_numeric_ops_ && environment_ && environment_->contains("*")) {
-                        auto op_result = environment_->get("*");
-                        if (op_result && op_result.value().is_function()) {
-                            script_value opFunc = std::move(op_result.value());
-                            const script_function& func = opFunc.as_function();
-                            std::vector<script_value> args = {currentValue, rightValue};
-                            auto result = func(args);
-                            if (!result) {
-                                // Function returned error - propagate it up
-                                return checked_result<void>(result.error(), result.message());
-                            }
-                            resultValue = std::move(result.value());
-                            customOpFound = true;
-                        }
-                    }
-                    
-                    // Fall back to built-in operators
-                    if (!customOpFound) {
-                        // Use single type() call + switch for faster type checking
-                        // Dereference if needed to get actual value type
-                        auto& derefCurrent = currentValue.deref();
-                        auto& derefRight = rightValue.deref();
-                        auto leftType = derefCurrent.type();
-                        auto rightType = derefRight.type();
-
-                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
-                            resultValue = make_value(derefCurrent.as_int() * derefRight.as_int());
-                        } else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
-                                   (rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
-                            resultValue = make_value(derefCurrent.as_float() * derefRight.as_float());
-                        } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for *=
-                        }
-                    }
-                    break;
-                }
-
-                case token_type::slash_equal: {
-                    // Use single type() call + switch for faster type checking
-                    // Dereference if needed to get actual value type
-                    auto& derefCurrent = currentValue.deref();
-                    auto& derefRight = rightValue.deref();
-                    auto leftType = derefCurrent.type();
-                    auto rightType = derefRight.type();
-
-                    // Check for division by zero
-                    if (rightType == script_value_type::jai_int_type && derefRight.as_int() == 0) {
-                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
-                    }
-                    if (rightType == script_value_type::jai_float_type && derefRight.as_float() == 0.0) {
-                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
-                    }
-
-                    if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
-                        resultValue = make_value(derefCurrent.as_int() / derefRight.as_int());
-                    } else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
-                               (rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
-                        resultValue = make_value(derefCurrent.as_float() / derefRight.as_float());
-                    } else {
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for /=
-                    }
-                    break;
-                }
-
-                default:
-                    return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator
-            }
-            
-            // Check if this is a reference variable
+            // Try fast path: direct variable lookup for in-place mutation
             script_value* varPtr = environment_->get_value_ptr(identifier->symbol_id);
-            if (varPtr && varPtr->is_reference()) {
-                // This is a reference - update the target (deep copy)
-                varPtr->deref() = std::move(resultValue.deref().clone());
+            if (varPtr) {
+                // Fast path: direct in-place mutation for local variables
+                script_value& target = varPtr->deref();
+
+                // Evaluate the right-hand side
+                JAISCRIPT_TRY(expr->value->accept(this));
+                script_value rightValue = pop_value();
+                auto& derefRight = rightValue.deref();
+
+                // Get types for dispatch
+                auto leftType = target.type();
+                auto rightType = derefRight.type();
+
+                // Check for custom operators first (rare path)
+                if (has_custom_numeric_ops_) [[unlikely]] {
+                    const char* opName = nullptr;
+                    switch (expr->op.type) {
+                        case token_type::plus_equal: opName = "+"; break;
+                        case token_type::minus_equal: opName = "-"; break;
+                        case token_type::star_equal: opName = "*"; break;
+                        default: break;
+                    }
+                    if (opName && environment_->contains(opName)) {
+                        auto op_result = environment_->get(opName);
+                        if (op_result && op_result.value().is_function()) {
+                            script_value opFunc = std::move(op_result.value());
+                            const script_function& func = opFunc.as_function();
+                            std::vector<script_value> args = {target.clone(), rightValue};
+                            auto result = func(args);
+                            if (!result) {
+                                return checked_result<void>(result.error(), result.message());
+                            }
+                            target = std::move(result.value());
+                            push_value(target.clone());
+                            return {};
+                        }
+                    }
+                }
+
+                // === IN-PLACE MUTATION (ChaiScript-style) ===
+                // Modify the value directly in storage, avoiding make_value() allocations
+                switch (expr->op.type) {
+                    case token_type::plus_equal: {
+                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
+                            target.unchecked_as_int_ref() += derefRight.unchecked_as_int();
+                        } else if (leftType == script_value_type::jai_float_type) {
+                            target.unchecked_as_float_ref() += derefRight.as_float();
+                        } else if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_float_type) {
+                            target = make_value(target.unchecked_as_int() + derefRight.unchecked_as_float());
+                        } else if (leftType == script_value_type::jai_string_type && rightType == script_value_type::jai_string_type) {
+                            target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+                        } else {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                        }
+                        break;
+                    }
+
+                    case token_type::minus_equal: {
+                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
+                            target.unchecked_as_int_ref() -= derefRight.unchecked_as_int();
+                        } else if (leftType == script_value_type::jai_float_type) {
+                            target.unchecked_as_float_ref() -= derefRight.as_float();
+                        } else if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_float_type) {
+                            target = make_value(target.unchecked_as_int() - derefRight.unchecked_as_float());
+                        } else {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                        }
+                        break;
+                    }
+
+                    case token_type::star_equal: {
+                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
+                            target.unchecked_as_int_ref() *= derefRight.unchecked_as_int();
+                        } else if (leftType == script_value_type::jai_float_type) {
+                            target.unchecked_as_float_ref() *= derefRight.as_float();
+                        } else if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_float_type) {
+                            target = make_value(target.unchecked_as_int() * derefRight.unchecked_as_float());
+                        } else {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                        }
+                        break;
+                    }
+
+                    case token_type::slash_equal: {
+                        if (rightType == script_value_type::jai_int_type && derefRight.unchecked_as_int() == 0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+                        }
+                        if (rightType == script_value_type::jai_float_type && derefRight.unchecked_as_float() == 0.0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+                        }
+
+                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
+                            target.unchecked_as_int_ref() /= derefRight.unchecked_as_int();
+                        } else if (leftType == script_value_type::jai_float_type) {
+                            target.unchecked_as_float_ref() /= derefRight.as_float();
+                        } else if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_float_type) {
+                            target = make_value(target.unchecked_as_int() / derefRight.unchecked_as_float());
+                        } else {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                        }
+                        break;
+                    }
+
+                    default:
+                        return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+                }
+
+                push_value(target.clone());
             } else {
-                // Regular assignment (deep copy the result)
-                environment_->assign(identifier->symbol_id, std::move(resultValue.clone()));
+                // Fallback: identifier is an implicit this.member access
+                // Check if 'this' exists and has this field
+                auto this_result = environment_->get(this_id_);
+                if (!this_result || !this_result.value().is_object()) {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
+                }
+
+                script_value this_val = std::move(this_result.value());
+                auto obj_holder = this_val.get_object_holder();
+                std::shared_ptr<class_instance> instance = obj_holder->is_class_instance_wrapper
+                    ? std::static_pointer_cast<class_instance>(obj_holder->data)
+                    : nullptr;
+
+                if (!instance || !instance->has_field(identifier->symbol_id)) {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
+                }
+
+                // Get current field value
+                script_value currentValue = instance->get_field(identifier->symbol_id);
+
+                // Evaluate the right-hand side
+                JAISCRIPT_TRY(expr->value->accept(this));
+                script_value rightValue = pop_value();
+
+                // Perform the compound operation (using standard path, no in-place mutation for fields)
+                script_value resultValue = make_value();
+                switch (expr->op.type) {
+                    case token_type::plus_equal:
+                        if (currentValue.is_int() && rightValue.is_int()) {
+                            resultValue = make_value(currentValue.as_int() + rightValue.as_int());
+                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                            resultValue = make_value(currentValue.as_float() + rightValue.as_float());
+                        } else if (currentValue.is_string() && rightValue.is_string()) {
+                            resultValue = make_value(currentValue.as_string() + rightValue.as_string());
+                        } else {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                        }
+                        break;
+                    case token_type::minus_equal:
+                        if (currentValue.is_int() && rightValue.is_int()) {
+                            resultValue = make_value(currentValue.as_int() - rightValue.as_int());
+                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                            resultValue = make_value(currentValue.as_float() - rightValue.as_float());
+                        } else {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                        }
+                        break;
+                    case token_type::star_equal:
+                        if (currentValue.is_int() && rightValue.is_int()) {
+                            resultValue = make_value(currentValue.as_int() * rightValue.as_int());
+                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                            resultValue = make_value(currentValue.as_float() * rightValue.as_float());
+                        } else {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                        }
+                        break;
+                    case token_type::slash_equal:
+                        if (rightValue.is_int() && rightValue.as_int() == 0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+                        }
+                        if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                            resultValue = make_value(currentValue.as_float() / rightValue.as_float());
+                        } else {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                        }
+                        break;
+                    default:
+                        return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+                }
+
+                // Set the field and push result
+                instance->set_field(identifier->symbol_id, resultValue.clone());
+                push_value(std::move(resultValue));
             }
-            push_value(resultValue);
         } else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
             // Handle compound assignment to member expression (e.g., obj.value += 10)
             // First, get the current value of the property
@@ -2709,7 +3108,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             // Then try static fields
                             else {
                                 auto class_def = instance->get_class_definition();
-                                if (class_def && class_def->set_static_field(identifier->name, value)) {
+                                if (class_def && class_def->set_static_field(identifier->symbol_id, value)) {
                                     assigned_to_member = true;
                                 }
                             }
@@ -2720,6 +3119,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 if (!assigned_to_member) {
                     // Use environment->assign() which will:
                     // - For static_method_environment: check static fields, then throw if not found
+                    // - For method_environment: check 'this' fields, then define locally if not found
                     // - For regular environment: throw error if variable doesn't exist
                     environment_->assign(identifier->symbol_id, std::move(value.clone()));
                 }
@@ -2765,7 +3165,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 script_value value = pop_value();
                 
                 // Set the static field
-                if (!class_def->set_static_field(memberExpr->member, value.clone())) {
+                if (!class_def->set_static_field(memberExpr->member_id, value.clone())) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                         "Cannot assign to static member: field '" + memberExpr->member + "' not found");
                 }
@@ -2904,7 +3304,11 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
                 environment_ = previous;
                 return result;
             }
-            if (is_unwinding_) break;
+
+            // Check for control flow: break, continue, return, or exceptions
+            if (is_unwinding_ || hasBreakRequest_ || hasContinueRequest_ || hasReturnValue_) {
+                break;
+            }
         }
     } catch (...) {
         // Release the block environment even if an error occurs
@@ -2972,11 +3376,19 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 environment_->define(decl->name_id, std::move(weak_result.value()));
             } else if (value.type() == script_value_type::jai_object_type) {
                 // Helpful error for value-semantic objects
-                throw runtime_error("Cannot initialize weak_ptr from a value-semantic object. Use shared_ptr<T> to enable reference semantics.");
+                auto type_info = decl->type;
+                std::string weak_type = type_info && !type_info->type_params.empty() ?
+                    "weak_ptr<" + type_info->type_params[0]->type_name + ">" : "weak_ptr";
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                    "Cannot initialize " + weak_type + " from a value-semantic object. Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<T>(...); auto weak = weak_ptr<T>(obj);");
             } else {
                 auto type_info = value.get_type_info();
                 std::string type_name = type_info ? type_info->type_name : "unknown";
-                throw runtime_error("Cannot initialize weak_ptr with " + type_name);
+                auto weak_type_info = decl->type;
+                std::string weak_type = weak_type_info && !weak_type_info->type_params.empty() ?
+                    "weak_ptr<" + weak_type_info->type_params[0]->type_name + ">" : "weak_ptr";
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                    "Cannot initialize " + weak_type + " with " + type_name + ". Use shared_ptr<T> to enable reference semantics.");
             }
         }
     } else if (is_shared_ptr) {
@@ -3653,9 +4065,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             return {};
         }
 
-        // Try static field access (still uses string for now - static fields not yet migrated)
+        // Try static field access
         // get_static_field returns null if not found
-        script_value static_value = class_def->get_static_field(expr->member);
+        script_value static_value = class_def->get_static_field(expr->member_id);
         if (!static_value.is_null()) {
             push_value(static_value);
             return {};
@@ -4370,8 +4782,13 @@ checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
     JAISCRIPT_TRY(expr->condition->accept(this));
     script_value conditionValue = pop_value();
 
-    // Check if condition is truthy
-    bool conditionIsTruthy = is_truthy(conditionValue);
+    // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
+    bool conditionIsTruthy;
+    if (expression_returns_bool(expr->condition.get())) {
+        conditionIsTruthy = conditionValue.unchecked_as_bool();
+    } else {
+        conditionIsTruthy = is_truthy(conditionValue);
+    }
 
     // Evaluate only the selected branch (short-circuit evaluation)
     if (conditionIsTruthy) {
@@ -4505,8 +4922,16 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
     JAISCRIPT_TRY(stmt->condition->accept(this));
     script_value conditionValue = pop_value();
 
+    // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
+    bool is_true;
+    if (expression_returns_bool(stmt->condition.get())) {
+        is_true = conditionValue.unchecked_as_bool();
+    } else {
+        is_true = is_truthy(conditionValue);
+    }
+
     // Execute appropriate branch based on truthiness
-    if (is_truthy(conditionValue)) {
+    if (is_true) {
         JAISCRIPT_TRY(stmt->then_statement->accept(this));
     } else if (stmt->else_statement) {
         JAISCRIPT_TRY(stmt->else_statement->accept(this));
@@ -4515,13 +4940,22 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
+    // OPTIMIZATION: Pre-check if condition is guaranteed to return bool
+    const bool condition_returns_bool = expression_returns_bool(stmt->condition.get());
+
     while (true) {
         // Evaluate the condition
         JAISCRIPT_TRY(stmt->condition->accept(this));
 
-        // Phase 2: Boolean fast path optimization (ChaiScript-style)
         const auto& val = valueStack_.top();
-        bool is_true = is_truthy(val);
+        bool is_true;
+
+        // FAST PATH: If we KNOW the condition returns bool, skip type dispatch
+        if (condition_returns_bool) {
+            is_true = val.unchecked_as_bool();
+        } else {
+            is_true = is_truthy(val);
+        }
 
         valueStack_.discard();
 
@@ -4552,6 +4986,96 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
+    // FAST PATH: Detect and optimize integer counting loops
+    // Pattern: for (auto i = START; i < END; ++i) { body }
+    // This eliminates virtual calls for condition and update - native C++ loop instead
+    if (stmt->initializer && stmt->condition && stmt->update) {
+        auto* init_var = dynamic_cast<variable_decl*>(stmt->initializer.get());
+        auto* cond_binary = dynamic_cast<binary_expr*>(stmt->condition.get());
+        auto* update_unary = dynamic_cast<unary_expr*>(stmt->update.get());
+
+        if (init_var && cond_binary && update_unary) {
+            // Check: condition is identifier < literal or identifier <= literal
+            bool is_less = cond_binary->op.type == token_type::less;
+            bool is_less_eq = cond_binary->op.type == token_type::less_equal;
+
+            if (is_less || is_less_eq) {
+                auto* cond_id = dynamic_cast<identifier_expr*>(cond_binary->left.get());
+                auto* cond_lit = dynamic_cast<literal_expr*>(cond_binary->right.get());
+
+                if (cond_id && cond_lit && cond_lit->value.raw_storage_index() == 1) {  // int literal
+                    // Check: update is ++identifier (same as condition)
+                    if (update_unary->op.type == token_type::plus_plus) {
+                        auto* update_id = dynamic_cast<identifier_expr*>(update_unary->operand.get());
+
+                        if (update_id && update_id->symbol_id == cond_id->symbol_id) {
+                            // Check: init is var i = literal (same identifier, int literal)
+                            auto* init_lit = dynamic_cast<literal_expr*>(init_var->initializer.get());
+
+                            if (init_lit && init_lit->value.raw_storage_index() == 1 &&
+                                init_var->name_id == cond_id->symbol_id) {
+
+                                // === PATTERN MATCHED! Run optimized native loop ===
+                                script_int i = init_lit->value.unchecked_as_int();
+                                script_int end = cond_lit->value.unchecked_as_int();
+                                uint64_t var_id = init_var->name_id;
+
+                                // Setup environment once
+                                auto previous = environment_;
+                                auto loop_env = get_pooled_environment(previous);
+                                environment_ = loop_env;
+                                environment_->define(var_id, make_value(i));
+
+                                // Get direct pointer to loop variable's int storage (ChaiScript-style)
+                                // NOTE: Assumes body doesn't reassign i to different type (UB if it does)
+                                script_value* var_ptr = environment_->get_value_ptr(var_id);
+                                script_int* int_ptr = &var_ptr->unchecked_as_int_ref();
+
+                                // Native C++ counting loop - single store instruction per iteration
+                                if (is_less) {
+                                    for (; i < end; ++i) {
+                                        *int_ptr = i;
+
+                                        auto result = stmt->body->accept(this);
+                                        if (!result) {
+                                            release_environment(loop_env);
+                                            environment_ = previous;
+                                            return result;
+                                        }
+
+                                        if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
+                                        if (hasReturnValue_) break;
+                                        if (hasContinueRequest_) hasContinueRequest_ = false;
+                                    }
+                                } else {  // is_less_eq
+                                    for (; i <= end; ++i) {
+                                        *int_ptr = i;
+
+                                        auto result = stmt->body->accept(this);
+                                        if (!result) {
+                                            release_environment(loop_env);
+                                            environment_ = previous;
+                                            return result;
+                                        }
+
+                                        if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
+                                        if (hasReturnValue_) break;
+                                        if (hasContinueRequest_) hasContinueRequest_ = false;
+                                    }
+                                }
+
+                                release_environment(loop_env);
+                                environment_ = previous;
+                                return {};
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // === GENERAL PATH: Standard for-loop handling ===
     // Create new scope for the for loop (initialization variables should be scoped)
     auto previous = environment_;
     auto loop_env = get_pooled_environment(environment_);
@@ -4559,6 +5083,10 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
     // Error capture for lambdas (avoid throwing from hot path)
     std::optional<checked_result<void>> error;
+
+    // OPTIMIZATION: Pre-check if condition is guaranteed to return bool
+    // This allows us to skip is_truthy() type dispatch entirely
+    const bool condition_returns_bool = stmt->condition && expression_returns_bool(stmt->condition.get());
 
     // Lambda helpers (ChaiScript-style) for cleaner, more optimizable code
     auto eval_condition = [&]() -> bool {
@@ -4570,9 +5098,17 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             return false;
         }
 
-        // Optimized: Use is_truthy with unchecked accessors
         const auto& val = valueStack_.top();
-        bool is_true = is_truthy(val);
+        bool is_true;
+
+        // FAST PATH: If we KNOW the condition returns bool (comparisons, logical ops),
+        // use unchecked direct access - no type dispatch needed!
+        if (condition_returns_bool) {
+            is_true = val.unchecked_as_bool();
+        } else {
+            // SLOW PATH: General case - need to check type and convert to bool
+            is_true = is_truthy(val);
+        }
 
         valueStack_.discard();
         return is_true;
@@ -4656,150 +5192,123 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
     // Create a new scope for the loop variable
     push_scope();
 
-    try {
-        if (container.is_array()) {
-            // Iterate over array
-            auto& array_storage = container.get_array_storage();
+    if (container.is_array()) {
+        // Iterate over array
+        auto& array_storage = container.get_array_storage();
+        const size_t array_size = array_storage->size();
 
-            for (size_t i = 0; i < array_storage->size(); ++i) {
-                script_value loop_var = make_value();
+        if (array_size > 0) {
+            // OPTIMIZATION: Define loop variable ONCE, then use pointer for direct assignment
+            // Use pre-interned symbol ID from parser - no runtime string interning needed
+            environment_->define(stmt->variable_name_id, make_value());
+            script_value* loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
 
+            for (size_t i = 0; i < array_size; ++i) {
                 if (stmt->is_reference) {
                     // Create a reference to the actual array element
-                    loop_var = script_value::make_reference(&(*array_storage)[i], environment_, engine_ref_);
+                    *loop_var_ptr = script_value::make_reference(&(*array_storage)[i], environment_, engine_ref_);
                 } else {
-                    // Make a copy of the element
-                    loop_var = (*array_storage)[i].clone();
+                    // Make a copy of the element - assign directly to pointer
+                    *loop_var_ptr = (*array_storage)[i].clone();
                 }
-
-                // Define the loop variable in current scope
-                environment_->define(stmt->variable_name, std::move(loop_var));
 
                 // Execute loop body
-                try {
-                    auto body_result = stmt->body->accept(this);
-                    if (!body_result) {
-                        pop_scope();
-                        return body_result;
-                    }
-                } catch (const continue_exception&) {
-                    continue; // Skip to next iteration
-                } catch (const break_exception&) {
-                    break; // Exit loop
-                }
-
-                // Check for return or exception
-                if (hasReturnValue_ || is_unwinding_) {
-                    break;
-                }
-            }
-            
-        } else if (container.is_map()) {
-            // Iterate over map - return key-value pairs with first/second access
-            auto& map_storage = container.get_map_storage();
-            
-            for (auto it = map_storage->begin(); it != map_storage->end(); ++it) {
-                // Create a pair object using the registered stdlib::script_pair type
-                script_value loop_var = make_value();
-                
-                try {
-                    if (stmt->is_reference) {
-                        // For references, create a pair with a reference to the map value
-                        // Cast away const to get a pointer (safe because we own the map)
-                        script_value* value_ptr = const_cast<script_value*>(&it->second);
-                        
-                        // Create pair using the constructor with first as copy and second as reference
-                        std::vector<script_value> args;
-                        args.push_back(it->first);  // Don't clone - just pass the key
-                        args.push_back(script_value::make_reference(value_ptr, environment_, engine_ref_));
-                        
-                        // Look up the pair constructor function
-                        uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
-                        auto pair_result = environment_->get_ref(pair_symbol_id);
-                        if (!pair_result) {
-                            pop_scope();
-                            return checked_result<void>(pair_result.error(), pair_result.message());
-                        }
-                        const script_value& pairConstructor = pair_result.value().get();
-
-                        if (pairConstructor.is_function()) {
-                            const script_function& func = pairConstructor.as_function();
-                            auto result = func(args);
-                            if (!result) {
-                                // Function returned error - propagate it up
-                                return checked_result<void>(result.error(), result.message());
-                            }
-                            loop_var = std::move(result.value());
-                        } else {
-                            pop_scope();
-                            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] pair type not registered - make sure stdlib is loaded
-                        }
-                    } else {
-                        // For copies, use regular pair constructor
-                        std::vector<script_value> args;
-                        args.push_back(it->first.clone());
-                        args.push_back(it->second.clone());
-
-                        // Look up the pair constructor function using symbol ID
-                        uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
-                        auto pair_result = environment_->get_ref(pair_symbol_id);
-                        if (!pair_result) {
-                            pop_scope();
-                            return checked_result<void>(pair_result.error(), pair_result.message());
-                        }
-                        const script_value& pairConstructor = pair_result.value().get();
-
-                        if (pairConstructor.is_function()) {
-                            const script_function& func = pairConstructor.as_function();
-                            auto result = func(args);
-                            if (!result) {
-                                // Function returned error - propagate it up
-                                return checked_result<void>(result.error(), result.message());
-                            }
-                            loop_var = std::move(result.value());
-                        } else {
-                            pop_scope();
-                            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] pair type not registered - make sure stdlib is loaded
-                        }
-                    }
-                } catch (const runtime_error&) {
+                auto body_result = stmt->body->accept(this);
+                if (!body_result) {
                     pop_scope();
-                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Failed to create pair for map iteration
+                    return body_result;
                 }
-                
-                // Define the loop variable in current scope
-                environment_->define(stmt->variable_name, std::move(loop_var));
-                
-                // Execute loop body
-                try {
-                    auto body_result = stmt->body->accept(this);
-                    if (!body_result) {
-                        pop_scope();
-                        return body_result;
-                    }
-                } catch (const continue_exception&) {
-                    continue; // Skip to next iteration
-                } catch (const break_exception&) {
-                    break; // Exit loop
+
+                // Check for control flow changes (break/continue/return) - mirror while/for loops
+                if (hasBreakRequest_) {
+                    hasBreakRequest_ = false;  // Clear the flag
+                    break;
                 }
-                
-                // Check for return or exception
-                if (hasReturnValue_ || is_unwinding_) {
+
+                if (hasContinueRequest_) {
+                    hasContinueRequest_ = false;  // Clear the flag
+                    continue;  // Skip to next iteration
+                }
+
+                if (hasReturnValue_) {
                     break;
                 }
             }
-
-        } else {
-            pop_scope();
-            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Range-based for loop requires an array or map
         }
 
-    } catch (const break_exception&) {
-        // Break caught from inner loop
-    } catch (const continue_exception&) {
-        // Continue should not escape the loop
+    } else if (container.is_map()) {
+        // Iterate over map - return key-value pairs with first/second access
+        auto& map_storage = container.get_map_storage();
+
+        if (!map_storage->empty()) {
+            // OPTIMIZATION: Look up pair constructor ONCE before the loop
+            uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
+            auto pair_result = environment_->get_ref(pair_symbol_id);
+            if (!pair_result) {
+                pop_scope();
+                return checked_result<void>(pair_result.error(), pair_result.message());
+            }
+            const script_value& pairConstructor = pair_result.value().get();
+            if (!pairConstructor.is_function()) {
+                pop_scope();
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] pair type not registered - make sure stdlib is loaded
+            }
+            const script_function& pair_func = pairConstructor.as_function();
+
+            // OPTIMIZATION: Define loop variable ONCE, then use pointer for direct assignment
+            // Use pre-interned symbol ID from parser - no runtime string interning needed
+            environment_->define(stmt->variable_name_id, make_value());
+            script_value* loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
+
+            for (auto it = map_storage->begin(); it != map_storage->end(); ++it) {
+                // Create pair args
+                std::vector<script_value> args;
+
+                if (stmt->is_reference) {
+                    // For references, create a pair with a reference to the map value
+                    script_value* value_ptr = const_cast<script_value*>(&it->second);
+                    args.push_back(it->first);  // Don't clone - just pass the key
+                    args.push_back(script_value::make_reference(value_ptr, environment_, engine_ref_));
+                } else {
+                    // For copies, clone key and value
+                    args.push_back(it->first.clone());
+                    args.push_back(it->second.clone());
+                }
+
+                auto result = pair_func(args);
+                if (!result) {
+                    pop_scope();
+                    return checked_result<void>(result.error(), result.message());
+                }
+                *loop_var_ptr = std::move(result.value());
+
+                // Execute loop body
+                auto body_result = stmt->body->accept(this);
+                if (!body_result) {
+                    pop_scope();
+                    return body_result;
+                }
+
+                // Check for control flow changes (break/continue/return) - mirror while/for loops
+                if (hasBreakRequest_) {
+                    hasBreakRequest_ = false;  // Clear the flag
+                    break;
+                }
+
+                if (hasContinueRequest_) {
+                    hasContinueRequest_ = false;  // Clear the flag
+                    continue;  // Skip to next iteration
+                }
+
+                if (hasReturnValue_) {
+                    break;
+                }
+            }
+        }
+
+    } else {
         pop_scope();
-        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] 'continue' statement not in loop
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Range-based for loop requires an array or map
     }
 
     // Pop the loop scope
@@ -5306,8 +5815,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 }
 
                 // Add static field directly to the class
-                if (!field_name.empty()) {
-                    class_def->add_static_field(field_name, default_val);
+                if (field_id != 0) {
+                    class_def->add_static_field(field_id, default_val);
                 }
             } else {
                 // Instance field - store initializer AST for evaluation at construction time
@@ -6244,6 +6753,8 @@ scoped_method_environment::scoped_method_environment(
     : interp_(interp)
     , env_(interp->get_pooled_method_environment(parent, this_obj))
 {
+    // Define 'this' as a regular variable for compatibility
+    // method_environment::get() also has special handling for 'this'
     env_->define("this", this_obj);
 }
 

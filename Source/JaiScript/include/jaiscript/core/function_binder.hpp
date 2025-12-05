@@ -227,7 +227,7 @@ class engine;
                 }
                 // For std::vector<T> containers, use conversion utility
                 else if constexpr (is_specialization_v<T, std::vector>) {
-                    auto* storage = detail::parameter_storage::current();
+                    auto* storage = detail::get_engine_parameter_storage(eng);
                     if (!storage) {
                         throw runtime_error("No parameter storage available for const reference conversion");
                     }
@@ -238,7 +238,7 @@ class engine;
                 }
                 // For std::map<K,V> containers, use conversion utility
                 else if constexpr (is_specialization_v<T, std::map>) {
-                    auto* storage = detail::parameter_storage::current();
+                    auto* storage = detail::get_engine_parameter_storage(eng);
                     if (!storage) {
                         throw runtime_error("No parameter storage available for const reference conversion");
                     }
@@ -249,7 +249,7 @@ class engine;
                     return temp;
                 }
                 // For custom classes, extract shared_ptr and return reference to avoid copy
-                else if constexpr (std::is_class_v<T> && 
+                else if constexpr (std::is_class_v<T> &&
                                   !std::is_same_v<T, std::string> &&
                                   !is_specialization_v<T, std::vector> &&
                                   !is_specialization_v<T, std::map>) {
@@ -257,7 +257,7 @@ class engine;
                     return *ptr;
                 } else {
                     // For basic types (int, float, bool, etc.), need to make a copy
-                    auto* storage = detail::parameter_storage::current();
+                    auto* storage = detail::get_engine_parameter_storage(eng);
                     if (!storage) {
                         throw runtime_error("No parameter storage available for const reference conversion");
                     }
@@ -559,8 +559,8 @@ class engine;
         static void call_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
             // Create parameter storage on stack
             detail::parameter_storage storage;
-            detail::parameter_storage::scope_guard guard(&storage);
-            
+            detail::parameter_storage::scope_guard guard(eng, &storage);
+
             // Call function with conversions using the storage
             func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
@@ -569,8 +569,8 @@ class engine;
         static R call_non_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
             // Create parameter storage on stack
             detail::parameter_storage storage;
-            detail::parameter_storage::scope_guard guard(&storage);
-            
+            detail::parameter_storage::scope_guard guard(eng, &storage);
+
             // Call function with conversions using the storage
             return func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }

@@ -454,13 +454,13 @@ namespace stdlib {
         engine.add_variadic_function("to_json", [engine_weak](const std::vector<script_value>& args) -> script_value {
             if (args.size() == 1) {
                 // Compact mode - use archive for shared_ptr support
-                serialization::json_archive_writer writer(-1); // No indentation
+                serialization::json_archive_writer writer(-1, engine_weak); // No indentation, with engine ref
                 writer.write_value(args[0]);
                 return script_value(writer.str(), engine_weak);
             } else if (args.size() == 2) {
                 // Pretty mode with indentation
                 int indent = static_cast<int>(args[1].as_int());
-                serialization::json_archive_writer writer(indent);
+                serialization::json_archive_writer writer(indent, engine_weak);
                 writer.write_value(args[0]);
                 return script_value(writer.str(), engine_weak);
             } else {
@@ -528,10 +528,12 @@ namespace stdlib {
                                 // Fallback: Create default instance and set properties
                                 instance = eng->execute(type_name + "()");
 
-                                // Set all properties (except _type_)
+                                // Set all properties (except metadata fields like _type_ and _version_)
                                 for (const auto& [key, value] : map) {
-                                    if (key.is_string() && key.as_string() != "_type_") {
+                                    if (key.is_string()) {
                                         std::string propName = key.as_string();
+                                        // Skip metadata fields
+                                        if (propName == "_type_" || propName == "_version_") continue;
 
                                         // Process nested values recursively
                                         script_value propValue = processValue(value);
@@ -541,8 +543,12 @@ namespace stdlib {
                                         eng->add_global(tempVar, propValue);
                                         eng->add_global("_json_obj", instance);
 
-                                        eng->execute("_json_obj." + propName + " = " + tempVar);
-                                        instance = eng->get_variable("_json_obj");
+                                        try {
+                                            eng->execute("_json_obj." + propName + " = " + tempVar);
+                                            instance = eng->get_variable("_json_obj");
+                                        } catch (...) {
+                                            // Skip properties that can't be set (e.g., read-only or non-existent)
+                                        }
 
                                         // Clean up
                                         eng->execute(tempVar + " = null");
@@ -562,7 +568,7 @@ namespace stdlib {
                                         auto eng = class_def->get_engine_ref().lock();
                                         if (!eng) return instance;
                                         uint64_t post_deserialize_id = eng->symbolize("post_deserialize");
-                                        script_value post_deserialize = class_def->get_method(post_deserialize_id);
+                                        script_value post_deserialize = class_def->get_method(post_deserialize_id, false);  // Don't throw if not found
                                         if (post_deserialize.type() == script_value_type::jai_function_type) {
                                             // Extract version from map (default to 1 if not present)
                                             script_int version = 1;
@@ -672,7 +678,7 @@ namespace stdlib {
                     
                     try {
                         script_value instance = eng->execute(type_name + "()");
-                        
+
                         // Set properties
                         for (const auto& [key, value] : map) {
                             if (key.is_string() && key.as_string() != "_type_" && key.as_string() != "_version_") {
@@ -680,15 +686,47 @@ namespace stdlib {
                                 std::string temp_var = "_binary_temp_" + prop_name;
                                 eng->add_global(temp_var, value);
                                 eng->add_global("_binary_obj", instance);
-                                
+
                                 eng->execute("_binary_obj." + prop_name + " = " + temp_var);
                                 instance = eng->get_variable("_binary_obj");
-                                
+
                                 eng->execute(temp_var + " = null");
                             }
                         }
-                        
+
                         eng->execute("_binary_obj = null");
+
+                        // Call post_deserialize hook if it exists
+                        try {
+                            auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
+                            if (class_instance_ptr) {
+                                auto class_def = class_instance_ptr->get_class_definition();
+                                if (class_def) {
+                                    auto class_eng = class_def->get_engine_ref().lock();
+                                    if (class_eng) {
+                                        uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
+                                        script_value post_deserialize = class_def->get_method(post_deserialize_id, false);
+                                        if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                            // Extract version from map (default to 1 if not present)
+                                            script_int version = 1;
+                                            auto version_it = map.find(script_value("_version_", engine_weak));
+                                            if (version_it != map.end() && version_it->second.is_int()) {
+                                                version = version_it->second.as<script_int>();
+                                            }
+
+                                            std::vector<script_value> args = {
+                                                instance,
+                                                script_value(version, engine_weak)
+                                            };
+                                            (void)post_deserialize.as_function()(args);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (...) {
+                            // Hook failed, but continue
+                        }
+
                         return instance;
                     } catch (...) {
                         // If object reconstruction fails, return as map

@@ -13,7 +13,7 @@
       "variables": [
         {
           "name": "JAISCRIPT_ENABLE_BENCHMARKS",
-          "value": "ON",
+          "value": "False",
           "type": "BOOL"
         }
       ]
@@ -24,7 +24,7 @@
       "configurationType": "RelWithDebInfo",
       "buildRoot": "${projectDir}\\out\\build\\${name}",
       "installRoot": "${projectDir}\\out\\install\\${name}",
-      "cmakeCommandArgs": "",
+      "cmakeCommandArgs": "-DCHAISCRIPT_NO_THREADS=ON",
       "buildCommandArgs": "",
       "ctestCommandArgs": "",
       "inheritEnvironments": [ "msvc_x64_x64" ],
@@ -41,6 +41,11 @@
         },
         {
           "name": "JAISCRIPT_ENABLE_PROFILING",
+          "value": "True",
+          "type": "BOOL"
+        },
+        {
+          "name": "CHAISCRIPT_NO_THREADS",
           "value": "True",
           "type": "BOOL"
         }

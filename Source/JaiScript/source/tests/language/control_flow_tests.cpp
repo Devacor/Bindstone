@@ -135,6 +135,7 @@ public:
                 }
                 sum;
             )");
+            std::cout << "while_loop_with_continue result: " << result.as<int>() << " (expected 25)" << std::endl;
             check_eq(result.as<int>(), 25); // 1 + 3 + 5 + 7 + 9
         });
         
@@ -175,6 +176,7 @@ public:
                 }
                 sum;
             )");
+            std::cout << "for_loop_with_break result: " << result.as<int>() << " (expected 15)" << std::endl;
             check_eq(result.as<int>(), 15); // 1 + 2 + 3 + 4 + 5
         });
         
@@ -190,6 +192,7 @@ public:
                 }
                 sum;
             )");
+            std::cout << "for_loop_with_continue result: " << result.as<int>() << " (expected 25)" << std::endl;
             check_eq(result.as<int>(), 25); // 1 + 3 + 5 + 7 + 9
         });
         
@@ -226,6 +229,7 @@ public:
                 }
                 result;
             )");
+            std::cout << "complex_control_flow result: " << result.as<int>() << " (expected 16)" << std::endl;
             check_eq(result.as<int>(), 16);
         });
     }

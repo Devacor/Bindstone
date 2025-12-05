@@ -64,6 +64,21 @@ endif()
 # JaiScript Library
 add_subdirectory(source)
 
+# Simple test executables
+add_executable(test_simple_static ${CMAKE_SOURCE_DIR}/../../test_simple_static.cpp)
+target_link_libraries(test_simple_static PRIVATE jaiscript)
+target_include_directories(test_simple_static PRIVATE ${CMAKE_SOURCE_DIR}/include)
+if(MSVC)
+    target_compile_options(test_simple_static PRIVATE /MT$<$<CONFIG:Debug>:d>)
+endif()
+
+add_executable(test_runner ${CMAKE_SOURCE_DIR}/../../test_runner.cpp)
+target_link_libraries(test_runner PRIVATE jaiscript)
+target_include_directories(test_runner PRIVATE ${CMAKE_SOURCE_DIR}/include)
+if(MSVC)
+    target_compile_options(test_runner PRIVATE /MT$<$<CONFIG:Debug>:d>)
+endif()
+
 # Tests (Foundry test suite)
 if(JAISCRIPT_BUILD_TESTS)
     add_subdirectory(source/tests)

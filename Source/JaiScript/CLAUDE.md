@@ -137,9 +137,11 @@ class_builder<MyClass>(engine, "MyClass")
     .method("method_name", &MyClass::method_name)
     .method("chainable", [](MyClass& self) -> MyClass& { return self; })
     .property("prop", &MyClass::prop)
-    .inherits<base_class>()
+    .base_class<BaseClass>()  // Enables inheritance and polymorphism
     .build();
 ```
+
+**Polymorphism:** When `base_class<Base>()` is called, derived class instances can be passed to functions expecting `shared_ptr<Base>`. Upcasting is automatic via `static_pointer_cast`.
 
 **Performance:** 
 - string_symbolizer: name→ID mapping (NOT deterministic, engine-bound, NEVER share between instances or serialize)
@@ -247,6 +249,24 @@ for (auto& kv : scores) {
 3. **Organized Tests** - Add tests to appropriate existing files in `tests/language/`
 4. **Build System** - Always build via Visual Studio or CMake, executable is in `out/build/x64-Debug/bin/`
 
+## Code Guidelines (CRITICAL)
+
+**Avoid static/thread_local storage - causes test pollution between test runs:**
+- Do NOT use `static thread_local` variables
+- Do NOT use `thread_local` variables
+- Do NOT use non-const `static` variables
+- `static const` (non-pointer) values are acceptable
+
+**Instead use:**
+- Instance members on classes
+- Pass values via engine reference
+- Use RAII patterns with engine-bound storage (see `parameter_storage` pattern)
+
+**script_value construction:**
+- Always create `script_value` with an engine reference when possible
+- Use `script_value(value, engine_weak_ptr)` pattern
+- Only use `script_value(std::monostate{}, eng)` for null values
+
 ## Bytecode VM
 
 **Status:** Architecture complete, implementation in progress (see `JaiScriptVMToDo.md`)
@@ -296,21 +316,71 @@ cd D:\git\Bindstone\Source\JaiScript\out\build\x64-Debug\bin
 # Run all tests
 .\jaiscript_tests.exe
 
-# Run tests matching a filter (searches suite names)
+# Filter by suite name (substring match)
 .\jaiscript_tests.exe "Script Class"
 
-# Run specific test by name
-.\jaiscript_tests.exe "class_destructor_basic"
+# Filter by test name (substring match)
+.\jaiscript_tests.exe "destructor"
+
+# gtest-style filter (for AI/automation compatibility)
+.\jaiscript_tests.exe --gtest_filter="Property.*"
+
+# jaitest-style filter (synonym for gtest)
+.\jaiscript_tests.exe --jaitest_filter="Hot Reload.*"
+
+# Explicit filter parameter
+.\jaiscript_tests.exe --filter="*.post_deserialize*"
+
+# Suite.Test pattern (filter both suite and test)
+.\jaiscript_tests.exe "Property.post_deserialize"
 ```
+
+**Filter Syntax:**
+- `pattern` - Matches both suite names AND test names (substring match)
+- `Suite.Test` - Dot separates suite filter from test filter
+- `*` - Wildcard matches any sequence of characters
+- `?` - Wildcard matches single character
+- No wildcards = substring match
+
+**Supported Filter Arguments:**
+- `--gtest_filter=pattern` - Google Test compatible
+- `--jaitest_filter=pattern` - JaiScript native (synonym)
+- `--filter=pattern` - Explicit filter
+- `pattern` - Positional argument
 
 **Test Output:**
 - Tests auto-discover and run all registered Foundry test suites
-- Filter parameter searches suite names (not individual test names)
+- Filter applies to both suite names and test names
+- Skipped tests are counted and reported
 - Returns exit code 0 on success, non-zero on failure
 
-### Command Line Build (Alternative)
+### Command Line Build (Claude Code Compatible)
 
-If you need to build from command line without Visual Studio:
+These commands work from PowerShell and properly set up the VS environment:
+
+**Release build:**
+```powershell
+powershell.exe -Command "& cmd /c '`"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake --build out/build/x64-Release --config Release 2>&1'"
+```
+
+**Debug build:**
+```powershell
+powershell.exe -Command "& cmd /c '`"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake --build out/build/x64-Debug --config Debug 2>&1'"
+```
+
+**Run all tests (Release):**
+```powershell
+powershell.exe -Command "& cmd /c '`"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript\out\build\x64-Release && bin\jaiscript_tests.exe 2>&1'"
+```
+
+**Run specific test case:**
+```powershell
+powershell.exe -Command "& cmd /c '`"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript\out\build\x64-Release && bin\jaiscript_tests.exe --test-case=`"test_name`" 2>&1'"
+```
+
+**Important:** Do NOT use plain `cmake` commands without the VsDevCmd.bat environment - standard includes like `<iostream>` won't be found.
+
+### Alternative: Batch File Build
 
 ```batch
 REM Set up Visual Studio environment

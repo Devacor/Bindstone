@@ -597,32 +597,51 @@ public:
                 uint32_t version = read_uint32();
                 uint32_t property_count = read_uint32();
 
+                // Read ALL property names first (binary format stores them separately)
+                std::vector<std::string> property_names;
+                property_names.reserve(property_count);
+                for (uint32_t i = 0; i < property_count; ++i) {
+                    property_names.push_back(read_string());
+                }
+
+                // Read ALL property values
+                std::vector<script_value> property_values;
+                property_values.reserve(property_count);
+                for (uint32_t i = 0; i < property_count; ++i) {
+                    property_values.push_back(read_value());
+                }
+
+                // Build a map of pre-read properties for factory access
+                std::map<std::string, script_value> preread_props;
+                for (uint32_t i = 0; i < property_count; ++i) {
+                    preread_props[property_names[i]] = property_values[i];
+                }
+
                 // Check if there's a custom factory for this type
                 auto eng = engine_ref_.lock();
                 if (eng) {
                     const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
                     if (metadata && metadata->custom_construct) {
+                        // Set pre-read properties so factory can access them via read_property
+                        set_preread_properties(preread_props);
+
                         // Use custom factory for construction with proper version
                         script_value constructed_obj = metadata->custom_construct(*this, version);
 
-                        // Now hydrate the object's properties
+                        // Clear pre-read properties
+                        clear_preread_properties();
+
+                        // Now hydrate the object's properties (all properties already read above)
                         auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
                         if (instance) {
                             auto class_def = instance->get_class_definition();
                             if (class_def) {
-                                // Read property names in order
-                                std::vector<std::string> property_names;
-                                property_names.reserve(property_count);
-                                for (uint32_t i = 0; i < property_count; ++i) {
-                                    property_names.push_back(read_string());
-                                }
-
-                                // Read and set each property
+                                // Set each property from pre-read values
                                 auto eng = class_def->get_engine_ref().lock();
                                 if (eng) {
                                     for (uint32_t i = 0; i < property_count; ++i) {
                                         const auto& prop_name = property_names[i];
-                                        script_value prop_value = read_value();
+                                        const auto& prop_value = property_values[i];
 
                                         // Try to find setter
                                         uint64_t setter_id = eng->symbolize("_set_" + prop_name);
@@ -636,18 +655,13 @@ public:
                                             }
                                         }
                                     }
-                                } else {
-                                    // Still need to read values to keep stream position correct
-                                    for (uint32_t i = 0; i < property_count; ++i) {
-                                        (void)read_value();
-                                    }
                                 }
 
                                 // Call post_deserialize hook if it exists
                                 // Pass both the object and the version number for migration logic
                                 if (eng) {
                                     uint64_t post_deserialize_id = eng->symbolize("post_deserialize");
-                                    auto post_deserialize = class_def->get_method(post_deserialize_id);
+                                    auto post_deserialize = class_def->get_method(post_deserialize_id, false);  // Don't throw if not found
                                     if (post_deserialize.type() == script_value_type::jai_function_type) {
                                         try {
                                             std::vector<script_value> args = {
@@ -668,20 +682,6 @@ public:
                 }
 
                 // No custom factory - use default deserialization path
-                // Read property names in order
-                std::vector<std::string> property_names;
-                property_names.reserve(property_count);
-                for (uint32_t i = 0; i < property_count; ++i) {
-                    property_names.push_back(read_string());
-                }
-
-                // Read property values in same order
-                std::vector<script_value> property_values;
-                property_values.reserve(property_count);
-                for (uint32_t i = 0; i < property_count; ++i) {
-                    property_values.push_back(read_value());
-                }
-
                 // Convert to map for reconstruction by from_binary
                 script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng_weak);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());

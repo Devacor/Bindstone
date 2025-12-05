@@ -147,12 +147,32 @@ namespace jai {
         expression_ptr left;
         token op;
         expression_ptr right;
-        
+
         binary_expr(const source_location& loc, expression_ptr l, const token& o, expression_ptr r)
             : expression(loc), left(l), op(o), right(r) {}
 
         [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
             return visitor->visit_binary_expr(this);
+        }
+
+        // Returns true if this binary expression ALWAYS produces a boolean result
+        // (comparison or logical operators)
+        [[nodiscard]] inline bool returns_bool() const noexcept {
+            switch (op.type) {
+                // Comparison operators - always return bool
+                case token_type::less:
+                case token_type::greater:
+                case token_type::less_equal:
+                case token_type::greater_equal:
+                case token_type::equal_equal:
+                case token_type::bang_equal:
+                // Logical operators - always return bool
+                case token_type::ampersand_ampersand:
+                case token_type::pipe_pipe:
+                    return true;
+                default:
+                    return false;
+            }
         }
     };
     
@@ -162,12 +182,17 @@ namespace jai {
         token op;
         expression_ptr operand;
         bool is_postfix;
-        
+
         unary_expr(const source_location& loc, const token& o, expression_ptr expr, bool postfix = false)
             : expression(loc), op(o), operand(expr), is_postfix(postfix) {}
 
         [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
             return visitor->visit_unary_expr(this);
+        }
+
+        // Returns true if this unary expression ALWAYS produces a boolean result
+        [[nodiscard]] inline bool returns_bool() const noexcept {
+            return op.type == token_type::bang;  // Logical NOT always returns bool
         }
     };
 
@@ -423,6 +448,7 @@ namespace jai {
     public:
         type_info_ptr element_type;      // Type of loop variable (auto, int, etc.)
         std::string variable_name;     // Name of loop variable
+        uint64_t variable_name_id = UINT64_MAX;  // Interned ID for fast lookup (UINT64_MAX = not interned)
         bool is_reference;             // true for auto&, false for auto
         bool is_const;                 // true for const auto&
         expression_ptr container;      // The container to iterate over
@@ -431,6 +457,11 @@ namespace jai {
         range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName,
                      bool ref, bool constRef, expression_ptr cont, statement_ptr b)
             : statement(loc), element_type(type), variable_name(varName),
+              is_reference(ref), is_const(constRef), container(cont), body(b) {}
+
+        range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName, uint64_t varNameId,
+                     bool ref, bool constRef, expression_ptr cont, statement_ptr b)
+            : statement(loc), element_type(type), variable_name(varName), variable_name_id(varNameId),
               is_reference(ref), is_const(constRef), container(cont), body(b) {}
 
         [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
@@ -707,7 +738,22 @@ namespace jai {
             return visitor->visit_import_decl(this);
         }
     };
-    
+
+    // Helper function to check if an expression is GUARANTEED to return a boolean
+    // This allows skipping is_truthy() type dispatch and using unchecked_as_bool() directly
+    [[nodiscard]] inline bool expression_returns_bool(const expression* expr) noexcept {
+        if (auto* bin = dynamic_cast<const binary_expr*>(expr)) {
+            return bin->returns_bool();
+        }
+        if (auto* un = dynamic_cast<const unary_expr*>(expr)) {
+            return un->returns_bool();
+        }
+        if (auto* lit = dynamic_cast<const literal_expr*>(expr)) {
+            return lit->value.is_bool();
+        }
+        return false;
+    }
+
 } // namespace jai
 
 #endif // __JAISCRIPT_DETAIL_AST_HPP__

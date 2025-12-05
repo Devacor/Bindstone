@@ -140,14 +140,15 @@ public:
                 }
                 sum
             )");
-            
+
+            std::cout << "break_in_range_for result: " << result.as<int>() << " (expected 6)" << std::endl;
             check_eq(result.as<int>(), 6);
         });
-        
+
         test("continue_in_range_for", [this]() {
             auto engine = engine::make();
             stdlib::register_all(engine);
-            
+
             auto result = engine->execute(R"(
                 auto numbers = [1, 2, 3, 4, 5];
                 auto sum = 0;
@@ -159,7 +160,8 @@ public:
                 }
                 sum
             )");
-            
+
+            std::cout << "continue_in_range_for result: " << result.as<int>() << " (expected 12)" << std::endl;
             check_eq(result.as<int>(), 12);
         });
         

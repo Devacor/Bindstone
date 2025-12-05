@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/core/class_builder.hpp>
 
 // Note: This requires ChaiScript to be available
 // Install via: vcpkg install chaiscript
@@ -12,6 +13,51 @@ using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+// C++ TreeNode class for fair performance comparison
+// Uses shared_ptr for proper null handling in both engines
+class CppTreeNode {
+public:
+    int value;
+    std::shared_ptr<CppTreeNode> left;
+    std::shared_ptr<CppTreeNode> right;
+
+    CppTreeNode(int val) : value(val), left(nullptr), right(nullptr) {}
+};
+
+// C++ tree operations for bound class
+inline std::shared_ptr<CppTreeNode> cpp_insertNode(std::shared_ptr<CppTreeNode> root, int val) {
+    if (!root) {
+        return std::make_shared<CppTreeNode>(val);
+    }
+    if (val < root->value) {
+        root->left = cpp_insertNode(root->left, val);
+    } else {
+        root->right = cpp_insertNode(root->right, val);
+    }
+    return root;
+}
+
+inline int cpp_inorderSum(std::shared_ptr<CppTreeNode> node) {
+    if (!node) return 0;
+    return cpp_inorderSum(node->left) + node->value + cpp_inorderSum(node->right);
+}
+
+inline int cpp_treeHeight(std::shared_ptr<CppTreeNode> node) {
+    if (!node) return 0;
+    int leftH = cpp_treeHeight(node->left);
+    int rightH = cpp_treeHeight(node->right);
+    return (leftH > rightH ? leftH : rightH) + 1;
+}
+
+inline std::shared_ptr<CppTreeNode> cpp_rotateRight(std::shared_ptr<CppTreeNode> y) {
+    if (!y || !y->left) return y;
+    auto x = y->left;
+    auto T2 = x->right;
+    x->right = y;
+    y->left = T2;
+    return x;
+}
 
 class chaiscript_comparison : public suite {
 public:
@@ -107,6 +153,116 @@ public:
         )");
         jai_engine->execute("function fib(auto n) -> auto { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }");
 
+        // Tree node class and tree operations for BST benchmark
+        jai_engine->execute(R"(
+            class TreeNode {
+                int value = 0;
+                TreeNode left = null;
+                TreeNode right = null;
+
+                TreeNode(int val) {
+                    value = val;
+                }
+            }
+        )");
+
+        jai_engine->execute(R"(
+            function insertNode(TreeNode root, int val) -> TreeNode {
+                if (root == null) {
+                    return TreeNode(val);
+                }
+                if (val < root.value) {
+                    root.left = insertNode(root.left, val);
+                } else {
+                    root.right = insertNode(root.right, val);
+                }
+                return root;
+            }
+        )");
+
+        jai_engine->execute(R"(
+            function inorderSum(TreeNode node) -> int {
+                if (node == null) { return 0; }
+                return inorderSum(node.left) + node.value + inorderSum(node.right);
+            }
+        )");
+
+        jai_engine->execute(R"(
+            function treeHeight(TreeNode node) -> int {
+                if (node == null) { return 0; }
+                auto leftH = treeHeight(node.left);
+                auto rightH = treeHeight(node.right);
+                if (leftH > rightH) {
+                    return leftH + 1;
+                }
+                return rightH + 1;
+            }
+        )");
+
+        jai_engine->execute(R"(
+            function rotateRight(TreeNode y) -> TreeNode {
+                if (y == null || y.left == null) { return y; }
+                auto x = y.left;
+                auto T2 = x.right;
+                x.right = y;
+                y.left = T2;
+                return x;
+            }
+        )");
+
+        // Bind C++ TreeNode class to JaiScript for fair comparison
+        class_builder<CppTreeNode>(*jai_engine, "CppTreeNode")
+            .constructor<int>()
+            .property("value", &CppTreeNode::value)
+            .property("left", &CppTreeNode::left, jai::skip_type_check)  // Self-referential
+            .property("right", &CppTreeNode::right, jai::skip_type_check)  // Self-referential
+            .build();
+
+        // Register C++ tree operations
+        jai_engine->add_function("cpp_insertNode", &cpp_insertNode);
+        jai_engine->add_function("cpp_inorderSum", &cpp_inorderSum);
+        jai_engine->add_function("cpp_treeHeight", &cpp_treeHeight);
+        jai_engine->add_function("cpp_rotateRight", &cpp_rotateRight);
+
+        // Pre-declare variables for C++ BST benchmark (for fair comparison with ChaiScript)
+        jai_engine->execute("auto root = null;");
+        jai_engine->execute("auto sum = 0;");
+        jai_engine->execute("auto height = 0;");
+
+        // Pre-declare arrays and benchmark functions for range-for benchmarks
+        jai_engine->execute(R"(
+            auto benchArr100 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                               20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+                               40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+                               60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+                               80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99];
+            auto benchArr10 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        )");
+
+        // Range-for benchmark functions (avoid parsing arrays each iteration)
+        jai_engine->execute(R"(
+            function benchRangeForCopy100() -> int {
+                auto s = 0;
+                for (auto x : benchArr100) { s += x; }
+                return s;
+            }
+            function benchRangeForRef100() -> int {
+                auto s = 0;
+                for (auto& x : benchArr100) { s += x; }
+                return s;
+            }
+            function benchRangeForCopy10() -> int {
+                auto s = 0;
+                for (auto x : benchArr10) { s += x; }
+                return s;
+            }
+            function benchRangeForRef10() -> int {
+                auto s = 0;
+                for (auto& x : benchArr10) { s += x; }
+                return s;
+            }
+        )");
+
 #ifdef HAVE_CHAISCRIPT
         // ChaiScript declarations - pre-declare functions, classes, and variables ONCE in constructor
         try {
@@ -126,6 +282,8 @@ public:
             chai_engine->eval("var calc");
             chai_engine->eval("var testArr = []");
             chai_engine->eval("var unsorted = []");
+            chai_engine->eval("var root");
+            chai_engine->eval("var height = 0");
 
             // Declare add function for Function Calls benchmark
             chai_engine->eval("def add(a, b) { return a + b; }");
@@ -182,6 +340,132 @@ public:
                 }
             )");
             chai_engine->eval("def fib(n) { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }");
+
+            // Tree node class and tree operations for BST benchmark
+            chai_engine->eval(R"(
+                class TreeNode {
+                    var value;
+                    var left;
+                    var right;
+
+                    def TreeNode(val) {
+                        this.value = val;
+                    }
+                }
+            )");
+
+            chai_engine->eval(R"(
+                def insertNode(root, val) {
+                    if (is_var_null(root)) {
+                        return TreeNode(val);
+                    }
+                    if (val < root.value) {
+                        if (is_var_null(root.left)) {
+                            root.left = TreeNode(val);
+                        } else {
+                            root.left = insertNode(root.left, val);
+                        }
+                    } else {
+                        if (is_var_null(root.right)) {
+                            root.right = TreeNode(val);
+                        } else {
+                            root.right = insertNode(root.right, val);
+                        }
+                    }
+                    return root;
+                }
+            )");
+
+            chai_engine->eval(R"(
+                def inorderSum(node) {
+                    if (is_var_null(node)) { return 0; }
+                    var leftSum = 0;
+                    var rightSum = 0;
+                    if (!is_var_null(node.left)) {
+                        leftSum = inorderSum(node.left);
+                    }
+                    if (!is_var_null(node.right)) {
+                        rightSum = inorderSum(node.right);
+                    }
+                    return leftSum + node.value + rightSum;
+                }
+            )");
+
+            chai_engine->eval(R"(
+                def treeHeight(node) {
+                    if (is_var_null(node)) { return 0; }
+                    var leftH = 0;
+                    var rightH = 0;
+                    if (!is_var_null(node.left)) {
+                        leftH = treeHeight(node.left);
+                    }
+                    if (!is_var_null(node.right)) {
+                        rightH = treeHeight(node.right);
+                    }
+                    if (leftH > rightH) {
+                        return leftH + 1;
+                    }
+                    return rightH + 1;
+                }
+            )");
+
+            chai_engine->eval(R"(
+                def rotateRight(y) {
+                    if (is_var_null(y) || is_var_null(y.left)) { return y; }
+                    var x = y.left;
+                    var T2 = x.right;
+                    x.right = y;
+                    y.left = T2;
+                    return x;
+                }
+            )");
+
+            // Bind C++ TreeNode class to ChaiScript for fair comparison
+            chaiscript::ModulePtr m = std::make_shared<chaiscript::Module>();
+
+            // Register the class
+            chaiscript::utility::add_class<CppTreeNode>(*m,
+                "CppTreeNode",
+                { chaiscript::constructor<CppTreeNode(int)>() },
+                { {chaiscript::fun(&CppTreeNode::value), "value"},
+                  {chaiscript::fun(&CppTreeNode::left), "left"},
+                  {chaiscript::fun(&CppTreeNode::right), "right"} }
+            );
+
+            // Register tree operations
+            m->add(chaiscript::fun(&cpp_insertNode), "cpp_insertNode");
+            m->add(chaiscript::fun(&cpp_inorderSum), "cpp_inorderSum");
+            m->add(chaiscript::fun(&cpp_treeHeight), "cpp_treeHeight");
+            m->add(chaiscript::fun(&cpp_rotateRight), "cpp_rotateRight");
+
+            // Register assignment operator for shared_ptr<CppTreeNode>
+            m->add(chaiscript::fun([](std::shared_ptr<CppTreeNode> &lhs, const std::shared_ptr<CppTreeNode> &rhs) -> std::shared_ptr<CppTreeNode> & {
+                return lhs = rhs;
+            }), "=");
+
+            chai_engine->add(m);
+
+            // Pre-declare arrays as globals (no 'var' = global in ChaiScript)
+            // and benchmark functions for range-for benchmarks
+            chai_engine->eval(R"(
+                global benchArr100 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                                      20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+                                      40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+                                      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+                                      80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99];
+                global benchArr10 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+                def benchRangeFor100() {
+                    var s = 0;
+                    for (elem : benchArr100) { s += elem; }
+                    return s;
+                }
+                def benchRangeFor10() {
+                    var s = 0;
+                    for (elem : benchArr10) { s += elem; }
+                    return s;
+                }
+            )");
 
         } catch (const std::exception& e) {
             std::cerr << "ChaiScript constructor error: " << e.what() << std::endl;
@@ -381,6 +665,76 @@ public:
             });
         });
 
+        // ===== For Loop Optimization Variants (JaiScript Only) =====
+        // These test different code paths to measure optimization effectiveness
+        test("JaiScript: For Loop Optimization Variants", [this]() {
+            // Literal condition - triggers fast path (i < 100)
+            benchmark("JaiScript - For Loop (literal condition, fast path)", [this]() {
+                jai_engine->execute(R"(
+                    auto sum = 0;
+                    for (auto i = 0; i < 100; ++i) {
+                        sum += i;
+                    }
+                )");
+            });
+
+            // Expression condition - does NOT trigger literal fast path (i < n)
+            benchmark("JaiScript - For Loop (expression condition)", [this]() {
+                jai_engine->execute(R"(
+                    auto sum = 0;
+                    auto n = 100;
+                    for (auto i = 0; i < n; ++i) {
+                        sum += i;
+                    }
+                )");
+            });
+
+            // Hot loop - nested iterations (measures overhead scaling)
+            benchmark("JaiScript - Hot Loop (10x100 nested iterations)", [this]() {
+                jai_engine->execute(R"(
+                    auto total = 0;
+                    for (auto i = 0; i < 10; ++i) {
+                        for (auto j = 0; j < 100; ++j) {
+                            total += j;
+                        }
+                    }
+                )");
+            });
+        });
+
+        // ===== Range-Based For Loop Comparison =====
+        // Uses pre-declared arrays and functions - fair comparison without array parsing overhead
+        test("JaiScript vs ChaiScript: Range-Based For Loop (100 elements)", [this]() {
+            // JaiScript range-for with copy (for(auto x : arr))
+            benchmark("JaiScript - Range-For (copy, 100 elements)", [this]() {
+                jai_engine->execute("benchRangeForCopy100();");
+            });
+
+            // ChaiScript range-for (for(x : arr))
+            benchmark("ChaiScript - Range-For (100 elements)", [this]() {
+                chai_engine->eval("benchRangeFor100();");
+            });
+        });
+
+        // ===== JaiScript-Only Range-For Variants =====
+        // Uses pre-declared arrays and functions for accurate per-iteration measurement
+        test("JaiScript: Range-For Reference vs Copy", [this]() {
+            // Range-for with reference (for(auto& x : arr)) - JaiScript only feature
+            benchmark("JaiScript - Range-For (reference, 100 elements)", [this]() {
+                jai_engine->execute("benchRangeForRef100();");
+            });
+
+            // Small array range-for (fewer elements, measures per-iteration overhead)
+            benchmark("JaiScript - Range-For (copy, 10 elements)", [this]() {
+                jai_engine->execute("benchRangeForCopy10();");
+            }, 5000);
+
+            // Small array range-for with reference
+            benchmark("JaiScript - Range-For (reference, 10 elements)", [this]() {
+                jai_engine->execute("benchRangeForRef10();");
+            }, 5000);
+        });
+
         // ===== Variable Lookup Heavy =====
         test("JaiScript vs ChaiScript: Variable Lookup Heavy", [this]() {
             benchmark("JaiScript - Variable Lookup Heavy", [this]() {
@@ -558,6 +912,106 @@ public:
                 // Use assignment to pre-declared variables only (ChaiScript doesn't allow redefinition)
                 chai_engine->eval("x = 42; y = 3.14; z = x + y; result = 45;");
             }, 5000);
+        });
+
+        // ===== Binary Search Tree Operations =====
+        test("JaiScript vs ChaiScript: Binary Search Tree", [this]() {
+            // This benchmark tests:
+            // - Object creation (TreeNode instances)
+            // - Field access (left, right, value)
+            // - Recursion (insert, traversal, height)
+            // - Pointer chasing through object references
+            // Build a BST with 15 nodes, traverse it, calculate height, and perform rotations
+
+            benchmark("JaiScript - BST (15 nodes)", [this]() {
+                jai_engine->execute(R"(
+                    auto root = TreeNode(8);
+                    root = insertNode(root, 4);
+                    root = insertNode(root, 12);
+                    root = insertNode(root, 2);
+                    root = insertNode(root, 6);
+                    root = insertNode(root, 10);
+                    root = insertNode(root, 14);
+                    root = insertNode(root, 1);
+                    root = insertNode(root, 3);
+                    root = insertNode(root, 5);
+                    root = insertNode(root, 7);
+                    root = insertNode(root, 9);
+                    root = insertNode(root, 11);
+                    root = insertNode(root, 13);
+                    root = insertNode(root, 15);
+
+                    auto sum = inorderSum(root);
+                    auto height = treeHeight(root);
+                    root = rotateRight(root);
+                    sum = inorderSum(root);
+                )");
+            });
+
+            // ChaiScript BST benchmark disabled - ChaiScript cannot handle null/undefined properly
+            // See: http://discourse.chaiscript.com/t/assign-null-or-reset-variable/179
+            // ChaiScript has no 'null' keyword, is_var_null() only works for undefined variables,
+            // and accessing undefined object fields throws "Can not find object" errors.
+            // This makes tree structures with optional child pointers impractical.
+            // JaiScript handles this cleanly with proper null support.
+            std::cout << "ChaiScript - BST (15 nodes): SKIPPED (ChaiScript lacks null support for object fields)\n";
+        });
+
+        // ===== Binary Search Tree Operations (C++ Bound - Fair Comparison) =====
+        test("JaiScript vs ChaiScript: Binary Search Tree (C++ Bound)", [this]() {
+            // This benchmark provides a fair comparison by using the same C++ TreeNode class
+            // bound to both engines. This works around ChaiScript's language limitations
+            // and allows us to compare pure scripting performance for tree operations.
+
+            benchmark("JaiScript - C++ BST (15 nodes)", [this]() {
+                jai_engine->execute(R"(
+                    root = CppTreeNode(8);
+                    root = cpp_insertNode(root, 4);
+                    root = cpp_insertNode(root, 12);
+                    root = cpp_insertNode(root, 2);
+                    root = cpp_insertNode(root, 6);
+                    root = cpp_insertNode(root, 10);
+                    root = cpp_insertNode(root, 14);
+                    root = cpp_insertNode(root, 1);
+                    root = cpp_insertNode(root, 3);
+                    root = cpp_insertNode(root, 5);
+                    root = cpp_insertNode(root, 7);
+                    root = cpp_insertNode(root, 9);
+                    root = cpp_insertNode(root, 11);
+                    root = cpp_insertNode(root, 13);
+                    root = cpp_insertNode(root, 15);
+
+                    sum = cpp_inorderSum(root);
+                    height = cpp_treeHeight(root);
+                    root = cpp_rotateRight(root);
+                    sum = cpp_inorderSum(root);
+                )");
+            });
+
+            benchmark("ChaiScript - C++ BST (15 nodes)", [this]() {
+                chai_engine->eval(R"(
+                    root = CppTreeNode(8);
+                    root = cpp_insertNode(root, 4);
+                    root = cpp_insertNode(root, 12);
+                    root = cpp_insertNode(root, 2);
+                    root = cpp_insertNode(root, 6);
+                    root = cpp_insertNode(root, 10);
+                    root = cpp_insertNode(root, 14);
+                    root = cpp_insertNode(root, 1);
+                    root = cpp_insertNode(root, 3);
+                    root = cpp_insertNode(root, 5);
+                    root = cpp_insertNode(root, 7);
+                    root = cpp_insertNode(root, 9);
+                    root = cpp_insertNode(root, 11);
+                    root = cpp_insertNode(root, 13);
+                    root = cpp_insertNode(root, 15);
+
+                    sum = cpp_inorderSum(root);
+                    height = cpp_treeHeight(root);
+                    root = cpp_rotateRight(root);
+                    sum = cpp_inorderSum(root);
+                )");
+            });
         });
 
 #else

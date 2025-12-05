@@ -520,7 +520,11 @@ namespace jai {
         
         // Execute a file with import tracking
         script_value execute_import(const std::string& resolved_path);
-        
+
+        // Parameter storage for function calls (replaces thread_local)
+        detail::parameter_storage* get_current_parameter_storage() const;
+        void set_current_parameter_storage(detail::parameter_storage* storage);
+
     private:
         struct implementation;
         std::unique_ptr<implementation> impl;

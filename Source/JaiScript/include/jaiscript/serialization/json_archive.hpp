@@ -221,24 +221,80 @@ public:
                 break;
             }
             
-            default: {
-                // Runtime validation: Check if object types are registered
-                if (value.type() == script_value_type::jai_object_type) {
-                    auto type_info = value.get_type_info();
-                    std::string type_name = type_info ? type_info->type_name : "unknown";
+            case script_value_type::jai_object_type: {
+                auto type_info = value.get_type_info();
+                std::string type_name = type_info ? type_info->type_name : "unknown";
 
-                    auto eng = engine_ref_.lock();
-                    if (eng) {
-                        const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
-                        if (!metadata || metadata->properties.empty()) {
-                            throw serialization_error(
-                                "Cannot serialize unregistered type '" + type_name + "'. " +
-                                "Register the type with class_builder before serialization, or ensure it has registered properties."
-                            );
-                        }
-                    }
+                auto eng = engine_ref_.lock();
+                if (!eng) {
+                    oss_ << "null";
+                    break;
                 }
 
+                // Try to serialize as class_instance
+                try {
+                    auto instance = value.as<std::shared_ptr<class_instance>>();
+                    if (instance) {
+                        auto class_def = instance->get_class_definition();
+
+                        oss_ << '{';
+                        bool first = true;
+
+                        // Add _type_ field
+                        oss_ << "\"_type_\":\"" << escape_json_string_local(type_name) << "\"";
+                        first = false;
+
+                        // Check if this type is registered in the serialization registry
+                        const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
+
+                        if (metadata && !metadata->properties.empty() && class_def) {
+                            // C++ bound class with registered properties - use getters
+                            for (const auto& prop_name : class_def->get_property_names()) {
+                                uint64_t getter_id = eng->symbolize("_get_" + prop_name);
+                                auto getter = class_def->get_method(getter_id);
+                                if (getter.type() == script_value_type::jai_function_type) {
+                                    try {
+                                        std::vector<script_value> args = {value};
+                                        auto result = getter.as_function()(args);
+                                        if (result) {
+                                            if (!first) oss_ << ',';
+                                            first = false;
+                                            oss_ << "\"" << escape_json_string_local(prop_name) << "\":";
+                                            write_value(std::move(result.value()));
+                                        }
+                                    } catch (...) {
+                                        // Skip properties that fail to get
+                                    }
+                                }
+                            }
+                        } else {
+                            // Script-defined class or unregistered - serialize fields directly
+                            const auto& fields = instance->get_fields();
+                            for (const auto& [field_id, field_val] : fields) {
+                                // Skip the __cpp_object__ field - it's not serializable
+                                std::string field_name = std::string(eng->get_symbolizer()->get_string(field_id));
+                                if (field_name == "__cpp_object__") continue;
+
+                                if (!first) oss_ << ',';
+                                first = false;
+                                oss_ << "\"" << escape_json_string_local(field_name) << "\":";
+                                write_value(field_val);
+                            }
+                        }
+
+                        oss_ << '}';
+                        break;
+                    }
+                } catch (...) {
+                    // Not a class_instance - fall through to default
+                }
+
+                // Fallback for other object types
+                oss_ << to_json_impl_fallback(value, 0, 0);
+                break;
+            }
+
+            default: {
                 // Use the existing to_json implementation for other types
                 oss_ << to_json_impl_fallback(value, 0, 0);  // No indentation, we handle it ourselves
                 break;

@@ -188,6 +188,7 @@ namespace jai {
         // Override assign to update 'this' object fields when appropriate
         void assign(const std::string& name, const script_value& value) override;
         void assign(uint64_t id, const script_value& value) override;
+        void assign(uint64_t id, script_value&& value) override;
 
         // Override contains to include 'this'
         bool contains(const std::string& name) const;
@@ -806,22 +807,17 @@ namespace jai {
         
         // Type conversion helpers (inlined for performance)
         inline bool is_truthy(const script_value& value) {
-            // ULTRA-OPTIMIZED: Get type ONCE via switch, then use unchecked accessors
-            // No branching, no exception checks - direct access to underlying data
-            // This is safe because we've already verified the type via switch
-            switch (value.type()) {
-                case script_value_type::jai_null_type:
-                    return false;
-                case script_value_type::jai_bool_type:
-                    return value.unchecked_as_bool();
-                case script_value_type::jai_int_type:
-                    return value.unchecked_as_int() != 0;
-                case script_value_type::jai_float_type:
-                    return value.unchecked_as_float() != 0.0;
-                case script_value_type::jai_string_type:
-                    return !value.unchecked_as_string().empty();
-                default:
-                    return true;  // Arrays, maps, objects, functions are truthy
+            // ULTRA-FAST: Use raw_storage_index() - single integer read, no pointer chasing
+            // Avoids type_info_ null check and double-switch overhead
+            // Bool case first since loop conditions almost always evaluate to bool
+            switch (value.raw_storage_index()) {
+                case 5: return value.unchecked_as_bool();    // bool - MOST COMMON for conditions
+                case 0: return false;                         // null (monostate)
+                case 1: return value.unchecked_as_int() != 0; // int
+                case 2: return value.unchecked_as_float() != 0.0; // float
+                case 3: return !value.unchecked_as_string().empty(); // string
+                case 4: return true;                          // char - any char is truthy
+                default: return true;                         // arrays, maps, objects, functions
             }
         }
         

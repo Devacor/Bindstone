@@ -351,6 +351,39 @@ public:
             
             check_eq(result.as<int>(), 7); // 2 dogs + 5 values
         });
+
+        test("polymorphic_parameter_passing", [this]() {
+            auto engine = engine::make();
+
+            // Register base and derived classes
+            class_builder<Animal>(*engine, "Animal")
+                .property("name", &Animal::name)
+                .method("speak", &Animal::speak)
+                .build();
+
+            class_builder<Dog>(*engine, "Dog")
+                .constructor<>()
+                .constructor<const std::string&>()
+                .base_class<Animal>()
+                .build();
+
+            // Add a function that takes shared_ptr<Animal> - should accept Dog
+            engine->add_function("make_speak", [](std::shared_ptr<Animal> animal) -> std::string {
+                if (!animal) return "null";
+                return animal->speak();
+            });
+
+            std::cout << "\n=== Testing polymorphic_parameter_passing ===" << std::endl;
+
+            // Create a Dog and pass it to a function expecting shared_ptr<Animal>
+            auto result = engine->execute(R"(
+                auto dog = Dog("Rex");
+                make_speak(dog)
+            )");
+
+            std::cout << "make_speak(Dog) result: " << result.as<std::string>() << std::endl;
+            check_eq(result.as<std::string>(), "Woof!");
+        });
     }
 };
 

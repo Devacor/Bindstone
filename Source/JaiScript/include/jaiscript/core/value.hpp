@@ -183,7 +183,7 @@ namespace jai {
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
         script_value_type type() const {
-            return type_info_ ? type_info_->base_type : script_value_type::jai_null_type;
+            return type_info_ ? type_info_->base_type : storage_type();
         }
 
         // Get type from storage variant - useful for AST literals that have nullptr type_info
@@ -206,6 +206,10 @@ namespace jai {
                 default: return script_value_type::jai_invalid_type;
             }
         }
+
+        // Ultra-fast raw storage index - no pointer chasing, single integer read
+        // Use this in hot paths like is_truthy() to avoid type_info_ pointer dereference
+        inline size_t raw_storage_index() const noexcept { return storage_.index(); }
         bool is_null() const { return deref().type() == script_value_type::jai_null_type; }
         bool is_invalid() const { return deref().type() == script_value_type::jai_invalid_type; }
         bool is_int() const { return deref().type() == script_value_type::jai_int_type; }
@@ -307,25 +311,49 @@ namespace jai {
         }
 
         // ============================================================================
-        // UNCHECKED ACCESSORS - Ultra-fast direct access without type checking
+        // UNCHECKED ACCESSORS - Fast direct access without type checking
         // ONLY use these when you've already verified the type (e.g., via type() switch)
-        // These provide zero-overhead access with no branching or error checking
+        // These check for cpp_bound values and fall back to storage_ otherwise
         // Uses std::get_if which returns a pointer without throwing (faster than std::get)
         // ============================================================================
 
         inline script_bool unchecked_as_bool() const noexcept {
+            if (cpp_bound_ptr_) {
+                return *static_cast<const bool*>(cpp_bound_ptr_);
+            }
             return *std::get_if<static_cast<size_t>(storage_index::jai_bool)>(&storage_);
         }
 
         inline script_int unchecked_as_int() const noexcept {
+            if (cpp_bound_ptr_) {
+                return static_cast<script_int>(*static_cast<const int*>(cpp_bound_ptr_));
+            }
+            return *std::get_if<static_cast<size_t>(storage_index::jai_int)>(&storage_);
+        }
+
+        // Mutable accessor for in-place modification (avoids make_value() overhead in loops)
+        inline script_int& unchecked_as_int_ref() noexcept {
             return *std::get_if<static_cast<size_t>(storage_index::jai_int)>(&storage_);
         }
 
         inline script_float unchecked_as_float() const noexcept {
+            if (cpp_bound_ptr_) {
+                return static_cast<script_float>(*static_cast<const double*>(cpp_bound_ptr_));
+            }
+            return *std::get_if<static_cast<size_t>(storage_index::jai_float)>(&storage_);
+        }
+
+        // Mutable accessor for in-place modification (avoids make_value() overhead in loops)
+        inline script_float& unchecked_as_float_ref() noexcept {
             return *std::get_if<static_cast<size_t>(storage_index::jai_float)>(&storage_);
         }
 
         inline const script_string& unchecked_as_string() const noexcept {
+            return *std::get_if<static_cast<size_t>(storage_index::jai_string)>(&storage_);
+        }
+
+        // Mutable accessor for in-place modification (avoids make_value() overhead)
+        inline script_string& unchecked_as_string_ref() noexcept {
             return *std::get_if<static_cast<size_t>(storage_index::jai_string)>(&storage_);
         }
 
@@ -1371,3 +1399,4 @@ namespace jai {
 } // namespace jai
 
 #endif // __JAISCRIPT_CORE_VALUE_HPP__
+

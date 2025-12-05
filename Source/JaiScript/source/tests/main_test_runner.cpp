@@ -5,6 +5,88 @@
 #include <iostream>
 #include <string>
 
+// Parse filter from command line arguments
+// Supports:
+//   --gtest_filter=<pattern>  (gtest style)
+//   --jaitest_filter=<pattern> (jaitest style, synonym)
+//   --filter=<pattern>        (explicit)
+//   <pattern>                 (positional)
+// Pattern format: suite_filter.test_filter or just pattern for both
+// Wildcard * matches anything
+struct test_filter_config {
+    std::string suite_pattern;
+    std::string test_pattern;
+
+    test_filter_config() : suite_pattern("*"), test_pattern("*") {}
+
+    static test_filter_config parse(const std::string& filter_str) {
+        test_filter_config result;
+        if (filter_str.empty()) {
+            return result;
+        }
+
+        // Check for dot separator (suite.test pattern)
+        size_t dot_pos = filter_str.find('.');
+        if (dot_pos != std::string::npos) {
+            result.suite_pattern = filter_str.substr(0, dot_pos);
+            result.test_pattern = filter_str.substr(dot_pos + 1);
+        } else {
+            // No dot - use as filter for both suites and tests
+            result.suite_pattern = filter_str;
+            result.test_pattern = filter_str;
+        }
+
+        // Handle empty parts as wildcards
+        if (result.suite_pattern.empty()) result.suite_pattern = "*";
+        if (result.test_pattern.empty()) result.test_pattern = "*";
+
+        return result;
+    }
+
+    // Simple wildcard matching (* matches any sequence)
+    static bool matches(const std::string& pattern, const std::string& text) {
+        if (pattern == "*") return true;
+
+        // If no wildcards, do substring match
+        if (pattern.find('*') == std::string::npos) {
+            return text.find(pattern) != std::string::npos;
+        }
+
+        // Simple wildcard matching
+        size_t pi = 0, ti = 0;
+        size_t star_pi = std::string::npos, star_ti = 0;
+
+        while (ti < text.size()) {
+            if (pi < pattern.size() && (pattern[pi] == text[ti] || pattern[pi] == '?')) {
+                pi++;
+                ti++;
+            } else if (pi < pattern.size() && pattern[pi] == '*') {
+                star_pi = pi++;
+                star_ti = ti;
+            } else if (star_pi != std::string::npos) {
+                pi = star_pi + 1;
+                ti = ++star_ti;
+            } else {
+                return false;
+            }
+        }
+
+        while (pi < pattern.size() && pattern[pi] == '*') {
+            pi++;
+        }
+
+        return pi == pattern.size();
+    }
+
+    bool matches_suite(const std::string& suite_name) const {
+        return matches(suite_pattern, suite_name);
+    }
+
+    bool matches_test(const std::string& test_name) const {
+        return matches(test_pattern, test_name);
+    }
+};
+
 int main(int argc, char** argv) {
     using namespace jai::foundry;
 
@@ -18,11 +100,35 @@ int main(int argc, char** argv) {
 
     std::cout << "Discovered " << suites.size() << " test suites\n";
 
-    // Optional filter from command line
-    std::string filter;
-    if (argc > 1) {
-        filter = argv[1];
-        std::cout << "Running tests matching filter: '" << filter << "'\n";
+    // Parse filter from command line
+    test_filter_config filter;
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+
+        // gtest style: --gtest_filter=pattern
+        if (arg.rfind("--gtest_filter=", 0) == 0) {
+            filter = test_filter_config::parse(arg.substr(15));
+            std::cout << "Running tests matching filter: '" << arg.substr(15) << "'\n";
+            break;
+        }
+        // jaitest style (synonym): --jaitest_filter=pattern
+        else if (arg.rfind("--jaitest_filter=", 0) == 0) {
+            filter = test_filter_config::parse(arg.substr(17));
+            std::cout << "Running tests matching filter: '" << arg.substr(17) << "'\n";
+            break;
+        }
+        // explicit: --filter=pattern
+        else if (arg.rfind("--filter=", 0) == 0) {
+            filter = test_filter_config::parse(arg.substr(9));
+            std::cout << "Running tests matching filter: '" << arg.substr(9) << "'\n";
+            break;
+        }
+        // positional argument
+        else if (arg[0] != '-') {
+            filter = test_filter_config::parse(arg);
+            std::cout << "Running tests matching filter: '" << arg << "'\n";
+            break;
+        }
     }
     std::cout << "\n";
 
@@ -31,13 +137,14 @@ int main(int argc, char** argv) {
     int suites_run = 0;
 
     for (auto& suite : suites) {
-        // Skip if filter doesn't match
-        if (!filter.empty() && suite->get_name().find(filter) == std::string::npos) {
+        // Skip if filter doesn't match suite
+        if (!filter.matches_suite(suite->get_name())) {
             continue;
         }
 
         suites_run++;
-        total_failures += suite->quench();
+        // Pass test filter to suite
+        total_failures += suite->quench(filter.test_pattern);
     }
 
     // Summary

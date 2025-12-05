@@ -195,6 +195,21 @@ void engine::add_custom_conversion(
     conv_manager.add_custom_conversion<T>(from_func, to_func);
 }
 
+// Implementation of parameter_storage::scope_guard methods
+// These need the full engine definition, so they're defined here
+inline detail::parameter_storage::scope_guard::scope_guard(engine* eng, parameter_storage* storage)
+    : engine_(eng), previous_(eng ? eng->get_current_parameter_storage() : nullptr) {
+    if (eng) {
+        eng->set_current_parameter_storage(storage);
+    }
+}
+
+inline detail::parameter_storage::scope_guard::~scope_guard() {
+    if (engine_) {
+        engine_->set_current_parameter_storage(previous_);
+    }
+}
+
 } // namespace jai
 
 #endif // __JAISCRIPT_CORE_ENGINE_IMPL_HPP__

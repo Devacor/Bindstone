@@ -1612,7 +1612,7 @@ checked_result<statement_ptr> parser::for_statement() {
                 JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
                 return std::make_shared<range_for_stmt>(
-                    forToken.location, element_type, varName.lexeme,
+                    forToken.location, element_type, varName.lexeme, symbolizer_->intern(varName.lexeme),
                     is_reference, is_const, container, body
                 );
             }

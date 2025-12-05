@@ -27,7 +27,10 @@ namespace jvm {
 struct engine::implementation {
     // Unified conversion registry (replaces both type_conversions and custom_conversions)
     std::shared_ptr<conversions::conversion_registry> conversions;
-    
+
+    // Current parameter storage for function calls (replaces thread_local)
+    detail::parameter_storage* current_parameter_storage = nullptr;
+
     // Serialization registry for class metadata (non-static to ensure test isolation)
     serialization::serialization_registry serialization_registry;
     
@@ -1677,6 +1680,22 @@ void engine::set_import_behavior(import_behavior behavior) {
 
 engine::import_behavior engine::get_import_behavior() const {
     return impl->import_behavior;
+}
+
+// Parameter storage for function calls (replaces thread_local)
+detail::parameter_storage* engine::get_current_parameter_storage() const {
+    return impl->current_parameter_storage;
+}
+
+void engine::set_current_parameter_storage(detail::parameter_storage* storage) {
+    impl->current_parameter_storage = storage;
+}
+
+// Non-member accessor for parameter_storage - breaks circular dependency
+namespace detail {
+    parameter_storage* get_engine_parameter_storage(engine* eng) {
+        return eng ? eng->get_current_parameter_storage() : nullptr;
+    }
 }
 
 // Import management

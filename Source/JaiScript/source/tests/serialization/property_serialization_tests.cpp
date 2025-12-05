@@ -1096,6 +1096,7 @@ public:
             };
 
             // Register with class_builder and add post_deserialize hook
+            // Note: No explicit .constructor<>() - auto-registration should handle it
             class_builder<Rectangle>(*eng, "Rectangle")
                 .property("width", &Rectangle::width)
                 .property("height", &Rectangle::height)
@@ -1171,7 +1172,7 @@ public:
             eng->add_global("json_str", script_value(json_v1, eng->weak_from_this()));
 
             // Load from JSON and check migration
-            eng->execute("loaded = from_json(json_str);");  // Use global variable
+            eng->execute("var loaded = from_json(json_str);");  // Use explicit var declaration
             auto health = eng->execute("loaded.health");
             auto max_health = eng->execute("loaded.max_health");
             auto was_migrated = eng->execute("loaded.was_migrated");
@@ -1207,16 +1208,16 @@ public:
 
             // Create an Item and serialize to binary
             eng->execute(R"(
-                item = Item();
+                var item = Item();
                 item.quantity = 5;
                 item.weight = 2.5;
-                binary_data = to_binary(item);
+                var binary_data = to_binary(item);
             )");
 
             auto binary_data = eng->get_variable("binary_data");
 
             // Load from binary
-            eng->execute("loaded_item = from_binary(binary_data);");
+            eng->execute("var loaded_item = from_binary(binary_data);");
 
             // Check that hook was called and computed value is correct
             auto hook_called = eng->execute("loaded_item.hook_called");
@@ -1241,10 +1242,10 @@ public:
 
             // Serialize and deserialize
             eng->execute(R"(
-                obj = SimpleClass();
+                var obj = SimpleClass();
                 obj.value = 100;
-                json_str = to_json(obj);
-                loaded = from_json(json_str);
+                var json_str = to_json(obj);
+                var loaded = from_json(json_str);
             )");
 
             auto value = eng->execute("loaded.value");

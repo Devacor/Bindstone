@@ -194,6 +194,12 @@ protected:
 
     // User context storage (for dependency injection during deserialization)
     std::map<std::type_index, void*> user_contexts_;
+
+    // Pre-read properties for factory-based deserialization
+    // In binary format, all property names come first, then all values
+    // This map stores pre-read properties so factories can access them
+    std::map<std::string, script_value> preread_properties_;
+    bool has_preread_properties_ = false;
     
     // Register a reconstructed shared_ptr
     void register_shared_ptr(uint32_t id, const script_value& ptr) {
@@ -287,30 +293,64 @@ public:
     // Generic value reading (determines type from stream)
     virtual script_value read_value() = 0;
 
+    // Set pre-read properties (called by binary_archive_reader before factory invocation)
+    void set_preread_properties(std::map<std::string, script_value> props) {
+        preread_properties_ = std::move(props);
+        has_preread_properties_ = true;
+    }
+
+    // Clear pre-read properties (called after factory completes)
+    void clear_preread_properties() {
+        preread_properties_.clear();
+        has_preread_properties_ = false;
+    }
+
+    // Get a pre-read property (returns nullptr if not found)
+    const script_value* get_preread_property(const std::string& name) const {
+        auto it = preread_properties_.find(name);
+        return it != preread_properties_.end() ? &it->second : nullptr;
+    }
+
+    // Check if we have pre-read properties available
+    bool has_preread_properties() const { return has_preread_properties_; }
+
     // Read a specific property by name and convert to C++ type
     // Used for property pre-reading before construction
+    // When pre-read properties are available (binary format), reads from the pre-read map
+    // Otherwise (JSON format), reads from the stream directly
     template<typename T>
     T read_property(const std::string& property_name) {
-        std::string name;
-        if (!read_property_name(name) || name != property_name) {
-            throw serialization_error("Expected property '" + property_name + "' but found '" + name + "'");
-        }
+        // Helper lambda to convert script_value to T
+        auto convert_value = [](const script_value& value) -> T {
+            if constexpr (std::is_same_v<T, std::string>) {
+                return value.as<std::string>();
+            } else if constexpr (std::is_integral_v<T>) {
+                return static_cast<T>(value.as<script_int>());
+            } else if constexpr (std::is_floating_point_v<T>) {
+                return static_cast<T>(value.as<script_float>());
+            } else if constexpr (std::is_same_v<T, bool>) {
+                return value.as<bool>();
+            } else {
+                // For complex types, assume they can be extracted directly
+                // This will work for shared_ptr<T> if value holds an object
+                return value.as<T>();
+            }
+        };
 
-        script_value value = read_value();
-
-        // Convert script_value to C++ type
-        if constexpr (std::is_same_v<T, std::string>) {
-            return value.as<std::string>();
-        } else if constexpr (std::is_integral_v<T>) {
-            return static_cast<T>(value.as<script_int>());
-        } else if constexpr (std::is_floating_point_v<T>) {
-            return static_cast<T>(value.as<script_float>());
-        } else if constexpr (std::is_same_v<T, bool>) {
-            return value.as<bool>();
+        // Check if we have pre-read properties (binary format)
+        if (has_preread_properties_) {
+            auto it = preread_properties_.find(property_name);
+            if (it == preread_properties_.end()) {
+                throw serialization_error("Property '" + property_name + "' not found in pre-read properties");
+            }
+            return convert_value(it->second);
         } else {
-            // For complex types, assume they can be extracted directly
-            // This will work for shared_ptr<T> if value holds an object
-            return value.as<T>();
+            // Fall back to reading from stream (JSON format)
+            std::string name;
+            if (!read_property_name(name) || name != property_name) {
+                throw serialization_error("Expected property '" + property_name + "' but found '" + name + "'");
+            }
+            return convert_value(read_value());
         }
     }
 

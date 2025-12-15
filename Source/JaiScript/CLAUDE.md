@@ -308,6 +308,21 @@ for (auto& kv : scores) {
 - Debug → Start Without Debugging (Ctrl+F5) to run tests
 - Or use Test Explorer if configured
 
+### Performance Benchmarks
+
+**IMPORTANT:** Benchmarks are disabled by default. To run performance benchmarks:
+
+1. **In Visual Studio:** Select the `x64-Release BENCHMARKS` configuration from the build configuration dropdown
+2. This enables `JAISCRIPT_ENABLE_BENCHMARKS=ON` which includes performance test suites
+3. Build and run `jaiscript_tests.exe` - benchmark results will be included in output
+
+**Benchmark categories:**
+- Core performance (integer/float/variable/function operations)
+- ChaiScript comparison (head-to-head benchmarks)
+- Loop performance (for-loop variants, range-for, strong types)
+- Container operations (array, map)
+- Value construction and type checking
+
 **From Command Line:**
 ```powershell
 # Navigate to build output directory

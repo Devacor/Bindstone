@@ -550,12 +550,13 @@ namespace stdlib {
                                             // Skip properties that can't be set (e.g., read-only or non-existent)
                                         }
 
-                                        // Clean up
-                                        eng->execute(tempVar + " = null");
+                                        // Clean up - use add_global instead of execute to avoid type checking
+                                        eng->add_global(tempVar, script_value(std::monostate{}, engine_weak));
                                     }
                                 }
 
-                                eng->execute("_json_obj = null");
+                                // Clean up - use add_global instead of execute to avoid type checking
+                                eng->add_global("_json_obj", script_value(std::monostate{}, engine_weak));
                             }
 
                             // Call post_deserialize hook if it exists (for both custom and fallback paths)
@@ -586,13 +587,14 @@ namespace stdlib {
                                     }
                                 }
                             } catch (...) {
-                                // Hook failed, but continue
+                                // Hook failed - rethrow to show error
+                                throw;
                             }
 
                             return instance;
-                            
+
                         } catch (...) {
-                            // If object reconstruction fails, return as processed map
+                            // If object reconstruction fails, fall through to return as map
                         }
                     }
 
@@ -690,11 +692,13 @@ namespace stdlib {
                                 eng->execute("_binary_obj." + prop_name + " = " + temp_var);
                                 instance = eng->get_variable("_binary_obj");
 
-                                eng->execute(temp_var + " = null");
+                                // Clean up - use add_global instead of execute to avoid type checking
+                                eng->add_global(temp_var, script_value(std::monostate{}, engine_weak));
                             }
                         }
 
-                        eng->execute("_binary_obj = null");
+                        // Clean up - use add_global instead of execute to avoid type checking
+                        eng->add_global("_binary_obj", script_value(std::monostate{}, engine_weak));
 
                         // Call post_deserialize hook if it exists
                         try {
@@ -729,7 +733,7 @@ namespace stdlib {
 
                         return instance;
                     } catch (...) {
-                        // If object reconstruction fails, return as map
+                        // If object reconstruction fails, fall through to return as map
                     }
                 }
             }

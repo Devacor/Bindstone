@@ -35,19 +35,25 @@ script_value interpreter::handle_add(const script_value& left, const script_valu
     if (left.is_int() && right.is_int()) {
         return make_value(left.as_int() + right.as_int());
     }
-    
+
     // Fast path for float addition
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         return make_value(lf + rf);
     }
-    
-    // String concatenation
+
+    // String concatenation - check for to_string() method on objects
     if (left.is_string() || right.is_string()) {
-        return make_value(left.to_string() + right.to_string());
+        return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
     }
-    
+
+    // Check for custom operator+ method on objects
+    auto custom_result = object_arithmetic_via_method(left, right, op_plus_id_);
+    if (custom_result.has_value()) {
+        return custom_result.value();
+    }
+
     throw runtime_error("Invalid operands for + operator");
 }
 
@@ -55,13 +61,19 @@ script_value interpreter::handle_subtract(const script_value& left, const script
     if (left.is_int() && right.is_int()) {
         return make_value(left.as_int() - right.as_int());
     }
-    
+
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         return make_value(lf - rf);
     }
-    
+
+    // Check for custom operator- method on objects
+    auto custom_result = object_arithmetic_via_method(left, right, op_minus_id_);
+    if (custom_result.has_value()) {
+        return custom_result.value();
+    }
+
     throw runtime_error("Invalid operands for - operator");
 }
 
@@ -69,13 +81,19 @@ script_value interpreter::handle_multiply(const script_value& left, const script
     if (left.is_int() && right.is_int()) {
         return make_value(left.as_int() * right.as_int());
     }
-    
+
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         return make_value(lf * rf);
     }
-    
+
+    // Check for custom operator* method on objects
+    auto custom_result = object_arithmetic_via_method(left, right, op_star_id_);
+    if (custom_result.has_value()) {
+        return custom_result.value();
+    }
+
     throw runtime_error("Invalid operands for * operator");
 }
 
@@ -84,14 +102,20 @@ script_value interpreter::handle_divide(const script_value& left, const script_v
         if (right.as_int() == 0) throw runtime_error("Division by zero");
         return make_value(left.as_int() / right.as_int());
     }
-    
+
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         if (rf == 0.0) throw runtime_error("Division by zero");
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         return make_value(lf / rf);
     }
-    
+
+    // Check for custom operator/ method on objects
+    auto custom_result = object_arithmetic_via_method(left, right, op_slash_id_);
+    if (custom_result.has_value()) {
+        return custom_result.value();
+    }
+
     throw runtime_error("Invalid operands for / operator");
 }
 
@@ -100,14 +124,20 @@ script_value interpreter::handle_modulo(const script_value& left, const script_v
         if (right.as_int() == 0) throw runtime_error("Division by zero");
         return make_value(left.as_int() % right.as_int());
     }
-    
+
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         if (rf == 0.0) throw runtime_error("Division by zero");
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         return make_value(std::fmod(lf, rf));
     }
-    
+
+    // Check for custom operator% method on objects
+    auto custom_result = object_arithmetic_via_method(left, right, op_percent_id_);
+    if (custom_result.has_value()) {
+        return custom_result.value();
+    }
+
     throw runtime_error("Invalid operands for % operator");
 }
 
@@ -115,17 +145,23 @@ script_value interpreter::handle_less(const script_value& left, const script_val
     if (left.is_int() && right.is_int()) {
         return make_value(left.as_int() < right.as_int());
     }
-    
+
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         return make_value(lf < rf);
     }
-    
+
     if (left.is_string() && right.is_string()) {
         return make_value(left.as_string() < right.as_string());
     }
-    
+
+    // Check for custom operator< method on objects
+    auto custom_result = object_comparison_via_method(left, right, op_less_id_);
+    if (custom_result.has_value()) {
+        return make_value(custom_result.value());
+    }
+
     throw runtime_error("Invalid operands for < operator");
 }
 
@@ -133,17 +169,23 @@ script_value interpreter::handle_less_equal(const script_value& left, const scri
     if (left.is_int() && right.is_int()) {
         return make_value(left.as_int() <= right.as_int());
     }
-    
+
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         return make_value(lf <= rf);
     }
-    
+
     if (left.is_string() && right.is_string()) {
         return make_value(left.as_string() <= right.as_string());
     }
-    
+
+    // Check for custom operator<= method on objects
+    auto custom_result = object_comparison_via_method(left, right, op_less_equal_id_);
+    if (custom_result.has_value()) {
+        return make_value(custom_result.value());
+    }
+
     throw runtime_error("Invalid operands for <= operator");
 }
 
@@ -151,17 +193,23 @@ script_value interpreter::handle_greater(const script_value& left, const script_
     if (left.is_int() && right.is_int()) {
         return make_value(left.as_int() > right.as_int());
     }
-    
+
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         return make_value(lf > rf);
     }
-    
+
     if (left.is_string() && right.is_string()) {
         return make_value(left.as_string() > right.as_string());
     }
-    
+
+    // Check for custom operator> method on objects
+    auto custom_result = object_comparison_via_method(left, right, op_greater_id_);
+    if (custom_result.has_value()) {
+        return make_value(custom_result.value());
+    }
+
     throw runtime_error("Invalid operands for > operator");
 }
 
@@ -169,17 +217,23 @@ script_value interpreter::handle_greater_equal(const script_value& left, const s
     if (left.is_int() && right.is_int()) {
         return make_value(left.as_int() >= right.as_int());
     }
-    
+
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         return make_value(lf >= rf);
     }
-    
+
     if (left.is_string() && right.is_string()) {
         return make_value(left.as_string() >= right.as_string());
     }
-    
+
+    // Check for custom operator>= method on objects
+    auto custom_result = object_comparison_via_method(left, right, op_greater_equal_id_);
+    if (custom_result.has_value()) {
+        return make_value(custom_result.value());
+    }
+
     throw runtime_error("Invalid operands for >= operator");
 }
 
@@ -220,19 +274,55 @@ script_value interpreter::handle_equal(const script_value& left, const script_va
         return make_value(is_expired);  // weak == null is true if expired
     }
     
-    // Type mismatch = not equal (except for weak_ptr vs null handled above)
+    // Handle numeric type comparison (int vs float should compare by value)
+    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
+        // Convert both to float for comparison to handle 5 == 5.0 correctly
+        script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
+        script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
+        return make_value(lf == rf);
+    }
+
+    // Type mismatch = not equal (except for numeric and weak_ptr vs null handled above)
     if (left.type() != right.type()) {
         return make_value(false);
     }
-    
+
     if (left.is_null()) return make_value(true);
-    if (left.is_int()) return make_value(left.as_int() == right.as_int());
-    if (left.is_float()) return make_value(left.as_float() == right.as_float());
+    // Note: int and float are already handled above in mixed-type comparison
     if (left.is_string()) return make_value(left.as_string() == right.as_string());
     if (left.is_bool()) return make_value(left.as_bool() == right.as_bool());
     if (left.is_char()) return make_value(left.as_char() == right.as_char());
-    
-    // For complex types, default to false
+
+    // Array equality - compare by reference (same array instance)
+    if (left.is_array() && right.is_array()) {
+        auto& left_arr = const_cast<script_value&>(left).get_array_storage();
+        auto& right_arr = const_cast<script_value&>(right).get_array_storage();
+        return make_value(left_arr.get() == right_arr.get());
+    }
+
+    // Map equality - compare by reference (same map instance)
+    if (left.is_map() && right.is_map()) {
+        auto& left_map = const_cast<script_value&>(left).get_map_storage();
+        auto& right_map = const_cast<script_value&>(right).get_map_storage();
+        return make_value(left_map.get() == right_map.get());
+    }
+
+    // Object/class instance equality
+    // First check for custom operator== or equals() method
+    auto custom_result = object_equality_via_method(left, right);
+    if (custom_result.has_value()) {
+        return make_value(custom_result.value());
+    }
+
+    // Fall back to reference equality (same object_holder)
+    // This enables: obj == obj to return true (self-comparison)
+    auto left_holder = const_cast<script_value&>(left).get_object_holder();
+    auto right_holder = const_cast<script_value&>(right).get_object_holder();
+    if (left_holder && right_holder) {
+        return make_value(left_holder == right_holder);
+    }
+
+    // For other complex types without holders, default to false
     return make_value(false);
 }
 

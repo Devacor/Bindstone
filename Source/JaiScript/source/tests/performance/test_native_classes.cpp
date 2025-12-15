@@ -101,22 +101,22 @@ public:
             auto result = engine->execute(R"(
                 class Cat {
                     int a = 0;
-                    Cat(int val) { a = val; }
+                    Cat(int val) { this.a = val; }
                 }
-                
+
                 class Tiger : Cat {
                     int b = 5;
                     Tiger() : super(5) {}
-                    
+
                     void roar() {
-                        print("ROAR! Tiger with a=" + to_string(a) + ", b=" + to_string(b));
+                        print("ROAR! Tiger with a=" + to_string(this.a) + ", b=" + to_string(this.b));
                     }
-                    
+
                     int getTotal() {
-                        return a + b;
+                        return this.a + this.b;
                     }
                 }
-                
+
                 auto tiger = Tiger();
                 tiger.roar();
                 tiger.getTotal();

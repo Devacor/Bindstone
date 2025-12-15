@@ -21,6 +21,7 @@ namespace jai {
     
     enum class script_value_type {
         jai_null_type,
+        jai_any_type,            // Dynamic type (var keyword) - any value allowed
         jai_int_type,
         jai_float_type,
         jai_string_type,

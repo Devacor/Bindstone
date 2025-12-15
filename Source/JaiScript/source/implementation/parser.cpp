@@ -526,9 +526,19 @@ checked_result<expression_ptr> parser::primary() {
 
 // Type parsing
 checked_result<type_info_ptr> parser::parse_type() {
-    // Handle auto/var/function
-    if (match({token_type::auto_keyword, token_type::var_keyword, token_type::function_keyword})) {
-        return type_info_ptr(nullptr); // Type inference or function keyword
+    // Handle auto - type inference (nullptr = infer from initializer, or uninitialized)
+    if (match(token_type::auto_keyword)) {
+        return type_info_ptr(nullptr);
+    }
+
+    // Handle var - dynamic typing (any type allowed, never locks)
+    if (match(token_type::var_keyword)) {
+        return store_type_info(type_info::make_any(*symbolizer_));
+    }
+
+    // Handle function keyword
+    if (match(token_type::function_keyword)) {
+        return type_info_ptr(nullptr);
     }
 
     // Primitive types
@@ -591,6 +601,12 @@ checked_result<type_info_ptr> parser::parse_type() {
         }
         info.id = symbolizer_->intern(info.canonical_name());
         return store_type_info(std::move(info));
+    }
+
+    // Handle "double" as an alias for float (since we only have float_keyword)
+    if (check(token_type::identifier) && peek().lexeme == "double") {
+        advance();  // consume "double"
+        return store_type_info(type_info::make_float(*symbolizer_));
     }
 
     // User-defined type (potentially templated)
@@ -1991,6 +2007,93 @@ checked_result<declaration_ptr> parser::class_declaration() {
             member = std::move(body_result.value());
             // TODO: Mark destructor as virtual if class has any virtual methods
             // Currently no virtual destructor support
+        } else if (match(token_type::function_keyword)) {
+            // Method declaration with 'function' keyword: function name(...) or function operator=(...)
+            bool is_static = false;
+            bool is_override = false;
+
+            // Check for static/override modifiers after function keyword
+            while (check(token_type::static_keyword) || check(token_type::override_keyword)) {
+                if (match(token_type::static_keyword)) is_static = true;
+                if (match(token_type::override_keyword)) is_override = true;
+            }
+
+            std::string method_name;
+            source_location method_location = peek().location;
+
+            // Check for operator overload: function operator= or function operator+
+            if (check(token_type::identifier) && peek().lexeme == "operator") {
+                advance(); // consume 'operator'
+
+                // Now consume the operator symbol
+                if (check(token_type::equal)) {
+                    advance();
+                    method_name = "=";
+                } else if (check(token_type::plus)) {
+                    advance();
+                    method_name = "+";
+                } else if (check(token_type::minus)) {
+                    advance();
+                    method_name = "-";
+                } else if (check(token_type::star)) {
+                    advance();
+                    method_name = "*";
+                } else if (check(token_type::slash)) {
+                    advance();
+                    method_name = "/";
+                } else if (check(token_type::left_bracket)) {
+                    advance();
+                    if (!match(token_type::right_bracket)) {
+                        report_error("Expected ']' after '[' in operator[]", peek());
+                        synchronize();
+                        continue;
+                    }
+                    method_name = "[]";
+                } else if (check(token_type::less)) {
+                    advance();
+                    method_name = "<";
+                } else if (check(token_type::greater)) {
+                    advance();
+                    method_name = ">";
+                } else if (check(token_type::less_equal)) {
+                    advance();
+                    method_name = "<=";
+                } else if (check(token_type::greater_equal)) {
+                    advance();
+                    method_name = ">=";
+                } else if (check(token_type::equal_equal)) {
+                    advance();
+                    method_name = "==";
+                } else if (check(token_type::bang_equal)) {
+                    advance();
+                    method_name = "!=";
+                } else {
+                    report_error("Expected operator symbol after 'operator' keyword", peek());
+                    synchronize();
+                    continue;
+                }
+            } else if (check(token_type::identifier)) {
+                // Regular method name
+                token name_tok = advance();
+                method_name = name_tok.lexeme;
+            } else {
+                report_error("Expected method name or 'operator' after 'function'", peek());
+                synchronize();
+                continue;
+            }
+
+            // Parse the function body using existing helper
+            auto body_result = parse_function_body(method_name, nullptr);
+            if (!body_result) {
+                synchronize();
+                continue;
+            }
+            auto func = std::dynamic_pointer_cast<function_decl>(body_result.value());
+            if (func) {
+                func->is_static = is_static;
+                func->is_override = is_override;
+            }
+            member = std::move(body_result.value());
         } else {
             // Regular member (variable or function)
             bool is_static = match(token_type::static_keyword);
@@ -2005,14 +2108,66 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
             if (check(token_type::identifier)) {
                 token name = advance();
+                std::string method_name = name.lexeme;
+
+                // Check for operator overload: function operator=(Type arg) or function operator+(...)
+                if (method_name == "operator") {
+                    // Consume the operator symbol
+                    if (check(token_type::equal)) {
+                        advance();
+                        method_name = "=";
+                    } else if (check(token_type::plus)) {
+                        advance();
+                        method_name = "+";
+                    } else if (check(token_type::minus)) {
+                        advance();
+                        method_name = "-";
+                    } else if (check(token_type::star)) {
+                        advance();
+                        method_name = "*";
+                    } else if (check(token_type::slash)) {
+                        advance();
+                        method_name = "/";
+                    } else if (check(token_type::left_bracket)) {
+                        advance();
+                        if (!match(token_type::right_bracket)) {
+                            report_error("Expected ']' after '[' in operator[]", peek());
+                            synchronize();
+                            continue;
+                        }
+                        method_name = "[]";
+                    } else if (check(token_type::less)) {
+                        advance();
+                        method_name = "<";
+                    } else if (check(token_type::greater)) {
+                        advance();
+                        method_name = ">";
+                    } else if (check(token_type::less_equal)) {
+                        advance();
+                        method_name = "<=";
+                    } else if (check(token_type::greater_equal)) {
+                        advance();
+                        method_name = ">=";
+                    } else if (check(token_type::equal_equal)) {
+                        advance();
+                        method_name = "==";
+                    } else if (check(token_type::bang_equal)) {
+                        advance();
+                        method_name = "!=";
+                    } else {
+                        report_error("Expected operator symbol after 'operator' keyword", peek());
+                        synchronize();
+                        continue;
+                    }
+                }
 
                 if (match(token_type::left_paren)) {
                     // Function - we need to parse parameters and check for override before body
                     current_--; // Back up to before '('
 
                     // Create function declaration
-                    auto func = std::make_shared<function_decl>(previous().location, name.lexeme);
-                    func->name_id = symbolizer_->intern(name.lexeme);
+                    auto func = std::make_shared<function_decl>(name.location, method_name);
+                    func->name_id = symbolizer_->intern(method_name);
                     func->is_static = is_static;
                     func->is_override = is_override; // Set from earlier check
 

@@ -43,11 +43,6 @@
           "name": "JAISCRIPT_ENABLE_PROFILING",
           "value": "True",
           "type": "BOOL"
-        },
-        {
-          "name": "CHAISCRIPT_NO_THREADS",
-          "value": "True",
-          "type": "BOOL"
         }
       ]
     },

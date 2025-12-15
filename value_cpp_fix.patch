@@ -1,0 +1,45 @@
+--- a/Source/JaiScript/source/implementation/value.cpp
++++ b/Source/JaiScript/source/implementation/value.cpp
+@@ -104,7 +104,16 @@ script_value script_value::make_object(const std::string& type_name, uint64_t t
+         throw runtime_error("Cannot create object with expired engine reference");
+     }
+     script_value v(std::monostate{}, eng);
+-    v.type_info_ = type_info::make_object(type_name);
++
++    // CRITICAL: Get persistent type_info from class registry (fast O(1) lookup by type_id)
++    auto locked_engine = eng.lock();
++    if (locked_engine) {
++        auto class_def = locked_engine->get_class_definition(type_id);
++        v.type_info_ = class_def ? class_def->get_type_info() : nullptr;
++    } else {
++        v.type_info_ = nullptr;
++    }
++
+     auto obj = std::make_shared<object_holder>();
+     obj->type_name = type_name;
+     obj->type_id = type_id;  // Set the cached type_id for fast comparison
+@@ -118,8 +127,21 @@ script_value script_value::make_cpp_object(const std::string& type_name, std::s
+     if (eng.expired()) {
+         throw runtime_error("Cannot create cpp_object with expired engine reference");
+     }
++
++    // Get the interned type_id for fast lookup
++    auto locked_engine = eng.lock();
++    uint64_t type_id = 0;
++    if (locked_engine) {
++        type_id = locked_engine->get_symbolizer()->intern(type_name);
++    }
++
+     script_value v(std::monostate{}, eng);
+-    v.type_info_ = type_info::make_object(type_name);
++
++    // CRITICAL: Use persistent type_info from registered class
++    if (locked_engine && type_id != 0) {
++        auto class_def = locked_engine->get_class_definition(type_id);
++        v.type_info_ = class_def ? class_def->get_type_info() : nullptr;
++    } else {
++        v.type_info_ = nullptr;
++    }
++
+     auto obj = std::make_shared<object_holder>();
+     obj->type_name = type_name;

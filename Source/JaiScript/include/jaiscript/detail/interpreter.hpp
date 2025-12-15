@@ -513,9 +513,11 @@ namespace jai {
 
         // Evaluate field initializers for a script class instance at construction time
         // This should be called BEFORE the constructor body executes
+        // If skip_parent_recursion is true, only evaluate THIS class's field initializers (parents already handled)
         void evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                         std::shared_ptr<script_class_definition> class_def,
-                                        std::shared_ptr<environment> init_env);
+                                        std::shared_ptr<environment> init_env,
+                                        bool skip_parent_recursion = false);
 
         // Parameter binding semantics
         enum class parameter_semantics {
@@ -710,8 +712,8 @@ namespace jai {
             bool in_method = false;
         };
         std::optional<class_context> current_class_context_;
-        std::string current_catch_var_;  // Name of the current catch variable (if any)
-        
+        uint64_t current_catch_var_id_ = 0;  // Symbol ID of current catch variable (0 = none)
+
         // Switch statement control flow state
         bool in_switch_ = false;
         bool should_fallthrough_ = false;
@@ -764,6 +766,7 @@ namespace jai {
         uint64_t op_left_shift_id_;
         uint64_t op_right_shift_id_;
         uint64_t subscript_op_id_;  // "[]"
+        uint64_t assign_operator_id_;  // "=" for class assignment operator overload
 
 		// Cached symbol IDs for common keywords (initialized in constructor)
 		uint64_t this_id_;
@@ -786,6 +789,20 @@ namespace jai {
         // Temporary storage for 'this' value during method/constructor execution
         script_value current_method_this_;
 
+        // ============================================================
+        // SWITCH-BASED DISPATCH (faster than virtual calls)
+        // ============================================================
+
+        // Evaluate an expression using switch-based dispatch
+        // Returns checked_result<void>, result is pushed to valueStack_
+        [[nodiscard]] checked_result<void> dispatch_expr(expression* expr);
+
+        // Execute a statement using switch-based dispatch
+        [[nodiscard]] checked_result<void> dispatch_stmt(statement* stmt);
+
+        // Execute a declaration using switch-based dispatch
+        [[nodiscard]] checked_result<void> dispatch_decl(declaration* decl);
+
         // Helper to get the last evaluated value (inlined for performance)
         inline script_value pop_value() {
             return valueStack_.pop();
@@ -804,8 +821,35 @@ namespace jai {
         script_value evaluate_comparison(const script_value& left, token_type op, const script_value& right);
         script_value evaluate_logical(const script_value& left, token_type op, const script_value& right);
         script_value evaluate_bitwise(const script_value& left, token_type op, const script_value& right);
-        
+
+        // Strong types: Type enforcement for assignment
+        // Returns error if value cannot be assigned to a variable with target_type
+        // - nullptr target = uninitialized (auto x;), locks to source type
+        // - any_type target = dynamic (var x), allows anything
+        // - locked target = enforce compatibility or convert
+        checked_result<script_value> enforce_type_compatibility(
+            script_value value,
+            type_info_ptr target_type,
+            const std::string& var_name = ""
+        );
+
         // Type conversion helpers (inlined for performance)
+        // Helper function for object to_bool() method lookup (defined in interpreter.cpp)
+        bool object_to_bool_via_method(const script_value& value);
+        // Helper function to convert value to string, checking for to_string() method on objects
+        std::string value_to_string_with_method(const script_value& val);
+        // Helper function for object equality via operator== method (defined in interpreter.cpp)
+        // Returns: nullopt if no custom equality, true/false if method found and returned a result
+        std::optional<bool> object_equality_via_method(const script_value& left, const script_value& right);
+
+        // Generic helper for binary comparison operators (<, <=, >, >=) via custom methods
+        // Returns: nullopt if no custom method, true/false if method found and returned valid result
+        std::optional<bool> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+
+        // Generic helper for binary arithmetic operators (+, -, *, /, %) via custom methods
+        // Returns: nullopt if no custom method, result value if method found
+        std::optional<script_value> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+
         inline bool is_truthy(const script_value& value) {
             // ULTRA-FAST: Use raw_storage_index() - single integer read, no pointer chasing
             // Avoids type_info_ null check and double-switch overhead
@@ -817,7 +861,18 @@ namespace jai {
                 case 2: return value.unchecked_as_float() != 0.0; // float
                 case 3: return !value.unchecked_as_string().empty(); // string
                 case 4: return true;                          // char - any char is truthy
-                default: return true;                         // arrays, maps, objects, functions
+                case 6: {
+                    // array - empty is falsy (const_cast required, get_array_storage is non-const)
+                    auto& arr = const_cast<script_value&>(value).get_array_storage();
+                    return arr && !arr->empty();
+                }
+                case 7: {
+                    // map - empty is falsy (const_cast required, get_map_storage is non-const)
+                    auto& map = const_cast<script_value&>(value).get_map_storage();
+                    return map && !map->empty();
+                }
+                case 8: return object_to_bool_via_method(value); // object (index 8) - check for to_bool() method
+                default: return true;                         // functions, other complex types
             }
         }
         
@@ -837,6 +892,15 @@ namespace jai {
         script_value call_function(const script_defined_function& function, const std::vector<script_value>& args);
         void validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args);
         script_value make_function(std::shared_ptr<script_defined_function> func);
+
+        // Type conversion helpers (constructor-based conversions)
+        // Attempts to convert a value to a target type using constructor-based conversion.
+        // Returns the converted value on success, or the original value if no conversion is needed/possible.
+        // Throws runtime_error if conversion fails.
+        script_value try_convert_for_parameter(const script_value& arg, type_info_ptr target_type);
+
+        // Check if a conversion is possible from source value to target type
+        bool can_convert_to_type(const script_value& source, type_info_ptr target_type) const;
         
         
         // Callback for resolving subscript operators when built-in logic fails
@@ -847,6 +911,7 @@ namespace jai {
         // Built-in method registries (using interned IDs for O(1) lookup)
         std::unordered_map<uint64_t, builtin_method> array_methods_;
         std::unordered_map<uint64_t, builtin_method> map_methods_;
+        std::unordered_map<uint64_t, builtin_method> string_methods_;
         std::unordered_map<uint64_t, builtin_method> weak_ptr_methods_;
         std::unordered_map<uint64_t, builtin_method> shared_ptr_methods_;
 

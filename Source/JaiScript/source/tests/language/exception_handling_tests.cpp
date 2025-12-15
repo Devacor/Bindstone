@@ -62,7 +62,7 @@ public:
         
         test("nested_try_catch", [this]() {
             auto engine = engine::make();
-            
+
             std::string script = R"(
                 try {
                     try {
@@ -74,8 +74,14 @@ public:
                     return outer;
                 }
             )";
-            
+
             script_value result = engine->execute(script);
+            std::cout << "  Result type: " << static_cast<int>(result.type()) << "\n";
+            if (result.is_string()) {
+                std::cout << "  Result value: '" << result.as_string() << "'\n";
+            } else {
+                std::cout << "  Result is not a string\n";
+            }
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "Outer error: Inner error");
         });

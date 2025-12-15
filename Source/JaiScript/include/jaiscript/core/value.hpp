@@ -183,7 +183,15 @@ namespace jai {
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
         script_value_type type() const {
-            return type_info_ ? type_info_->base_type : storage_type();
+            // For any_type (var keyword), return actual storage type for operations
+            // but keep any_type in type_info_ for assignment enforcement
+            if (type_info_) {
+                if (type_info_->base_type == script_value_type::jai_any_type) {
+                    return storage_type();  // Dynamic typing - use actual value type
+                }
+                return type_info_->base_type;
+            }
+            return storage_type();
         }
 
         // Get type from storage variant - useful for AST literals that have nullptr type_info
@@ -1294,15 +1302,16 @@ namespace jai {
         
         
         // Safe access to reference holder for reference types
+        // Use storage_type() because references may have type_info with different base_type
         reference_holder* get_reference_holder() {
-            if (type() == script_value_type::jai_reference_type) {
+            if (storage_type() == script_value_type::jai_reference_type) {
                 return std::get<std::shared_ptr<reference_holder>>(storage_).get();
             }
             return nullptr;
         }
-        
+
         const reference_holder* get_reference_holder() const {
-            if (type() == script_value_type::jai_reference_type) {
+            if (storage_type() == script_value_type::jai_reference_type) {
                 return std::get<std::shared_ptr<reference_holder>>(storage_).get();
             }
             return nullptr;

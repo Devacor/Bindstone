@@ -37,6 +37,52 @@ namespace jai {
     using default_stmt_ptr = std::shared_ptr<default_stmt>;
     using fallthrough_stmt_ptr = std::shared_ptr<fallthrough_stmt>;
     
+    // Node type enum for switch-based dispatch (faster than virtual calls)
+    enum class node_type : uint8_t {
+        // Expressions (0-19)
+        literal_expr = 0,
+        identifier_expr,
+        binary_expr,
+        unary_expr,
+        assignment_expr,
+        call_expr,
+        member_expr,
+        lambda_expr,
+        new_expr,
+        ternary_expr,
+        array_literal_expr,
+        map_literal_expr,
+        this_expr,
+        super_expr,
+        throw_expr,
+
+        // Statements (20-39)
+        expression_stmt = 20,
+        block_stmt,
+        if_stmt,
+        while_stmt,
+        for_stmt,
+        range_for_stmt,
+        return_stmt,
+        break_stmt,
+        continue_stmt,
+        try_stmt,
+        switch_stmt,
+        case_stmt,
+        default_stmt,
+        fallthrough_stmt,
+
+        // Declarations (40-59)
+        variable_decl = 40,
+        function_decl,
+        class_decl,
+        namespace_decl,
+        expression_decl,
+        statement_decl,
+        include_decl,
+        import_decl,
+    };
+
     // parameter information for functions and lambdas
     struct parameter {
         type_info_ptr type;
@@ -44,7 +90,7 @@ namespace jai {
         bool is_reference = false;
         bool is_const = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
-        
+
         parameter(type_info_ptr t, const std::string& n, bool ref = false, bool c = false)
             : type(t), name(n), is_reference(ref), is_const(c), symbol_id(UINT64_MAX) {}
     };
@@ -100,18 +146,21 @@ namespace jai {
     class ast_node {
     public:
         source_location location;
+        node_type type_;  // For switch-based dispatch
 
-        ast_node(const source_location& loc) : location(loc) {}
+        ast_node(const source_location& loc, node_type t) : location(loc), type_(t) {}
         virtual ~ast_node() = default;
-        [[nodiscard]] virtual checked_result<void> accept(ast_visitor* visitor) = 0;
+
+        // Fast type check for switch dispatch
+        [[nodiscard]] node_type get_type() const noexcept { return type_; }
     };
     
     // Base expression node
     class expression : public ast_node {
     public:
         type_info_ptr result_type;  // Type of the expression result
-        
-        expression(const source_location& loc) : ast_node(loc) {}
+
+        expression(const source_location& loc, node_type t) : ast_node(loc, t) {}
     };
     
     // Literal expression
@@ -120,12 +169,7 @@ namespace jai {
         script_value value;
 
         literal_expr(const source_location& loc, const script_value& val)
-            : expression(loc), value(val) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_literal_expr(this);
-        }
-    };
+            : expression(loc, node_type::literal_expr), value(val) {}    };
     
     // identifier expression
     class identifier_expr : public expression {
@@ -134,12 +178,7 @@ namespace jai {
         uint64_t symbol_id;  // Interned symbol ID - must be set by parser
 
         identifier_expr(const source_location& loc, const std::string& n, uint64_t sym_id)
-            : expression(loc), name(n), symbol_id(sym_id) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_identifier_expr(this);
-        }
-    };
+            : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id) {}    };
     
     // Binary expression
     class binary_expr : public expression {
@@ -149,12 +188,7 @@ namespace jai {
         expression_ptr right;
 
         binary_expr(const source_location& loc, expression_ptr l, const token& o, expression_ptr r)
-            : expression(loc), left(l), op(o), right(r) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_binary_expr(this);
-        }
-
+            : expression(loc, node_type::binary_expr), left(l), op(o), right(r) {}
         // Returns true if this binary expression ALWAYS produces a boolean result
         // (comparison or logical operators)
         [[nodiscard]] inline bool returns_bool() const noexcept {
@@ -184,12 +218,7 @@ namespace jai {
         bool is_postfix;
 
         unary_expr(const source_location& loc, const token& o, expression_ptr expr, bool postfix = false)
-            : expression(loc), op(o), operand(expr), is_postfix(postfix) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_unary_expr(this);
-        }
-
+            : expression(loc, node_type::unary_expr), op(o), operand(expr), is_postfix(postfix) {}
         // Returns true if this unary expression ALWAYS produces a boolean result
         [[nodiscard]] inline bool returns_bool() const noexcept {
             return op.type == token_type::bang;  // Logical NOT always returns bool
@@ -204,12 +233,7 @@ namespace jai {
         expression_ptr value;
 
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
-            : expression(loc), target(t), op(o), value(v) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_assignment_expr(this);
-        }
-    };
+            : expression(loc, node_type::assignment_expr), target(t), op(o), value(v) {}    };
 
     // Function call expression
     class call_expr : public expression {
@@ -218,12 +242,7 @@ namespace jai {
         std::vector<expression_ptr> arguments;
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
-            : expression(loc), callee(c), arguments(std::move(args)) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_call_expr(this);
-        }
-    };
+            : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}    };
 
     // member access expression
     class member_expr : public expression {
@@ -235,15 +254,10 @@ namespace jai {
         bool is_static; // true for ::, false for . or ->
 
         member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, bool arrow, bool static_access = false)
-            : expression(loc), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
+            : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
 
         member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, uint64_t mem_id, bool arrow, bool static_access = false)
-            : expression(loc), object(obj), member(mem), member_id(mem_id), is_arrow(arrow), is_static(static_access) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_member_expr(this);
-        }
-    };
+            : expression(loc, node_type::member_expr), object(obj), member(mem), member_id(mem_id), is_arrow(arrow), is_static(static_access) {}    };
     
     // Lambda expression
     class lambda_expr : public expression {
@@ -270,13 +284,8 @@ namespace jai {
         std::vector<parameter> parameters;
         type_info_ptr return_type;
         statement_ptr body;
-        
-        lambda_expr(const source_location& loc) : expression(loc) {}
 
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_lambda_expr(this);
-        }
-    };
+        lambda_expr(const source_location& loc) : expression(loc, node_type::lambda_expr) {}    };
 
     // New expression
     class new_expr : public expression {
@@ -285,12 +294,7 @@ namespace jai {
         std::vector<expression_ptr> arguments;
 
         new_expr(const source_location& loc, type_info_ptr t, std::vector<expression_ptr> args)
-            : expression(loc), type(t), arguments(std::move(args)) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_new_expr(this);
-        }
-    };
+            : expression(loc, node_type::new_expr), type(t), arguments(std::move(args)) {}    };
 
     // Ternary expression
     class ternary_expr : public expression {
@@ -300,12 +304,7 @@ namespace jai {
         expression_ptr else_expression;
 
         ternary_expr(const source_location& loc, expression_ptr c, expression_ptr t, expression_ptr e)
-            : expression(loc), condition(c), then_expression(t), else_expression(e) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_ternary_expr(this);
-        }
-    };
+            : expression(loc, node_type::ternary_expr), condition(c), then_expression(t), else_expression(e) {}    };
 
     // Array literal expression
     class array_literal_expr : public expression {
@@ -313,12 +312,7 @@ namespace jai {
         std::vector<expression_ptr> elements;
 
         array_literal_expr(const source_location& loc, std::vector<expression_ptr> elems)
-            : expression(loc), elements(std::move(elems)) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_array_literal_expr(this);
-        }
-    };
+            : expression(loc, node_type::array_literal_expr), elements(std::move(elems)) {}    };
 
     // Map literal expression
     class map_literal_expr : public expression {
@@ -326,32 +320,17 @@ namespace jai {
         std::vector<std::pair<expression_ptr, expression_ptr>> entries;
 
         map_literal_expr(const source_location& loc, std::vector<std::pair<expression_ptr, expression_ptr>> e)
-            : expression(loc), entries(std::move(e)) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_map_literal_expr(this);
-        }
-    };
+            : expression(loc, node_type::map_literal_expr), entries(std::move(e)) {}    };
 
     // This expression
     class this_expr : public expression {
     public:
-        this_expr(const source_location& loc) : expression(loc) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_this_expr(this);
-        }
-    };
+        this_expr(const source_location& loc) : expression(loc, node_type::this_expr) {}    };
 
     // Super expression
     class super_expr : public expression {
     public:
-        super_expr(const source_location& loc) : expression(loc) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_super_expr(this);
-        }
-    };
+        super_expr(const source_location& loc) : expression(loc, node_type::super_expr) {}    };
 
     // Throw expression
     class throw_expr : public expression {
@@ -359,17 +338,12 @@ namespace jai {
         expression_ptr value;  // Optional - null for re-throw
 
         throw_expr(const source_location& loc, expression_ptr val = nullptr)
-            : expression(loc), value(val) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_throw_expr(this);
-        }
-    };
+            : expression(loc, node_type::throw_expr), value(val) {}    };
     
     // Base statement node
     class statement : public ast_node {
     public:
-        statement(const source_location& loc) : ast_node(loc) {}
+        statement(const source_location& loc, node_type t) : ast_node(loc, t) {}
     };
     
     // expression statement
@@ -378,12 +352,7 @@ namespace jai {
         expression_ptr expression;
 
         expression_stmt(const source_location& loc, expression_ptr expr)
-            : statement(loc), expression(expr) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_expression_stmt(this);
-        }
-    };
+            : statement(loc, node_type::expression_stmt), expression(expr) {}    };
 
     // Block statement
     class block_stmt : public statement {
@@ -391,12 +360,7 @@ namespace jai {
         std::vector<declaration_ptr> declarations;
 
         block_stmt(const source_location& loc, std::vector<declaration_ptr> decls)
-            : statement(loc), declarations(std::move(decls)) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_block_stmt(this);
-        }
-    };
+            : statement(loc, node_type::block_stmt), declarations(std::move(decls)) {}    };
 
     // If statement
     class if_stmt : public statement {
@@ -406,12 +370,7 @@ namespace jai {
         statement_ptr else_statement;  // Can be null
 
         if_stmt(const source_location& loc, expression_ptr c, statement_ptr t, statement_ptr e = nullptr)
-            : statement(loc), condition(c), then_statement(t), else_statement(e) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_if_stmt(this);
-        }
-    };
+            : statement(loc, node_type::if_stmt), condition(c), then_statement(t), else_statement(e) {}    };
 
     // While statement
     class while_stmt : public statement {
@@ -420,12 +379,7 @@ namespace jai {
         statement_ptr body;
 
         while_stmt(const source_location& loc, expression_ptr c, statement_ptr b)
-            : statement(loc), condition(c), body(b) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_while_stmt(this);
-        }
-    };
+            : statement(loc, node_type::while_stmt), condition(c), body(b) {}    };
 
     // For statement
     class for_stmt : public statement {
@@ -436,12 +390,7 @@ namespace jai {
         statement_ptr body;
 
         for_stmt(const source_location& loc, declaration_ptr i, expression_ptr c, expression_ptr u, statement_ptr b)
-            : statement(loc), initializer(i), condition(c), update(u), body(b) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_for_stmt(this);
-        }
-    };
+            : statement(loc, node_type::for_stmt), initializer(i), condition(c), update(u), body(b) {}    };
 
     // Range-based for statement (C++11 style)
     class range_for_stmt : public statement {
@@ -456,18 +405,13 @@ namespace jai {
 
         range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName,
                      bool ref, bool constRef, expression_ptr cont, statement_ptr b)
-            : statement(loc), element_type(type), variable_name(varName),
+            : statement(loc, node_type::range_for_stmt), element_type(type), variable_name(varName),
               is_reference(ref), is_const(constRef), container(cont), body(b) {}
 
         range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName, uint64_t varNameId,
                      bool ref, bool constRef, expression_ptr cont, statement_ptr b)
-            : statement(loc), element_type(type), variable_name(varName), variable_name_id(varNameId),
-              is_reference(ref), is_const(constRef), container(cont), body(b) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_range_for_stmt(this);
-        }
-    };
+            : statement(loc, node_type::range_for_stmt), element_type(type), variable_name(varName), variable_name_id(varNameId),
+              is_reference(ref), is_const(constRef), container(cont), body(b) {}    };
 
     // Return statement
     class return_stmt : public statement {
@@ -475,32 +419,17 @@ namespace jai {
         expression_ptr value;  // Can be null
 
         return_stmt(const source_location& loc, expression_ptr v = nullptr)
-            : statement(loc), value(v) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_return_stmt(this);
-        }
-    };
+            : statement(loc, node_type::return_stmt), value(v) {}    };
 
     // Break statement
     class break_stmt : public statement {
     public:
-        break_stmt(const source_location& loc) : statement(loc) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_break_stmt(this);
-        }
-    };
+        break_stmt(const source_location& loc) : statement(loc, node_type::break_stmt) {}    };
 
     // Continue statement
     class continue_stmt : public statement {
     public:
-        continue_stmt(const source_location& loc) : statement(loc) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_continue_stmt(this);
-        }
-    };
+        continue_stmt(const source_location& loc) : statement(loc, node_type::continue_stmt) {}    };
 
     // Try-catch statement
     class try_stmt : public statement {
@@ -510,12 +439,7 @@ namespace jai {
         statement_ptr catch_block;
 
         try_stmt(const source_location& loc, statement_ptr try_blk, statement_ptr catch_blk, const std::string& var = "")
-            : statement(loc), try_block(try_blk), catch_var(var), catch_block(catch_blk) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_try_stmt(this);
-        }
-    };
+            : statement(loc, node_type::try_stmt), try_block(try_blk), catch_var(var), catch_block(catch_blk) {}    };
 
     // Switch statement
     class switch_stmt : public statement {
@@ -525,12 +449,7 @@ namespace jai {
         default_stmt_ptr default_case;  // Can be null
 
         switch_stmt(const source_location& loc, expression_ptr cond)
-            : statement(loc), condition(cond), default_case(nullptr) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_switch_stmt(this);
-        }
-    };
+            : statement(loc, node_type::switch_stmt), condition(cond), default_case(nullptr) {}    };
 
     // Case statement (part of switch)
     class case_stmt : public statement {
@@ -540,12 +459,7 @@ namespace jai {
         bool has_fallthrough = false;  // Set if last statement is fallthrough
 
         case_stmt(const source_location& loc, expression_ptr val)
-            : statement(loc), value(val) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_case_stmt(this);
-        }
-    };
+            : statement(loc, node_type::case_stmt), value(val) {}    };
 
     // Default statement (part of switch)
     class default_stmt : public statement {
@@ -553,28 +467,18 @@ namespace jai {
         std::vector<statement_ptr> body;
 
         default_stmt(const source_location& loc)
-            : statement(loc) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_default_stmt(this);
-        }
-    };
+            : statement(loc, node_type::default_stmt) {}    };
 
     // Fallthrough statement (only valid inside switch cases)
     class fallthrough_stmt : public statement {
     public:
         fallthrough_stmt(const source_location& loc)
-            : statement(loc) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_fallthrough_stmt(this);
-        }
-    };
+            : statement(loc, node_type::fallthrough_stmt) {}    };
     
     // Base declaration node
     class declaration : public statement {
     public:
-        declaration(const source_location& loc) : statement(loc) {}
+        declaration(const source_location& loc, node_type t) : statement(loc, t) {}
     };
     
     // Variable declaration
@@ -587,15 +491,10 @@ namespace jai {
         bool is_static = false;      // For static class members
 
         variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, expression_ptr init = nullptr)
-            : declaration(loc), type(t), name(n), initializer(init), is_static(false) {}
+            : declaration(loc, node_type::variable_decl), type(t), name(n), initializer(init), is_static(false) {}
 
         variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, uint64_t nid, expression_ptr init = nullptr)
-            : declaration(loc), type(t), name(n), name_id(nid), initializer(init), is_static(false) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_variable_decl(this);
-        }
-    };
+            : declaration(loc, node_type::variable_decl), type(t), name(n), name_id(nid), initializer(init), is_static(false) {}    };
     
     // Constructor initialization entry (for : super(args), : this(args))
     struct constructor_initializer {
@@ -619,12 +518,7 @@ namespace jai {
         bool is_static = false;   // For static methods
 
         function_decl(const source_location& loc, const std::string& n)
-            : declaration(loc), name(n), is_override(false), is_static(false) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_function_decl(this);
-        }
-    };
+            : declaration(loc, node_type::function_decl), name(n), is_override(false), is_static(false) {}    };
 
     // Class declaration
     class class_decl : public declaration {
@@ -645,15 +539,10 @@ namespace jai {
         std::vector<member> members;
 
         class_decl(const source_location& loc, const std::string& n)
-            : declaration(loc), name(n) {}
+            : declaration(loc, node_type::class_decl), name(n) {}
 
         class_decl(const source_location& loc, const std::string& n, uint64_t nid)
-            : declaration(loc), name(n), name_id(nid) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_class_decl(this);
-        }
-    };
+            : declaration(loc, node_type::class_decl), name(n), name_id(nid) {}    };
 
     // Namespace declaration
     class namespace_decl : public declaration {
@@ -663,15 +552,10 @@ namespace jai {
         std::vector<declaration_ptr> declarations;  // Can hold functions, classes, variables
 
         namespace_decl(const source_location& loc, const std::string& n)
-            : declaration(loc), name(n) {}
+            : declaration(loc, node_type::namespace_decl), name(n) {}
 
         namespace_decl(const source_location& loc, const std::string& n, uint64_t nid)
-            : declaration(loc), name(n), name_id(nid) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_namespace_decl(this);
-        }
-    };
+            : declaration(loc, node_type::namespace_decl), name(n), name_id(nid) {}    };
 
     // expression as declaration (for top-level expressions)
     class expression_decl : public declaration {
@@ -680,12 +564,7 @@ namespace jai {
         bool implicit_return;  // True if this expression should implicitly return its value
 
         expression_decl(const source_location& loc, expression_ptr expr, bool implicit_ret = false)
-            : declaration(loc), expression(expr), implicit_return(implicit_ret) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_expression_decl(this);
-        }
-    };
+            : declaration(loc, node_type::expression_decl), expression(expr), implicit_return(implicit_ret) {}    };
 
     // statement as declaration (for top-level statements in scripting context)
     class statement_decl : public declaration {
@@ -693,13 +572,7 @@ namespace jai {
         statement_ptr statement;
 
         statement_decl(const source_location& loc, statement_ptr stmt)
-            : declaration(loc), statement(stmt) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            // Just visit the wrapped statement
-            return statement->accept(visitor);
-        }
-    };
+            : declaration(loc, node_type::statement_decl), statement(stmt) {}    };
 
     // include declaration - always parses the file
     class include_decl : public declaration {
@@ -709,16 +582,11 @@ namespace jai {
 
         // Constructor for literal syntax: include "file.jai"
         include_decl(const source_location& loc, const std::string& p)
-            : declaration(loc), path(p), path_expr(nullptr) {}
+            : declaration(loc, node_type::include_decl), path(p), path_expr(nullptr) {}
 
         // Constructor for expression syntax: include(expr)
         include_decl(const source_location& loc, expression_ptr expr)
-            : declaration(loc), path(), path_expr(expr) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_include_decl(this);
-        }
-    };
+            : declaration(loc, node_type::include_decl), path(), path_expr(expr) {}    };
 
     // import declaration - intelligently manages file parsing
     class import_decl : public declaration {
@@ -728,16 +596,11 @@ namespace jai {
 
         // Constructor for literal syntax: import "file.jai"
         import_decl(const source_location& loc, const std::string& p)
-            : declaration(loc), path(p), path_expr(nullptr) {}
+            : declaration(loc, node_type::import_decl), path(p), path_expr(nullptr) {}
 
         // Constructor for expression syntax: import(expr)
         import_decl(const source_location& loc, expression_ptr expr)
-            : declaration(loc), path(), path_expr(expr) {}
-
-        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
-            return visitor->visit_import_decl(this);
-        }
-    };
+            : declaration(loc, node_type::import_decl), path(), path_expr(expr) {}    };
 
     // Helper function to check if an expression is GUARANTEED to return a boolean
     // This allows skipping is_truthy() type dispatch and using unchecked_as_bool() directly

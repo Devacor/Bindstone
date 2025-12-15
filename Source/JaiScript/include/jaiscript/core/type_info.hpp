@@ -96,6 +96,7 @@ namespace jai {
                 case script_value_type::jai_bool_type: return "bool";
                 case script_value_type::jai_char_type: return "char";
                 case script_value_type::jai_null_type: return "void";
+                case script_value_type::jai_any_type: return "any";
                 case script_value_type::jai_array_type: {
                     std::string elem = element_type() ? element_type()->canonical_name() : "";
                     return "array<" + elem + ">";
@@ -179,6 +180,14 @@ namespace jai {
         static type_info make_void(string_symbolizer& symbolizer) {
             type_info info(script_value_type::jai_null_type);
             info.type_name = "void";
+            info.id = symbolizer.intern(info.canonical_name());
+            return info;
+        }
+
+        // any type (var keyword) - dynamic typing, any value allowed
+        static type_info make_any(string_symbolizer& symbolizer) {
+            type_info info(script_value_type::jai_any_type);
+            info.type_name = "any";
             info.id = symbolizer.intern(info.canonical_name());
             return info;
         }

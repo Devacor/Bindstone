@@ -217,6 +217,19 @@ public:
                 auto type_info = value.get_type_info();
                 std::string type_name = type_info ? type_info->type_name : "unknown";
 
+                // For script classes, type_info->type_name may be "any" - use the actual class name
+                try {
+                    auto instance = value.as<std::shared_ptr<class_instance>>();
+                    if (instance) {
+                        auto class_def = instance->get_class_definition();
+                        if (class_def) {
+                            type_name = class_def->get_name();
+                        }
+                    }
+                } catch (...) {
+                    // Not a class_instance, keep original type_name
+                }
+
                 // Write type name first
                 write_string(type_name);
 

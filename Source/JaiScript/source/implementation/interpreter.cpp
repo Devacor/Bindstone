@@ -14,6 +14,28 @@
 
 namespace jai {
 
+// Helper function to convert script_value_type to a human-readable string
+static std::string get_type_name(script_value_type type) {
+    switch (type) {
+        case script_value_type::jai_null_type: return "null";
+        case script_value_type::jai_int_type: return "int";
+        case script_value_type::jai_float_type: return "float";
+        case script_value_type::jai_string_type: return "string";
+        case script_value_type::jai_char_type: return "char";
+        case script_value_type::jai_bool_type: return "bool";
+        case script_value_type::jai_array_type: return "array";
+        case script_value_type::jai_map_type: return "map";
+        case script_value_type::jai_object_type: return "object";
+        case script_value_type::jai_function_type: return "function";
+        case script_value_type::jai_reference_type: return "reference";
+        case script_value_type::jai_shared_ptr_type: return "shared_ptr";
+        case script_value_type::jai_weak_ptr_type: return "weak_ptr";
+        case script_value_type::jai_any_type: return "any";
+        case script_value_type::jai_invalid_type: return "invalid";
+        default: return "unknown";
+    }
+}
+
 // Initialize built-in method registries with interned method names for O(1) lookup
 void interpreter::init_builtin_methods() {
     // Array methods
@@ -473,6 +495,74 @@ void interpreter::init_builtin_methods() {
     }}
     };
 
+    // String methods - enable str.length(), str.substr(), etc.
+    string_methods_ = {
+        {string_symbolizer_->intern("length"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
+        }
+        return interp->make_value(static_cast<script_int>(self.as_string().size()));
+    }},
+
+        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
+        }
+        return interp->make_value(static_cast<script_int>(self.as_string().size()));
+    }},
+
+        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
+        }
+        return interp->make_value(self.as_string().empty());
+    }},
+
+        {string_symbolizer_->intern("substr"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() < 1 || args.size() > 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "substr() takes 1 or 2 arguments (start, [length])");
+        }
+        const auto& str = self.as_string();
+        script_int start = args[0].as<script_int>();
+
+        // Handle negative start index
+        if (start < 0) start = static_cast<script_int>(str.size()) + start;
+        if (start < 0) start = 0;
+        if (start >= static_cast<script_int>(str.size())) {
+            return interp->make_value(std::string(""));
+        }
+
+        if (args.size() == 2) {
+            script_int len = args[1].as<script_int>();
+            if (len < 0) len = 0;
+            return interp->make_value(str.substr(static_cast<size_t>(start), static_cast<size_t>(len)));
+        }
+        return interp->make_value(str.substr(static_cast<size_t>(start)));
+    }},
+
+        {string_symbolizer_->intern("find"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find() takes exactly one argument");
+        }
+        const auto& str = self.as_string();
+        const auto& search = args[0].as_string();
+        auto pos = str.find(search);
+        if (pos == std::string::npos) {
+            return interp->make_value(static_cast<script_int>(-1));
+        }
+        return interp->make_value(static_cast<script_int>(pos));
+    }},
+
+        {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
+        }
+        const auto& str = self.as_string();
+        const auto& search = args[0].as_string();
+        return interp->make_value(str.find(search) != std::string::npos);
+    }}
+    };
+
     // Weak pointer methods
     weak_ptr_methods_ = {
         {string_symbolizer_->intern("lock"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -903,6 +993,119 @@ script_value interpreter::create_bound_method(const script_value& this_obj, cons
     }, engine_weak);
 }
 
+// Helper for is_truthy() to check for to_bool() method on objects
+bool interpreter::object_to_bool_via_method(const script_value& value) {
+    // Use get_class_instance() which safely returns nullptr if not a class instance
+    auto instance = const_cast<script_value&>(value).get_class_instance();
+    if (!instance) {
+        return true;  // Not a class instance - treat as truthy
+    }
+
+    auto method_id = string_symbolizer_->intern("to_bool");
+    auto method_val = instance->get_method(method_id, false);
+    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+        return true;  // No to_bool() method - objects are truthy by default
+    }
+
+    script_value bound = create_bound_method(value, method_val);
+    const script_function& method = bound.as_function();
+    std::vector<script_value> no_args;
+    auto result = method(no_args);
+    if (result.has_value() && result.value().is_bool()) {
+        return result.value().as_bool();
+    }
+    return true;  // Method didn't return a valid bool - treat as truthy
+}
+
+// Helper for handle_equal() to check for operator== or equals() method on objects
+// Returns: nullopt if no custom equality method, true/false if method found and returned valid result
+std::optional<bool> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
+    // Get class instance from the left operand
+    auto instance = const_cast<script_value&>(left).get_class_instance();
+    if (!instance) {
+        return std::nullopt;  // Not a class instance - no custom equality
+    }
+
+    // Look for "==" method - used by both script classes (operator==) and class_builder
+    auto eq_id = string_symbolizer_->intern("==");
+    auto method_val = instance->get_method(eq_id, false);
+    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+        return std::nullopt;  // No == method - use default reference comparison
+    }
+
+    // Create a bound method and call it with the right operand
+    script_value bound = create_bound_method(left, method_val);
+    const script_function& method = bound.as_function();
+    std::vector<script_value> args;
+    args.push_back(right);  // Push by copy (const ref)
+
+    auto result = method(args);
+    if (result.has_value() && result.value().is_bool()) {
+        return result.value().as_bool();
+    }
+
+    // Method didn't return a valid bool - fall back to reference comparison
+    return std::nullopt;
+}
+
+// Generic helper for comparison operators (<, <=, >, >=) via custom methods
+std::optional<bool> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+    // Get class instance from the left operand
+    auto instance = const_cast<script_value&>(left).get_class_instance();
+    if (!instance) {
+        return std::nullopt;  // Not a class instance - no custom comparison
+    }
+
+    // Look for the operator method by symbol ID
+    auto method_val = instance->get_method(op_symbol_id, false);
+    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+        return std::nullopt;  // No custom method - use default comparison
+    }
+
+    // Create a bound method and call it with the right operand
+    script_value bound = create_bound_method(left, method_val);
+    const script_function& method = bound.as_function();
+    std::vector<script_value> args;
+    args.push_back(right);
+
+    auto result = method(args);
+    if (result.has_value() && result.value().is_bool()) {
+        return result.value().as_bool();
+    }
+
+    // Method didn't return a valid bool
+    return std::nullopt;
+}
+
+// Generic helper for arithmetic operators (+, -, *, /, %) via custom methods
+std::optional<script_value> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+    // Get class instance from the left operand
+    auto instance = const_cast<script_value&>(left).get_class_instance();
+    if (!instance) {
+        return std::nullopt;  // Not a class instance - no custom arithmetic
+    }
+
+    // Look for the operator method by symbol ID
+    auto method_val = instance->get_method(op_symbol_id, false);
+    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+        return std::nullopt;  // No custom method - use default arithmetic
+    }
+
+    // Create a bound method and call it with the right operand
+    script_value bound = create_bound_method(left, method_val);
+    const script_function& method = bound.as_function();
+    std::vector<script_value> args;
+    args.push_back(right);
+
+    auto result = method(args);
+    if (result.has_value()) {
+        return result.value();
+    }
+
+    // Method call failed
+    return std::nullopt;
+}
+
 // method_environment implementation
 checked_result<script_value> method_environment::get(const std::string& name) const {
     // DEBUG: Log method environment lookup
@@ -1138,11 +1341,32 @@ void method_environment::assign(uint64_t id, const script_value& value) {
 
     // If not found anywhere and 'this' has this field, update it
     auto this_type = this_object_.type();
+
     if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
         auto obj_holder = this_object_.get_object_holder();
         if (obj_holder && obj_holder->data) {
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
             if (instance && instance->has_field(id)) {
+                // Check if this is a C++ parent property that needs setter method
+                auto class_def = instance->get_class_definition();
+                if (class_def) {
+                    auto cpp_base = class_def->get_cpp_base_class();
+                    if (cpp_base) {
+                        // Check if field has a pre-registered setter ID (fast path)
+                        uint64_t setter_id = cpp_base->get_property_setter_id(id);
+                        if (setter_id != 0) {
+                            // This is a C++ property - call the setter method
+                            auto setter = cpp_base->get_method(setter_id, false);
+                            if (setter.is_function()) {
+                                // Call setter with this and value
+                                std::vector<script_value> args = {this_object_, value};
+                                setter.as_function()(args);
+                                return;
+                            }
+                        }
+                    }
+                }
+                // Not a C++ property or no setter - use regular field assignment
                 instance->set_field(id, value.clone());
                 return;
             }
@@ -1184,6 +1408,26 @@ void method_environment::assign(uint64_t id, script_value&& value) {
         if (obj_holder && obj_holder->data) {
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
             if (instance && instance->has_field(id)) {
+                // Check if this is a C++ parent property that needs setter method
+                auto class_def = instance->get_class_definition();
+                if (class_def) {
+                    auto cpp_base = class_def->get_cpp_base_class();
+                    if (cpp_base) {
+                        // Check if field has a pre-registered setter ID (fast path)
+                        uint64_t setter_id = cpp_base->get_property_setter_id(id);
+                        if (setter_id != 0) {
+                            // This is a C++ property - call the setter method
+                            auto setter = cpp_base->get_method(setter_id, false);
+                            if (setter.is_function()) {
+                                // Call setter with this and value
+                                std::vector<script_value> args = {this_object_, std::move(value)};
+                                setter.as_function()(args);
+                                return;
+                            }
+                        }
+                    }
+                }
+                // Not a C++ property or no setter - use regular field assignment
                 instance->set_field(id, std::move(value));
                 return;
             }
@@ -1490,6 +1734,7 @@ interpreter::interpreter()
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
     subscript_op_id_ = string_symbolizer_->intern("[]");
+    assign_operator_id_ = string_symbolizer_->intern("=");
 
 	// Initialize cached keyword symbol IDs for fast keyword checks
 	this_id_ = string_symbolizer_->intern("this");
@@ -1550,6 +1795,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
     subscript_op_id_ = string_symbolizer_->intern("[]");
+    assign_operator_id_ = string_symbolizer_->intern("=");
 
 	// Initialize cached keyword symbol IDs for fast keyword checks
 	this_id_ = string_symbolizer_->intern("this");
@@ -1610,6 +1856,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
     subscript_op_id_ = string_symbolizer_->intern("[]");
+    assign_operator_id_ = string_symbolizer_->intern("=");
 
     // Initialize built-in method registries with interned method names
     init_builtin_methods();
@@ -1638,7 +1885,7 @@ void interpreter::prepare_for_execution() {
     current_exception_.reset();
     is_unwinding_ = false;
     active_exception_value_.reset();  // No need to create a value here either
-    current_catch_var_.clear();
+    current_catch_var_id_ = 0;
 
     // Reset to global scope but keep all variables defined at global scope
     // Only pop scopes if we're in a nested scope
@@ -1678,7 +1925,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         // Execute declaration with exception handling
         try {
             // std::cerr << "  About to visit declaration " << i << "\n";
-            auto result = decl->accept(this);
+            auto result = dispatch_decl(decl.get());
             if (!result) [[unlikely]] {
                 // Convert error code to exception at boundary
                 // Include the custom error message if available
@@ -1735,7 +1982,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
 }
 
 script_value interpreter::evaluate(expression_ptr expr) {
-    auto result = expr->accept(this);
+    auto result = dispatch_expr(expr.get());
     if (!result) {
         // Return null on error
         return make_value();
@@ -1803,8 +2050,8 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
 checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
     if (expr->symbol_id == getValue_id_) {
     }
-    // Check if this identifier is the current catch variable
-    if (!current_catch_var_.empty() && expr->name == current_catch_var_) {
+    // Check if this identifier is the current catch variable (fast symbol_id comparison)
+    if (current_catch_var_id_ != 0 && expr->symbol_id == current_catch_var_id_) {
         push_value(active_exception_value_.value());
         return checked_result<void>();
     }
@@ -1843,7 +2090,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
 
 
         // Variable not found - check if it's a member of 'this'
-        auto this_result = environment_->get(this_id_);
+        auto this_result = environment_->get(string_symbolizer_->get_this_id());
         if (this_result) {
             script_value this_val = std::move(this_result.value());
             if (this_val.is_object()) {
@@ -1897,7 +2144,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 	// FAST PATH: identifier + identifier (e.g., "a + b", "sum + i") - eliminates 2 virtual calls
 	// Skip logical operators - they need short-circuit evaluation
-	if (expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe) {
+	// Skip if we're in a catch block - catch variables need special handling
+	if (expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe && current_catch_var_id_ == 0) {
 		if (auto* leftId = dynamic_cast<identifier_expr*>(expr->left.get())) {
 			if (auto* rightId = dynamic_cast<identifier_expr*>(expr->right.get())) {
 				// Both operands are simple identifiers - direct variable lookup without AST traversal
@@ -2210,28 +2458,34 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 	}
 
     // Handle logical operators specially for short-circuit evaluation
+    // Return proper boolean values (not JavaScript-style operand values)
     if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
-        JAISCRIPT_TRY(expr->left->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(expr->left.get()));
         script_value left = pop_value();
 
         bool leftTruthy = is_truthy(left);
 
         if (expr->op.type == token_type::ampersand_ampersand) {
             if (!leftTruthy) {
-                push_value(left);  // Short-circuit: return left (falsy)
+                push_value(make_value(false));  // Short-circuit: left is falsy, return false
                 return {};
             }
+            // Left is truthy, evaluate right and return its boolean value
+            JAISCRIPT_TRY(dispatch_expr(expr->right.get()));
+            script_value right = pop_value();
+            push_value(make_value(is_truthy(right)));
+            return {};
         } else { // pipe_pipe
             if (leftTruthy) {
-                push_value(left);  // Short-circuit: return left (truthy)
+                push_value(make_value(true));  // Short-circuit: left is truthy, return true
                 return {};
             }
+            // Left is falsy, evaluate right and return its boolean value
+            JAISCRIPT_TRY(dispatch_expr(expr->right.get()));
+            script_value right = pop_value();
+            push_value(make_value(is_truthy(right)));
+            return {};
         }
-
-        // Evaluate right side
-        JAISCRIPT_TRY(expr->right->accept(this));
-        // Result is already on stack
-        return {};
     }
 
     // Evaluate operands once and use them throughout (or use pre-fetched values)
@@ -2244,11 +2498,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
         right_opt = std::move(*pre_fetched_right);
     } else {
         // Normal path: evaluate via AST traversal
-        JAISCRIPT_TRY(expr->left->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(expr->left.get()));
         left_raw_opt = pop_value();  // Keep raw value for subscript handling
         left_opt = left_raw_opt->deref();  // Dereferenced version for most operations
 
-        JAISCRIPT_TRY(expr->right->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(expr->right.get()));
         // Check if we're unwinding due to an exception in the right expression
         if (is_unwinding_) {
             // Don't try to pop a value that wasn't pushed due to the exception
@@ -2470,7 +2724,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     }
 
     // Generic path - evaluate operand and use existing logic
-    JAISCRIPT_TRY(expr->operand->accept(this));
+    JAISCRIPT_TRY(dispatch_expr(expr->operand.get()));
     script_value operand = pop_value();
     
     switch (expr->op.type) {
@@ -2548,7 +2802,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                 } else {
                     // Fallback: identifier is an implicit this.member access
                     // Check if 'this' exists and has this field
-                    auto this_result = environment_->get(this_id_);
+                    auto this_result = environment_->get(string_symbolizer_->get_this_id());
                     if (this_result && this_result.value().is_object()) {
                         script_value this_val = std::move(this_result.value());
                         auto obj_holder = this_val.get_object_holder();
@@ -2608,14 +2862,81 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (varPtr) {
                 // Fast path: direct in-place mutation for local variables
                 script_value& target = varPtr->deref();
+                auto leftType = target.type();
 
-                // Evaluate the right-hand side
-                JAISCRIPT_TRY(expr->value->accept(this));
+                // === ULTRA FAST PATH: int += int literal (e.g., sum += 1) ===
+                // Skip dispatch_expr entirely for int literal RHS
+                if (leftType == script_value_type::jai_int_type && !has_custom_numeric_ops_) [[likely]] {
+                    if (auto* rhs_lit = dynamic_cast<literal_expr*>(expr->value.get())) {
+                        if (rhs_lit->value.raw_storage_index() == 1) {  // int literal
+                            script_int rhs_val = rhs_lit->value.unchecked_as_int();
+                            switch (expr->op.type) {
+                                case token_type::plus_equal:
+                                    target.unchecked_as_int_ref() += rhs_val;
+                                    push_value(target.clone());
+                                    return {};
+                                case token_type::minus_equal:
+                                    target.unchecked_as_int_ref() -= rhs_val;
+                                    push_value(target.clone());
+                                    return {};
+                                case token_type::star_equal:
+                                    target.unchecked_as_int_ref() *= rhs_val;
+                                    push_value(target.clone());
+                                    return {};
+                                case token_type::slash_equal:
+                                    if (rhs_val == 0) {
+                                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+                                    }
+                                    target.unchecked_as_int_ref() /= rhs_val;
+                                    push_value(target.clone());
+                                    return {};
+                                default:
+                                    break;  // Fall through to general path
+                            }
+                        }
+                    }
+                    // === ULTRA FAST PATH: int += int variable (e.g., sum += i) ===
+                    // Skip dispatch_expr for simple identifier RHS
+                    else if (auto* rhs_id = dynamic_cast<identifier_expr*>(expr->value.get())) {
+                        if (rhs_id->symbol_id == UINT64_MAX) {
+                            rhs_id->symbol_id = string_symbolizer_->intern(rhs_id->name);
+                        }
+                        script_value* rhs_ptr = environment_->get_value_ptr(rhs_id->symbol_id);
+                        if (rhs_ptr && rhs_ptr->raw_storage_index() == 1) {  // int value
+                            script_int rhs_val = rhs_ptr->unchecked_as_int();
+                            switch (expr->op.type) {
+                                case token_type::plus_equal:
+                                    target.unchecked_as_int_ref() += rhs_val;
+                                    push_value(target.clone());
+                                    return {};
+                                case token_type::minus_equal:
+                                    target.unchecked_as_int_ref() -= rhs_val;
+                                    push_value(target.clone());
+                                    return {};
+                                case token_type::star_equal:
+                                    target.unchecked_as_int_ref() *= rhs_val;
+                                    push_value(target.clone());
+                                    return {};
+                                case token_type::slash_equal:
+                                    if (rhs_val == 0) {
+                                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+                                    }
+                                    target.unchecked_as_int_ref() /= rhs_val;
+                                    push_value(target.clone());
+                                    return {};
+                                default:
+                                    break;  // Fall through to general path
+                            }
+                        }
+                    }
+                }
+
+                // Evaluate the right-hand side (general path)
+                JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
                 script_value rightValue = pop_value();
                 auto& derefRight = rightValue.deref();
 
-                // Get types for dispatch
-                auto leftType = target.type();
+                // Get type for RHS
                 auto rightType = derefRight.type();
 
                 // Check for custom operators first (rare path)
@@ -2638,6 +2959,27 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 return checked_result<void>(result.error(), result.message());
                             }
                             target = std::move(result.value());
+                            push_value(target.clone());
+                            return {};
+                        }
+                    }
+                }
+
+                // Check for custom arithmetic operators on class instances
+                if (leftType == script_value_type::jai_object_type) {
+                    uint64_t op_symbol_id = 0;
+                    switch (expr->op.type) {
+                        case token_type::plus_equal: op_symbol_id = op_plus_id_; break;
+                        case token_type::minus_equal: op_symbol_id = op_minus_id_; break;
+                        case token_type::star_equal: op_symbol_id = op_star_id_; break;
+                        case token_type::slash_equal: op_symbol_id = op_slash_id_; break;
+                        case token_type::percent_equal: op_symbol_id = op_percent_id_; break;
+                        default: break;
+                    }
+                    if (op_symbol_id != 0) {
+                        auto custom_result = object_arithmetic_via_method(target, rightValue, op_symbol_id);
+                        if (custom_result.has_value()) {
+                            target = std::move(custom_result.value());
                             push_value(target.clone());
                             return {};
                         }
@@ -2716,7 +3058,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             } else {
                 // Fallback: identifier is an implicit this.member access
                 // Check if 'this' exists and has this field
-                auto this_result = environment_->get(this_id_);
+                auto this_result = environment_->get(string_symbolizer_->get_this_id());
                 if (!this_result || !this_result.value().is_object()) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
                 }
@@ -2735,8 +3077,29 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 script_value currentValue = instance->get_field(identifier->symbol_id);
 
                 // Evaluate the right-hand side
-                JAISCRIPT_TRY(expr->value->accept(this));
+                JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
                 script_value rightValue = pop_value();
+
+                // Check for custom arithmetic operators on class instances
+                if (currentValue.is_object()) {
+                    uint64_t op_symbol_id = 0;
+                    switch (expr->op.type) {
+                        case token_type::plus_equal: op_symbol_id = op_plus_id_; break;
+                        case token_type::minus_equal: op_symbol_id = op_minus_id_; break;
+                        case token_type::star_equal: op_symbol_id = op_star_id_; break;
+                        case token_type::slash_equal: op_symbol_id = op_slash_id_; break;
+                        case token_type::percent_equal: op_symbol_id = op_percent_id_; break;
+                        default: break;
+                    }
+                    if (op_symbol_id != 0) {
+                        auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+                        if (custom_result.has_value()) {
+                            instance->set_field(identifier->symbol_id, custom_result.value().clone());
+                            push_value(std::move(custom_result.value()));
+                            return {};
+                        }
+                    }
+                }
 
                 // Perform the compound operation (using standard path, no in-place mutation for fields)
                 script_value resultValue = make_value();
@@ -2791,30 +3154,58 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
         } else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
             // Handle compound assignment to member expression (e.g., obj.value += 10)
             // First, get the current value of the property
-            JAISCRIPT_TRY(memberExpr->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(memberExpr));
             script_value currentValue = pop_value().deref();
-            
+
             // Evaluate the right-hand side
-            JAISCRIPT_TRY(expr->value->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
             script_value rightValue = pop_value();
-            
+
+            // Check for custom arithmetic operators on class instances
+            if (currentValue.is_object()) {
+                uint64_t op_symbol_id = 0;
+                switch (expr->op.type) {
+                    case token_type::plus_equal: op_symbol_id = op_plus_id_; break;
+                    case token_type::minus_equal: op_symbol_id = op_minus_id_; break;
+                    case token_type::star_equal: op_symbol_id = op_star_id_; break;
+                    case token_type::slash_equal: op_symbol_id = op_slash_id_; break;
+                    case token_type::percent_equal: op_symbol_id = op_percent_id_; break;
+                    default: break;
+                }
+                if (op_symbol_id != 0) {
+                    auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+                    if (custom_result.has_value()) {
+                        // Assign the result back to the property
+                        JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
+                        script_value objectValue = pop_value();
+                        if (objectValue.is_object()) {
+                            auto objHolder = objectValue.get_object_holder();
+                            if (objHolder) {
+                                auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
+                                uint64_t member_id = string_symbolizer_->intern(memberExpr->member);
+                                instance->set_field(member_id, custom_result.value().clone());
+                                push_value(std::move(custom_result.value()));
+                                return {};
+                            }
+                        }
+                    }
+                }
+            }
+
             // Perform the compound operation
             script_value resultValue = make_value();
-            bool customOpFound = false;
-            
+
             switch (expr->op.type) {
                 case token_type::plus_equal: {
-                    if (!customOpFound) {
-                        if (currentValue.is_int() && rightValue.is_int()) {
-                            resultValue = make_value(currentValue.as_int() + rightValue.as_int());
-                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = make_value(currentValue.as_float() + rightValue.as_float());
-                        } else if (currentValue.is_string() && rightValue.is_string()) {
-                            resultValue = make_value(currentValue.as_string() + rightValue.as_string());
-                        } else {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                                "Invalid operands for +=");
-                        }
+                    if (currentValue.is_int() && rightValue.is_int()) {
+                        resultValue = make_value(currentValue.as_int() + rightValue.as_int());
+                    } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                        resultValue = make_value(currentValue.as_float() + rightValue.as_float());
+                    } else if (currentValue.is_string() && rightValue.is_string()) {
+                        resultValue = make_value(currentValue.as_string() + rightValue.as_string());
+                    } else {
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Invalid operands for +=");
                     }
                     break;
                 }
@@ -2863,7 +3254,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             
             // Now assign the result back to the property
             // We need to evaluate the object again to get a fresh reference
-            JAISCRIPT_TRY(memberExpr->object->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
             script_value objectValue = pop_value();
 
             // After refactor: shared_ptr<T> uses same storage, no unwrapping needed
@@ -2917,13 +3308,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
         } else {
             // General compound assignment for any expression
             // This handles subscripts, function calls that return references, etc.
-            
+
             // First, evaluate the target expression to get current value
-            JAISCRIPT_TRY(expr->target->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(expr->target.get()));
             script_value currentValue = pop_value();
 
             // Evaluate the right-hand side
-            JAISCRIPT_TRY(expr->value->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
             script_value rightValue = pop_value();
             
             // Perform the compound operation
@@ -2994,13 +3385,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     token(token_type::equal, "=", expr->op.location),
                     std::make_shared<literal_expr>(expr->location, resultValue)
                 );
-                JAISCRIPT_TRY(regularAssignment->accept(this));
+                JAISCRIPT_TRY(dispatch_expr(regularAssignment.get()));
             }
         }
     } else {
         // Regular assignment
 
-        JAISCRIPT_TRY(expr->value->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
         // Check if we're unwinding due to an exception in the value expression
         if (is_unwinding_) {
             // Don't try to pop a value that wasn't pushed due to the exception
@@ -3077,7 +3468,59 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             "Cannot assign " + type_name + " to shared_ptr");
                     }
                 } else {
-                    // Regular variable assignment
+                    // Regular variable assignment with STRONG TYPES enforcement
+                    type_info_ptr target_type = currentVal->get_type_info();
+
+                    // Try assignment operator lookup for class types before type enforcement
+                    if (target_type && target_type->base_type == script_value_type::jai_object_type) {
+                        // Check if currentVal has an operator= method for the source type
+                        auto source_type_info = value.get_type_info();
+                        std::string source_type_name = source_type_info ? source_type_info->type_name : "unknown";
+
+                        // Only try operator= if types are different (same type just uses regular assignment)
+                        if (source_type_name != target_type->type_name) {
+                            auto instance_result = currentVal->checked_as<std::shared_ptr<class_instance>>();
+                            if (instance_result) {
+                                auto instance = instance_result.value();
+                                // Look for operator= method using cached symbol ID
+                                script_value method = instance->get_method(assign_operator_id_, false);
+                                if (method.is_function()) {
+                                    // Found operator= method - call it with the source value
+                                    // Script methods expect 'this' as the first argument
+                                    const script_function& func = method.as_function();
+                                    std::vector<script_value> args;
+                                    args.push_back(*currentVal);  // 'this' - the instance being assigned to
+                                    args.push_back(std::move(value));  // the value being assigned
+                                    auto result = func(args);
+                                    if (result) {
+                                        // Operator= succeeded - return without replacing the variable
+                                        // The operator= method should have modified the instance in place
+                                        return checked_result<void>();
+                                    }
+                                    // Method call failed - fall through to type enforcement error
+                                }
+                            }
+                        }
+                    }
+
+                    // Enforce type compatibility
+                    auto enforced = enforce_type_compatibility(std::move(value), target_type, identifier->name);
+                    if (!enforced) {
+                        return checked_result<void>(enforced.error(), enforced.message());
+                    }
+                    value = std::move(enforced.value());
+
+                    // Handle first assignment for uninitialized auto variables
+                    if (!target_type) {
+                        // Lock the variable's type to the assigned value's type
+                        // The value keeps its own type_info
+                    }
+                    // For any_type (var), keep the any_type on the variable
+                    else if (target_type->base_type == script_value_type::jai_any_type) {
+                        value.set_type_info(target_type);  // Keep any_type marker
+                    }
+                    // For locked types, the value already has correct type from enforce_type_compatibility
+
                     // For objects, use move semantics to transfer ownership instead of cloning
                     // This ensures destructors fire at the right time
                     if (value.is_object()) {
@@ -3092,7 +3535,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Try static_method_environment's assign (which handles static fields)
                 // or instance method's 'this' field assignment
                 bool assigned_to_member = false;
-                auto this_result = environment_->get(this_id_);
+                auto this_result = environment_->get(string_symbolizer_->get_this_id());
                 if (this_result) {
                     script_value this_val = std::move(this_result.value());
                     if (this_val.is_object()) {
@@ -3102,8 +3545,30 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                             // First try instance fields
                             if (instance->has_field(identifier->symbol_id)) {
-                                instance->set_field(identifier->symbol_id, std::move(value.clone()));
-                                assigned_to_member = true;
+                                // Check if this is a C++ parent property that needs setter method
+                                auto class_def = instance->get_class_definition();
+                                if (class_def) {
+                                    auto cpp_base = class_def->get_cpp_base_class();
+                                    if (cpp_base) {
+                                        // Check if field has a pre-registered setter ID (fast path)
+                                        uint64_t setter_id = cpp_base->get_property_setter_id(identifier->symbol_id);
+                                        if (setter_id != 0) {
+                                            // This is a C++ property - call the setter method
+                                            auto setter = cpp_base->get_method(setter_id, false);
+                                            if (setter.is_function()) {
+                                                // Call setter with this and value
+                                                std::vector<script_value> args = {this_val, value};
+                                                setter.as_function()(args);
+                                                assigned_to_member = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                // Not a C++ property or no setter - use regular field assignment
+                                if (!assigned_to_member) {
+                                    instance->set_field(identifier->symbol_id, std::move(value.clone()));
+                                    assigned_to_member = true;
+                                }
                             }
                             // Then try static fields
                             else {
@@ -3161,9 +3626,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
                 // Evaluate the value
-                JAISCRIPT_TRY(expr->value->accept(this));
+                JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
                 script_value value = pop_value();
-                
+
                 // Set the static field
                 if (!class_def->set_static_field(memberExpr->member_id, value.clone())) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
@@ -3176,7 +3641,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
 
             // Regular member assignment - evaluate the object
-            JAISCRIPT_TRY(memberExpr->object->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
             script_value objectValue = pop_value();
 
             // Dereference if it's a reference (e.g., from array[index])
@@ -3237,7 +3702,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (binaryExpr->op.type == token_type::left_bracket) {
                 // Evaluate the entire target expression (e.g., nested["nums"][1])
                 // This should return a reference if it's a valid lvalue
-                JAISCRIPT_TRY(expr->target->accept(this));
+                JAISCRIPT_TRY(dispatch_expr(expr->target.get()));
                 script_value target_ref = pop_value();
                 
                 // Check if we got a reference
@@ -3269,7 +3734,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
 // statement visitors
 checked_result<void> interpreter::visit_expression_stmt(expression_stmt* stmt) {
-    JAISCRIPT_TRY(stmt->expression->accept(this));
+    JAISCRIPT_TRY(dispatch_expr(stmt->expression.get()));
 
     // Early exit if exception is propagating
     if (is_unwinding_) return {};
@@ -3288,7 +3753,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
 
     try {
         for (const auto& decl : stmt->declarations) {
-            auto result = decl->accept(this);
+            auto result = dispatch_decl(decl.get());
 
             // IMPORTANT: Clear value stack after each declaration to prevent accumulation
             // This ensures objects are destroyed at statement boundaries, not just at block exit
@@ -3356,7 +3821,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             environment_->define(decl->name_id, std::move(weak));
         } else {
             // Evaluate initializer
-            JAISCRIPT_TRY(decl->initializer->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value value = pop_value();
             
             // Handle different initialization cases
@@ -3400,7 +3865,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             environment_->define(decl->name_id, std::move(null_ptr));
         } else {
             // Evaluate initializer
-            JAISCRIPT_TRY(decl->initializer->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value value = pop_value();
             
             // Handle different initialization cases
@@ -3459,7 +3924,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             }
         } else {
             // For other expressions, evaluate them and check if they return a reference
-            JAISCRIPT_TRY(decl->initializer->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value result = pop_value();
             
             // If the result is a reference, we can create a reference to its target
@@ -3481,7 +3946,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         // Regular variable declaration
         script_value value = make_value();
         if (decl->initializer) {
-            JAISCRIPT_TRY(decl->initializer->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             value = std::move(pop_value());
 
             // Only clone if initializing from an lvalue (existing object)
@@ -3499,17 +3964,258 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         }
         // If no initializer, value remains null
 
+        // === STRONG TYPES: Set type_info based on declaration ===
+        // - Explicit type (int, float, var, etc.): Use declared type (locks the variable)
+        // - auto with initializer: Infer type from value (locks to inferred type)
+        // - auto without initializer: Keep nullptr (first assignment will lock type)
+        if (decl->type) {
+            // Explicit type declaration (int x, float y, var z, etc.)
+            // Set declared type - this locks the variable's type
+            value.set_type_info(decl->type);
+        } else if (decl->initializer && value.get_type_info()) {
+            // auto with initializer - type is inferred from value and locked
+            // Value already has type_info from make_value() or evaluation
+            // Keep the value's type_info (already set)
+        }
+        // else: auto without initializer - type_info remains nullptr (uninitialized)
+        // First assignment will lock the type
+
         environment_->define(decl->name_id, std::move(value));
         // After move, value is in moved-from state, so don't access it
     }
     return {};
 }
 
+// === STRONG TYPES: Type enforcement for assignment ===
+checked_result<script_value> interpreter::enforce_type_compatibility(
+    script_value value,
+    type_info_ptr target_type,
+    const std::string& var_name
+) {
+    // Case 1: Uninitialized variable (auto x;) - lock to source type
+    if (!target_type) {
+        // First assignment locks the type - value already has its own type
+        return std::move(value);
+    }
+
+    // Case 2: Any type (var x) - allow anything
+    if (target_type->base_type == script_value_type::jai_any_type) {
+        // Keep any_type on the variable, but store the value
+        // The value's internal type is preserved for operations
+        return std::move(value);
+    }
+
+    // Case 3: Locked type - enforce compatibility
+    auto source_type = value.type();
+    auto target = target_type->base_type;
+
+    // Fast path: same type (but NOT for object types - need to compare class names)
+    if (source_type == target && target != script_value_type::jai_object_type) {
+        return std::move(value);
+    }
+
+    // Numeric conversions (int <-> float)
+    if (target == script_value_type::jai_int_type) {
+        if (source_type == script_value_type::jai_float_type) {
+            // float -> int (truncate)
+            return make_value(static_cast<script_int>(value.as_float()));
+        }
+        if (source_type == script_value_type::jai_bool_type) {
+            // bool -> int
+            return make_value(static_cast<script_int>(value.as_bool() ? 1 : 0));
+        }
+    }
+
+    if (target == script_value_type::jai_float_type) {
+        if (source_type == script_value_type::jai_int_type) {
+            // int -> float (widening)
+            return make_value(static_cast<script_float>(value.as_int()));
+        }
+        if (source_type == script_value_type::jai_bool_type) {
+            // bool -> float
+            return make_value(static_cast<script_float>(value.as_bool() ? 1.0 : 0.0));
+        }
+    }
+
+    if (target == script_value_type::jai_bool_type) {
+        // Truthy conversion to bool
+        return make_value(is_truthy(value));
+    }
+
+    if (target == script_value_type::jai_string_type) {
+        // to_string conversion
+        return make_value(value.to_string());
+    }
+
+    // Null can be assigned to object/shared_ptr/weak_ptr types
+    // Keep the target type_info so the variable remains typed
+    if (source_type == script_value_type::jai_null_type) {
+        if (target == script_value_type::jai_object_type ||
+            target == script_value_type::jai_shared_ptr_type ||
+            target == script_value_type::jai_weak_ptr_type) {
+            // Return null but preserve the target type for future assignments
+            script_value null_val = make_value();
+            null_val.set_type_info(target_type);
+            return null_val;
+        }
+    }
+
+    // Class type compatibility for object types (nominal typing)
+    if (target == script_value_type::jai_object_type &&
+        source_type == script_value_type::jai_object_type) {
+
+        auto source_type_info = value.get_type_info();
+        if (source_type_info && target_type) {
+            // Compare class names - must match exactly or source must be subclass of target
+            const std::string& source_class_name = source_type_info->type_name;
+            const std::string& target_class_name = target_type->type_name;
+
+            // Same class name - compatible
+            if (source_class_name == target_class_name) {
+                return std::move(value);
+            }
+
+            // Check inheritance - source must be derived from target (child -> parent is OK)
+            // We need to get the actual class instance to check the inheritance chain
+            try {
+                auto instance = value.as<std::shared_ptr<class_instance>>();
+                if (instance) {
+                    auto class_def = instance->get_class_definition();
+                    if (class_def) {
+                        // Walk up the inheritance chain looking for target class
+                        auto current = class_def;
+                        while (current) {
+                            for (const auto& parent : current->get_parent_classes()) {
+                                if (parent && parent->get_name() == target_class_name) {
+                                    // Source is derived from target - compatible
+                                    return std::move(value);
+                                }
+                            }
+                            // Move up to first parent for next iteration (single inheritance path)
+                            current = current->get_parent();
+                        }
+                    }
+                }
+            } catch (...) {
+                // Not a class_instance or extraction failed - fall through to error
+            }
+
+            // Classes are incompatible - try constructor-based conversion
+            // Look for a constructor Target(Source) in the target class
+            auto ctor_result = environment_->get(target_class_name);
+            if (ctor_result && ctor_result.value().is_function()) {
+                const script_function& ctor = ctor_result.value().as_function();
+                std::vector<script_value> ctor_args;
+                ctor_args.push_back(value);
+
+                try {
+                    auto result = ctor(ctor_args);
+                    if (result.has_value()) {
+                        return std::move(result.value());
+                    }
+                } catch (const runtime_error& e) {
+                    std::string error_msg = e.what();
+                    if (error_msg.find("No constructor found") == std::string::npos) {
+                        // Constructor exists but failed - propagate the error
+                        throw runtime_error("Error converting " + source_class_name +
+                                          " to " + target_class_name + ": " + error_msg);
+                    }
+                    // No matching constructor - fall through to type mismatch error
+                }
+            }
+
+            // No suitable constructor found - incompatible types
+            std::string msg = "Cannot assign " + source_class_name + " to ";
+            if (!var_name.empty()) {
+                msg += "variable '" + var_name + "' of type " + target_class_name;
+            } else {
+                msg += "type " + target_class_name;
+            }
+            msg += " (incompatible class types)";
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), msg);
+        }
+    }
+
+    // Primitive-to-object conversion via constructor
+    // Try to convert primitives (int, float, string, bool, char) to object types via constructors
+    if (target == script_value_type::jai_object_type && target_type && !target_type->type_name.empty()) {
+        bool is_primitive = (source_type == script_value_type::jai_int_type ||
+                            source_type == script_value_type::jai_float_type ||
+                            source_type == script_value_type::jai_string_type ||
+                            source_type == script_value_type::jai_bool_type ||
+                            source_type == script_value_type::jai_char_type);
+
+        if (is_primitive) {
+            const std::string& target_class_name = target_type->type_name;
+
+            // Try to find and call the constructor with the primitive value
+            auto ctor_result = environment_->get(target_class_name);
+            if (ctor_result && ctor_result.value().is_function()) {
+                const script_function& ctor = ctor_result.value().as_function();
+                std::vector<script_value> ctor_args;
+                ctor_args.push_back(value);
+
+                try {
+                    auto result = ctor(ctor_args);
+                    if (result.has_value()) {
+                        return std::move(result.value());
+                    }
+                } catch (const runtime_error& e) {
+                    std::string error_msg = e.what();
+                    if (error_msg.find("No constructor found") == std::string::npos) {
+                        // Constructor exists but failed - propagate the error
+                        throw runtime_error("Error converting " + get_type_name(source_type) +
+                                          " to " + target_class_name + ": " + error_msg);
+                    }
+                    // No matching constructor - fall through to type mismatch error
+                }
+            }
+        }
+    }
+
+    // Incompatible types - error
+    std::string source_name = value.get_type_info() ? value.get_type_info()->type_name : "unknown";
+    if (source_name.empty() || source_name == "unknown") {
+        source_name = get_type_name(source_type);
+    }
+    std::string target_name = target_type->type_name;
+    std::string msg = "Cannot assign " + source_name + " to ";
+    if (!var_name.empty()) {
+        msg += "variable '" + var_name + "' of type " + target_name;
+    } else {
+        msg += "type " + target_name;
+    }
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), msg);
+}
+
+// Helper to convert value to string, checking for to_string() method on objects
+std::string interpreter::value_to_string_with_method(const script_value& val) {
+    if (val.type() == script_value_type::jai_object_type) {
+        // Use get_class_instance() which safely returns nullptr if not a class instance
+        auto instance = const_cast<script_value&>(val).get_class_instance();
+        if (instance) {
+            auto method_id = string_symbolizer_->intern("to_string");
+            auto method_val = instance->get_method(method_id, false);
+            if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
+                script_value bound = create_bound_method(val, method_val);
+                const script_function& method = bound.as_function();
+                std::vector<script_value> no_args;
+                auto result = method(no_args);
+                if (result.has_value() && result.value().is_string()) {
+                    return result.value().as_string();
+                }
+            }
+        }
+    }
+    return val.to_string();
+}
+
 // Binary operation helpers
 script_value interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right) {
     // Special case for string concatenation (use move to avoid copying the temporary)
+    // Check for to_string() method on objects before falling back to default
     if (op == token_type::plus && (left.is_string() || right.is_string())) {
-        return make_value(left.to_string() + right.to_string());  // Move overload selected automatically
+        return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
     }
     
     // Fast path for pure integer arithmetic (avoid float conversion)
@@ -3695,22 +4401,22 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
 
 script_value interpreter::evaluate_logical(const script_value& left, token_type op, const script_value& right) {
     bool leftTruthy = is_truthy(left);
-    
+
     switch (op) {
         case token_type::ampersand_ampersand:
-            // Short-circuit: if left is false, return left
+            // Return boolean result (not JavaScript-style operand values)
             if (!leftTruthy) {
-                return left;
+                return make_value(false);  // Left is falsy -> result is false
             }
-            return right;
-            
+            return make_value(is_truthy(right));  // Return truthiness of right
+
         case token_type::pipe_pipe:
-            // Short-circuit: if left is true, return left
+            // Return boolean result (not JavaScript-style operand values)
             if (leftTruthy) {
-                return left;
+                return make_value(true);  // Left is truthy -> result is true
             }
-            return right;
-            
+            return make_value(is_truthy(right));  // Return truthiness of right
+
         default:
             throw runtime_error("Unknown logical operator");
     }
@@ -3755,7 +4461,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             }
 
             // Get 'this' from the current environment
-            auto this_result = environment_->get(this_id_);
+            auto this_result = environment_->get(string_symbolizer_->get_this_id());
             if (!this_result) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                     ident_expr->name + "() can only be called from within a method");
@@ -3783,7 +4489,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     }
 
     // Evaluate the callee expression
-    JAISCRIPT_TRY(expr->callee->accept(this));
+    JAISCRIPT_TRY(dispatch_expr(expr->callee.get()));
     script_value callee = pop_value();
 
     // Check if the callee is a function
@@ -3812,7 +4518,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
         
         // Evaluate argument with exception handling
         try {
-            JAISCRIPT_TRY(argExpr->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
             arguments.emplace_back(std::move(pop_value()));
         } catch (const script_exception& e) {
             // Convert to interpreter exception state
@@ -4100,7 +4806,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     bool is_super_access = dynamic_cast<super_expr*>(expr->object.get()) != nullptr;
 
     // Evaluate the object expression
-    JAISCRIPT_TRY(expr->object->accept(this));
+    JAISCRIPT_TRY(dispatch_expr(expr->object.get()));
     script_value objectValue = pop_value();
 
     // Dereference if needed - subscript access returns references
@@ -4152,7 +4858,32 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         push_value(create_bound_method(objectValue, method));
         return {};
     }
-    
+
+    // Handle string methods
+    if (objectValue.is_string()) {
+        auto methodIt = string_methods_.find(expr->member_id);
+        if (methodIt != string_methods_.end()) {
+            // Found the method in the registry
+            const builtin_method& method = methodIt->second;
+
+            // Create a wrapper function that captures the string value by moving it
+            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+                return method(this, capturedValue, args);
+            };
+
+            push_value(script_value::make_function(boundMethod, engine_ref_));
+            return {};
+        }
+        else {
+            // Set exception state instead of throwing
+            active_exception_value_ = make_value("String has no method '" + expr->member + "'");
+            current_exception_ = script_exception("String has no method '" + expr->member + "'", expr->location);
+            is_unwinding_ = true;
+            push_value(make_value());
+            return {};
+        }
+    }
+
     // Handle array methods
     if (objectValue.is_array()) {
         auto methodIt = array_methods_.find(expr->member_id);
@@ -4253,7 +4984,6 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Extract the class_instance from the object
     auto objHolder = objectValue.get_object_holder();
 
-
     // Get the class_instance - both C++ and script classes use class_instance wrapper
     // (script_class_instance inherits from class_instance)
     if (!objHolder->is_class_instance_wrapper) {
@@ -4269,32 +4999,31 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Use pre-computed member_id from parser
     uint64_t member_id = expr->member_id;
 
-    // First check if it's a field (registered by the property() method)
+    // First check for property getter method (C++ properties and inherited properties)
+    // This handles both direct C++ classes and script classes that inherit from C++
+    try {
+        uint64_t getter_id = string_symbolizer_->intern("_get_" + expr->member);
+        script_value getter = instance->get_method(getter_id, false);
+        if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
+            // Call the getter with 'this' as argument
+            const script_function& func = getter.as_function();
+            std::vector<script_value> args = {objectValue};
+            auto result = func(args);
+            if (!result) {
+                // Function returned error - propagate it up
+                return checked_result<void>(result.error(), result.message());
+            }
+            push_value(std::move(result.value()));
+            return {};
+        }
+    } catch (const std::exception&) {
+        // If get_method fails (e.g., class definition expired), fall back to field access
+    }
+
+    // Check if it's a field (registered by the property() method or script field)
     bool has_field_result = instance->has_field(member_id);
     if (has_field_result) {
-        // For script classes, always access fields directly
-        // For C++ classes, check if there's a property getter method
-        if (!instance->is_script_class()) {
-            try {
-                uint64_t getter_id = string_symbolizer_->intern("_get_" + expr->member);
-                script_value getter = instance->get_method(getter_id);
-                if (!getter.is_null()) {
-                    // Call the getter with 'this' as argument
-                    const script_function& func = getter.as_function();
-                    std::vector<script_value> args = {objectValue};
-                    auto result = func(args);
-                    if (!result) {
-                        // Function returned error - propagate it up
-                        return checked_result<void>(result.error(), result.message());
-                    }
-                    push_value(std::move(result.value()));
-                    return {};
-                }
-            } catch (const std::exception&) {
-                // If get_method fails (e.g., class definition expired), fall back to direct field access
-            }
-        }
-        // Return the field value directly (for script classes or if no getter)
+        // Return the field value directly (for script fields without getters)
         push_value(instance->get_field(member_id));
         return {};
     }
@@ -4653,7 +5382,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
             push_value(script_value::make_empty_weak_ptr(expr->type, engine_ref_));
         } else if (expr->arguments.size() == 1) {
             // One argument - create weak_ptr from object
-            JAISCRIPT_TRY(expr->arguments[0]->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(expr->arguments[0].get()));
             script_value obj = pop_value();
 
             // Handle null objects
@@ -4711,7 +5440,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
             push_value(make_value());
         } else if (expr->arguments.size() == 1) {
             // One argument - mark it as shared_ptr type
-            JAISCRIPT_TRY(expr->arguments[0]->accept(this));
+            JAISCRIPT_TRY(dispatch_expr(expr->arguments[0].get()));
             script_value value = pop_value();
 
             // Handle null
@@ -4754,7 +5483,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
     // Evaluate all arguments
     std::vector<script_value> args;
     for (const auto& argExpr : expr->arguments) {
-        JAISCRIPT_TRY(argExpr->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
         args.push_back(std::move(pop_value()));
     }
 
@@ -4779,7 +5508,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
 checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
     // Evaluate the condition
-    JAISCRIPT_TRY(expr->condition->accept(this));
+    JAISCRIPT_TRY(dispatch_expr(expr->condition.get()));
     script_value conditionValue = pop_value();
 
     // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
@@ -4792,9 +5521,9 @@ checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
 
     // Evaluate only the selected branch (short-circuit evaluation)
     if (conditionIsTruthy) {
-        JAISCRIPT_TRY(expr->then_expression->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(expr->then_expression.get()));
     } else {
-        JAISCRIPT_TRY(expr->else_expression->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(expr->else_expression.get()));
     }
     return {};
 }
@@ -4815,7 +5544,7 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
 
     // Evaluate each element and add to array
     for (const auto& element : expr->elements) {
-        JAISCRIPT_TRY(element->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(element.get()));
         array.push_back(pop_value());
     }
 
@@ -4839,11 +5568,11 @@ checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr)
     // Evaluate each key-value pair and add to map
     for (const auto& entry : expr->entries) {
         // Evaluate key
-        JAISCRIPT_TRY(entry.first->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(entry.first.get()));
         script_value key = pop_value();
 
         // Evaluate value
-        JAISCRIPT_TRY(entry.second->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(entry.second.get()));
         script_value value = pop_value();
 
         // Insert into map
@@ -4863,7 +5592,8 @@ checked_result<void> interpreter::visit_this_expr(this_expr* expr) {
     }
 
     // Try to get 'this' from the current environment
-    auto this_result = environment_->get(this_id_);
+    // Use the symbolizer's cached ID (not interpreter's this_id_ which may be stale)
+    auto this_result = environment_->get(string_symbolizer_->get_this_id());
     if (!this_result) {
         // 'this' can only be used inside methods
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
@@ -4877,7 +5607,8 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
     // Constructor delegation (Enemy() : super()) is handled in the parser/constructor
 
     // Get 'this' from the environment - super only makes sense in instance methods
-    auto this_result = environment_->get(this_id_);
+    // Use the symbolizer's cached ID (not interpreter's this_id_ which may be stale)
+    auto this_result = environment_->get(string_symbolizer_->get_this_id());
     if (!this_result) {
         // 'this' not found - super used outside of class method
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
@@ -4897,7 +5628,7 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
 checked_result<void> interpreter::visit_throw_expr(throw_expr* expr) {
     if (expr->value) {
         // Evaluate the expression to throw
-        JAISCRIPT_TRY(expr->value->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
         script_value val = pop_value();
 
         // Store the exception value and convert to string for exception message
@@ -4919,7 +5650,7 @@ checked_result<void> interpreter::visit_throw_expr(throw_expr* expr) {
 
 checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
     // Evaluate the condition
-    JAISCRIPT_TRY(stmt->condition->accept(this));
+    JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
     script_value conditionValue = pop_value();
 
     // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
@@ -4932,9 +5663,9 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
 
     // Execute appropriate branch based on truthiness
     if (is_true) {
-        JAISCRIPT_TRY(stmt->then_statement->accept(this));
+        JAISCRIPT_TRY(dispatch_stmt(stmt->then_statement.get()));
     } else if (stmt->else_statement) {
-        JAISCRIPT_TRY(stmt->else_statement->accept(this));
+        JAISCRIPT_TRY(dispatch_stmt(stmt->else_statement.get()));
     }
     return {};
 }
@@ -4945,7 +5676,7 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
 
     while (true) {
         // Evaluate the condition
-        JAISCRIPT_TRY(stmt->condition->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
 
         const auto& val = valueStack_.top();
         bool is_true;
@@ -4964,7 +5695,7 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         }
 
         // Execute the loop body
-        auto result = stmt->body->accept(this);
+        auto result = dispatch_stmt(stmt->body.get());
         if (!result) return result;
 
         // Check for control flow changes (break/continue/return)
@@ -4986,93 +5717,261 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
-    // FAST PATH: Detect and optimize integer counting loops
-    // Pattern: for (auto i = START; i < END; ++i) { body }
-    // This eliminates virtual calls for condition and update - native C++ loop instead
+    // FAST PATHS: Detect and optimize integer counting loops
+    // Pattern: for (int/auto/var i = START; i < END; ++i) { body }
+    //
+    // Two fast paths based on type declaration:
+    // 1. ULTRA FAST (locked types): int i, auto i = 0 - direct int pointer, no type checks
+    //    Safe because strong types prevent type changes after locking
+    // 2. VAR FAST (dynamic type): var i = 0 - native loop with per-iteration type validation
+    //    Validates type is still int before each iteration (handles rare type changes)
+    //
     if (stmt->initializer && stmt->condition && stmt->update) {
         auto* init_var = dynamic_cast<variable_decl*>(stmt->initializer.get());
         auto* cond_binary = dynamic_cast<binary_expr*>(stmt->condition.get());
+
+        // Try to match update patterns: ++i, i++, i += step, i = i + step
         auto* update_unary = dynamic_cast<unary_expr*>(stmt->update.get());
+        auto* update_assign = dynamic_cast<assignment_expr*>(stmt->update.get());
 
-        if (init_var && cond_binary && update_unary) {
-            // Check: condition is identifier < literal or identifier <= literal
-            bool is_less = cond_binary->op.type == token_type::less;
-            bool is_less_eq = cond_binary->op.type == token_type::less_equal;
+        // Extract update info: which variable, what step
+        uint64_t update_var_id = UINT64_MAX;
+        script_int step_value = 1;  // Default for ++i
+        uint64_t step_var_id = UINT64_MAX;  // For dynamic step (i += j)
+        bool valid_update = false;
 
-            if (is_less || is_less_eq) {
+        if (update_unary && update_unary->op.type == token_type::plus_plus) {
+            // Pattern: ++i or i++
+            if (auto* update_id = dynamic_cast<identifier_expr*>(update_unary->operand.get())) {
+                update_var_id = update_id->symbol_id;
+                step_value = 1;
+                valid_update = true;
+            }
+        } else if (update_unary && update_unary->op.type == token_type::minus_minus) {
+            // Pattern: --i or i-- (step = -1, but this is unusual for counting up)
+            if (auto* update_id = dynamic_cast<identifier_expr*>(update_unary->operand.get())) {
+                update_var_id = update_id->symbol_id;
+                step_value = -1;
+                valid_update = true;
+            }
+        } else if (update_assign && update_assign->op.type == token_type::plus_equal) {
+            // Pattern: i += step (literal or variable)
+            if (auto* update_id = dynamic_cast<identifier_expr*>(update_assign->target.get())) {
+                update_var_id = update_id->symbol_id;
+                // Check if step is an int literal
+                if (auto* step_lit = dynamic_cast<literal_expr*>(update_assign->value.get())) {
+                    if (step_lit->value.raw_storage_index() == 1) {  // int literal
+                        step_value = step_lit->value.unchecked_as_int();
+                        valid_update = true;
+                    }
+                }
+                // Check if step is an identifier (i += j where j is int)
+                else if (auto* step_id = dynamic_cast<identifier_expr*>(update_assign->value.get())) {
+                    // Look up step variable in current environment
+                    script_value* step_ptr = environment_->get_value_ptr(step_id->symbol_id);
+                    if (step_ptr && step_ptr->raw_storage_index() == 1) {  // int value
+                        step_var_id = step_id->symbol_id;
+                        step_value = step_ptr->unchecked_as_int();  // Initial value
+                        valid_update = true;
+                    }
+                }
+            }
+        } else if (update_assign && update_assign->op.type == token_type::minus_equal) {
+            // Pattern: i -= step (literal or variable)
+            if (auto* update_id = dynamic_cast<identifier_expr*>(update_assign->target.get())) {
+                update_var_id = update_id->symbol_id;
+                if (auto* step_lit = dynamic_cast<literal_expr*>(update_assign->value.get())) {
+                    if (step_lit->value.raw_storage_index() == 1) {
+                        step_value = -step_lit->value.unchecked_as_int();
+                        valid_update = true;
+                    }
+                }
+                // Check if step is an identifier (i -= j where j is int)
+                else if (auto* step_id = dynamic_cast<identifier_expr*>(update_assign->value.get())) {
+                    script_value* step_ptr = environment_->get_value_ptr(step_id->symbol_id);
+                    if (step_ptr && step_ptr->raw_storage_index() == 1) {  // int value
+                        step_var_id = step_id->symbol_id;
+                        step_value = step_ptr->unchecked_as_int();  // Initial value
+                        valid_update = true;
+                    }
+                }
+            }
+        }
+
+        if (init_var && cond_binary && valid_update) {
+            // Select comparison function based on operator type
+            // Supports: <, <=, >, >=, ==, !=
+            using compare_fn = bool(*)(script_int, script_int);
+            compare_fn cmp = nullptr;
+            switch (cond_binary->op.type) {
+                case token_type::less:          cmp = [](script_int a, script_int b) { return a < b; }; break;
+                case token_type::less_equal:    cmp = [](script_int a, script_int b) { return a <= b; }; break;
+                case token_type::greater:       cmp = [](script_int a, script_int b) { return a > b; }; break;
+                case token_type::greater_equal: cmp = [](script_int a, script_int b) { return a >= b; }; break;
+                case token_type::equal_equal:   cmp = [](script_int a, script_int b) { return a == b; }; break;
+                case token_type::bang_equal:    cmp = [](script_int a, script_int b) { return a != b; }; break;
+                default: break;
+            }
+
+            if (cmp) {
                 auto* cond_id = dynamic_cast<identifier_expr*>(cond_binary->left.get());
-                auto* cond_lit = dynamic_cast<literal_expr*>(cond_binary->right.get());
 
-                if (cond_id && cond_lit && cond_lit->value.raw_storage_index() == 1) {  // int literal
-                    // Check: update is ++identifier (same as condition)
-                    if (update_unary->op.type == token_type::plus_plus) {
-                        auto* update_id = dynamic_cast<identifier_expr*>(update_unary->operand.get());
+                // End value can be literal OR variable
+                script_int end_literal = 0;
+                uint64_t end_var_id = UINT64_MAX;
+                bool has_end = false;
 
-                        if (update_id && update_id->symbol_id == cond_id->symbol_id) {
-                            // Check: init is var i = literal (same identifier, int literal)
-                            auto* init_lit = dynamic_cast<literal_expr*>(init_var->initializer.get());
+                if (auto* cond_lit = dynamic_cast<literal_expr*>(cond_binary->right.get())) {
+                    if (cond_lit->value.raw_storage_index() == 1) {  // int literal
+                        end_literal = cond_lit->value.unchecked_as_int();
+                        has_end = true;
+                    }
+                } else if (auto* cond_end_id = dynamic_cast<identifier_expr*>(cond_binary->right.get())) {
+                    // End is a variable - we'll bind to its pointer
+                    end_var_id = cond_end_id->symbol_id;
+                    has_end = true;
+                }
 
-                            if (init_lit && init_lit->value.raw_storage_index() == 1 &&
-                                init_var->name_id == cond_id->symbol_id) {
+                if (cond_id && has_end) {
+                    // Check: update variable matches condition variable
+                    if (update_var_id == cond_id->symbol_id) {
+                        // Check: init is variable i = literal (same identifier, int literal)
+                        auto* init_lit = dynamic_cast<literal_expr*>(init_var->initializer.get());
 
-                                // === PATTERN MATCHED! Run optimized native loop ===
-                                script_int i = init_lit->value.unchecked_as_int();
-                                script_int end = cond_lit->value.unchecked_as_int();
-                                uint64_t var_id = init_var->name_id;
+                        if (init_lit && init_lit->value.raw_storage_index() == 1 &&
+                            init_var->name_id == cond_id->symbol_id) {
 
-                                // Setup environment once
-                                auto previous = environment_;
-                                auto loop_env = get_pooled_environment(previous);
-                                environment_ = loop_env;
-                                environment_->define(var_id, make_value(i));
+                            // === PATTERN MATCHED! Run optimized native loop ===
+                            // Unified fast path for all integer counting loops (auto/int/var)
+                            // Type validation per-iteration is negligible (~0.1ns) vs body dispatch
+                            script_int i = init_lit->value.unchecked_as_int();
+                            uint64_t var_id = init_var->name_id;
 
-                                // Get direct pointer to loop variable's int storage (ChaiScript-style)
-                                // NOTE: Assumes body doesn't reassign i to different type (UB if it does)
-                                script_value* var_ptr = environment_->get_value_ptr(var_id);
-                                script_int* int_ptr = &var_ptr->unchecked_as_int_ref();
+                            // Setup environment once
+                            auto previous = environment_;
+                            auto loop_env = get_pooled_environment(previous);
+                            environment_ = loop_env;
 
-                                // Native C++ counting loop - single store instruction per iteration
-                                if (is_less) {
-                                    for (; i < end; ++i) {
-                                        *int_ptr = i;
+                            // Create value preserving declared type (var = any_type, auto = nullptr, int = int_type)
+                            script_value init_val = make_value(i);
+                            if (init_var->type) {
+                                init_val.set_type_info(init_var->type);
+                            }
+                            environment_->define(var_id, std::move(init_val));
 
-                                        auto result = stmt->body->accept(this);
-                                        if (!result) {
-                                            release_environment(loop_env);
-                                            environment_ = previous;
-                                            return result;
-                                        }
+                            script_value* var_ptr = environment_->get_value_ptr(var_id);
 
-                                        if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
-                                        if (hasReturnValue_) break;
-                                        if (hasContinueRequest_) hasContinueRequest_ = false;
-                                    }
-                                } else {  // is_less_eq
-                                    for (; i <= end; ++i) {
-                                        *int_ptr = i;
+                            // Bind end value pointer (if variable) AFTER environment setup
+                            script_int* end_ptr = nullptr;
+                            script_int end_val = end_literal;
+                            if (end_var_id != UINT64_MAX) {
+                                script_value* end_sv = environment_->get_value_ptr(end_var_id);
+                                if (end_sv && end_sv->raw_storage_index() == 1) {
+                                    end_ptr = &end_sv->unchecked_as_int_ref();
+                                } else {
+                                    // End variable not int - fall back to slow path
+                                    release_environment(loop_env);
+                                    environment_ = previous;
+                                    goto slow_path;
+                                }
+                            }
 
-                                        auto result = stmt->body->accept(this);
-                                        if (!result) {
-                                            release_environment(loop_env);
-                                            environment_ = previous;
-                                            return result;
-                                        }
+                            // Bind step value pointer (if variable)
+                            script_int* step_ptr = nullptr;
+                            if (step_var_id != UINT64_MAX) {
+                                script_value* step_sv = environment_->get_value_ptr(step_var_id);
+                                if (step_sv && step_sv->raw_storage_index() == 1) {
+                                    step_ptr = &step_sv->unchecked_as_int_ref();
+                                } else {
+                                    // Step variable not int - fall back to slow path
+                                    release_environment(loop_env);
+                                    environment_ = previous;
+                                    goto slow_path;
+                                }
+                            }
 
-                                        if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
-                                        if (hasReturnValue_) break;
-                                        if (hasContinueRequest_) hasContinueRequest_ = false;
-                                    }
+                            // Determine step operation: += or -=
+                            const bool step_subtract = update_assign &&
+                                update_assign->op.type == token_type::minus_equal;
+
+                            // === UNIFIED FAST PATH ===
+                            // Native C++ loop with cached pointers for end and step
+                            // Per-iteration type check is cheap (~0.1ns) and handles edge cases
+                            bool fell_through = false;
+                            while (true) {
+                                script_int current_end = end_ptr ? *end_ptr : end_val;
+                                if (!cmp(i, current_end)) break;
+
+                                // Type validation - if type changed, fall back to slow path
+                                if (var_ptr->raw_storage_index() != 1) [[unlikely]] {
+                                    fell_through = true;
+                                    break;
+                                }
+                                var_ptr->unchecked_as_int_ref() = i;
+
+                                auto result = dispatch_stmt(stmt->body.get());
+                                if (!result) {
+                                    release_environment(loop_env);
+                                    environment_ = previous;
+                                    return result;
                                 }
 
-                                release_environment(loop_env);
-                                environment_ = previous;
-                                return {};
+                                if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
+                                if (hasReturnValue_) break;
+                                if (hasContinueRequest_) hasContinueRequest_ = false;
+
+                                // Update step - read from pointer if dynamic
+                                script_int step = step_ptr ? *step_ptr : step_value;
+                                if (step_subtract) {
+                                    i -= step;
+                                } else {
+                                    i += step;
+                                }
                             }
+
+                            // If type changed mid-loop, continue with slow path dispatch
+                            if (fell_through) [[unlikely]] {
+                                while (true) {
+                                    auto cond_result = dispatch_expr(stmt->condition.get());
+                                    if (!cond_result) {
+                                        release_environment(loop_env);
+                                        environment_ = previous;
+                                        return cond_result;
+                                    }
+                                    if (!is_truthy(pop_value())) break;
+
+                                    auto body_result = dispatch_stmt(stmt->body.get());
+                                    if (!body_result) {
+                                        release_environment(loop_env);
+                                        environment_ = previous;
+                                        return body_result;
+                                    }
+
+                                    if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
+                                    if (hasReturnValue_) break;
+                                    if (hasContinueRequest_) hasContinueRequest_ = false;
+
+                                    if (stmt->update) {
+                                        auto update_result = dispatch_expr(stmt->update.get());
+                                        if (!update_result) {
+                                            release_environment(loop_env);
+                                            environment_ = previous;
+                                            return update_result;
+                                        }
+                                        pop_value();
+                                    }
+                                }
+                            }
+
+                            release_environment(loop_env);
+                            environment_ = previous;
+                            return {};
                         }
                     }
                 }
             }
         }
+    slow_path: ;  // Empty statement for goto target
     }
 
     // === GENERAL PATH: Standard for-loop handling ===
@@ -5092,7 +5991,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     auto eval_condition = [&]() -> bool {
         if (!stmt->condition) return true;  // No condition = infinite loop
 
-        auto result = stmt->condition->accept(this);
+        auto result = dispatch_expr(stmt->condition.get());
         if (!result) {
             error = result;  // Capture error, signal loop termination
             return false;
@@ -5117,7 +6016,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     auto eval_update = [&]() {
         if (!stmt->update) return;
 
-        auto result = stmt->update->accept(this);
+        auto result = dispatch_expr(stmt->update.get());
         if (!result) {
             error = result;  // Capture error, loop will terminate on next condition check
             return;
@@ -5131,7 +6030,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
     // Execute initialization (if present)
     if (stmt->initializer) {
-        auto result = stmt->initializer->accept(this);
+        auto result = dispatch_decl(stmt->initializer.get());
         if (!result) {
             release_environment(loop_env);
             environment_ = previous;
@@ -5146,7 +6045,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
         if (error) break;
 
         // Execute the loop body
-        auto result = stmt->body->accept(this);
+        auto result = dispatch_stmt(stmt->body.get());
         if (!result) {
             release_environment(loop_env);
             environment_ = previous;
@@ -5186,7 +6085,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
     // Evaluate the container expression
-    JAISCRIPT_TRY(stmt->container->accept(this));
+    JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
     script_value container = pop_value();
 
     // Create a new scope for the loop variable
@@ -5213,7 +6112,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 // Execute loop body
-                auto body_result = stmt->body->accept(this);
+                auto body_result = dispatch_stmt(stmt->body.get());
                 if (!body_result) {
                     pop_scope();
                     return body_result;
@@ -5283,7 +6182,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 *loop_var_ptr = std::move(result.value());
 
                 // Execute loop body
-                auto body_result = stmt->body->accept(this);
+                auto body_result = dispatch_stmt(stmt->body.get());
                 if (!body_result) {
                     pop_scope();
                     return body_result;
@@ -5319,7 +6218,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
     if (stmt->value) {
         // Evaluate the return expression
-        JAISCRIPT_TRY(stmt->value->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(stmt->value.get()));
         returnValue_ = std::move(pop_value());
     } else {
         // Return null if no expression
@@ -5345,19 +6244,19 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     auto saved_exception = current_exception_;
     auto saved_unwinding = is_unwinding_;
     auto saved_exception_value = active_exception_value_;
-    auto saved_catch_var = current_catch_var_;
+    auto saved_catch_var_id = current_catch_var_id_;
 
     // Reset state for try block
     // Don't reset exception state if we're in a catch block (allows re-throw)
-    if (current_catch_var_.empty()) {
+    if (current_catch_var_id_ == 0) {
         current_exception_.reset();
         active_exception_value_ = make_value();
     }
     is_unwinding_ = false;
-    current_catch_var_.clear();
+    current_catch_var_id_ = 0;
 
     // Execute try block
-    auto try_result = stmt->try_block->accept(this);
+    auto try_result = dispatch_stmt(stmt->try_block.get());
 
     // Check if an error occurred (either checked_result error or exception unwinding)
     bool caught_error = false;
@@ -5376,19 +6275,21 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         // Reset unwinding flag
         is_unwinding_ = false;
 
-        // Set the current catch variable name so identifier lookup can find it
-        current_catch_var_ = stmt->catch_var;
+        // Set the current catch variable ID so identifier lookup can find it (symbolize once here)
+        if (auto eng = engine_ref_.lock()) {
+            current_catch_var_id_ = eng->symbolize(stmt->catch_var);
+        }
 
         // Execute catch block
-        auto catch_result = stmt->catch_block->accept(this);
+        auto catch_result = dispatch_stmt(stmt->catch_block.get());
         // Propagate errors from catch block
         if (!catch_result) {
-            current_catch_var_ = saved_catch_var;
+            current_catch_var_id_ = saved_catch_var_id;
             return catch_result;
         }
 
         // Clear catch variable
-        current_catch_var_.clear();
+        current_catch_var_id_ = 0;
 
         // Only clear exception if it wasn't re-thrown
         if (!is_unwinding_) {
@@ -5408,13 +6309,13 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     // it means a new exception was thrown in the catch block - keep it
 
     // Always restore the catch variable state
-    current_catch_var_ = saved_catch_var;
+    current_catch_var_id_ = saved_catch_var_id;
     return {};
 }
 
 checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
     // Evaluate the switch condition
-    JAISCRIPT_TRY(stmt->condition->accept(this));
+    JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
     script_value switch_value = pop_value();
 
     // Save and set switch state
@@ -5430,7 +6331,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
         // Check each case
         for (const auto& case_stmt : stmt->cases) {
             // Evaluate case value
-            auto result = case_stmt->value->accept(this);
+            auto result = dispatch_expr(case_stmt->value.get());
             if (!result) {
                 in_switch_ = old_in_switch;
                 should_fallthrough_ = old_should_fallthrough;
@@ -5461,7 +6362,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
 
                 try {
                     // Execute case body
-                    auto case_result = case_stmt->accept(this);
+                    auto case_result = dispatch_stmt(case_stmt.get());
                     if (!case_result) {
                         environment_ = previous;
                         in_switch_ = old_in_switch;
@@ -5492,7 +6393,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
             environment_ = get_pooled_environment(environment_);  // Use pool!
 
             try {
-                auto default_result = stmt->default_case->accept(this);
+                auto default_result = dispatch_stmt(stmt->default_case.get());
                 if (!default_result) {
                     environment_ = previous;
                     in_switch_ = old_in_switch;
@@ -5522,7 +6423,7 @@ checked_result<void> interpreter::visit_case_stmt(case_stmt* stmt) {
     // Execute all statements in the case body
     // Note: The scope is created by visit_switch_stmt when it decides to execute this case
     for (const auto& s : stmt->body) {
-        auto result = s->accept(this);
+        auto result = dispatch_stmt(s.get());
         if (!result) return result;
 
         // Check for break or return
@@ -5537,7 +6438,7 @@ checked_result<void> interpreter::visit_default_stmt(default_stmt* stmt) {
     // Execute all statements in the default body
     // Note: The scope is created by visit_switch_stmt when it decides to execute the default
     for (const auto& s : stmt->body) {
-        auto result = s->accept(this);
+        auto result = dispatch_stmt(s.get());
         if (!result) return result;
 
         // Check for break or return
@@ -5667,7 +6568,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             std::shared_ptr<class_definition> base_class_def;
 
             if (!base_class_var.is_null() && base_class_var.is_object()) {
-                // Found a script class - extract from object holder
+                // Found a class definition in __class_<name> - extract from object holder
+                // This could be either a C++ class or a script class
                 auto objHolder = base_class_var.get_object_holder();
                 if (objHolder && objHolder->type_id == class_definition_type_id_) {
                     base_class_def = std::static_pointer_cast<class_definition>(objHolder->data);
@@ -5681,11 +6583,6 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     if (cpp_class_def) {
                         // Found a C++ class!
                         base_class_def = cpp_class_def;
-
-                        // Set as C++ base class (for first base only, maintaining compatibility)
-                        if (parent_defs.empty()) {
-                            class_def->set_cpp_base_class(cpp_class_def);
-                        }
                     } else if (environment_->contains(base_name)) {
                         // Constructor exists but no class definition found
                         // This shouldn't happen with proper engine integration
@@ -5705,6 +6602,14 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
             if (base_class_def) {
                 parent_defs.push_back(base_class_def);
+
+                // Check if this is a C++ class (not a script_class_definition)
+                // C++ classes don't have script_class_definition type, so dynamic_pointer_cast fails
+                auto script_class = std::dynamic_pointer_cast<script_class_definition>(base_class_def);
+                if (!script_class && parent_defs.size() == 1) {
+                    // This is a C++ class and it's the first parent - set as cpp_base_class
+                    class_def->set_cpp_base_class(base_class_def);
+                }
             }
         }
 
@@ -5792,6 +6697,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     // For field declarations like "x = 0", we need to get the field name from the assignment
                     if (auto* ident_expr = dynamic_cast<identifier_expr*>(assign_expr->target.get())) {
                         field_name = ident_expr->name;
+                        field_id = ident_expr->symbol_id;  // FIX: Also update the ID to match the field name
                     }
                     // Store the RHS AST for later evaluation during instance construction
                     initializer_ast = assign_expr->value;
@@ -5805,7 +6711,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             if (var_decl->is_static) {
                 // Static fields must be evaluated immediately (they're shared across all instances)
                 if (initializer_ast) {
-                    JAISCRIPT_TRY(initializer_ast->accept(this));
+                    JAISCRIPT_TRY(dispatch_expr(initializer_ast.get()));
                     default_val = pop_value();
 
                     // Ensure the default value has an engine reference
@@ -6033,18 +6939,81 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             
             // Get all constructor ASTs
             const auto& ctor_asts = class_def->get_constructor_asts();
-            
-            // Find constructor with matching parameter count
-            std::shared_ptr<function_decl> matching_ctor;
+
+            // Find constructor with matching parameter count AND types
+            // Priority: 1) exact type match, 2) numeric conversion match, 3) untyped fallback
+            std::shared_ptr<function_decl> exact_match_ctor;
+            std::shared_ptr<function_decl> convertible_match_ctor;
+            std::shared_ptr<function_decl> arity_match_ctor;  // Fallback for untyped params
+
             for (const auto& ctor_ast : ctor_asts) {
-                if (ctor_ast->parameters.size() == args.size()) {
-                    matching_ctor = ctor_ast;
-                    break;
+                if (ctor_ast->parameters.size() != args.size()) {
+                    continue;
+                }
+
+                // Remember first arity match as fallback
+                if (!arity_match_ctor) {
+                    arity_match_ctor = ctor_ast;
+                }
+
+                // Check if all parameter types match exactly
+                bool exact_match = true;
+                bool convertible_match = true;
+                for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
+                    const auto& param = ctor_ast->parameters[i];
+                    if (param.type && !param.type->type_name.empty()) {
+                        // Parameter has explicit type - check if arg is compatible
+                        auto arg_type = args[i].type();
+                        if (arg_type == script_value_type::jai_object_type) {
+                            // For objects, check class name
+                            auto instance = const_cast<script_value&>(args[i]).get_class_instance();
+                            if (instance) {
+                                if (instance->get_class_name() != param.type->type_name) {
+                                    exact_match = false;
+                                    convertible_match = false;
+                                }
+                            } else {
+                                exact_match = false;
+                                convertible_match = false;
+                            }
+                        } else {
+                            // For primitives, check base type
+                            if (arg_type != param.type->base_type) {
+                                exact_match = false;
+                                // Check if numeric conversion is allowed
+                                bool is_numeric_conversion =
+                                    (arg_type == script_value_type::jai_int_type &&
+                                     param.type->base_type == script_value_type::jai_float_type) ||
+                                    (arg_type == script_value_type::jai_float_type &&
+                                     param.type->base_type == script_value_type::jai_int_type);
+                                if (!is_numeric_conversion) {
+                                    convertible_match = false;
+                                }
+                            }
+                        }
+                    }
+                    // If param has no type, it accepts anything
+                }
+
+                if (exact_match && !exact_match_ctor) {
+                    exact_match_ctor = ctor_ast;
+                }
+                if (convertible_match && !convertible_match_ctor) {
+                    convertible_match_ctor = ctor_ast;
                 }
             }
-            
+
+            // Select best matching constructor: exact > convertible > arity fallback
+            std::shared_ptr<function_decl> matching_ctor = exact_match_ctor;
             if (!matching_ctor) {
-                throw runtime_error("No constructor found for " + class_name + 
+                matching_ctor = convertible_match_ctor;
+            }
+            if (!matching_ctor) {
+                matching_ctor = arity_match_ctor;
+            }
+
+            if (!matching_ctor) {
+                throw runtime_error("No constructor found for " + class_name +
                                   " with " + std::to_string(args.size()) + " arguments");
             }
             
@@ -6072,6 +7041,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 init_env->define(matching_ctor->parameters[i].name, args[i]);
             }
 
+            // Track whether the iterative multi-level loop handled parent field initializers
+            bool handled_parent_init = false;
+
             // Process constructor initializers (: super(args), : this(args))
             for (const auto& initializer : matching_ctor->initializers) {
                 if (initializer.target == "super") {
@@ -6086,7 +7058,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                         self->environment_ = init_env;
 
                         for (const auto& arg_expr : initializer.arguments) {
-                            auto result = arg_expr->accept(self.get());
+                            auto result = self->dispatch_expr(arg_expr.get());
                             if (!result) {
                                 // Restore environment before throwing
                                 self->environment_ = old_env;
@@ -6115,15 +7087,142 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                 }
 
                                 if (parent_ctor) {
-                                    // Execute parent constructor with method environment
-                                    // Use definition_env as parent
-                                    scoped_method_environment parent_method_env(
-                                        self.get(),
-                                        definition_env,
-                                        this_value
-                                    );
+                                    // === Multi-level inheritance support ===
+                                    // We need to process the entire super() chain to find and call the C++ base constructor.
+                                    // Constructor bodies are executed AFTER field initializers by the outer flow.
+                                    //
+                                    // Algorithm (iterative):
+                                    // 1. Walk up super() calls, evaluating arguments at each level
+                                    // 2. When we hit a C++ class, call its constructor to get _cpp_object
+                                    // 3. Store constructor info for later body execution
+                                    // 4. Execute bodies from root to leaf, interleaved with field initializers
 
-                                    self->execute_method_ast(parent_ctor, parent_method_env.get(), init_args);
+                                    struct CtorChainEntry {
+                                        std::shared_ptr<script_class_definition> script_class;
+                                        std::shared_ptr<function_decl> ctor;
+                                        std::vector<script_value> args;
+                                    };
+
+                                    std::vector<CtorChainEntry> ctor_chain;
+                                    ctor_chain.push_back({parent_script_class, parent_ctor, init_args});
+
+                                    // Walk up the inheritance chain, collecting constructors and evaluating args
+                                    size_t chain_idx = 0;
+                                    while (chain_idx < ctor_chain.size()) {
+                                        auto& entry = ctor_chain[chain_idx];
+
+                                        // Create environment for this level's argument evaluation
+                                        auto level_env = std::make_shared<environment>(definition_env, self->string_symbolizer_);
+                                        level_env->define("this", this_value);
+                                        for (size_t pi = 0; pi < entry.ctor->parameters.size() && pi < entry.args.size(); ++pi) {
+                                            level_env->define(entry.ctor->parameters[pi].name, entry.args[pi]);
+                                        }
+
+                                        // Look for super() in this constructor's initializers
+                                        for (const auto& init : entry.ctor->initializers) {
+                                            if (init.target == "super") {
+                                                auto ancestor = entry.script_class->get_parent();
+                                                if (ancestor) {
+                                                    // Evaluate super() arguments in this level's environment
+                                                    std::vector<script_value> ancestor_args;
+                                                    auto old_env = self->environment_;
+                                                    self->environment_ = level_env;
+                                                    for (const auto& arg_expr : init.arguments) {
+                                                        auto r = self->dispatch_expr(arg_expr.get());
+                                                        if (!r) {
+                                                            self->environment_ = old_env;
+                                                            throw runtime_error("Failed to evaluate super() argument at inheritance level " + std::to_string(chain_idx));
+                                                        }
+                                                        ancestor_args.push_back(self->pop_value());
+                                                    }
+                                                    self->environment_ = old_env;
+
+                                                    auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor);
+                                                    if (ancestor_script) {
+                                                        // Ancestor is a script class - find matching constructor and add to chain
+                                                        const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
+                                                        std::shared_ptr<function_decl> ancestor_ctor;
+                                                        for (const auto& ac : ancestor_ctors) {
+                                                            if (ac->parameters.size() == ancestor_args.size()) {
+                                                                ancestor_ctor = ac;
+                                                                break;
+                                                            }
+                                                        }
+                                                        if (ancestor_ctor) {
+                                                            ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
+                                                        } else if (!ancestor_ctors.empty()) {
+                                                            throw runtime_error("No matching constructor for ancestor class " + ancestor->get_name());
+                                                        }
+                                                    } else {
+                                                        // Ancestor is a C++ class - call its constructor NOW
+                                                        auto cpp_name = ancestor->get_name();
+                                                        auto cpp_ctor_result = self->environment_->get(cpp_name);
+                                                        if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
+                                                            auto cpp_result = cpp_ctor_result.value().as_function()(ancestor_args);
+                                                            if (!cpp_result) {
+                                                                throw runtime_error("Failed to call C++ ancestor constructor: " + cpp_name);
+                                                            }
+                                                            script_value cpp_obj = std::move(cpp_result.value());
+
+                                                            // Copy _cpp_object from C++ instance to our instance
+                                                            if (cpp_obj.is_object()) {
+                                                                auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
+                                                                if (cpp_instance) {
+                                                                    uint64_t src_id = cpp_instance->get_cpp_object_field_id();
+                                                                    uint64_t dst_id = instance->get_cpp_object_field_id();
+                                                                    if (cpp_instance->has_field(src_id)) {
+                                                                        instance->set_field(dst_id, cpp_instance->get_field(src_id));
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                break; // Only one super() per constructor
+                                            }
+                                        }
+                                        chain_idx++;
+                                    }
+
+                                    // Execute field initializers and constructor bodies from root to leaf
+                                    // This ensures proper initialization order:
+                                    // 1. Grandparent field defaults, then grandparent body
+                                    // 2. Parent field defaults, then parent body
+                                    // 3. (Current class handled by outer code after this block)
+                                    for (auto it = ctor_chain.rbegin(); it != ctor_chain.rend(); ++it) {
+                                        // Create init environment for field initializers
+                                        auto level_init_env = std::make_shared<environment>(definition_env, self->string_symbolizer_);
+                                        level_init_env->define("this", this_value);
+                                        for (size_t pi = 0; pi < it->ctor->parameters.size() && pi < it->args.size(); ++pi) {
+                                            level_init_env->define(it->ctor->parameters[pi].name, it->args[pi]);
+                                        }
+
+                                        // Evaluate THIS class's field initializers only (not parents - they're handled by their own iteration)
+                                        const auto& field_initializers = it->script_class->get_field_initializer_asts();
+                                        auto old_env = self->environment_;
+                                        self->environment_ = level_init_env;
+                                        for (const auto& [field_name, initializer_ast] : field_initializers) {
+                                            if (initializer_ast) {
+                                                auto r = self->dispatch_expr(initializer_ast.get());
+                                                if (r) {
+                                                    script_value field_value = self->pop_value();
+                                                    uint64_t field_name_id = self->string_symbolizer_->intern(field_name);
+                                                    instance->set_field(field_name_id, std::move(field_value));
+                                                }
+                                            }
+                                        }
+                                        self->environment_ = old_env;
+
+                                        // Execute constructor body
+                                        scoped_method_environment method_env(
+                                            self.get(),
+                                            definition_env,
+                                            this_value
+                                        );
+                                        self->execute_method_ast(it->ctor, method_env.get(), it->args);
+                                    }
+                                    // Mark that we handled all parent field initializers
+                                    handled_parent_init = true;
                                 } else if (parent_ctor_asts.empty() && init_args.empty()) {
                                     // Parent has no explicit constructors (only default constructor)
                                     // and super() called with no arguments - this is valid, nothing to do
@@ -6151,9 +7250,15 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                         // Extract the C++ object and store it in _cpp_object field
                                         if (cpp_obj.is_object()) {
                                             auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
-                                            if (cpp_instance && cpp_instance->has_field(cpp_object_field_id)) {
-                                                // Copy _cpp_object from parent to derived instance
-                                                instance->set_field(cpp_object_field_id, cpp_instance->get_field(cpp_object_field_id));
+                                            if (cpp_instance) {
+                                                // Use each instance's own field ID getter to ensure consistency
+                                                uint64_t src_field_id = cpp_instance->get_cpp_object_field_id();
+                                                uint64_t dst_field_id = instance->get_cpp_object_field_id();
+                                                if (cpp_instance->has_field(src_field_id)) {
+                                                    // Copy _cpp_object from parent to derived instance
+                                                    auto src_value = cpp_instance->get_field(src_field_id);
+                                                    instance->set_field(dst_field_id, src_value);
+                                                }
                                             }
                                         }
                                     }
@@ -6176,7 +7281,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     self->environment_ = init_env;
 
                     for (const auto& arg_expr : initializer.arguments) {
-                        auto result = arg_expr->accept(self.get());
+                        auto result = self->dispatch_expr(arg_expr.get());
                         if (!result) {
                             // Restore environment before throwing
                             self->environment_ = old_env;
@@ -6217,7 +7322,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
             // Evaluate field initializers BEFORE executing the constructor body
             // Field initializers can access constructor parameters via init_env
-            self->evaluate_field_initializers(instance, class_def, init_env);
+            // If the iterative multi-level loop already handled parent field initializers,
+            // skip recursive parent processing to avoid re-evaluating defaults
+            self->evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
 
             // Execute the matching constructor with method environment
             // Create a method environment that provides implicit 'this' field access
@@ -6313,7 +7420,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             if (initializer_ast) {
                 // Evaluate the initializer AST in the current (definition) environment
                 // to get the actual default value
-                JAISCRIPT_TRY(initializer_ast->accept(this));
+                JAISCRIPT_TRY(dispatch_expr(initializer_ast.get()));
                 evaluated_value = pop_value();
             }
 
@@ -6549,7 +7656,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
 
             // Evaluate variable initializer and store value
             if (var_decl->initializer) {
-                JAISCRIPT_TRY(var_decl->initializer->accept(this));
+                JAISCRIPT_TRY(dispatch_expr(var_decl->initializer.get()));
                 script_value value = pop_value();
                 ns_data->variables[var_decl->name_id] = value;
             } else {
@@ -6565,7 +7672,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
 
             // Process class declaration normally to register it globally
             // Then also store reference in namespace
-            JAISCRIPT_TRY(class_decl_ptr->accept(this));
+            JAISCRIPT_TRY(dispatch_decl(class_decl_ptr));
 
             // Look up the registered class definition using __class_ prefix
             std::string class_var_name = "__class_" + class_decl_ptr->name;
@@ -6582,7 +7689,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
 
         } else {
             // Other declaration types (expressions, includes, etc.) - execute normally
-            JAISCRIPT_TRY(member_decl->accept(this));
+            JAISCRIPT_TRY(dispatch_decl(member_decl.get()));
         }
     }
 
@@ -6592,7 +7699,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
 checked_result<void> interpreter::visit_expression_decl(expression_decl* decl) {
     // Evaluate the expression and leave the result on the stack
     // This allows top-level expressions to return values
-    return decl->expression->accept(this);
+    return dispatch_expr(decl->expression.get());
 }
 
 checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
@@ -6607,7 +7714,7 @@ checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
     std::string path;
     if (decl->path_expr) {
         // Evaluate the expression to get the path
-        JAISCRIPT_TRY(decl->path_expr->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(decl->path_expr.get()));
         script_value path_value = pop_value();
 
         // Convert to string
@@ -6656,7 +7763,7 @@ checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     std::string path;
     if (decl->path_expr) {
         // Evaluate the expression to get the path
-        JAISCRIPT_TRY(decl->path_expr->accept(this));
+        JAISCRIPT_TRY(dispatch_expr(decl->path_expr.get()));
         script_value path_value = pop_value();
 
         // Convert to string
@@ -6699,16 +7806,21 @@ script_value interpreter::execute_method_ast(std::shared_ptr<function_decl> ast,
 }
 
 // Evaluate field initializers for a script class instance at construction time
+// If skip_parent_recursion is true, only evaluate THIS class's field initializers (parents already handled)
 void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                              std::shared_ptr<script_class_definition> class_def,
-                                             std::shared_ptr<environment> init_env) {
+                                             std::shared_ptr<environment> init_env,
+                                             bool skip_parent_recursion) {
     // First, evaluate parent class field initializers (if any)
     // Support multiple inheritance by iterating over all parent classes
-    for (const auto& parent : class_def->get_parent_classes()) {
-        auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent);
-        if (parent_script_class) {
-            // Recursively evaluate parent field initializers
-            evaluate_field_initializers(instance, parent_script_class, init_env);
+    // Skip this if parents were already processed (e.g., by multi-level super() chain handling)
+    if (!skip_parent_recursion) {
+        for (const auto& parent : class_def->get_parent_classes()) {
+            auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent);
+            if (parent_script_class) {
+                // Recursively evaluate parent field initializers
+                evaluate_field_initializers(instance, parent_script_class, init_env, false);
+            }
         }
     }
 
@@ -6722,7 +7834,7 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
     for (const auto& [field_name, initializer_ast] : field_initializers) {
         if (initializer_ast) {
             // Evaluate the initializer expression
-            auto result = initializer_ast->accept(this);
+            auto result = dispatch_expr(initializer_ast.get());
             if (!result) {
                 // Restore environment before throwing
                 environment_ = old_env;
@@ -6813,8 +7925,9 @@ script_value interpreter::call_function(const script_defined_function& function,
     if (function.closure_env) {
         // Check if the closure is a method_environment
         if (auto method_env = std::dynamic_pointer_cast<method_environment>(function.closure_env)) {
+            auto this_obj = method_env->get_this_object();
             // Create a new method_environment that preserves implicit 'this' lookups
-            environment_ = get_pooled_method_environment(method_env->get_parent(), method_env->get_this_object());
+            environment_ = get_pooled_method_environment(method_env->get_parent(), this_obj);
         } else {
             // Regular closure - create new environment for parameters
             environment_ = get_pooled_environment(function.closure_env);
@@ -6883,7 +7996,9 @@ script_value interpreter::call_function(const script_defined_function& function,
                     throw runtime_error("Cannot pass non-lvalue to reference parameter");
                 }
             } else {
-                // Non-reference parameter
+                // Non-reference parameter - try to convert the argument to the parameter type if needed
+                script_value converted_arg = try_convert_for_parameter(arg, param.type);
+
                 // Decide between value semantics (clone) or reference semantics (share)
                 // Use reference semantics (no clone) if:
                 // 1. Parameter type is declared as shared_ptr<T>, OR
@@ -6898,24 +8013,25 @@ script_value interpreter::call_function(const script_defined_function& function,
                 }
 
                 // Check if argument is shared_ptr<T> (preserve reference semantics)
-                if (arg.get_type_info() && arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+                if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
                     should_share = true;
                 }
 
                 if (param.symbol_id != UINT64_MAX) {
                     if (should_share) {
                         // Shallow copy - share ownership (reference semantics)
-                        environment_->define(param.symbol_id, arg);
+                        environment_->define(param.symbol_id, converted_arg);
                     } else {
                         // Deep copy - value semantics (C++-like default)
-                        environment_->define(param.symbol_id, arg.clone());
+                        auto cloned = converted_arg.clone();
+                        environment_->define(param.symbol_id, std::move(cloned));
                     }
                 } else {
                     // Fallback to parameter name if symbol_id not set
                     if (should_share) {
-                        environment_->define(param.name, arg);
+                        environment_->define(param.name, converted_arg);
                     } else {
-                        environment_->define(param.name, arg.clone());
+                        environment_->define(param.name, converted_arg.clone());
                     }
                 }
             }
@@ -6924,14 +8040,22 @@ script_value interpreter::call_function(const script_defined_function& function,
         // Execute function body without creating another environment
         // (since we already created one for the function call)
         for (const auto& decl : function.body->declarations) {
-            auto result = decl->accept(this);
+            auto result = dispatch_decl(decl.get());
 
-            // Check for error codes
-            if (!result) {
+            // Check for error codes - propagate errors as runtime exceptions
+            if (!result && result.error() != std::error_code()) {
+                // Restore environment before throwing
                 environment_ = previousEnv;
                 hasReturnValue_ = previousHasReturn;
                 returnValue_ = previousReturn;
-                return make_value();  // Return null on error
+
+                // Build a meaningful error message
+                std::string error_msg = result.message();
+                if (error_msg.empty()) {
+                    error_msg = "Error in function body: " + result.error().message();
+                }
+
+                throw runtime_error(error_msg);
             }
 
             // Check if we hit a return statement and break early
@@ -6946,13 +8070,33 @@ script_value interpreter::call_function(const script_defined_function& function,
 
         if (hasReturnValue_) {
             result = std::move(returnValue_.value());
+
+            // Apply return type conversion if needed
+            // Skip conversion for void, auto, or any type (implicit return type accepts any value)
+            if (function.return_type && !function.return_type->type_name.empty() &&
+                function.return_type->type_name != "void" &&
+                function.return_type->type_name != "auto" &&
+                function.return_type->base_type != script_value_type::jai_any_type) {
+                result = try_convert_for_parameter(result, function.return_type);
+            }
         } else {
             // Check if this is a constructor (method_environment with no explicit return)
             // Constructors implicitly return 'this'
+            // Note: The environment_ at this point is a pooled environment for parameters,
+            // so we need to check the PARENT which could be the method_environment
             auto function_env = environment_;
             if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
                 result = method_env->get_this_object();
                 is_constructor_with_implicit_return = true;
+            } else if (function_env->get_parent()) {
+                // Check parent - the closure_env passed to call_function might be a method_environment
+                if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env->get_parent())) {
+                    result = method_env->get_this_object();
+                    is_constructor_with_implicit_return = true;
+                } else {
+                    // Regular function with no return statement returns null
+                    result = make_value();
+                }
             } else {
                 // Regular function with no return statement returns null
                 result = make_value();
@@ -6966,6 +8110,11 @@ script_value interpreter::call_function(const script_defined_function& function,
         auto function_env = environment_;
         if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
             method_env->clear_this_reference();
+        } else if (function_env->get_parent()) {
+            // Also check parent for method_environment
+            if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env->get_parent())) {
+                method_env->clear_this_reference();
+            }
         }
 
         environment_ = previousEnv;
@@ -6999,12 +8148,344 @@ script_value interpreter::call_function(const script_defined_function& function,
 
 void interpreter::validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args) {
     if (params.size() != args.size()) {
-        throw runtime_error("Function expected " + std::to_string(params.size()) + 
+        throw runtime_error("Function expected " + std::to_string(params.size()) +
                          " arguments but got " + std::to_string(args.size()));
     }
-    
-    // TODO: Add type checking for parameters
-    // For now, we'll just check argument count
+
+    // Type checking is now done in call_function via try_convert_for_parameter
+}
+
+bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr target_type) const {
+    if (!target_type) return true;  // No type specified = any type accepted
+
+    auto source_type = source.type();
+    auto target_base_type = target_type->base_type;
+
+    // Any type accepts anything
+    if (target_base_type == script_value_type::jai_any_type) return true;
+
+    // Exact match - no conversion needed
+    if (source_type == target_base_type) {
+        // For objects, also check the type name
+        if (source_type == script_value_type::jai_object_type) {
+            // First, try to get the type name from type_info
+            auto source_type_info = source.get_type_info();
+            if (source_type_info && !source_type_info->type_name.empty() &&
+                source_type_info->type_name == target_type->type_name) {
+                return true;
+            }
+            // Also check the class_instance's class name (for script-defined classes)
+            // Use get_class_instance() which safely returns nullptr if not a class instance
+            auto instance = const_cast<script_value&>(source).get_class_instance();
+            if (instance && instance->get_class_name() == target_type->type_name) {
+                return true;
+            }
+            // Different object types - might still be convertible via constructor
+        } else {
+            return true;  // Non-object types match
+        }
+    }
+
+    // shared_ptr<T> handling - storage is object_holder but type_info marks as shared_ptr
+    auto source_type_info = source.get_type_info();
+    if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type) {
+        // shared_ptr<T> -> shared_ptr<T>
+        if (target_base_type == script_value_type::jai_shared_ptr_type) {
+            if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
+                return true;  // Inner types match
+            }
+            auto instance = const_cast<script_value&>(source).get_class_instance();
+            if (instance && instance->get_class_name() == target_type->type_name) {
+                return true;
+            }
+        }
+        // shared_ptr<T> -> T
+        if (target_base_type == script_value_type::jai_object_type) {
+            if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
+                return true;
+            }
+            auto instance = const_cast<script_value&>(source).get_class_instance();
+            if (instance && instance->get_class_name() == target_type->type_name) {
+                return true;
+            }
+        }
+    }
+
+    // For object target types, check if constructor conversion is available
+    if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty()) {
+        // Look up the class definition
+        auto eng = engine_ref_.lock();
+        if (eng) {
+            auto class_def = eng->get_class_definition(target_type->type_name);
+            if (class_def) {
+                // Check if there's a constructor that takes 1 argument
+                // For script classes, check constructor ASTs
+                auto script_class = std::dynamic_pointer_cast<script_class_definition>(class_def);
+                if (script_class) {
+                    const auto& ctor_asts = script_class->get_constructor_asts();
+                    for (const auto& ctor_ast : ctor_asts) {
+                        if (ctor_ast->parameters.size() == 1) {
+                            // Has a single-argument constructor - conversion might be possible
+                            // Further type checking could be done here if parameters have types
+                            return true;
+                        }
+                    }
+                }
+                // For C++ classes, the constructor would be in the environment
+                // Try looking it up
+                auto ctor_result = environment_->get(target_type->type_name);
+                if (ctor_result && ctor_result.value().is_function()) {
+                    return true;  // Constructor exists
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+script_value interpreter::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type) {
+    if (!target_type) {
+        return arg;  // No type specified = any type accepted
+    }
+
+    // Dereference if the argument is a reference to get the actual value type
+    const script_value& derefed_arg = arg.deref();
+    // Get source type - prefer storage_type for accuracy
+    auto source_type = derefed_arg.storage_type();
+    // If still showing as reference after deref, get the actual target and check its type
+    if (source_type == script_value_type::jai_reference_type) {
+        // The deref'd value is still showing as reference - manually get the target
+        auto ref_holder = derefed_arg.get_reference_holder();
+        if (ref_holder && ref_holder->target) {
+            source_type = ref_holder->target->storage_type();
+        }
+    }
+    auto target_base_type = target_type->base_type;
+
+    // Any type accepts anything - no conversion needed
+    if (target_base_type == script_value_type::jai_any_type) return arg;
+
+    // Exact match - no conversion needed
+    if (source_type == target_base_type) {
+        // For objects, also check the type name (with inheritance support)
+        if (source_type == script_value_type::jai_object_type) {
+            // First, try to get the type name from type_info
+            auto source_type_info = derefed_arg.get_type_info();
+            if (source_type_info && !source_type_info->type_name.empty() &&
+                source_type_info->type_name == target_type->type_name) {
+                return derefed_arg;  // Same object type - no conversion needed
+            }
+            // Also check the class_instance's class name (for script-defined classes)
+            // Use get_class_instance() which safely returns nullptr if not a class instance
+            auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
+            if (instance) {
+                if (instance->get_class_name() == target_type->type_name) {
+                    return arg;  // Same object type - no conversion needed
+                }
+                // Check inheritance - derived types are compatible with base types
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->is_subtype_of(target_type->type_name)) {
+                    return arg;  // Derived type - compatible without conversion
+                }
+            }
+            // Different object types - fall through to try constructor conversion
+        } else {
+            return arg;  // Non-object types match - no conversion needed
+        }
+    }
+
+    // Null can be assigned to object types without conversion
+    if (source_type == script_value_type::jai_null_type &&
+        target_base_type == script_value_type::jai_object_type) {
+        return arg;
+    }
+
+    // shared_ptr<T> handling
+    auto source_type_info = derefed_arg.get_type_info();
+    if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type) {
+        // shared_ptr<T> -> shared_ptr<T> - same shared_ptr type
+        if (target_base_type == script_value_type::jai_shared_ptr_type) {
+            // Check if inner types match
+            if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
+                return arg;  // shared_ptr<T> -> shared_ptr<T> with matching inner type
+            }
+            // Also check via class instance (with inheritance support)
+            auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
+            if (instance) {
+                if (instance->get_class_name() == target_type->type_name) {
+                    return arg;
+                }
+                // Check inheritance
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->is_subtype_of(target_type->type_name)) {
+                    return arg;  // Derived type compatible with base
+                }
+            }
+        }
+        // shared_ptr<T> -> T - unwrap to regular object
+        if (target_base_type == script_value_type::jai_object_type) {
+            // Check if the inner type matches the target type (with inheritance)
+            auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
+            if (instance) {
+                if (instance->get_class_name() == target_type->type_name) {
+                    return arg;  // shared_ptr<T> -> T is allowed (preserves reference semantics)
+                }
+                // Check inheritance
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->is_subtype_of(target_type->type_name)) {
+                    return arg;  // Derived type compatible with base
+                }
+            }
+            // Check type_info's inner type name
+            if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
+                return arg;
+            }
+        }
+    }
+
+    // For object target types, try constructor-based conversion
+    if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty()) {
+        const std::string& target_class_name = target_type->type_name;
+
+        // First, check if there's a constructor that directly accepts the source type
+        // This prevents chained conversions (A->B->C)
+        auto eng = engine_ref_.lock();
+        if (eng) {
+            auto class_def = eng->get_class_definition(target_class_name);
+            if (class_def) {
+                auto script_class = std::dynamic_pointer_cast<script_class_definition>(class_def);
+                if (script_class) {
+                    // Check constructor ASTs for one that accepts the source type
+                    const auto& ctor_asts = script_class->get_constructor_asts();
+                    bool has_matching_ctor = false;
+
+                    // Get source type info (name and class_def for inheritance)
+                    std::string source_type_name;
+                    std::shared_ptr<class_definition> source_class_def;
+                    if (source_type == script_value_type::jai_object_type) {
+                        auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
+                        if (instance) {
+                            source_type_name = instance->get_class_name();
+                            source_class_def = instance->get_class_definition();
+                        }
+                    }
+
+                    for (const auto& ctor_ast : ctor_asts) {
+                        if (ctor_ast->parameters.size() != 1) continue;
+
+                        const auto& param = ctor_ast->parameters[0];
+                        if (!param.type || param.type->type_name.empty()) {
+                            // Untyped parameter - accepts anything
+                            has_matching_ctor = true;
+                            break;
+                        }
+
+                        // Check if parameter type matches source type (with inheritance)
+                        if (source_type == script_value_type::jai_object_type) {
+                            if (param.type->type_name == source_type_name) {
+                                has_matching_ctor = true;
+                                break;
+                            }
+                            // Check inheritance - derived types are accepted
+                            if (source_class_def && source_class_def->is_subtype_of(param.type->type_name)) {
+                                has_matching_ctor = true;
+                                break;
+                            }
+                        } else {
+                            // For primitives, check base_type match or numeric conversion
+                            if (param.type->base_type == source_type ||
+                                (source_type == script_value_type::jai_int_type &&
+                                 param.type->base_type == script_value_type::jai_float_type) ||
+                                (source_type == script_value_type::jai_float_type &&
+                                 param.type->base_type == script_value_type::jai_int_type)) {
+                                has_matching_ctor = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!has_matching_ctor) {
+                        // No constructor directly accepts the source type - don't allow chained conversion
+                        throw runtime_error("Cannot convert " + get_type_name(source_type) +
+                                          " to " + target_class_name +
+                                          " (no suitable single-argument constructor)");
+                    }
+                }
+            }
+        }
+
+        // Try to find and call the constructor with the source value
+        auto ctor_result = environment_->get(target_class_name);
+        if (ctor_result && ctor_result.value().is_function()) {
+            const script_function& ctor = ctor_result.value().as_function();
+
+            // Call constructor with the source value as argument
+            std::vector<script_value> ctor_args;
+            ctor_args.push_back(arg);
+
+            auto result = ctor(ctor_args);
+            if (result.has_value()) {
+                return std::move(result.value());
+            }
+            // Constructor returned invalid result - fall through to error
+        }
+
+        // No suitable constructor found
+        throw runtime_error("Cannot convert " + get_type_name(source_type) +
+                          " to " + target_class_name +
+                          " (no suitable single-argument constructor)");
+    }
+
+    // Built-in type conversions
+    // Int <-> Float implicit conversions
+    if (source_type == script_value_type::jai_int_type &&
+        target_base_type == script_value_type::jai_float_type) {
+        return script_value(static_cast<script_float>(derefed_arg.as_int()), engine_ref_);
+    }
+    if (source_type == script_value_type::jai_float_type &&
+        target_base_type == script_value_type::jai_int_type) {
+        return script_value(static_cast<script_int>(derefed_arg.as_float()), engine_ref_);
+    }
+
+    // Object -> primitive via to_X() methods
+    if (source_type == script_value_type::jai_object_type) {
+        std::string method_name;
+        if (target_base_type == script_value_type::jai_int_type) {
+            method_name = "to_int";
+        } else if (target_base_type == script_value_type::jai_float_type) {
+            method_name = "to_float";
+        } else if (target_base_type == script_value_type::jai_string_type) {
+            method_name = "to_string";
+        } else if (target_base_type == script_value_type::jai_bool_type) {
+            method_name = "to_bool";
+        } else if (target_base_type == script_value_type::jai_char_type) {
+            method_name = "to_char";
+        }
+
+        if (!method_name.empty()) {
+            // Use get_class_instance() which safely returns nullptr if not a class instance
+            auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
+            if (instance) {
+                auto method_id = string_symbolizer_->intern(method_name);
+                auto method_val = instance->get_method(method_id, false);
+                if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
+                    // Create a bound method with the object as 'this'
+                    script_value bound = create_bound_method(arg, method_val);
+                    const script_function& method = bound.as_function();
+                    std::vector<script_value> no_args;
+                    auto result = method(no_args);
+                    if (result.has_value()) {
+                        return std::move(result.value());
+                    }
+                }
+            }
+        }
+    }
+
+    // Type mismatch - throw error
+    throw runtime_error("Type mismatch: expected " + target_type->type_name +
+                       " but got " + get_type_name(source_type));
 }
 
 script_value interpreter::make_function(std::shared_ptr<script_defined_function> func) {
@@ -7098,6 +8579,110 @@ void interpreter::reset_environment_pool() {
     for (auto& env : method_environment_pool_) {
         // Reset the method environment (clear values and this_object to release references)
         env->reset(nullptr, make_value());
+    }
+}
+
+// ============================================================
+// SWITCH-BASED DISPATCH (faster than virtual calls)
+// These functions use a switch on node_type enum instead of
+// virtual method dispatch, eliminating vtable lookup overhead.
+// ============================================================
+
+checked_result<void> interpreter::dispatch_expr(expression* expr) {
+    switch (expr->get_type()) {
+        case node_type::literal_expr:
+            return visit_literal_expr(static_cast<literal_expr*>(expr));
+        case node_type::identifier_expr:
+            return visit_identifier_expr(static_cast<identifier_expr*>(expr));
+        case node_type::binary_expr:
+            return visit_binary_expr(static_cast<binary_expr*>(expr));
+        case node_type::unary_expr:
+            return visit_unary_expr(static_cast<unary_expr*>(expr));
+        case node_type::assignment_expr:
+            return visit_assignment_expr(static_cast<assignment_expr*>(expr));
+        case node_type::call_expr:
+            return visit_call_expr(static_cast<call_expr*>(expr));
+        case node_type::member_expr:
+            return visit_member_expr(static_cast<member_expr*>(expr));
+        case node_type::lambda_expr:
+            return visit_lambda_expr(static_cast<lambda_expr*>(expr));
+        case node_type::new_expr:
+            return visit_new_expr(static_cast<new_expr*>(expr));
+        case node_type::ternary_expr:
+            return visit_ternary_expr(static_cast<ternary_expr*>(expr));
+        case node_type::array_literal_expr:
+            return visit_array_literal_expr(static_cast<array_literal_expr*>(expr));
+        case node_type::map_literal_expr:
+            return visit_map_literal_expr(static_cast<map_literal_expr*>(expr));
+        case node_type::this_expr:
+            return visit_this_expr(static_cast<this_expr*>(expr));
+        case node_type::super_expr:
+            return visit_super_expr(static_cast<super_expr*>(expr));
+        case node_type::throw_expr:
+            return visit_throw_expr(static_cast<throw_expr*>(expr));
+        default:
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                "Unknown expression type in dispatch_expr");
+    }
+}
+
+checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
+    switch (stmt->get_type()) {
+        case node_type::expression_stmt:
+            return visit_expression_stmt(static_cast<expression_stmt*>(stmt));
+        case node_type::block_stmt:
+            return visit_block_stmt(static_cast<block_stmt*>(stmt));
+        case node_type::if_stmt:
+            return visit_if_stmt(static_cast<if_stmt*>(stmt));
+        case node_type::while_stmt:
+            return visit_while_stmt(static_cast<while_stmt*>(stmt));
+        case node_type::for_stmt:
+            return visit_for_stmt(static_cast<for_stmt*>(stmt));
+        case node_type::range_for_stmt:
+            return visit_range_for_stmt(static_cast<range_for_stmt*>(stmt));
+        case node_type::return_stmt:
+            return visit_return_stmt(static_cast<return_stmt*>(stmt));
+        case node_type::break_stmt:
+            return visit_break_stmt(static_cast<break_stmt*>(stmt));
+        case node_type::continue_stmt:
+            return visit_continue_stmt(static_cast<continue_stmt*>(stmt));
+        case node_type::try_stmt:
+            return visit_try_stmt(static_cast<try_stmt*>(stmt));
+        case node_type::switch_stmt:
+            return visit_switch_stmt(static_cast<switch_stmt*>(stmt));
+        case node_type::case_stmt:
+            return visit_case_stmt(static_cast<case_stmt*>(stmt));
+        case node_type::default_stmt:
+            return visit_default_stmt(static_cast<default_stmt*>(stmt));
+        case node_type::fallthrough_stmt:
+            return visit_fallthrough_stmt(static_cast<fallthrough_stmt*>(stmt));
+        default:
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                "Unknown statement type in dispatch_stmt");
+    }
+}
+
+checked_result<void> interpreter::dispatch_decl(declaration* decl) {
+    switch (decl->get_type()) {
+        case node_type::variable_decl:
+            return visit_variable_decl(static_cast<variable_decl*>(decl));
+        case node_type::function_decl:
+            return visit_function_decl(static_cast<function_decl*>(decl));
+        case node_type::class_decl:
+            return visit_class_decl(static_cast<class_decl*>(decl));
+        case node_type::namespace_decl:
+            return visit_namespace_decl(static_cast<namespace_decl*>(decl));
+        case node_type::expression_decl:
+            return visit_expression_decl(static_cast<expression_decl*>(decl));
+        case node_type::include_decl:
+            return visit_include_decl(static_cast<include_decl*>(decl));
+        case node_type::import_decl:
+            return visit_import_decl(static_cast<import_decl*>(decl));
+        case node_type::statement_decl:
+            return dispatch_stmt(static_cast<statement_decl*>(decl)->statement.get());
+        default:
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                "Unknown declaration type in dispatch_decl");
     }
 }
 

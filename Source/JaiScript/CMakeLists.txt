@@ -79,6 +79,13 @@ if(MSVC)
     target_compile_options(test_runner PRIVATE /MT$<$<CONFIG:Debug>:d>)
 endif()
 
+add_executable(test_string_ctor ${CMAKE_SOURCE_DIR}/../../test_string_ctor.cpp)
+target_link_libraries(test_string_ctor PRIVATE jaiscript)
+target_include_directories(test_string_ctor PRIVATE ${CMAKE_SOURCE_DIR}/include)
+if(MSVC)
+    target_compile_options(test_string_ctor PRIVATE /MT$<$<CONFIG:Debug>:d>)
+endif()
+
 # Tests (Foundry test suite)
 if(JAISCRIPT_BUILD_TESTS)
     add_subdirectory(source/tests)

@@ -460,7 +460,8 @@ std::string script_value::to_string() const {
 }
 
 const script_value& script_value::deref() const {
-    if (type() == script_value_type::jai_reference_type) {
+    // Use storage_type() not type() - references may have type_info with different base_type
+    if (storage_type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference");
@@ -468,9 +469,8 @@ const script_value& script_value::deref() const {
         if (refHolder->sourceEnv.expired()) {
             throw runtime_error("Reference target environment has been destroyed");
         }
-        // Don't recursively deref - just return the target
-        // This prevents infinite recursion and matches C++ reference semantics
-        return *refHolder->target;
+        // Recursively deref to handle chained references
+        return refHolder->target->deref();
     }
     // For C++ references, we don't deref here - they need special handling
     // The interpreter will handle them specially
@@ -478,7 +478,8 @@ const script_value& script_value::deref() const {
 }
 
 script_value& script_value::deref() {
-    if (type() == script_value_type::jai_reference_type) {
+    // Use storage_type() not type() - references may have type_info with different base_type
+    if (storage_type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference");
@@ -486,9 +487,8 @@ script_value& script_value::deref() {
         if (refHolder->sourceEnv.expired()) {
             throw runtime_error("Reference target environment has been destroyed");
         }
-        // Don't recursively deref - just return the target
-        // This prevents infinite recursion and matches C++ reference semantics
-        return *refHolder->target;
+        // Recursively deref to handle chained references
+        return refHolder->target->deref();
     }
     return *this;
 }

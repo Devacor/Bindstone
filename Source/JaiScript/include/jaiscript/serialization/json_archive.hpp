@@ -237,6 +237,11 @@ public:
                     if (instance) {
                         auto class_def = instance->get_class_definition();
 
+                        // For script classes, type_info->type_name may be "any" - use the actual class name
+                        if (class_def) {
+                            type_name = class_def->get_name();
+                        }
+
                         oss_ << '{';
                         bool first = true;
 

@@ -1139,6 +1139,7 @@ public:
             // Register JSON stdlib functions (needed for from_json)
             stdlib::register_json_functions(*eng);
 
+            std::cerr << "[TEST] Step 1: Define class..." << std::endl;
             // Define a script class with post_deserialize
             eng->execute(R"(
                 class GameCharacter {
@@ -1164,6 +1165,18 @@ public:
                     }
                 }
             )");
+            std::cerr << "[TEST] Class defined OK" << std::endl;
+
+            std::cerr << "[TEST] Step 2: Test direct method call..." << std::endl;
+            try {
+                eng->execute(R"(
+                    var test_obj = GameCharacter();
+                    test_obj.post_deserialize(1);
+                )");
+                std::cerr << "[TEST] Direct method call OK" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "[TEST] Direct method call FAILED: " << e.what() << std::endl;
+            }
 
             // Create JSON representing v1 data (no max_health field)
             std::string json_v1 = R"({"_type_":"GameCharacter","_version_":1,"health":80})";
@@ -1171,12 +1184,45 @@ public:
             // Store JSON as a variable to avoid string escaping issues
             eng->add_global("json_str", script_value(json_v1, eng->weak_from_this()));
 
+            std::cerr << "[TEST] Step 3: Call from_json..." << std::endl;
             // Load from JSON and check migration
             eng->execute("var loaded = from_json(json_str);");  // Use explicit var declaration
+            std::cerr << "[TEST] from_json OK" << std::endl;
+
+            // Debug: Check what type loaded is
+            auto loaded_val = eng->get_variable("loaded");
+            std::cerr << "[TEST] loaded type = " << static_cast<int>(loaded_val.type()) << std::endl;
+            std::cerr << "[TEST] loaded storage type = " << static_cast<int>(loaded_val.storage_type()) << std::endl;
+            if (loaded_val.type() == script_value_type::jai_object_type || loaded_val.type() == script_value_type::jai_shared_ptr_type) {
+                auto obj_holder = loaded_val.get_object_holder();
+                if (obj_holder && obj_holder->data) {
+                    auto inst = std::static_pointer_cast<class_instance>(obj_holder->data);
+                    std::cerr << "[TEST] loaded is class instance: " << inst->get_class_name() << std::endl;
+                    std::cerr << "[TEST] Instance fields: ";
+                    for (const auto& [fid, fval] : inst->get_fields()) {
+                        std::cerr << fid << " ";
+                    }
+                    std::cerr << std::endl;
+                }
+            } else if (loaded_val.type() == script_value_type::jai_map_type) {
+                std::cerr << "[TEST] loaded is a MAP, not an object!" << std::endl;
+            }
+
+            std::cerr << "[TEST] Step 4: Access loaded.health..." << std::endl;
             auto health = eng->execute("loaded.health");
+            std::cerr << "[TEST] health = " << health.as<script_int>() << std::endl;
+
+            std::cerr << "[TEST] Step 5: Access loaded.max_health..." << std::endl;
             auto max_health = eng->execute("loaded.max_health");
+            std::cerr << "[TEST] max_health = " << max_health.as<script_int>() << std::endl;
+
+            std::cerr << "[TEST] Step 6: Access loaded.was_migrated..." << std::endl;
             auto was_migrated = eng->execute("loaded.was_migrated");
+            std::cerr << "[TEST] was_migrated = " << was_migrated.as<bool>() << std::endl;
+
+            std::cerr << "[TEST] Step 7: Access loaded.loaded_version..." << std::endl;
             auto loaded_version = eng->execute("loaded.loaded_version");
+            std::cerr << "[TEST] loaded_version = " << loaded_version.as<script_int>() << std::endl;
 
             check_eq(health.as<script_int>(), 80);
             check_eq(max_health.as<script_int>(), 80);  // Should be set to health value

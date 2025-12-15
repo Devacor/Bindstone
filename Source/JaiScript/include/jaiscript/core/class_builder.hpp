@@ -244,18 +244,57 @@ public:
     // Set the persistent type_info (used for bootstrap registration)
     void set_type_info(type_info_ptr type_info) { type_info_ = type_info; }
 
-    // Add a method to the class
+    // Add a method to the class (with arity-based overloading support for C++ methods)
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
         auto eng = engine_ref_.lock();
         if (!eng) return;
 
         uint64_t name_id = eng->symbolize(name);
-        methods_.insert_or_assign(name_id, script_value::make_function(func, engine_ref_));
 
-        // If arity is provided, store it for arity-aware method resolution
+        // If arity is provided, store in overloads map for arity-based dispatch
         if (arity != SIZE_MAX) {
-            // Track arity for C++ methods
+            // Store overload by arity
+            cpp_method_overloads_[name_id][arity] = func;
             method_arities_[name_id].push_back(arity);
+
+            // Create/update dispatcher that selects overload by argument count
+            // Use shared_from_this() to safely capture access to the overloads map
+            std::weak_ptr<class_definition> class_def_weak = shared_from_this();
+            auto method_name = name;  // Capture for error messages
+
+            methods_.insert_or_assign(name_id, script_value::make_function(
+                [class_def_weak, name_id, method_name](const std::vector<script_value>& args) -> checked_result<script_value> {
+                    auto class_def = class_def_weak.lock();
+                    if (!class_def) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::class_not_found),
+                                                            "Class definition no longer exists");
+                    }
+
+                    // For instance methods, first arg is 'this', so script-visible arg count is args.size() - 1
+                    // This matches the arity stored during registration (number of parameters excluding this)
+                    size_t script_arg_count = args.empty() ? 0 : args.size() - 1;
+
+                    auto& overloads_for_name = class_def->cpp_method_overloads_[name_id];
+                    auto it = overloads_for_name.find(script_arg_count);
+                    if (it != overloads_for_name.end()) {
+                        return it->second(args);
+                    }
+
+                    // Build error message with available arities
+                    std::string available;
+                    for (const auto& [ar, fn] : overloads_for_name) {
+                        if (!available.empty()) available += ", ";
+                        available += std::to_string(ar);
+                    }
+                    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                                                        "Method '" + method_name + "' expects " + available +
+                                                        " arguments, got " + std::to_string(script_arg_count));
+                },
+                engine_ref_
+            ));
+        } else {
+            // No arity tracking - just store directly (for lambdas with unknown arity)
+            methods_.insert_or_assign(name_id, script_value::make_function(func, engine_ref_));
         }
     }
     
@@ -430,6 +469,14 @@ public:
                 if (!result.is_invalid()) {
                     return result;
                 }
+            }
+        }
+
+        // Also check C++ base class for mixed inheritance (script inheriting from C++)
+        if (cpp_base_class_) {
+            auto result = cpp_base_class_->get_method(id, false);
+            if (!result.is_invalid()) {
+                return result;
             }
         }
 
@@ -671,8 +718,16 @@ public:
     }
     
     // Get first parent class for inheritance (for compatibility with single inheritance code)
+    // Also checks cpp_base_class_ for mixed inheritance (script inheriting from C++)
     std::shared_ptr<class_definition> get_parent() const {
-        return parent_classes_.empty() ? nullptr : parent_classes_[0];
+        if (!parent_classes_.empty()) {
+            return parent_classes_[0];
+        }
+        // Check for C++ base class (mixed inheritance)
+        if (cpp_base_class_) {
+            return cpp_base_class_;
+        }
+        return nullptr;
     }
 
     // Check if this class's inheritance hierarchy contains a diamond pattern
@@ -726,7 +781,27 @@ public:
     }
     
     std::shared_ptr<class_definition> get_cpp_base_class() const { return cpp_base_class_; }
-    
+
+    // Property setter ID cache for fast runtime lookup
+    // Register a field_id -> setter_id mapping (called during property registration)
+    void register_property_setter(uint64_t field_id, uint64_t setter_id) {
+        property_setter_ids_[field_id] = setter_id;
+    }
+
+    // Get the setter method ID for a field, or 0 if not found
+    uint64_t get_property_setter_id(uint64_t field_id) const {
+        auto it = property_setter_ids_.find(field_id);
+        if (it != property_setter_ids_.end()) {
+            return it->second;
+        }
+        return 0;
+    }
+
+    // Check if a field has a registered setter
+    bool has_property_setter(uint64_t field_id) const {
+        return property_setter_ids_.find(field_id) != property_setter_ids_.end();
+    }
+
     const std::string& get_name() const { return name_; }
     uint64_t get_type_id() const { return type_id_; }
 
@@ -756,7 +831,31 @@ public:
         }
         return properties;
     }
-    
+
+    // Check if this class is a subtype of the given base class name
+    // Walks up the inheritance hierarchy to find a match
+    // Used for type compatibility checking in function overload resolution
+    bool is_subtype_of(const std::string& base_class_name) const {
+        // Same class is trivially a subtype of itself
+        if (name_ == base_class_name) {
+            return true;
+        }
+
+        // Check all parent classes (handles multiple inheritance)
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->is_subtype_of(base_class_name)) {
+                return true;
+            }
+        }
+
+        // Also check C++ base class for mixed inheritance
+        if (cpp_base_class_ && cpp_base_class_->is_subtype_of(base_class_name)) {
+            return true;
+        }
+
+        return false;
+    }
+
     // Script class specific methods - removed old implementation
     // These are now handled by the simplified script_class_definition
     // which inherits from class_definition
@@ -1067,6 +1166,8 @@ private:
     std::weak_ptr<engine> engine_ref_;  // Engine reference for script_value creation
     std::unordered_map<uint64_t, script_value> methods_;
     std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
+    std::unordered_map<uint64_t, std::unordered_map<size_t, script_function>> cpp_method_overloads_;  // C++ method overloads by arity for dispatch
+    std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> method_overloads_;  // Track overloads by name_id for type-based resolution (for script methods)
     std::unordered_map<uint64_t, script_value> static_methods_;  // Static method storage
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> static_method_overloads_;  // Track overloads by name_id and arity (for script methods)
     std::unordered_map<uint64_t, std::vector<size_t>> static_method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
@@ -1085,7 +1186,11 @@ private:
     
     // Mixed inheritance support - for script classes inheriting from C++ classes
     std::shared_ptr<class_definition> cpp_base_class_;
-    
+
+    // Property setter ID cache - maps field_id to _set_<field> method ID
+    // Pre-computed during property registration for fast runtime lookup
+    std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
+
     // Copy function for deep copying objects
     copy_function copy_function_;
     
@@ -1519,8 +1624,10 @@ public:
         using args_tuple = typename traits::argument_types;
         
         // Check if the first parameter is a reference to T (the self parameter)
-        constexpr bool has_self_param = traits::arity > 0 && 
-            std::is_same_v<std::tuple_element_t<0, args_tuple>, T&>;
+        // Support both T& and const T& for lambda methods
+        constexpr bool has_self_param = traits::arity > 0 &&
+            (std::is_same_v<std::tuple_element_t<0, args_tuple>, T&> ||
+             std::is_same_v<std::tuple_element_t<0, args_tuple>, const T&>);
         
         auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
             if (has_self_param) {
@@ -1770,14 +1877,14 @@ private:
             if (args.size() < 2) {
                 throw runtime_error("Property setter requires 'this' and value");
             }
-            
+
             // Extract the class_instance from the first argument (this)
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            
+
             // Get the C++ object from the special field
             auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
+
             // Special case: if P is script_value, don't convert
             if constexpr (std::is_same_v<P, script_value>) {
                 // deref() returns *this if not a reference, so this handles both cases
@@ -1787,7 +1894,12 @@ private:
             }
             return script_value(std::monostate{}, engine_weak); // null
         });
-        
+
+        // Register field_id -> setter_id mapping for fast runtime lookup
+        uint64_t field_id = engine_.symbolize(name);
+        uint64_t setter_id = engine_.symbolize("_set_" + name);
+        class_def_->register_property_setter(field_id, setter_id);
+
         // Also add traditional getter/setter methods for compatibility
         std::string getterName = "get" + name;
         getterName[3] = std::toupper(getterName[3]); // Capitalize first letter
@@ -1960,6 +2072,11 @@ public:
                 return script_value(std::monostate{}, engine_weak);
             });
         }
+
+        // Register field_id -> setter_id mapping for fast runtime lookup
+        uint64_t field_id = engine_.symbolize(name);
+        uint64_t setter_id = engine_.symbolize("_set_" + name);
+        class_def_->register_property_setter(field_id, setter_id);
 
         // Also add traditional getter/setter methods for compatibility
         std::string getterName = "get" + name;
@@ -2869,6 +2986,18 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
                 }
             }
         }
+
+        // Also check C++ base class for mixed inheritance
+        auto cpp_base = def->get_cpp_base_class();
+        if (cpp_base) {
+            auto& cpp_defaults = cpp_base->get_all_field_defaults();
+            auto cpp_it = cpp_defaults.find(id);
+            if (cpp_it != cpp_defaults.end()) {
+                // Create the field with a clone of the C++ base class default value
+                auto [new_it, _] = fields_.emplace(id, cpp_it->second.clone());
+                return new_it->second;
+            }
+        }
     }
 
     if (throw_if_missing) {
@@ -2906,6 +3035,15 @@ inline bool class_instance::has_field(uint64_t id) const {
         const auto& all_fields = def->get_all_field_defaults();
         if (all_fields.find(id) != all_fields.end()) {
             return true;
+        }
+
+        // Also check C++ base class for mixed inheritance
+        auto cpp_base = def->get_cpp_base_class();
+        if (cpp_base) {
+            const auto& cpp_fields = cpp_base->get_all_field_defaults();
+            if (cpp_fields.find(id) != cpp_fields.end()) {
+                return true;
+            }
         }
     }
 

@@ -11,16 +11,16 @@ Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration:
 | Variable Operations            | 6         | 3 variable declarations + 1 addition     |
 | Function Calls                 | 4         | Function declaration + invocation        |
 | Array Push/Pop                 | 19        | 3 pushes + 1 pop + size check            |
-| Map Insert/Lookup              | 14        | 2 inserts + 1 lookup                     |
+| Map Insert/Lookup              | 13        | 2 inserts + 1 lookup                     |
 | Class Creation                 | 6         | Class definition + instantiation         |
 | Method Invocation              | 9         | Class with method + method call          |
-| For Loop (100 iterations)      | 67        | 0.67μs per iteration                     |
-| String Concatenation           | 8         | String operations                        |
-| Complex Expression             | 7         | Multi-operator expression evaluation     |
-| Class Inheritance              | 109       | Base + derived class + instantiation     |
-| Variable Lookup Heavy          | 15        | 10 variable lookups in expression        |
-| Hot Loop (1000 iterations)     | 715       | 0.72μs per iteration                     |
-| Simple Compound Assignment     | 55        | 100 compound assignments (+=, -=, etc.)  |
+| For Loop (100 iterations)      | 28        | 0.28μs per iteration                     |
+| String Concatenation           | 7         | String operations                        |
+| Complex Expression             | 6         | Multi-operator expression evaluation     |
+| Class Inheritance              | 113       | Base + derived class + instantiation     |
+| Variable Lookup Heavy          | 16        | 10 variable lookups in expression        |
+| Hot Loop (1000 iterations)     | 197       | 0.20μs per iteration                     |
+| Simple Compound Assignment     | 57        | 100 compound assignments (+=, -=, etc.)  |
 
 ## Performance Optimizations
 
@@ -178,14 +178,14 @@ This ensures type safety and prevents undefined behavior at the cost of some mic
 
 For `for (auto i = 0; i < 100; ++i) { sum += i; }`:
 
-**JaiScript** (~67μs for 100 iterations):
+**JaiScript** (~28μs for 100 iterations):
 ```
 Per iteration:
-1. condition (i < 100):     ~7ns (AST dispatch + unchecked is_truthy)
-2. body (sum += i):         ~30ns (2 ID lookups + optimized type checks + value construction)
-3. increment (++i):         ~13ns (ID lookup + optimized type check + value construction)
+1. condition (i < 100):     ~3ns (switch dispatch + unchecked is_truthy)
+2. body (sum += i):         ~15ns (2 ID lookups + optimized type checks + value construction)
+3. increment (++i):         ~7ns (ID lookup + optimized type check + value construction)
                            ------
-Total: ~50ns × 100 = 5.0μs + overhead = 67μs
+Total: ~25ns × 100 = 2.5μs + overhead = 28μs
 ```
 
 **Optimizations applied:**
@@ -234,16 +234,16 @@ Performance measurements running representative workloads:
 | **Variable Operations**          | 6μs            | Variable declarations + addition |
 | **Function Calls**               | 4μs            | Function declaration + invocation |
 | **Array Push/Pop**               | 19μs           | Array operations |
-| **Map Insert/Lookup**            | 14μs           | Hash map operations |
+| **Map Insert/Lookup**            | 13μs           | Hash map operations |
 | **Class Creation**               | 6μs            | Class instantiation |
 | **Method Invocation**            | 9μs            | Instance method call |
-| **For Loop (100 iterations)**    | 67μs           | ~670ns per iteration |
-| **Variable Lookup Heavy**        | 15μs           | Multiple variable accesses |
-| **Complex Expression**           | 7μs            | Multi-operator expression |
-| **Factorial(10) - Recursion**    | 11μs           | Recursive algorithm |
-| **Fibonacci(6) - Deep Recursion**  | 22μs          | Deep recursive calls |
-| **Binary Search**                | 21μs           | Search algorithm |
-| **Bubble Sort (10 elements)**    | 127μs          | Sorting algorithm |
+| **For Loop (100 iterations)**    | 28μs           | ~280ns per iteration |
+| **Variable Lookup Heavy**        | 16μs           | Multiple variable accesses |
+| **Complex Expression**           | 6μs            | Multi-operator expression |
+| **Factorial(10) - Recursion**    | 10μs           | Recursive algorithm |
+| **Fibonacci(6) - Deep Recursion**  | 18μs          | Deep recursive calls |
+| **Binary Search**                | 22μs           | Search algorithm |
+| **Bubble Sort (10 elements)**    | 122μs          | Sorting algorithm |
 
 ---
 
@@ -268,9 +268,9 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Benchmark | JaiScript | ChaiScript | ChaiScript Speedup |
 |-----------|-----------|------------|-------------------|
-| For Loop (100 iter) | 42μs | 12μs | 3.5x faster |
-| Variable Lookup Heavy | 15μs | 9μs | 1.7x faster |
-| Variable Operations | 6μs | 6μs | Equal |
+| For Loop (100 iter) | 28μs | 12μs | 2.3x faster |
+| Variable Lookup Heavy | 15μs | 10μs | 1.5x faster |
+| Variable Operations | 6μs | 5μs | ~Equal |
 | Integer Addition | 2μs | 2μs | Equal |
 | Float Multiplication | 2μs | 1μs | 2x faster |
 
@@ -278,16 +278,16 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Loop Pattern | JaiScript | Notes |
 |--------------|-----------|-------|
-| For Loop (literal condition) | 40μs | Fast path: `i < 100` |
-| For Loop (expression condition) | 60μs | No fast path: `i < n` |
-| Range-For (copy, 100 elem) | 33μs | `for(auto x : arr)` |
-| Range-For (reference, 100 elem) | 43μs | `for(auto& x : arr)` |
-| Hot Loop (10x100 nested) | 339μs | Nested iteration scaling |
+| For Loop (literal condition) | 28μs | Fast path: `i < 100` |
+| For Loop (expression condition) | 48μs | No fast path: `i < n` |
+| Range-For (copy, 100 elem) | 26μs | `for(auto x : arr)` |
+| Range-For (reference, 100 elem) | 35μs | `for(auto& x : arr)` |
+| Hot Loop (10x100 nested) | 197μs | Nested iteration scaling |
 
 **Loop Optimization Notes:**
-- Literal condition fast path saves ~33% (40μs vs 60μs)
+- Literal condition fast path saves ~42% (28μs vs 48μs)
 - Range-for with copy is faster than reference (no reference wrapper overhead)
-- JaiScript range-for is **4.9x faster** than ChaiScript's equivalent
+- JaiScript range-for is **6.2x faster** than ChaiScript's equivalent
 
 ### Value Type Comparison (script_value vs BoxedValue)
 
@@ -336,10 +336,10 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 **Excellent Performance:**
 - ✅ **Function/Method Calls**: 4-9μs - ID-based lookups + string interning eliminate overhead
-- ✅ **Recursion**: 11-22μs - Efficient stack frame management + cached symbol IDs + unchecked accessors
-- ✅ **Algorithms**: Fast execution for search (21μs), sort (127μs), and computational tasks
+- ✅ **Recursion**: 10-18μs - Efficient stack frame management + cached symbol IDs + unchecked accessors
+- ✅ **Algorithms**: Fast execution for search (22μs), sort (122μs), and computational tasks
 - ✅ **Class Operations**: 6μs instantiation - ID-based field/method access
-- ✅ **For Loops**: ~670ns per iteration - Competitive performance with native C++ structure
+- ✅ **For Loops**: ~280ns per iteration - Switch-based dispatch + native C++ structure
 
 **Adequate Performance:**
 - ⚪ **Simple Expressions**: 2-8μs - Good for event handlers and UI
@@ -357,16 +357,17 @@ JaiScript's for loop implementation:
 auto loop_env = get_pooled_environment(environment_);  // ONCE per loop
 environment_ = loop_env;
 for (init; ; update) {
-    stmt->condition->accept(this);  // Virtual call
+    dispatch_expr(stmt->condition.get());  // Switch dispatch (no virtual call)
     script_value conditionValue = pop_value();  // Stack operation
     if (!is_truthy(conditionValue)) break;
-    stmt->body->accept(this);
-    stmt->update->accept(this);  // Virtual call
+    dispatch_stmt(stmt->body.get());
+    dispatch_expr(stmt->update.get());  // Switch dispatch
     pop_value();  // Pop update result
 }
 ```
 
 **Optimizations in place:**
+✅ Switch-based AST dispatch (eliminates virtual call overhead)
 ✅ Native C++ for-loop structure with lambda helpers (Phase 1 & 2 optimizations)
 ✅ Unchecked accessors for zero-overhead type access (using std::get_if)
 ✅ Error capture flags instead of exception throwing from lambdas
@@ -381,7 +382,7 @@ for (init; ; update) {
 - 3 AST node evaluations (condition, body, update)
 - 2 value stack operations
 - Truthiness conversion on condition
-- Virtual function calls for AST traversal
+- Switch-based dispatch for AST traversal (~2-4% faster than virtual calls)
 
 Performance is adequate for typical game scripting use cases. For extremely tight computational loops, write in C++ and expose to JaiScript.
 
@@ -475,6 +476,7 @@ Track performance improvements over time:
 
 | Date       | Version | Integer Add | Function Call | For Loop (100) | Fibonacci(6) | Hot Loop (1000) | Notes                           |
 |------------|---------|-------------|---------------|----------------|--------------|------------------|---------------------------------|
+| 2025-12-04 | 0.1.5   | 2μs         | 4μs           | 28μs           | 18μs         | 197μs            | + Switch-based AST dispatch + string interning improvements |
 | 2025-01-31 | 0.1.4   | 2μs         | 4μs           | 67μs           | 22μs         | 715μs            | + ID-based class_instance/class_definition operations |
 | 2025-01-30 | 0.1.3   | 2μs         | 5μs           | 79μs           | 27μs         | 1136μs           | + Unchecked accessors + native for-loop structure |
 | 2025-01-30 | 0.1.2   | 2μs         | 10μs          | 101μs          | 220μs*       | -                | + Type check optimization (single type() call) |

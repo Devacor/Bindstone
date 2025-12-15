@@ -225,9 +225,10 @@ public:
         jai_engine->add_function("cpp_rotateRight", &cpp_rotateRight);
 
         // Pre-declare variables for C++ BST benchmark (for fair comparison with ChaiScript)
-        jai_engine->execute("auto root = null;");
-        jai_engine->execute("auto sum = 0;");
-        jai_engine->execute("auto height = 0;");
+        // Use 'var' instead of 'auto' so the variable can accept any type (TreeNode or CppTreeNode)
+        jai_engine->execute("var root = null;");
+        jai_engine->execute("var sum = 0;");
+        jai_engine->execute("var height = 0;");
 
         // Pre-declare arrays and benchmark functions for range-for benchmarks
         jai_engine->execute(R"(
@@ -702,6 +703,46 @@ public:
             });
         });
 
+        // ===== Strong Types: auto vs var Loop Counter Performance =====
+        // Compares ULTRA fast path (auto/int - locked types) vs VAR fast path (dynamic type check)
+        test("JaiScript: Strong Types Loop Counter (auto vs var, 1000 iterations)", [this]() {
+            // auto counter - ULTRA fast path (type locked, direct int pointer, no checks)
+            benchmark("JaiScript - For Loop (auto i, 1000 iter) - ULTRA fast path", [this]() {
+                jai_engine->execute(R"(
+                    auto sum = 0;
+                    for (auto i = 0; i < 1000; ++i) {
+                        sum += i;
+                    }
+                )");
+            });
+
+            // int counter - ULTRA fast path (explicit type, should be identical to auto)
+            benchmark("JaiScript - For Loop (int i, 1000 iter) - ULTRA fast path", [this]() {
+                jai_engine->execute(R"(
+                    int sum = 0;
+                    for (int i = 0; i < 1000; ++i) {
+                        sum += i;
+                    }
+                )");
+            });
+
+            // var counter - VAR fast path (per-iteration type check)
+            benchmark("JaiScript - For Loop (var i, 1000 iter) - VAR fast path", [this]() {
+                jai_engine->execute(R"(
+                    var sum = 0;
+                    for (var i = 0; i < 1000; ++i) {
+                        sum += i;
+                    }
+                )");
+            });
+
+            // Output comparison summary
+            std::cout << "\nStrong Types Loop Performance (1000 iterations):\n";
+            std::cout << "  auto i: ULTRA fast path - direct int pointer, no type checks\n";
+            std::cout << "  int i:  ULTRA fast path - same as auto (locked type)\n";
+            std::cout << "  var i:  VAR fast path - per-iteration type validation\n";
+        });
+
         // ===== Range-Based For Loop Comparison =====
         // Uses pre-declared arrays and functions - fair comparison without array parsing overhead
         test("JaiScript vs ChaiScript: Range-Based For Loop (100 elements)", [this]() {
@@ -925,26 +966,26 @@ public:
 
             benchmark("JaiScript - BST (15 nodes)", [this]() {
                 jai_engine->execute(R"(
-                    auto root = TreeNode(8);
-                    root = insertNode(root, 4);
-                    root = insertNode(root, 12);
-                    root = insertNode(root, 2);
-                    root = insertNode(root, 6);
-                    root = insertNode(root, 10);
-                    root = insertNode(root, 14);
-                    root = insertNode(root, 1);
-                    root = insertNode(root, 3);
-                    root = insertNode(root, 5);
-                    root = insertNode(root, 7);
-                    root = insertNode(root, 9);
-                    root = insertNode(root, 11);
-                    root = insertNode(root, 13);
-                    root = insertNode(root, 15);
+                    auto tree_root = TreeNode(8);
+                    tree_root = insertNode(tree_root, 4);
+                    tree_root = insertNode(tree_root, 12);
+                    tree_root = insertNode(tree_root, 2);
+                    tree_root = insertNode(tree_root, 6);
+                    tree_root = insertNode(tree_root, 10);
+                    tree_root = insertNode(tree_root, 14);
+                    tree_root = insertNode(tree_root, 1);
+                    tree_root = insertNode(tree_root, 3);
+                    tree_root = insertNode(tree_root, 5);
+                    tree_root = insertNode(tree_root, 7);
+                    tree_root = insertNode(tree_root, 9);
+                    tree_root = insertNode(tree_root, 11);
+                    tree_root = insertNode(tree_root, 13);
+                    tree_root = insertNode(tree_root, 15);
 
-                    auto sum = inorderSum(root);
-                    auto height = treeHeight(root);
-                    root = rotateRight(root);
-                    sum = inorderSum(root);
+                    auto tree_sum = inorderSum(tree_root);
+                    auto tree_height = treeHeight(tree_root);
+                    tree_root = rotateRight(tree_root);
+                    tree_sum = inorderSum(tree_root);
                 )");
             });
 

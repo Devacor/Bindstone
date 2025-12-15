@@ -1,0 +1,1568 @@
+.________________________________________.
+|       JaiScript Foundry Tests          |
+|________________________________________|
+
+
+==============================================
+Initializing engines for comparison benchmarks...
+==============================================
+Creating JaiScript engine...
+JaiScript engine ready.
+Creating ChaiScript engine...
+ChaiScript engine ready.
+==============================================
+
+Discovered 54 test suites
+
+
+╔══ Array Tests ══╗
+  array_literal_basic ... <3 (200us)
+  array_literal_mixed_types ... <3 (119us)
+  array_literal_empty ... <3 (97us)
+  array_indexing_read ... <3 (105us)
+  array_indexing_write ... <3 (174us)
+  array_push_operation ... <3 (105us)
+  array_pop_operation ... <3 (106us)
+  array_size_method ... <3 (101us)
+  array_empty_method ... <3 (85us)
+  array_clear_method ... <3 (102us)
+  array_nested_arrays ... <3 (145us)
+  array_nested_modification ... <3 (119us)
+  array_deeply_nested ... <3 (126us)
+  array_with_nested_mixed_types ... <3 (173us)
+  array_iteration_for_loop ... <3 (134us)
+  array_bounds_checking ... <3 (214us)
+  array_in_function_parameter ... <3 (179us)
+  array_as_return_value ... <3 (79us)
+  concatenate_arrays ... <3 (315us)
+  append_arrays ... <3 (270us)
+  concatenate_strings ... <3 (269us)
+  append_strings ... <3 (219us)
+
+  Summary: 22 passed
+
+╔══ Map Tests ══╗
+  map_literal_basic ... <3 (135us)
+  map_literal_mixed_types ... <3 (130us)
+  map_literal_empty ... <3 (124us)
+  map_access_read ... <3 (86us)
+  map_access_write ... <3 (82us)
+  map_size_method ... <3 (103us)
+  map_empty_method ... <3 (82us)
+  map_clear_method ... <3 (111us)
+  map_keys_method ... <3 (87us)
+  map_values_method ... <3 (73us)
+  map_nested_in_map ... <3 (113us)
+  map_nested_modification ... <3 (143us)
+  map_deeply_nested ... <3 (97us)
+  map_with_array_values ... <3 (123us)
+  array_with_map_elements ... <3 (123us)
+  map_complex_nested_structure ... <3 (173us)
+  map_iteration_keys ... <3 (116us)
+  map_missing_key_behavior ... <3 (109us)
+  map_in_function_parameter ... <3 (105us)
+  map_merge_function ... <3 (260us)
+  map_with_numeric_string_keys ... <3 (174us)
+
+  Summary: 21 passed
+
+╔══ Array Methods ══╗
+  index_of_found ... <3 (112us)
+  index_of_not_found ... <3 (82us)
+  has_true ... <3 (74us)
+  has_false ... <3 (72us)
+  contains_alias ... <3 (77us)
+  first ... <3 (87us)
+  last ... <3 (72us)
+  length ... <3 (82us)
+  slice_positive ... <3 (132us)
+  slice_negative ... <3 (88us)
+  filter ... <3 (110us)
+  sort ... <3 (85us)
+  sort_with_custom_comparator ... <3 (93us)
+  reverse ... <3 (78us)
+  remove_by_index ... <3 (112us)
+  remove_if ... <3 (115us)
+
+  Summary: 16 passed
+
+╔══ Map Methods ══╗
+  has_true ... <3 (95us)
+  has_false ... <3 (116us)
+  get_existing ... <3 (78us)
+  get_default ... <3 (101us)
+  length ... <3 (71us)
+  remove_existing ... <3 (83us)
+  remove_nonexistent ... <3 (71us)
+  remove_if ... <3 (107us)
+  filter ... <3 (123us)
+  to_array ... <3 (85us)
+
+  Summary: 10 passed
+
+╔══ Namespace Tests ══╗
+  namespace_basic_function ... <3 (126us)
+  namespace_function_overload ... <3 (97us)
+  namespace_variable ... <3 (67us)
+  namespace_class ... <3 (132us)
+  namespace_nested_blocks ... <3 (72us)
+  namespace_scope_resolution_syntax ... <3 (67us)
+  namespace_mixed_members ... <3 (109us)
+  namespace_override_required ... <3 (124us)
+  namespace_override_allowed ... <3 (124us)
+  namespace_string_keyword_as_name ... <3 (183us)
+  namespace_member_not_found ... <3 (129us)
+  namespace_function_arity_mismatch ... <3 (102us)
+  namespace_complex_members ... <3 (122us)
+  namespace_overrides_class_static ... <3 (159us)
+  namespace_override_before_class ... <3 (103us)
+
+  Summary: 15 passed
+
+╔══ Class Builder ══╗
+  basic_class_registration ... <3 (237us)
+  constructors ... <3 (178us)
+  methods ... <3 (201us)
+  properties ... <3 (127us)
+  operator_overloading ... <3 (198us)
+  static_methods ... <3 (104us)
+  static_properties ... x
+    Error: Values do not match
+  method_chaining ... <3 (159us)
+  lambda_methods ... <3 (192us)
+  custom_getters_setters ... <3 (158us)
+  shared_ptr_support ... <3 (88us)
+  const_correctness ... <3 (133us)
+  overloaded_methods ... <3 (144us)
+  equality_operator ... <3 (173us)
+  equality_operator_via_lambda ... <3 (120us)
+  comparison_operators ... <3 (195us)
+  comparison_operators_via_lambda ... <3 (391us)
+  arithmetic_operators ... <3 (192us)
+  arithmetic_operators_all ... <3 (175us)
+  arithmetic_operators_via_lambda ... <3 (162us)
+  compound_assignment_operators ... <3 (269us)
+
+  Summary: 20 passed, 1 failed
+
+╔══ Constructor Debug ══╗
+  constructor_with_ints ... Registering TestPoint class...
+Executing TestPoint(3, 4)...
+TestPoint constructor called with x=3, y=4
+Success! Result: 5
+<3 (211us)
+  direct_value_conversion ... intVal type: 2 (should be 1 for int)
+Converted int 3 to double: 3
+<3 (97us)
+
+  Summary: 2 passed
+
+╔══ constructor_conversions ══╗
+  explicit_constructor_call ... <3 (128us)
+  explicit_constructor_brace_init ... <3 (213us)
+  implicit_conversion_function_param_int ... <3 (143us)
+  implicit_conversion_function_param_string ... <3 (120us)
+  implicit_conversion_function_param_float ... <3 (108us)
+  implicit_conversion_function_param_object ... <3 (128us)
+  implicit_conversion_assignment_int ... <3 (145us)
+  implicit_conversion_assignment_string ... <3 (118us)
+  implicit_conversion_return_int ... <3 (120us)
+  implicit_conversion_return_object ... <3 (145us)
+  script_to_int_method ... <3 (146us)
+  script_to_float_method ... <3 (101us)
+  script_to_string_method ... <3 (98us)
+  script_to_bool_in_conditional ... <3 (139us)
+  script_to_string_in_concatenation ... <3 (118us)
+  cpp_constructor_int_conversion ... <3 (203us)
+  cpp_constructor_object_conversion ... <3 (200us)
+  cpp_constructor_string_conversion ... <3 (183us)
+  inheritance_ref_upcast_no_copy ... <3 (230us)
+  script_inheritance_base_param ... <3 (189us)
+  null_assignment_no_conversion ... <3 (122us)
+  exact_match_priority ... <3 (132us)
+  error_no_conversion_available ... <3 (156us)
+  no_chained_conversions ... <3 (146us)
+  hot_reload_adds_conversion ... <3 (157us)
+  multiple_constructors_exact_match ... <3 (177us)
+  conversion_preserves_value_semantics ... <3 (184us)
+  recursive_type_conversion ... <3 (181us)
+  conversion_with_side_effects ... <3 (117us)
+  conversion_exception_handling ... <3 (153us)
+  bidirectional_conversion ... <3 (146us)
+
+  Summary: 31 passed
+
+╔══ Control Flow ══╗
+  if_statement_true ... <3 (78us)
+  if_statement_false ... <3 (70us)
+  if_else_branches ... <3 (116us)
+  nested_if_statements ... <3 (88us)
+  while_loop_counter ... <3 (116us)
+  while_loop_sum ... <3 (133us)
+  while_loop_with_break ... <3 (87us)
+  while_loop_with_continue ... while_loop_with_continue result: 25 (expected 25)
+<3 (119us)
+  for_loop_basic ... <3 (96us)
+  for_loop_with_increment_operator ... <3 (270us)
+  for_loop_with_break ... for_loop_with_break result: 15 (expected 15)
+<3 (130us)
+  for_loop_with_continue ... for_loop_with_continue result: 25 (expected 25)
+<3 (111us)
+  nested_loops ... <3 (110us)
+  complex_control_flow ... complex_control_flow result: 16 (expected 16)
+<3 (183us)
+
+  Summary: 14 passed
+
+╔══ Exception Handling ══╗
+  basic_throw_catch ... <3 (83us)
+  throw_without_catch_bubbles_to_cpp ... <3 (101us)
+  catch_without_variable ... <3 (73us)
+  nested_try_catch ...   Result type: 4
+  Result value: 'Outer error: Inner error'
+<3 (85us)
+  cpp_runtime_error_interop ... <3 (84us)
+  cpp_generic_exception_interop ... <3 (83us)
+  throw_rethrow ... <3 (77us)
+  throw_in_expressions ... <3 (89us)
+  exception_with_numeric_values ... <3 (67us)
+  exception_scope_isolation ... <3 (114us)
+
+  Summary: 10 passed
+
+╔══ Function Tests ══╗
+  simple_function_declaration_and_call ... <3 (84us)
+  function_with_no_parameters ... <3 (188us)
+  function_with_side_effects ... <3 (90us)
+  function_with_multiple_parameters ... <3 (89us)
+  recursive_function ... <3 (93us)
+  function_returning_string ... <3 (73us)
+  nested_function_calls ... <3 (86us)
+  function_with_local_variables ... <3 (74us)
+  function_with_conditional_return ... <3 (119us)
+  function_with_early_return ... <3 (90us)
+  function_scope_isolation ... <3 (74us)
+  function_parameter_shadowing ... <3 (69us)
+  function_with_different_syntax_styles ... <3 (109us)
+
+  Summary: 13 passed
+
+╔══ Hot Reload Tests ══╗
+  basic_class_redefinition ... Fluffy is dancing! 
+<3 (262us)
+  inheritance_hot_reload ... <3 (305us)
+  multi_level_inheritance_hot_reload ... <3 (345us)
+  method_override_hot_reload ... <3 (268us)
+  constructor_hot_reload ... <3 (211us)
+  complex_field_migration ... <3 (352us)
+  multiple_instances_hot_reload ... <3 (325us)
+  hot_reload_migrate_lifecycle ... <3 (416us)
+  performance_stress_test ... <3 (1099us)
+  fields_unchanged_optimization ... <3 (317us)
+  fields_unchanged_performance ... <3 (13889us)
+  identical_class_fingerprint ... <3 (355us)
+
+  Summary: 12 passed
+
+╔══ Include/Import Tests ══╗
+  basic_include ... <3 (2059us)
+  include_with_angle_brackets ... <3 (1605us)
+  multiple_includes_execute_multiple_times ... <3 (2255us)
+  basic_import_once_behavior ... <3 (1016us)
+  import_file_timestamp_behavior ... <3 (18656us)
+  import_always_behavior ... <3 (2718us)
+  include_path_resolution ... <3 (2693us)
+  import_tracking_api ... <3 (1826us)
+  hash_prefix_ignored ... <3 (1226us)
+  file_not_found_error ... <3 (154us)
+  nested_includes ... <3 (1550us)
+  dynamic_include_with_variable ... <3 (1327us)
+  dynamic_import_with_expression ... <3 (1781us)
+
+  Summary: 13 passed
+
+╔══ Override Edge Cases ══╗
+  override_on_multiple_inheritance_levels ... <3 (208us)
+  override_with_different_return_types ... <3 (132us)
+  override_with_multiple_base_methods ... <3 (204us)
+  override_in_diamond_inheritance ... <3 (308us)
+  override_method_calling_super ... <3 (129us)
+  override_with_private_base_method ... <3 (154us)
+  shadowing_without_override_fails ... <3 (300us)
+  constructor_with_override_in_same_class ... <3 (353us)
+  override_chain_with_skip ... <3 (189us)
+  override_with_field_access ... <3 (137us)
+  multiple_override_errors_in_one_class ... <3 (132us)
+  override_static_vs_instance_methods ... <3 (112us)
+  static_method_cannot_use_override ... <3 (105us)
+  instance_method_cannot_override_static ... <3 (106us)
+  static_in_base_static_in_derived_same_name ... <3 (175us)
+  instance_in_base_static_in_derived_same_name ... <3 (124us)
+  static_in_base_instance_in_derived_same_name ... <3 (143us)
+  instance_in_base_instance_in_derived_same_name ... <3 (189us)
+  static_methods_no_virtual_dispatch ... <3 (115us)
+  mixed_static_instance_same_name ... <3 (134us)
+
+  Summary: 20 passed
+
+╔══ Override and Virtual Tests ══╗
+  override_promotes_to_virtual ... <3 (137us)
+  override_keyword_required_for_virtual_methods ... <3 (143us)
+  override_without_base_method_throws ... <3 (95us)
+  shadowing_without_override_throws ... <3 (129us)
+  multi_level_virtual_promotion ... <3 (116us)
+  constructor_not_affected_by_override ... <3 (107us)
+
+  Summary: 6 passed
+
+╔══ Parser Debug Tests ══╗
+  parse_function_and_call ... 
+=== TESTING SIMPLE EXPRESSION ===
+Simple '42;' produces 1 declarations
+
+=== TESTING JUST FUNCTION ===
+Function tokens:
+[0] 18 'function'
+[1] 6 'double'
+[2] 83 '('
+[3] 78 ':'
+[4] 6 'x'
+[5] 84 ')'
+[6] 85 '{'
+[7] 28 'return'
+[8] 6 'x'
+[9] 51 '*'
+[10] 0 '2'
+[11] 91 ';'
+[12] 86 '}'
+[13] 93 ''
+Function alone produces 1 declarations
+  Type: function_decl
+  Name: double
+
+=== TOKENS ===
+[0] 18 'function'
+[1] 6 'double'
+[2] 83 '('
+[3] 78 ':'
+[4] 6 'x'
+[5] 84 ')'
+[6] 85 '{'
+[7] 28 'return'
+[8] 6 'x'
+[9] 51 '*'
+[10] 0 '2'
+[11] 91 ';'
+[12] 86 '}'
+[13] 6 'double'
+[14] 83 '('
+[15] 0 '21'
+[16] 84 ')'
+[17] 91 ';'
+[18] 93 ''
+
+=== DECLARATIONS ===
+Total: 2
+
+Declaration 0:
+  Type: function_decl
+  Name: double
+  Parameters: 1
+
+Declaration 1:
+  Type: expression_decl
+
+Parser working correctly!
+
+Diagnosis complete.
+<3 (96us)
+
+  Summary: 1 passed
+
+╔══ range_based_for ══╗
+  array_value_iteration ... <3 (221us)
+  array_reference_iteration ... <3 (289us)
+  map_value_iteration ... <3 (254us)
+  map_reference_iteration ... <3 (325us)
+  map_key_const_check ... <3 (295us)
+  nested_iteration ... <3 (323us)
+  break_in_range_for ... break_in_range_for result: 6 (expected 6)
+<3 (253us)
+  continue_in_range_for ... continue_in_range_for result: 12 (expected 12)
+<3 (286us)
+  empty_container_iteration ... <3 (228us)
+  pair_member_access ... <3 (388us)
+
+  Summary: 10 passed
+
+╔══ Script Class Tests ══╗
+  basic_class_with_fields ... <3 (120us)
+  class_with_constructor ... <3 (104us)
+  class_with_methods ... <3 (128us)
+  script_cpp_interop ... <3 (216us)
+  script_inherits_from_cpp ... <3 (165us)
+  class_destructor_basic ... Resource file1 created
+Resource file2 created
+Resource file2 destroyed
+Resource file1 destroyed
+Resource temp created
+Resource replacement created
+Resource temp destroyed
+Resource replacement destroyed
+Destructor counts: [2, 3, 4]
+Expected: [2, 3, 4]
+<3 (424us)
+  class_destructor_polymorphic ... === Test REVERSED order ===
+Creating file_ref FIRST
+BaseResource created
+FileResource data.txt created
+Creating base_ref SECOND
+BaseResource created
+About to exit scope - should destroy base_ref then file_ref
+BaseResource destroyed
+FileResource data.txt destroyed
+BaseResource destroyed
+After scope exit - base: 2, derived: 1
+<3 (506us)
+  class_destructor_nested_scopes ... Destruction order log:
+outer1_ctor,inner1_ctor,inner2_ctor,deep1_ctor,deep1_dtor,inner3_ctor,inner3_dtor,inner2_dtor,inner1_dtor,outer2_ctor,outer2_dtor,outer1_dtor,a_ctor,b_ctor,c_ctor,c_dtor,b_dtor,a_dtor
+Expected:
+outer1_ctor,inner1_ctor,inner2_ctor,deep1_ctor,deep1_dtor,inner3_ctor,inner3_dtor,inner2_dtor,inner1_dtor,outer2_ctor,outer2_dtor,outer1_dtor,a_ctor,b_ctor,c_ctor,c_dtor,b_dtor,a_dtor
+<3 (403us)
+  class_destructor_in_containers ... Object 1 created (count=1)
+Object 2 created (count=2)
+Object 3 created (count=3)
+Object 1 destroyed (count=2)
+Object 2 destroyed (count=1)
+Object 3 destroyed (count=0)
+Object 10 created (count=1)
+Object 20 created (count=2)
+Object 20 destroyed (count=1)
+Object 10 destroyed (count=0)
+Container destructor counts: [0, 3, 0, 2, 0]
+Expected: [0, 3, 0, 2, 0]
+<3 (476us)
+  multiple_inheritance_basic_fields ... <3 (216us)
+  multiple_inheritance_method_lookup ... <3 (116us)
+  multiple_inheritance_field_conflict_detected ... <3 (133us)
+  multiple_inheritance_override_in_derived ... <3 (111us)
+  multiple_inheritance_constructors ... <3 (189us)
+  multiple_inheritance_destructors ... <3 (169us)
+  multiple_inheritance_three_levels ... <3 (117us)
+  multiple_inheritance_mixed_fields ... <3 (112us)
+  static_members_not_inherited ... <3 (91us)
+  diamond_inheritance_should_fail ... <3 (107us)
+
+  Summary: 19 passed
+
+╔══ Static Field Tests ══╗
+  basic_static_field ... <3 (92us)
+  static_field_modification ... <3 (113us)
+  implicit_static_access_in_methods ... <3 (158us)
+  static_fields_with_inheritance ... <3 (146us)
+  static_field_errors ... <3 (129us)
+  static_fields_with_complex_types ... <3 (241us)
+  static_fields_shared_across_instances ... <3 (144us)
+
+  Summary: 7 passed
+
+╔══ Static Method Tests ══╗
+  basic_static_method ... <3 (99us)
+  static_method_with_string ... <3 (124us)
+  static_method_accessing_static_fields ... <3 (123us)
+  static_method_with_inheritance ... <3 (181us)
+  static_method_void_return ... <3 (182us)
+  static_method_errors ... <3 (199us)
+  static_method_with_complex_types ... <3 (187us)
+  static_method_mixed_with_instance ... <3 (183us)
+
+  Summary: 8 passed
+
+╔══ Switch Statement Tests ══╗
+  basic_integer_switch ... <3 (227us)
+  switch_with_fallthrough ... <3 (132us)
+  switch_with_explicit_break ... <3 (89us)
+  switch_with_strings ... <3 (105us)
+  switch_no_match_default_case ... <3 (88us)
+  switch_no_default ... <3 (116us)
+  switch_with_expressions ... <3 (114us)
+  nested_switch ... <3 (103us)
+  switch_with_return ... <3 (88us)
+  fallthrough_only_in_switch ... <3 (80us)
+
+  Summary: 10 passed
+
+╔══ Cat Class Syntax Test ══╗
+  exact_user_syntax ... Script executed successfully!
+Result is int: 42
+<3 (110us)
+  simpler_no_constructor ... Simple class test executed successfully!
+Result is int: 42
+<3 (104us)
+  field_assignment_without_this ... Field assignment test executed successfully!
+Result is int: 99
+<3 (93us)
+
+  Summary: 3 passed
+
+╔══ Lambda Captures ══╗
+  no_capture_lambda ... <3 (75us)
+  empty_default_capture ... <3 (166us)
+  capture_all_by_value ... <3 (106us)
+  capture_all_by_reference ... <3 (108us)
+  mixed_capture_value_default_with_ref ... <3 (111us)
+  explicit_captures ... <3 (97us)
+  reference_capture_modifies_original ... <3 (107us)
+  debug_simple_default_capture ... <3 (74us)
+  debug_parameter_with_default_capture ... ./bin/jaiscript_tests.exe : 
+At line:1 char:63
++ ... urce\JaiScript\out\build\x64-Release'; ./bin/jaiscript_tests.exe 2>&1
++                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Hot reload performance comparison (1000 instances):
+  Fields unchanged (optimized): 127 μs
+  Fields changed (full migration): 781 μs
+  Speedup: 6.15x
+Fingerprint optimization results:
+  Identical class redefinition: 47 μs
+  Changed class redefinition: 56 μs
+<3 (76us)
+
+  Summary: 9 passed
+
+╔══ Performance Benchmarks ══╗
+
+  Benchmarks:
+    Integer Addition: 3μs/iteration
+    Float Multiplication: 3μs/iteration
+    Variable Operations: 8μs/iteration
+    Function Calls: 13μs/iteration
+    Array Push/Pop: 25μs/iteration
+    Map Insert/Lookup: 18μs/iteration
+    Class Creation: 29μs/iteration
+    Method Invocation: 20μs/iteration
+    For Loop (100 iterations): 32μs/iteration
+    String Concatenation: 10μs/iteration
+    Engine Creation: 50μs/iteration
+    Stdlib Registration: 189μs/iteration
+    Complex Expression: 8μs/iteration
+    Class Inheritance: 139μs/iteration
+    Hot Loop (1000 iterations): 298μs/iteration
+    Simple Compound Assignment (x100): 67μs/iteration
+    Variable Lookup Heavy: 21μs/iteration
+
+  Summary: 0 passed
+
+╔══ ChaiScript Performance Comparison ══╗
+  JaiScript vs ChaiScript: Integer Addition ... <3 (43us)
+  JaiScript vs ChaiScript: Float Multiplication ... <3 (2us)
+  JaiScript vs ChaiScript: Variable Operations ... <3 (2us)
+  JaiScript vs ChaiScript: Function Calls ... <3 (1us)
+  JaiScript vs ChaiScript: Array Push/Pop ... <3 (2us)
+  JaiScript vs ChaiScript: Map Insert/Lookup ... <3 (0us)
+  JaiScript vs ChaiScript: Class Creation ... <3 (1us)
+  JaiScript vs ChaiScript: Method Invocation ... <3 (0us)
+  JaiScript vs ChaiScript: For Loop (100 iterations) ... <3 (3us)
+  JaiScript: For Loop Optimization Variants ... <3 (1us)
+  JaiScript: Strong Types Loop Counter (auto vs var, 1000 iterations) ... 
+Strong Types Loop Performance (1000 iterations):
+  auto i: ULTRA fast path - direct int pointer, no type checks
+  int i:  ULTRA fast path - same as auto (locked type)
+  var i:  VAR fast path - per-iteration type validation
+<3 (0us)
+  JaiScript vs ChaiScript: Range-Based For Loop (100 elements) ... <3 (2us)
+  JaiScript: Range-For Reference vs Copy ... <3 (2us)
+  JaiScript vs ChaiScript: Variable Lookup Heavy ... <3 (0us)
+  JaiScript vs ChaiScript: Complex Expression ... <3 (0us)
+  JaiScript vs ChaiScript: Constant Folding ... <3 (0us)
+  JaiScript vs ChaiScript: Factorial (Recursion) ... <3 (2us)
+  JaiScript vs ChaiScript: Fibonacci (Deep Recursion) ... <3 (0us)
+  JaiScript vs ChaiScript: Binary Search ... <3 (3us)
+  JaiScript vs ChaiScript: Bubble Sort ... <3 (2us)
+  BoxedValue vs script_value: Integer Construction ... <3 (0us)
+  BoxedValue vs script_value: String Construction ... <3 (0us)
+  BoxedValue vs script_value: Boolean Construction ... <3 (2us)
+  BoxedValue vs script_value: Float Construction ... <3 (0us)
+  BoxedValue vs script_value: Type Checking ... <3 (56us)
+  BoxedValue vs script_value: Array Construction ... <3 (0us)
+  BoxedValue vs script_value: Mixed Type Operations ... <3 (2us)
+  JaiScript vs ChaiScript: Binary Search Tree ... ChaiScript - BST (15 nodes): SKIPPED (ChaiScript lacks null support for object fields)
+<3 (0us)
+  JaiScript vs ChaiScript: Binary Search Tree (C++ Bound) ... <3 (0us)
+
+  Benchmarks:
+    JaiScript - Integer Addition: 3μs/iteration
+    ChaiScript - Integer Addition: 2μs/iteration
+    JaiScript - Float Multiplication: 3μs/iteration
+    ChaiScript - Float Multiplication: 2μs/iteration
+    JaiScript - Variable Operations: 8μs/iteration
+    ChaiScript - Variable Operations: 8μs/iteration
+    JaiScript - Function Calls: 6μs/iteration
+    ChaiScript - Function Calls: 8μs/iteration
+    JaiScript - Array Push/Pop: 24μs/iteration
+    ChaiScript - Array Push/Pop: 24μs/iteration
+    JaiScript - Map Insert/Lookup: 18μs/iteration
+    ChaiScript - Map Insert/Lookup: 15μs/iteration
+    JaiScript - Class Creation: 9μs/iteration
+    ChaiScript - Class Creation: 24μs/iteration
+    JaiScript - Method Invocation: 12μs/iteration
+    ChaiScript - Method Invocation: 19μs/iteration
+    JaiScript - For Loop: 31μs/iteration
+    ChaiScript - For Loop: 12μs/iteration
+    JaiScript - For Loop (literal condition, fast path): 30μs/iteration
+    JaiScript - For Loop (expression condition): 33μs/iteration
+    JaiScript - Hot Loop (10x100 nested iterations): 202μs/iteration
+    JaiScript - For Loop (auto i, 1000 iter) - ULTRA fast path: 184μs/iteration
+    JaiScript - For Loop (int i, 1000 iter) - ULTRA fast path: 188μs/iteration
+    JaiScript - For Loop (var i, 1000 iter) - VAR fast path: 183μs/iteration
+    JaiScript - Range-For (copy, 100 elements): 24μs/iteration
+    ChaiScript - Range-For (100 elements): 13μs/iteration
+    JaiScript - Range-For (reference, 100 elements): 36μs/iteration
+    JaiScript - Range-For (copy, 10 elements): 7μs/iteration
+    JaiScript - Range-For (reference, 10 elements): 10μs/iteration
+    JaiScript - Variable Lookup Heavy: 16μs/iteration
+    ChaiScript - Variable Lookup Heavy: 9μs/iteration
+    JaiScript - Complex Expression: 8μs/iteration
+    ChaiScript - Complex Expression: 6μs/iteration
+    JaiScript - Constant Expression (Parse-time Folding): 5μs/iteration
+    ChaiScript - Constant Expression (Runtime Evaluation): 4μs/iteration
+    JaiScript - Factorial(10): 14μs/iteration
+    ChaiScript - Factorial(10): 36μs/iteration
+    JaiScript - Fibonacci(6): 26μs/iteration
+    ChaiScript - Fibonacci(6): 92μs/iteration
+    JaiScript - Binary Search: 28μs/iteration
+    ChaiScript - Binary Search: 29μs/iteration
+    JaiScript - Bubble Sort (10 elements): 153μs/iteration
+    ChaiScript - Bubble Sort (10 elements): 100μs/iteration
+    JaiScript - script_value Integer Construction: 2μs/iteration
+    ChaiScript - BoxedValue Integer Construction: 1μs/iteration
+    JaiScript - script_value String Construction: 2μs/iteration
+    ChaiScript - BoxedValue String Construction: 1μs/iteration
+    JaiScript - script_value Boolean Construction: 2μs/iteration
+    ChaiScript - BoxedValue Boolean Construction: 1μs/iteration
+    JaiScript - script_value Float Construction: 2μs/iteration
+    ChaiScript - BoxedValue Float Construction: 1μs/iteration
+    JaiScript - script_value Type Checking: 7μs/iteration
+    ChaiScript - BoxedValue Type Checking: 4μs/iteration
+    JaiScript - script_value Array Construction: 9μs/iteration
+    ChaiScript - BoxedValue Array Construction: 8μs/iteration
+    JaiScript - script_value Mixed Types: 11μs/iteration
+    ChaiScript - BoxedValue Mixed Types: 10μs/iteration
+    JaiScript - BST (15 nodes): 871μs/iteration
+    JaiScript - C++ BST (15 nodes): 147μs/iteration
+    ChaiScript - C++ BST (15 nodes): 104μs/iteration
+
+  Summary: 29 passed
+
+╔══ Native Class Performance ══╗
+  basic_class_performance ... Basic class test completed in 183 μs
+<3 (556us)
+  inheritance_performance ... Inheritance test completed in 123 μs
+<3 (374us)
+  cat_tiger_example ... ROAR! Tiger with a=0, b=5
+x
+    Error: Values do not match
+  performance_vs_map_objects ... Native classes: 805 μs
+Map objects: 697 μs
+Native classes are 0.865839x faster
+x
+    Error: Check failed
+
+  Summary: 2 passed, 2 failed
+
+╔══ Container Property Tests ══╗
+  basic_vector_access ... Size: 2
+First cat: Fred
+✓ Basic vector access works
+<3 (549us)
+  vector_registration ... ✓ Can register vector<Cat> property
+<3 (151us)
+  cpp_populate_script_access ... ✓ C++ populates, script accesses
+<3 (228us)
+  script_populate_and_access ... ✓ Script creates and populates
+<3 (252us)
+
+  Summary: 4 passed
+
+╔══ Auto Container Conversion Tests ══╗
+  auto_vector_registration ... <3 (240us)
+  auto_map_string_registration ... <3 (151us)
+  auto_map_int_registration ... <3 (131us)
+  nested_auto_registration ... <3 (179us)
+  non_default_constructible_type ... <3 (130us)
+  complex_nested_containers ... <3 (155us)
+  custom_type_with_custom_methods ... <3 (179us)
+  inheritance_and_containers ... Registering std::vector<script_value> conversion...
+
+=== Testing inheritance_and_containers ===
+Testing count_dogs...
+count_dogs result: 2
+Testing count_script_values...
+count_script_values result: 5
+Testing combined expression...
+<3 (312us)
+  polymorphic_parameter_passing ... 
+=== Testing polymorphic_parameter_passing ===
+make_speak(Dog) result: Woof!
+<3 (108us)
+
+  Summary: 9 passed
+
+╔══ Comprehensive Scope Tests ══╗
+  block_scope_destruction ... CppBoundObject("block_scope") ctor, id=1, alive=1
+~CppBoundObject("block_scope") dtor, id=1, alive=0
+CppBoundObject("outer_block") ctor, id=2, alive=1
+CppBoundObject("inner_block") ctor, id=3, alive=2
+~CppBoundObject("inner_block") dtor, id=3, alive=1
+~CppBoundObject("outer_block") dtor, id=2, alive=0
+
+=== Operation Log ===
+CppBoundObject("block_scope") ctor, id=1, alive=1
+~CppBoundObject("block_scope") dtor, id=1, alive=0
+CppBoundObject("outer_block") ctor, id=2, alive=1
+CppBoundObject("inner_block") ctor, id=3, alive=2
+~CppBoundObject("inner_block") dtor, id=3, alive=1
+~CppBoundObject("outer_block") dtor, id=2, alive=0
+<3 (223us)
+  if_statement_scope ... CppBoundObject("if_true_branch") ctor, id=1, alive=1
+~CppBoundObject("if_true_branch") dtor, id=1, alive=0
+CppBoundObject("else_branch") ctor, id=2, alive=1
+~CppBoundObject("else_branch") dtor, id=2, alive=0
+
+=== If Statement Log ===
+CppBoundObject("if_true_branch") ctor, id=1, alive=1
+~CppBoundObject("if_true_branch") dtor, id=1, alive=0
+CppBoundObject("else_branch") ctor, id=2, alive=1
+~CppBoundObject("else_branch") dtor, id=2, alive=0
+<3 (257us)
+  for_loop_scope ... CppBoundObject("loop_iteration") ctor, id=1, alive=1
+~CppBoundObject("loop_iteration") dtor, id=1, alive=0
+CppBoundObject("loop_iteration") ctor, id=2, alive=1
+~CppBoundObject("loop_iteration") dtor, id=2, alive=0
+CppBoundObject("loop_iteration") ctor, id=3, alive=1
+~CppBoundObject("loop_iteration") dtor, id=3, alive=0
+
+=== For Loop Log ===
+CppBoundObject("loop_iteration") ctor, id=1, alive=1
+~CppBoundObject("loop_iteration") dtor, id=1, alive=0
+CppBoundObject("loop_iteration") ctor, id=2, alive=1
+~CppBoundObject("loop_iteration") dtor, id=2, alive=0
+CppBoundObject("loop_iteration") ctor, id=3, alive=1
+~CppBoundObject("loop_iteration") dtor, id=3, alive=0
+<3 (140us)
+  function_scope ... CppBoundObject("function_local") ctor, id=1, alive=1
+~CppBoundObject("function_local") dtor, id=1, alive=0
+CppBoundObject("function_local") ctor, id=2, alive=1
+~CppBoundObject("function_local") dtor, id=2, alive=0
+
+=== Function Scope Log ===
+CppBoundObject("function_local") ctor, id=1, alive=1
+~CppBoundObject("function_local") dtor, id=1, alive=0
+CppBoundObject("function_local") ctor, id=2, alive=1
+~CppBoundObject("function_local") dtor, id=2, alive=0
+<3 (197us)
+  lambda_scope ... CppBoundObject("lambda_local") ctor, id=1, alive=1
+~CppBoundObject("lambda_local") dtor, id=1, alive=0
+CppBoundObject("lambda_local") ctor, id=2, alive=1
+~CppBoundObject("lambda_local") dtor, id=2, alive=0
+
+=== Lambda Scope Log ===
+CppBoundObject("lambda_local") ctor, id=1, alive=1
+~CppBoundObject("lambda_local") dtor, id=1, alive=0
+CppBoundObject("lambda_local") ctor, id=2, alive=1
+~CppBoundObject("lambda_local") dtor, id=2, alive=0
+<3 (140us)
+  script_class_with_destructor ... CppBoundObject("script_class_member") ctor, id=1, alive=1
+CppBoundObject COPY from id=1, alive=2
+~CppBoundObject("script_class_member") dtor, id=1, alive=1
+CppBoundObject::instance_method() called on "script_class_member"
+CppBoundObject::static_method() called
+~CppBoundObject("script_class_member") dtor, id=1, alive=0
+
+=== Script Class Destructor Log ===
+CppBoundObject("script_class_member") ctor, id=1, alive=1
+CppBoundObject COPY from id=1, alive=2
+~CppBoundObject("script_class_member") dtor, id=1, alive=1
+CppBoundObject::instance_method() called on "script_class_member"
+CppBoundObject::static_method() called
+~CppBoundObject("script_class_member") dtor, id=1, alive=0
+<3 (219us)
+  mixed_scopes_comprehensive ... CppBoundObject("global") ctor, id=1, alive=1
+CppBoundObject("block") ctor, id=2, alive=2
+CppBoundObject("script_class_member") ctor, id=3, alive=3
+CppBoundObject COPY from id=3, alive=4
+~CppBoundObject("script_class_member") dtor, id=3, alive=3
+call_lambda: before creating lambda
+CppBoundObject COPY from id=3, alive=4
+call_lambda: after creating lambda, before calling
+lambda: inside lambda body
+CppBoundObject("lambda_capture") ctor, id=4, alive=5
+CppBoundObject::instance_method() called on "script_class_member"
+call_lambda: after calling lambda
+CppBoundObject("function") ctor, id=5, alive=6
+CppBoundObject("loop") ctor, id=6, alive=7
+CppBoundObject("if_branch") ctor, id=7, alive=8
+~CppBoundObject("if_branch") dtor, id=7, alive=7
+~CppBoundObject("loop") dtor, id=6, alive=6
+CppBoundObject("loop") ctor, id=8, alive=7
+~CppBoundObject("loop") dtor, id=8, alive=6
+~CppBoundObject("block") dtor, id=2, alive=5
+~CppBoundObject("function") dtor, id=5, alive=4
+~CppBoundObject("script_class_member") dtor, id=3, alive=3
+~CppBoundObject("script_class_member") dtor, id=3, alive=2
+~CppBoundObject("lambda_capture") dtor, id=4, alive=1
+
+=== Comprehensive Mixed Scopes Log ===
+0: CppBoundObject("global") ctor, id=1, alive=1
+1: CppBoundObject("block") ctor, id=2, alive=2
+2: CppBoundObject("script_class_member") ctor, id=3, alive=3
+3: CppBoundObject COPY from id=3, alive=4
+4: ~CppBoundObject("script_class_member") dtor, id=3, alive=3
+5: CppBoundObject COPY from id=3, alive=4
+6: CppBoundObject("lambda_capture") ctor, id=4, alive=5
+7: CppBoundObject::instance_method() called on "script_class_member"
+8: CppBoundObject("function") ctor, id=5, alive=6
+9: CppBoundObject("loop") ctor, id=6, alive=7
+10: CppBoundObject("if_branch") ctor, id=7, alive=8
+11: ~CppBoundObject("if_branch") dtor, id=7, alive=7
+12: ~CppBoundObject("loop") dtor, id=6, alive=6
+13: CppBoundObject("loop") ctor, id=8, alive=7
+14: ~CppBoundObject("loop") dtor, id=8, alive=6
+15: ~CppBoundObject("block") dtor, id=2, alive=5
+16: ~CppBoundObject("function") dtor, id=5, alive=4
+17: ~CppBoundObject("script_class_member") dtor, id=3, alive=3
+18: ~CppBoundObject("script_class_member") dtor, id=3, alive=2
+19: ~CppBoundObject("lambda_capture") dtor, id=4, alive=1
+
+Ctor count: 10, Dtor count: 9
+<3 (628us)
+  early_return_scope_cleanup ... CppBoundObject("before_if") ctor, id=1, alive=1
+CppBoundObject("in_if") ctor, id=2, alive=2
+~CppBoundObject("in_if") dtor, id=2, alive=1
+~CppBoundObject("before_if") dtor, id=1, alive=0
+CppBoundObject("before_if") ctor, id=3, alive=1
+~CppBoundObject("before_if") dtor, id=3, alive=0
+
+=== Early Return Scope Log ===
+CppBoundObject("before_if") ctor, id=1, alive=1
+CppBoundObject("in_if") ctor, id=2, alive=2
+~CppBoundObject("in_if") dtor, id=2, alive=1
+~CppBoundObject("before_if") dtor, id=1, alive=0
+CppBoundObject("before_if") ctor, id=3, alive=1
+~CppBoundObject("before_if") dtor, id=3, alive=0
+<3 (249us)
+  exception_scope_cleanup ... CppBoundObject("before_throw") ctor, id=1, alive=1
+~CppBoundObject("before_throw") dtor, id=1, alive=0
+<3 (156us)
+
+  Summary: 9 passed
+
+╔══ Container Conversion Tests ══╗
+  large_vector_performance ...     Large vector (10k elements) conversion time: 576μs
+<3 (8745us)
+  vector_int_basic ... <3 (138us)
+  vector_double_conversion ... <3 (81us)
+  vector_string_operations ... <3 (93us)
+  vector_return_values ... <3 (66us)
+  nested_vectors ... <3 (83us)
+  map_string_int_basic ... <3 (79us)
+  map_return_values ... <3 (64us)
+  map_int_string ...     SKIPPED: Map literal parsing issue
+<3 (53us)
+  empty_containers ... <3 (100us)
+  large_vector_performance ... About to call sum_large with array size: 10000
+    Array size: 10000
+    First few elements in large_array: 0 1 2 3 4 
+    Testing direct sum_large([1,2,3,4,5])...
+    sum_large called with vector size: 5
+    Vector address: 0000000F93BBCF80
+    First few elements: 1 2 3 4 5 
+    Direct call result: 15
+    sum_large called with vector size: 10000
+    Vector address: 0000000F93BBCF80
+    Result: 49995000 (expected: 49995000)
+    Large vector (10k elements) conversion time: 580μs
+<3 (8592us)
+  type_mismatch_errors ... <3 (224us)
+  vector_of_maps ... <3 (114us)
+  map_of_vectors ... <3 (84us)
+  custom_type_vectors ... <3 (157us)
+  performance_comparison ...     Performance comparison (100 iterations, 1000 elements):
+      Variadic version: 1282μs
+      Typed version: 6024μs
+      Speedup: 0.212815x
+<3 (8191us)
+
+  Summary: 16 passed
+
+╔══ Script Value Conversions ══╗
+  basic_type_conversions ... <3 (135us)
+  array_to_vector_conversions ... <3 (91us)
+  map_to_stdmap_conversions ... <3 (72us)
+  vector_parameter_binding_attempt ...     ✓ Vector<int> parameter binding works!
+<3 (62us)
+  map_parameter_binding_attempt ...     ✓ Map<string, int> parameter binding works!
+<3 (56us)
+  script_value_vector_compatibility ...     ✓ Vector<script_value> parameter binding works!
+<3 (54us)
+  script_value_map_compatibility ...     ✓ Map<script_value, script_value> parameter binding works!
+<3 (85us)
+  bound_class_conversions ...     Object type: 9
+    Is object: 1
+<3 (137us)
+
+  Summary: 8 passed
+
+╔══ Enhanced Conversion System ══╗
+  standard_vector_conversions ...     ✓ Vector<int> conversion works!
+    ✓ Vector<double> with mixed types works!
+    ✓ Vector<string> conversion works!
+<3 (115us)
+  standard_map_conversions ...     ✓ Map<string, int> conversion works!
+    ✓ Map<string, double> with mixed types works!
+    ✓ Map return value works!
+<3 (90us)
+  custom_type_conversions ...     ✓ Custom Point conversion works!
+    ✓ Vector of custom types works!
+    ✓ Custom type return value works!
+<3 (147us)
+  specific_type_registration ...     ✓ Specific type registration works!
+<3 (62us)
+  int64_downconversion_bounds_checking ...     ✓ Normal range values work!
+    ✓ Out-of-range bounds checking works: Integer value out of range for int: C++ exception
+<3 (106us)
+  mixed_type_array_conversions ...     ✓ Mixed int/float to double conversion works!
+    ✗ Mixed int/bool conversion failed: script_value is not a boolean: C++ exception
+<3 (81us)
+
+  Summary: 6 passed
+
+╔══ Lexer Tests ══╗
+  empty_input ... <3 (1us)
+  single_identifier ... <3 (0us)
+  keywords ... <3 (1us)
+  integer_literals ... <3 (2us)
+  float_literals ... <3 (1us)
+  string_literals ... <3 (1us)
+  character_literals ... <3 (0us)
+  boolean_keywords ... <3 (0us)
+  operators ... <3 (2us)
+  compound_assignments ... <3 (1us)
+  delimiters ... <3 (1us)
+
+  Summary: 11 passed
+
+╔══ Map Conversion Tests ══╗
+  basic_string_int_map_conversion ...     ✓ Basic map<string, int> parameter works
+    ✓ Map key extraction works
+    ✓ Map value extraction works
+    ✓ Map size works
+<3 (126us)
+  map_return_values ...     ✓ Map return value works
+    ✓ Map transformation works
+<3 (114us)
+  string_string_map_conversion ...     ✓ Map<string, string> parameter works
+    ✓ Empty map works
+    ✓ Single entry map works
+<3 (79us)
+  double_value_map_conversion ...     ✓ Map<string, double> with doubles works
+    ✓ Map<string, double> with integers works
+    ✓ Map<string, double> with mixed types works
+<3 (83us)
+  nested_map_conversion ...     ✓ Nested map creation works
+    ✓ Nested map processing works
+    ✓ Manual nested map creation works
+<3 (103us)
+  map_with_custom_objects ...     ✓ Map with custom objects creation works
+    ✓ Processing map with custom objects works
+    ✓ Extracting data from map with custom objects works
+<3 (131us)
+  map_key_lookup_operations ...     ✓ Map key existence check (true) works
+    ✓ Map key existence check (false) works
+    ✓ Map value retrieval (found) works
+    ✓ Map value retrieval (not found) works
+<3 (100us)
+  map_edge_cases ...     ✓ Empty map works
+    ✓ Single entry map works
+    ✓ Map with special character keys works
+    ✓ Map with empty string key works
+<3 (91us)
+  map_script_value_compatibility ...     ✓ Map<script_value, script_value> with mixed types works
+    ✓ Returning map<script_value, script_value> works
+<3 (66us)
+
+  Summary: 9 passed
+
+╔══ Parser Tests ══╗
+  expression_literals ... <3 (276us)
+  expression_identifiers ... <3 (98us)
+  binary_operators ... <3 (201us)
+  unary_operators ... <3 (166us)
+  assignment_operators ... <3 (126us)
+  ternary_operator ... <3 (104us)
+  parenthesized_expressions ... <3 (108us)
+  function_calls ... <3 (148us)
+  member_access ... <3 (97us)
+  array_access ... <3 (68us)
+  array_literals ... <3 (119us)
+  map_literals ... <3 (146us)
+  variable_declarations ... <3 (98us)
+  function_declarations ... <3 (192us)
+  control_flow_statements ... <3 (150us)
+  break_continue_statements ... <3 (79us)
+  return_statements ... <3 (141us)
+  lambda_expressions ... <3 (74us)
+  complex_expressions ... <3 (414us)
+  error_cases ... <3 (311us)
+
+  Summary: 20 passed
+
+╔══ script_container_tests ══╗
+  bound_array_reference_semantics ... <3 (54us)
+  bound_array_value_semantics ... <3 (51us)
+  bound_array_copy_constructor ... <3 (48us)
+  bound_array_function_parameters ... <3 (49us)
+  bound_array_element_access ... <3 (49us)
+  bound_array_iteration ... <3 (48us)
+  bound_array_custom_objects ... <3 (98us)
+  bound_map_reference_semantics ... <3 (110us)
+  bound_map_value_semantics ... <3 (97us)
+  bound_map_element_access ... <3 (51us)
+  bound_map_iteration ... <3 (109us)
+  bound_array_zero_copy_performance ... <3 (1398us)
+
+  Summary: 12 passed
+
+╔══ Strong Types ══╗
+  auto_with_initializer_locks_type ... <3 (143us)
+  auto_rejects_incompatible_type ... <3 (139us)
+  auto_uninitialized_locks_on_first_assignment ... <3 (103us)
+  auto_uninitialized_rejects_after_lock ... <3 (85us)
+  auto_float_allows_int_widening ... <3 (70us)
+  auto_int_truncates_float ... <3 (78us)
+  var_allows_any_type ... <3 (67us)
+  var_uninitialized_allows_any ... <3 (88us)
+  var_array_methods_work ... <3 (439us)
+  var_map_methods_work ... <3 (800us)
+  var_can_change_to_different_container ... <3 (714us)
+  int_type_enforced ... <3 (140us)
+  float_type_accepts_int ... <3 (80us)
+  string_type_accepts_int_coercion ... <3 (69us)
+  bool_converts_truthy ... <3 (81us)
+  auto_nested_array_in_array ... <3 (102us)
+  auto_nested_map_in_array ... <3 (74us)
+  auto_nested_array_in_map ... <3 (95us)
+  var_nested_containers_reassignable ... <3 (152us)
+  auto_array_push_preserves_type ... <3 (168us)
+  auto_array_filter_works ... <3 (136us)
+  auto_array_sort_works ... <3 (77us)
+  auto_map_keys_values_work ... <3 (99us)
+  shared_ptr_null_assignment ... <3 (117us)
+  weak_ptr_null_assignment ... <3 (112us)
+  auto_locks_to_object_type ... <3 (112us)
+  function_with_typed_params ... <3 (73us)
+  function_param_type_conversion ... <3 (65us)
+  function_returns_to_typed_var ... <3 (69us)
+  function_with_var_param_accepts_any ... <3 (260us)
+  for_loop_int_counter ... <3 (107us)
+  for_loop_auto_counter_locks ... <3 (95us)
+  for_loop_var_counter_flexible ... <3 (252us)
+  for_loop_fast_path_fallthrough ... <3 (102us)
+  range_for_auto_element ... <3 (85us)
+  range_for_var_element ... <3 (76us)
+  cpp_bound_int_to_script_auto ... <3 (59us)
+  cpp_bound_string_to_script_auto ... <3 (60us)
+  script_var_to_cpp_function ... <3 (78us)
+  auto_compound_assignment_int ... <3 (71us)
+  auto_compound_assignment_float ... <3 (78us)
+  auto_compound_string_concat ... <3 (74us)
+  class_int_field_enforced ... <3 (107us)
+  class_var_field_flexible ... <3 (238us)
+  auto_infers_from_arithmetic ... <3 (90us)
+  auto_infers_from_comparison ... <3 (60us)
+  auto_infers_from_ternary ... <3 (63us)
+  lambda_captures_typed_var ... <3 (66us)
+  lambda_modifies_var_capture ... <3 (78us)
+  null_to_auto_object ... <3 (111us)
+  null_preserves_type_for_reassignment ... <3 (78us)
+  auto_array_iteration_types ... <3 (107us)
+  var_array_mixed_types ... <3 (80us)
+  type_error_message_is_descriptive ... <3 (89us)
+  bool_to_int_conversion ... <3 (83us)
+  multiple_auto_declarations_independent ... <3 (228us)
+  nested_scope_same_name_different_type ... <3 (92us)
+  class_type_same_class_allowed ... <3 (84us)
+  class_type_different_class_rejected ... <3 (227us)
+  class_type_var_allows_any_class ... <3 (91us)
+  class_inheritance_child_to_parent_allowed ... <3 (90us)
+  class_inheritance_parent_to_child_rejected ... <3 (113us)
+  class_type_null_preserves_type ... <3 (106us)
+  class_type_reassign_after_null_same_type ... <3 (80us)
+  class_type_unrelated_classes_with_same_fields_rejected ... <3 (108us)
+  class_type_sibling_classes_rejected ... <3 (112us)
+  class_type_deep_inheritance_allowed ... <3 (98us)
+  script_class_constructor_conversion ... <3 (182us)
+  script_class_multiple_assignment_operators ... <3 (172us)
+  assignment_operator_not_found_rejected ... <3 (112us)
+  script_class_implicit_conversion_via_constructor ... <3 (96us)
+
+  Summary: 71 passed
+
+╔══ Bound Array Debug ══╗
+  check_function_registration ... Registering sum_ints function...
+has_function('sum_ints'): true
+Attempting to execute sum_ints([1, 2, 3])...
+Success! Result: 6
+<3 (76us)
+
+  Summary: 1 passed
+
+╔══ Conversion Isolation Tests ══╗
+  test1_register_widget ... 
+=== TEST 1: Register Widget ===
+Has conversion for SimpleWidget: 1
+Has conversion for vector<SimpleWidget>: 1
+SUCCESS: Conversion worked!
+<3 (193us)
+  test2_register_widget_again ... 
+=== TEST 2: Register Widget Again ===
+Has conversion for SimpleWidget: 1
+Has conversion for vector<SimpleWidget>: 1
+SUCCESS: Conversion worked!
+<3 (126us)
+
+  Summary: 2 passed
+
+╔══ C++ Bound Values ══╗
+  primitive_types_read_write ... <3 (107us)
+  cpp_changes_visible_in_script ... <3 (54us)
+  integration_with_functions ... <3 (105us)
+  mixed_operations ... <3 (105us)
+
+  Summary: 4 passed
+
+╔══ Deep Copy Tests ══╗
+  map_deep_copy ... <3 (308us)
+  array_deep_copy ... <3 (194us)
+  nested_container_deep_copy ... <3 (344us)
+  assignment_operator_deep_copy ... <3 (204us)
+  function_parameter_copy ... <3 (280us)
+  reference_semantics_preserved ... <3 (193us)
+
+  Summary: 6 passed
+
+╔══ Deep Copy Comprehensive Tests ══╗
+  container_deep_copy ... <3 (252us)
+  nested_container_deep_copy ... <3 (240us)
+  cpp_object_deep_copy ... <3 (317us)
+  polymorphic_deep_copy ... <3 (392us)
+  mixed_container_object_copy ... <3 (409us)
+  assignment_operator_deep_copy ... <3 (210us)
+  function_parameter_copy ... <3 (227us)
+
+  Summary: 7 passed
+
+╔══ Global Variable Persistence Tests ══╗
+  top_level_variable_persistence ... <3 (87us)
+  top_level_multiple_variables ... <3 (146us)
+  top_level_object_persistence ... <3 (91us)
+  top_level_function_persistence ... <3 (103us)
+  top_level_class_persistence ... <3 (171us)
+  explicit_global_vs_top_level ... <3 (75us)
+
+  Summary: 6 passed
+
+╔══ object deep copy tests ══╗
+  basic object deep copy ... <3 (197us)
+  object deep copy with inheritance ... <3 (351us)
+  object deep copy in containers ... <3 (258us)
+
+  Summary: 3 passed
+
+╔══ this capture debug tests ══╗
+  simple this capture in method ... TestClass created with value: 42
+Before lambda creation
+After lambda creation, before call
+Inside lambda, value = 42
+Lambda returned: 84
+Final result: 84
+<3 (509us)
+
+  Summary: 1 passed
+
+╔══ Minimal This Lambda Tests ══╗
+  minimal_this_capture_in_method ... 
+=== Test: minimal_this_capture_in_method ===
+Creating TestClass
+Constructor called with: 42
+Calling call_lambda
+call_lambda: start
+call_lambda: lambda created, about to call
+Inside lambda, value = 42
+call_lambda: lambda returned 42
+Result: 42
+Final result: 42
+<3 (542us)
+  void_method_with_lambda ... 
+=== Test: void_method_with_lambda ===
+Creating object
+Constructor: 99
+Calling method_void
+method_void: start
+method_void: calling lambda
+lambda: value = 99
+method_void: done
+All done
+<3 (389us)
+
+  Summary: 2 passed
+
+╔══ Type Conversions ══╗
+  integer_type_conversions ... <3 (86us)
+  integer_size_conversions ... <3 (75us)
+  unsigned_integer_conversions ... <3 (68us)
+  float_type_conversions ... <3 (55us)
+  string_conversions ... <3 (63us)
+  boolean_conversions ... <3 (59us)
+  implicit_numeric_conversions ... <3 (74us)
+  array_element_conversions ... <3 (105us)
+  map_value_conversions ... <3 (77us)
+  null_conversions ... <3 (54us)
+  type_coercion_in_operations ... <3 (184us)
+
+  Summary: 11 passed
+
+╔══ Type Info ══╗
+  recursive_reference_type_creation ... <3 (68us)
+  type_info_equality ... <3 (52us)
+  array_type_creation ... <3 (48us)
+  map_type_creation ... <3 (64us)
+
+  Summary: 4 passed
+
+╔══ Type Safety ══╗
+  numeric_equality_int_float_works ... <3 (131us)
+  numeric_not_equal_int_float_works ... <3 (107us)
+  numeric_comparison_consistent ... <3 (74us)
+  logical_and_returns_boolean ... <3 (57us)
+  logical_or_returns_boolean ... <3 (55us)
+  logical_and_short_circuit_returns_false ... <3 (54us)
+  logical_result_type_always_bool ... <3 (57us)
+  empty_array_is_falsy ... <3 (76us)
+  empty_map_is_falsy ... <3 (80us)
+  non_empty_containers_are_truthy ... <3 (96us)
+  empty_array_in_logical_or ... <3 (106us)
+  object_self_equality_works ... <3 (76us)
+  object_reference_equality_different_instances ... <3 (108us)
+  object_operator_equals_custom ... <3 (203us)
+  object_operator_equals_with_not_equal ... <3 (141us)
+  script_class_comparison_operators ... <3 (269us)
+  script_class_arithmetic_operators ... <3 (329us)
+  script_class_compound_assignment_operators ... <3 (368us)
+  type_based_method_overloading ... <3 (418us)
+  type_based_overloading_with_var_fallback ... <3 (170us)
+  type_based_overloading_multi_param ... <3 (209us)
+  type_based_overloading_conversion_count ... <3 (118us)
+  type_based_overloading_arity_difference ... <3 (145us)
+  type_based_overloading_class_types ... <3 (270us)
+  type_based_overloading_numeric_preference ... <3 (120us)
+  KNOWN_ISSUE_float_to_int_silent_truncation ... <3 (63us)
+  KNOWN_ISSUE_negative_float_truncation ... <3 (61us)
+  KNOWN_ISSUE_typed_array_accepts_wrong_element ... <3 (116us)
+  int_variable_rejects_string ... <3 (109us)
+  string_variable_rejects_uncoerced_int ... <3 (64us)
+  bool_variable_accepts_assignment ... <3 (58us)
+  bool_rejects_incompatible_assignment ... <3 (54us)
+  int_to_float_widening_works ... <3 (58us)
+  float_to_int_narrowing_works ... <3 (58us)
+  mixed_arithmetic_promotes_to_float ... <3 (51us)
+  integer_division_stays_integer ... <3 (53us)
+  float_division_preserves_precision ... <3 (50us)
+  auto_locks_to_first_value_type ... <3 (100us)
+  auto_rejects_incompatible_reassignment ... <3 (71us)
+  auto_allows_numeric_conversion ... <3 (60us)
+  var_accepts_any_type ... <3 (119us)
+  var_preserves_actual_type ... <3 (75us)
+  null_assignable_to_object_types ... <3 (73us)
+  null_not_assignable_to_primitives ... <3 (73us)
+  function_param_type_enforced ... <3 (85us)
+  function_param_numeric_conversion ... <3 (73us)
+  function_return_type_enforced ... <3 (108us)
+  class_field_types_enforced ... <3 (85us)
+  class_inheritance_upcasting_allowed ... <3 (94us)
+  class_inheritance_type_safety ... <3 (104us)
+  constructor_enables_implicit_conversion ... <3 (91us)
+  no_chained_constructor_conversion ... <3 (120us)
+  reference_preserves_type ... <3 (80us)
+  shared_ptr_type_preserved ... <3 (90us)
+  shared_ptr_parameter_matching ... <3 (103us)
+  weak_ptr_rejects_value_type ... <3 (148us)
+  weak_ptr_accepts_shared_ptr ... <3 (100us)
+  bitwise_requires_integers ... <3 (71us)
+  bitwise_rejects_floats ... <3 (80us)
+  same_type_equality_works ... <3 (82us)
+  null_equality_works ... <3 (106us)
+  numeric_comparisons_work ... <3 (275us)
+  string_comparison_lexicographic ... <3 (93us)
+  zero_is_falsy ... <3 (85us)
+  nonzero_is_truthy ... <3 (124us)
+  empty_string_is_falsy ... <3 (73us)
+  nonempty_string_is_truthy ... <3 (68us)
+  null_is_falsy ... <3 (72us)
+  nonempty_array_is_truthy ... <3 (79us)
+  nonempty_map_is_truthy ... <3 (109us)
+  arithmetic_preserves_int_when_possible ... <3 (57us)
+  arithmetic_promotes_to_float_when_needed ... <3 (53us)
+  comparison_always_returns_bool ... <3 (70us)
+  cpp_int_to_script_preserves_type ... <3 (60us)
+  cpp_float_to_script_preserves_type ... <3 (100us)
+  cpp_string_to_script_preserves_type ... <3 (62us)
+  cpp_bool_to_script_preserves_type ... <3 (57us)
+  script_int_to_cpp_works ... <3 (50us)
+  script_float_to_cpp_works ... <3 (51us)
+  cpp_function_parameter_type_checking ... <3 (71us)
+  cpp_function_returns_correct_type ... <3 (104us)
+  script_class_method_returns_correct_type ... <3 (128us)
+  script_class_inheritance_method_override ... <3 (106us)
+  script_class_polymorphic_call ... <3 (170us)
+  script_class_field_type_inheritance ... <3 (108us)
+  script_class_multi_level_inheritance ... <3 (99us)
+  script_class_type_checking_in_function ... <3 (143us)
+  script_class_return_type_enforcement ... <3 (92us)
+  array_push_preserves_type_context ... <3 (93us)
+  map_typed_access ... <3 (78us)
+  nested_container_type_safety ... <3 (450us)
+  map_of_arrays_type_safety ... <3 (122us)
+  script_inherits_cpp_basic_field_access ... <3 (288us)
+  script_inherits_cpp_base_method_call ... <3 (171us)
+  script_inherits_cpp_override_method ... <3 (141us)
+  script_inherits_cpp_super_call ... <3 (195us)
+  script_inherits_cpp_script_specific_field ... <3 (151us)
+  script_inherits_cpp_type_preserved_in_parameter ... x
+    Error: No viable candidates for function call
+  script_inherits_cpp_different_cpp_base_types ... <3 (250us)
+  script_inherits_cpp_type_mismatch_rejected ... <3 (247us)
+  script_inherits_cpp_multi_level ... x
+    Error: Values do not match
+  script_inherits_cpp_cpp_method_mutation ... <3 (268us)
+  script_inherits_cpp_script_overrides_cpp_field_access ... x
+    Error: Values do not match
+  script_inherits_cpp_shared_ptr_inheritance ... <3 (111us)
+  script_inherits_cpp_return_derived_from_base_function ... x
+    Error: No viable candidates for function call
+
+  Summary: 101 passed, 4 failed
+
+╔══ Vector Conversion Tests ══╗
+  basic_vector_int_conversion ...     ✓ Basic vector<int> parameter works
+    ✓ Vector<int> return value works
+    ✓ Const reference vector parameter works
+<3 (119us)
+  vector_double_conversion ...     ✓ Vector<double> with integers works
+    ✓ Vector<double> with floats works
+    ✓ Vector<double> with mixed types works
+<3 (85us)
+  vector_string_conversion ...     ✓ Vector<string> parameter works
+    ✓ Empty vector<string> works
+    ✓ Single element vector<string> works
+<3 (126us)
+  vector_custom_object_conversion ...     ✓ Vector of custom objects creation works
+    ✓ Vector of custom objects as parameter works
+<3 (129us)
+  nested_vector_conversion ...     ✓ Nested vector creation works
+    ✓ Nested vector as parameter works
+    ✓ Manual nested vector creation works
+<3 (107us)
+  vector_edge_cases ...     ✓ Empty vector works
+    ✓ Single element vector works
+    ✓ Large vector works
+<3 (1000us)
+  vector_type_coercion ...     Mixed types in integer vector result: 6
+    Non-numeric types in numeric vector failed as expected: script_value is not an integer or float. Actual type: 4: C++ exception
+    Numeric types in string vector failed: script_value is not a string: C++ exception
+<3 (231us)
+  vector_script_value_compatibility ...     ✓ Vector<script_value> with mixed types works
+    ✓ Returning vector<script_value> works
+<3 (99us)
+
+  Summary: 8 passed
+
+╔══ weak_ptr Tests ══╗
+  weak_ptr_null_checking ... <3 (275us)
+  weak_ptr_lock_valid ... LifetimeTracker(42) created, id=1, alive=1
+<3 (153us)
+  weak_ptr_becomes_invalid ... LifetimeTracker(42) created, id=1, alive=1
+~LifetimeTracker() id=1, alive=0
+Initial LifetimeTracker::alive_count: 0
+After scope, LifetimeTracker::alive_count: 0
+Test result: true (type: bool)
+<3 (232us)
+  weak_ptr_tree_structure ... <3 (189us)
+  weak_ptr_reassignment ... LifetimeTracker(10) created, id=1, alive=1
+LifetimeTracker(20) created, id=2, alive=2
+<3 (179us)
+  weak_ptr_in_containers ... LifetimeTracker(1) created, id=1, alive=1
+LifetimeTracker(2) created, id=2, alive=2
+LifetimeTracker(3) created, id=3, alive=3
+<3 (268us)
+  weak_ptr_expired_method ... LifetimeTracker(42) created, id=1, alive=1
+~LifetimeTracker() id=1, alive=0
+<3 (160us)
+  weak_ptr_script_class_simplified ... x
+    Error: No matching overload found for method 'add_child' with 1 arguments
+  weak_ptr_assignment_debug ... LifetimeTracker(42) created, id=1, alive=1
+~LifetimeTracker() id=1, alive=0
+<3 (188us)
+  weak_ptr_script_class_lifetime ... Created test1, alive: 1
+Destroyed test1, alive: 0
+Created test2, alive: 1
+Destroyed test2, alive: 0
+  Test results: test1=1, test2a(locked==null)=1, test2b(expired)=1, test2c(count==0)=1, test3=1, test4a(weak1.expired)=1, test4b(weak2.expired)=1, test4c(count==0)=1
+<3 (648us)
+  weak_ptr_circular_reference_script ... <3 (496us)
+  weak_ptr_rejects_value_constructor ... LifetimeTracker(42) created, id=1, alive=1
+  Error message: Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T>: auto obj = shared_ptr<LifetimeTracker>(...); auto weak = weak_ptr<LifetimeTracker>(obj);: Type mismatch
+<3 (179us)
+  weak_ptr_rejects_value_initialization ... LifetimeTracker(42) created, id=1, alive=1
+  Error message: Cannot initialize weak_ptr<LifetimeTracker> from a value-semantic object. Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<T>(...); auto weak = weak_ptr<T>(obj);: Type mismatch
+<3 (132us)
+  weak_ptr_rejects_value_assignment ... LifetimeTracker(42) created, id=1, alive=1
+  Error message: Cannot assign value-semantic object to weak_ptr<LifetimeTracker>. Use shared_ptr<T> to enable reference semantics.: Type mismatch
+<3 (199us)
+  weak_ptr_accepts_shared_ptr ... LifetimeTracker(42) created, id=1, alive=1
+<3 (136us)
+
+  Summary: 14 passed, 1 failed
+
+╔══ Factory Deserialization Tests ══╗
+  context_only_factory ... <3 (249us)
+  archive_only_factory ... <3 (150us)
+  context_and_archive_factory ... <3 (126us)
+
+  Summary: 3 passed
+
+╔══ Property Serialization Tests ══╗
+  property_basic_access ... <3 (15us)
+  property_transparent_conversion ... <3 (3us)
+  property_manager_reflection ... <3 (6us)
+  json_round_trip_basic ... json_round_trip_basic JSON: 
+{
+  "_type_": "test_object",
+  "active": false,
+  "health": 42,
+  "name": "Modified",
+  "speed": 3.14
+}
+Loaded health: 42
+Loaded speed: 3.14
+Loaded name: Modified
+Loaded active: 0
+<3 (117us)
+  json_round_trip_containers ... <3 (80us)
+  json_selective_serialization ... <3 (8us)
+  binary_round_trip_basic ... <3 (56us)
+  binary_round_trip_containers ... <3 (108us)
+  binary_format_stability ... <3 (4us)
+  version_add_new_field ... <3 (62us)
+  version_rename_field ... <3 (62us)
+  version_deleted_field ... <3 (55us)
+  property_clone_basic ... <3 (9us)
+  skip_unknown_property ... <3 (64us)
+  serialize_enabled_flag ... <3 (63us)
+  json_to_binary_conversion ... <3 (63us)
+  json_field_order_stability ... <3 (61us)
+  binary_field_order_stability ... <3 (52us)
+  json_partial_field_order_with_missing ... <3 (105us)
+  binary_partial_field_order_with_missing ... <3 (52us)
+  post_deserialize_computed_values_json ... <3 (122us)
+  post_deserialize_computed_values_binary ... <3 (54us)
+  post_deserialize_validation_json ... <3 (51us)
+  post_deserialize_validation_binary ... <3 (49us)
+  post_deserialize_migration_hook_called_json ... <3 (56us)
+  post_deserialize_migration_hook_called_binary ... <3 (54us)
+  post_deserialize_without_hook_not_called ... <3 (53us)
+  class_builder_post_deserialize_with_version ... <3 (182us)
+  script_class_post_deserialize_json ... <3 (352us)
+  script_class_post_deserialize_binary ... <3 (221us)
+  script_class_post_deserialize_no_hook ... <3 (150us)
+  custom_construction_with_context ... Serialized JSON: 
+{
+  "_type_": "resource_dependent_object",
+  "name": "test_resource",
+  "resource_ref": 42
+}
+Loaded name: test_resource
+Loaded resource_ref: 42
+<3 (79us)
+  custom_construction_with_archive ... [TEST] Step 1: Define class...
+<3 (61us)
+  context_extraction_from_archive ... <3 (52us)
+
+  Summary: 34 passed
+
+╔══ Math Stdlib Tests ══╗
+  abs_positive ... <3 (207us)
+  abs_negative ... [TEST] Class defined OK
+<3 (373us)
+  sign_positive ... <3 (187us)
+  sign_negative ... [TEST] Step 2: Test direct method call...
+[TEST] Direct method call OK
+<3 (333us)
+  sign_zero ... [TEST] Step 3: Call from_json...
+[TEST] from_json OK
+<3 (257us)
+  min_function ... [TEST] loaded type = 9
+[TEST] loaded storage type = 9
+[TEST] loaded is class instance: GameCharacter
+<3 (295us)
+  max_function ... [TEST] Instance fields: 71 72 73 74 
+<3 (206us)
+  clamp_in_range ... [TEST] Step 4: Access loaded.health...
+[TEST] health = 80
+[TEST] Step 5: Access loaded.max_health...
+[TEST] max_health = 80
+<3 (304us)
+  clamp_below ... [TEST] Step 6: Access loaded.was_migrated...
+[TEST] was_migrated = 1
+<3 (287us)
+  clamp_above ... [TEST] Step 7: Access loaded.loaded_version...
+[TEST] loaded_version = 1
+<3 (308us)
+  floor_function ... <3 (184us)
+  ceil_function ... <3 (318us)
+  round_function ... <3 (290us)
+  trunc_function ... <3 (367us)
+  sqrt_function ... <3 (178us)
+  pow_function ... <3 (209us)
+  exp_function ... <3 (173us)
+  log_function ... <3 (243us)
+  sin_function ... <3 (328us)
+  cos_function ... <3 (312us)
+  sin_pi_half ... <3 (247us)
+  mix_basic ... <3 (206us)
+  mix_at_start ... <3 (240us)
+  mix_at_end ... <3 (209us)
+  unmix_basic ... <3 (375us)
+  unmix_at_start ... <3 (185us)
+  unmix_at_end ... <3 (203us)
+  mix_in_ease ... <3 (302us)
+  mix_out_ease ... <3 (534us)
+  saturate_clamps_to_unit ... <3 (308us)
+  wrap_function ... <3 (320us)
+  remap_function ... <3 (224us)
+  hypot_function ... <3 (175us)
+  lerp_function ... <3 (334us)
+  pi_constant ... <3 (185us)
+  e_constant ... <3 (380us)
+  tau_constant ... <3 (202us)
+  random_in_unit_range ... <3 (190us)
+  random_int_in_range ... <3 (234us)
+  random_range_in_bounds ... <3 (241us)
+
+  Summary: 40 passed
+
+-----------------------------------------
+x 8 test(s) failed
+-----------------------------------------

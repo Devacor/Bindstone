@@ -135,9 +135,12 @@ public:
     }
 
     void write_value(const script_value& value) override {
+        // Track depth - throws on overflow (hard failure, no partial data)
+        depth_guard guard(current_depth_);
+
         // Write type tag first
         write_uint8(static_cast<uint8_t>(value.type()));
-        
+
         switch (value.type()) {
             case script_value_type::jai_null_type:
                 // Nothing to write
@@ -504,6 +507,9 @@ public:
     }
 
     script_value read_value() override {
+        // Track depth - throws on overflow (hard failure, no partial data)
+        depth_guard guard(current_depth_);
+
         // Get engine reference once at the start
         auto eng = engine_ref_.lock();
         if (!eng) {

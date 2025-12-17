@@ -180,6 +180,26 @@ public:
     // Implemented after class_definition is complete
     uint64_t get_cpp_object_field_id() const;
 
+    // Bound method caching for performance optimization
+    // Returns cached bound method if exists, or null value if not cached
+    const script_value& get_cached_bound_method(uint64_t method_id) const {
+        auto it = bound_method_cache_.find(method_id);
+        if (it != bound_method_cache_.end()) {
+            return it->second;
+        }
+        return invalid_value_;
+    }
+
+    // Cache a bound method for later reuse
+    void cache_bound_method(uint64_t method_id, const script_value& bound_method) const {
+        bound_method_cache_[method_id] = bound_method;
+    }
+
+    // Check if a bound method is cached
+    bool has_cached_bound_method(uint64_t method_id) const {
+        return bound_method_cache_.find(method_id) != bound_method_cache_.end();
+    }
+
 private:
     std::string class_name_;
     std::unordered_map<uint64_t, script_value> fields_;
@@ -187,6 +207,7 @@ private:
     std::weak_ptr<engine> engine_ref_;  // Engine reference for creating values
     mutable uint64_t cpp_object_field_id_ = 0;  // Cached field ID
     mutable script_value invalid_value_;  // Used for get_field when field not found and throw_if_missing=false
+    mutable std::unordered_map<uint64_t, script_value> bound_method_cache_;  // Cached bound methods
 
     static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
 };
@@ -2881,6 +2902,12 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                     if (cpp_obj) {
                         // Use the copy function to create a new C++ object
                         auto new_cpp_obj = class_def->copy_object(cpp_obj.get());
+
+                        // FIX #9: Check if copy_object succeeded
+                        if (!new_cpp_obj) {
+                            throw runtime_error("Failed to copy C++ object of type '" + class_name_ +
+                                "'. The registered copy function returned null.");
+                        }
 
                         // Wrap in a new script_value (use engine ref from the existing value)
                         auto eng_ref = value.get_engine_ref();

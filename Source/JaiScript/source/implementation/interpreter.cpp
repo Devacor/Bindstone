@@ -688,151 +688,140 @@ void interpreter::init_builtin_methods() {
 
 void environment::define(const std::string& name, const script_value& value) {
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it == values_.end()) {
-        // New variable - track declaration order
-        declaration_order_.push_back(id);
-    }
-    values_[id] = value;
+    define(id, value);
 }
 
 void environment::define(const std::string& name, script_value&& value) {
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it == values_.end()) {
-        // New variable - track declaration order
-        declaration_order_.push_back(id);
-    }
-    values_[id] = std::move(value);
+    define(id, std::move(value));
 }
 
 void environment::define(uint64_t id, const script_value& value) {
-    auto it = values_.find(id);
-    if (it == values_.end()) {
-        // New variable - track declaration order
-        declaration_order_.push_back(id);
+    // Check if we're redefining a local variable (shadowing parent is ok)
+    if (local_ids_.count(id) > 0) {
+        // Redefining local variable - update in place via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = value;
+            return;
+        }
     }
-    values_[id] = value;
+
+    // New local variable - add to stable storage
+    local_storage_.push_back(value);
+    flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
+    local_ids_.insert(id);
 }
 
 void environment::define(uint64_t id, script_value&& value) {
-    auto it = values_.find(id);
-    if (it == values_.end()) {
-        // New variable - track declaration order
-        declaration_order_.push_back(id);
+    // Check if we're redefining a local variable (shadowing parent is ok)
+    if (local_ids_.count(id) > 0) {
+        // Redefining local variable - update in place via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = std::move(value);
+            return;
+        }
     }
-    values_[id] = std::move(value);
+
+    // New local variable - add to stable storage
+    local_storage_.push_back(std::move(value));
+    flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
+    local_ids_.insert(id);
 }
 
 checked_result<script_value> environment::get(const std::string& name) const {
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-
-    if (parent_) {
-        return parent_->get(name);
-    }
-
-    return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
+    return get(id);
 }
 
 checked_result<script_value> environment::get(uint64_t id) const {
-    return get(id, 0);
-}
-
-checked_result<script_value> environment::get(uint64_t id, int depth) const {
-    // Prevent infinite recursion in environment chains
-    const int MAX_RECURSION_DEPTH = 100;
-    if (depth > MAX_RECURSION_DEPTH) {
-        std::string name{symbolizer_->get_string(id)};
-        return checked_result<script_value>(make_error_code(runtime_error_code::max_recursion_depth),
-            "Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
+    // Check cache first (O(1))
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        return *(it->second);
     }
 
-
-
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-
+    // Cache miss - walk parent chain
     if (parent_) {
-        // IMPORTANT: Call the one-parameter virtual get() to ensure proper polymorphic dispatch
-        // This allows derived classes (method_environment, static_method_environment) to
-        // properly check class fields/static fields when looking up variables in nested scopes
-        return parent_->get(id);
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            // Cache for future O(1) access (flat_lookup_ is mutable)
+            flat_lookup_[id] = ptr;
+            return *ptr;
+        }
     }
 
-    // Need to get the name for error message
+    // Not found anywhere
     std::string name{symbolizer_->get_string(id)};
     return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
         "Undefined variable '" + name + "'");
 }
 
+checked_result<script_value> environment::get(uint64_t id, int /*depth*/) const {
+    // Legacy method kept for compatibility - just delegate to O(1) version
+    // The depth parameter is no longer needed since we don't recurse
+    return get(id);
+}
+
 void environment::assign(const std::string& name, const script_value& value) {
     uint64_t id = symbolizer_->intern(name);
-    // Use numeric ID for recursion to avoid re-interning at each parent level
     assign(id, value);
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(const std::string& name) const {
     uint64_t id = symbolizer_->intern(name);
-    // Use numeric ID for recursion to avoid re-interning at each parent level
     return get_ref(id);
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id) const {
-    return get_ref(id, 0);
-}
-
-checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id, int depth) const {
-    // This version with depth is only called internally for recursion tracking
-    // The public version delegates here
-    const int MAX_RECURSION_DEPTH = 100;
-    if (depth > MAX_RECURSION_DEPTH) {
-        std::string name{symbolizer_->get_string(id)};
-        return checked_result<std::reference_wrapper<const script_value>>(
-            make_error_code(runtime_error_code::max_recursion_depth),
-            "Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
+    // Check cache first (O(1))
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        return std::cref(*(it->second));
     }
 
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return std::cref(it->second);
-    }
-
+    // Cache miss - walk parent chain
     if (parent_) {
-        // For proper virtual dispatch, we need to call the public virtual method
-        // on the parent, not this internal version
-        // Cast to const to call the const overload
-        const environment* const_parent = parent_.get();
-        return const_parent->get_ref(id);
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            // Cache for future O(1) access (flat_lookup_ is mutable)
+            flat_lookup_[id] = ptr;
+            return std::cref(*ptr);
+        }
     }
 
-    // Need to get the name for error message
     std::string name{symbolizer_->get_string(id)};
     return checked_result<std::reference_wrapper<const script_value>>(
         make_error_code(runtime_error_code::undefined_variable),
         "Undefined variable '" + name + "'");
 }
 
+checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id, int /*depth*/) const {
+    // Legacy method - delegate to O(1) version
+    return get_ref(id);
+}
+
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(const std::string& name) {
     uint64_t id = symbolizer_->intern(name);
-    // Use numeric ID for recursion to avoid re-interning at each parent level
     return get_ref(id);
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64_t id) {
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return std::ref(it->second);
+    // Check cache first (O(1))
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        return std::ref(*(it->second));
     }
 
+    // Cache miss - walk parent chain
     if (parent_) {
-        return parent_->get_ref(id);
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            // Cache for future O(1) access
+            flat_lookup_[id] = ptr;
+            return std::ref(*ptr);
+        }
     }
 
     std::string name{symbolizer_->get_string(id)};
@@ -843,110 +832,150 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
 
 void environment::assign(const std::string& name, script_value&& value) {
     uint64_t id = symbolizer_->intern(name);
-    // Use numeric ID for recursion to avoid re-interning at each parent level
     assign(id, std::move(value));
 }
 
 void environment::assign(uint64_t id, const script_value& value) {
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = value;
+    // Check cache first (O(1))
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        *(it->second) = value;
         return;
     }
-    
+
+    // Cache miss - walk parent chain
     if (parent_) {
-        parent_->assign(id, value);
-        return;
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            // Cache for future O(1) access, then assign
+            flat_lookup_[id] = ptr;
+            *ptr = value;
+            return;
+        }
     }
-    
+
     std::string name{symbolizer_->get_string(id)};
     throw runtime_error("Undefined variable '" + name + "'");
 }
 
 void environment::assign(uint64_t id, script_value&& value) {
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = std::move(value);
+    // Check cache first (O(1))
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        *(it->second) = std::move(value);
         return;
     }
-    
+
+    // Cache miss - walk parent chain
     if (parent_) {
-        parent_->assign(id, std::move(value));
-        return;
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            // Cache for future O(1) access, then assign
+            flat_lookup_[id] = ptr;
+            *ptr = std::move(value);
+            return;
+        }
     }
-    
+
     std::string name{symbolizer_->get_string(id)};
     throw runtime_error("Undefined variable '" + name + "'");
 }
 
 bool environment::contains(const std::string& name) const {
     uint64_t id = symbolizer_->intern(name);
-    // Use numeric ID for recursion to avoid re-interning at each parent level
     return contains(id);
 }
 
 bool environment::contains(uint64_t id) const {
-    if (values_.find(id) != values_.end()) {
+    // Check cache first (O(1))
+    if (flat_lookup_.find(id) != flat_lookup_.end()) {
         return true;
     }
-    return parent_ ? parent_->contains(id) : false;
+
+    // Cache miss - walk parent chain
+    if (parent_) {
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            // Cache for future O(1) access (often followed by get())
+            flat_lookup_[id] = ptr;
+            return true;
+        }
+    }
+    return false;
 }
 
 std::unordered_map<std::string_view, script_value> environment::get_local_variables() const {
     std::unordered_map<std::string_view, script_value> result;
-    for (const auto& [id, value] : values_) {
-        result[symbolizer_->get_string(id)] = value;
+    // Iterate over local_ids_ set and look up values via flat_lookup_
+    for (uint64_t id : local_ids_) {
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            result[symbolizer_->get_string(id)] = *(it->second);
+        }
     }
     return result;
 }
 
 void environment::clear_values() {
-    // Destroy variables in reverse declaration order (LIFO) for proper destructor ordering
-    // This clears all local variables but keeps the parent chain intact
-    for (auto it = declaration_order_.rbegin(); it != declaration_order_.rend(); ++it) {
-        values_.erase(*it);  // This destroys the script_value, firing destructors
+    // Remove local IDs from flat_lookup_
+    for (uint64_t id : local_ids_) {
+        flat_lookup_.erase(id);
     }
 
-    // Clear the tracking vector
-    declaration_order_.clear();
+    // Clear local storage (destroys script_values)
+    local_storage_.clear();
+    local_ids_.clear();
 }
 
 void environment::reset(std::shared_ptr<environment> new_parent) {
-    // Clear all values first
+    // Clear all local values first
     clear_values();
 
     // Validate the parent chain before setting (debug mode only)
     validate_parent_chain(new_parent);
 
     parent_ = new_parent;
+
+    // With lazy caching, we start with empty flat_lookup_ (no copy needed)
+    // Variables will be cached on first access
+    flat_lookup_.clear();
 }
 
 std::unordered_map<std::string_view, script_value> environment::get_all_variables() const {
+    // With lazy caching, we need to walk the parent chain to get all variables
     std::unordered_map<std::string_view, script_value> allVars;
 
-    // Start with parent's variables (if any)
+    // First, get all from parent (if any)
     if (parent_) {
         allVars = parent_->get_all_variables();
     }
 
-    // Add/override with local variables
-    for (const auto& [id, value] : values_) {
-        allVars[symbolizer_->get_string(id)] = value;
+    // Then add/override with our local variables
+    for (uint64_t id : local_ids_) {
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            allVars[symbolizer_->get_string(id)] = *(it->second);
+        }
     }
-
     return allVars;
 }
 
 script_value* environment::get_value_ptr(uint64_t id) {
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return &it->second;
+    // Check cache first (O(1))
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        return it->second;
     }
-    
+
+    // Cache miss - walk parent chain
     if (parent_) {
-        return parent_->get_value_ptr(id);
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            // Cache for future O(1) access
+            flat_lookup_[id] = ptr;
+            return ptr;
+        }
     }
-    
     return nullptr;
 }
 
@@ -991,6 +1020,33 @@ script_value interpreter::create_bound_method(const script_value& this_obj, cons
         const auto& method_func = method.as_function();
         return method_func(method_args);
     }, engine_weak);
+}
+
+// Helper to check if an expression is an lvalue (existing object that should be cloned)
+// Lvalues: identifiers, member access, subscript access
+// Non-lvalues (temporaries): function calls, constructors, literals, operators
+bool interpreter::is_lvalue_expression(expression* e) const {
+    if (!e) return false;
+
+    // Direct identifier - always an lvalue
+    if (dynamic_cast<identifier_expr*>(e)) {
+        return true;
+    }
+
+    // Member access - always an lvalue
+    if (dynamic_cast<member_expr*>(e)) {
+        return true;
+    }
+
+    // Array/map subscript (binary expr with left_bracket) - lvalue
+    if (auto* bin = dynamic_cast<binary_expr*>(e)) {
+        if (bin->op.type == token_type::left_bracket) {
+            return true;
+        }
+    }
+
+    // Everything else (function calls, constructors, literals, etc.) is a temporary
+    return false;
 }
 
 // Helper for is_truthy() to check for to_bool() method on objects
@@ -1296,10 +1352,13 @@ checked_result<std::reference_wrapper<script_value>> method_environment::get_ref
 void method_environment::assign(const std::string& name, const script_value& value) {
     // First check if it's a local variable or parameter
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = value;
-        return;
+    if (local_ids_.count(id) > 0) {
+        // It's a local variable - update via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = value;
+            return;
+        }
     }
     
     // Check parent environments
@@ -1327,10 +1386,13 @@ void method_environment::assign(const std::string& name, const script_value& val
 
 void method_environment::assign(uint64_t id, const script_value& value) {
     // First check if it's a local variable or parameter
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = value;
-        return;
+    if (local_ids_.count(id) > 0) {
+        // It's a local variable - update via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = value;
+            return;
+        }
     }
 
     // Check parent environments
@@ -1389,10 +1451,13 @@ void method_environment::assign(uint64_t id, const script_value& value) {
 
 void method_environment::assign(uint64_t id, script_value&& value) {
     // First check if it's a local variable or parameter
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = std::move(value);
-        return;
+    if (local_ids_.count(id) > 0) {
+        // It's a local variable - update via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = std::move(value);
+            return;
+        }
     }
 
     // Check parent environments
@@ -1600,10 +1665,13 @@ checked_result<std::reference_wrapper<script_value>> static_method_environment::
 void static_method_environment::assign(const std::string& name, const script_value& value) {
     // First check if it's a local variable or parameter
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = value;
-        return;
+    if (local_ids_.count(id) > 0) {
+        // It's a local variable - update via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = value;
+            return;
+        }
     }
 
     // Check parent environments
@@ -1624,10 +1692,13 @@ void static_method_environment::assign(const std::string& name, const script_val
 void static_method_environment::assign(const std::string& name, script_value&& value) {
     // First check if it's a local variable or parameter
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = std::move(value);
-        return;
+    if (local_ids_.count(id) > 0) {
+        // It's a local variable - update via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = std::move(value);
+            return;
+        }
     }
 
     // Check parent environments
@@ -1647,10 +1718,13 @@ void static_method_environment::assign(const std::string& name, script_value&& v
 
 void static_method_environment::assign(uint64_t id, const script_value& value) {
     // First check if it's a local variable or parameter
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = value;
-        return;
+    if (local_ids_.count(id) > 0) {
+        // It's a local variable - update via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = value;
+            return;
+        }
     }
 
     // Check parent environments
@@ -1671,10 +1745,13 @@ void static_method_environment::assign(uint64_t id, const script_value& value) {
 
 void static_method_environment::assign(uint64_t id, script_value&& value) {
     // First check if it's a local variable or parameter
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = std::move(value);
-        return;
+    if (local_ids_.count(id) > 0) {
+        // It's a local variable - update via flat_lookup_
+        auto it = flat_lookup_.find(id);
+        if (it != flat_lookup_.end()) {
+            *(it->second) = std::move(value);
+            return;
+        }
     }
 
     // Check parent environments
@@ -2073,7 +2150,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
     }
     
     // Use parser's pre-computed symbol ID (always set by parser)
-    // Try to get the variable from environment
+    // With lazy caching, environment_ will cache lookups automatically
     auto ref_result = environment_->get_ref(expr->symbol_id);
     if (ref_result) {
         const script_value& val = ref_result.value().get();
@@ -2929,6 +3006,37 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             }
                         }
                     }
+                    // === FAST PATH: int += simple binary expr (e.g., sum += i * 2) ===
+                    else if (auto* rhs_binary = dynamic_cast<binary_expr*>(expr->value.get())) {
+                        // Handle identifier * literal pattern (most common in loops)
+                        if (auto* left_id = dynamic_cast<identifier_expr*>(rhs_binary->left.get())) {
+                            if (auto* right_lit = dynamic_cast<literal_expr*>(rhs_binary->right.get())) {
+                                if (right_lit->value.raw_storage_index() == 1) {  // int literal
+                                    if (left_id->symbol_id == UINT64_MAX) {
+                                        left_id->symbol_id = string_symbolizer_->intern(left_id->name);
+                                    }
+                                    script_value* left_ptr = environment_->get_value_ptr(left_id->symbol_id);
+                                    if (left_ptr && left_ptr->raw_storage_index() == 1) {
+                                        script_int left_val = left_ptr->unchecked_as_int();
+                                        script_int right_val = right_lit->value.unchecked_as_int();
+                                        script_int binary_result = 0;
+                                        bool handled = true;
+                                        switch (rhs_binary->op.type) {
+                                            case token_type::star: binary_result = left_val * right_val; break;
+                                            case token_type::plus: binary_result = left_val + right_val; break;
+                                            case token_type::minus: binary_result = left_val - right_val; break;
+                                            default: handled = false; break;
+                                        }
+                                        if (handled && expr->op.type == token_type::plus_equal) {
+                                            target.unchecked_as_int_ref() += binary_result;
+                                            push_value(target.clone());
+                                            return {};
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Evaluate the right-hand side (general path)
@@ -3375,8 +3483,24 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 if (identifier->symbol_id == UINT64_MAX) {
                     identifier->symbol_id = string_symbolizer_->intern(identifier->name);
                 }
+
+                // FIX #5: Enforce type compatibility for compound assignments
+                script_value* currentVal = environment_->get_value_ptr(identifier->symbol_id);
+                if (currentVal) {
+                    type_info_ptr target_type = currentVal->get_type_info();
+                    if (target_type && target_type->base_type != script_value_type::jai_any_type) {
+                        auto enforced = enforce_type_compatibility(std::move(resultValue), target_type, identifier->name);
+                        if (!enforced) {
+                            return checked_result<void>(enforced.error(), enforced.message());
+                        }
+                        resultValue = std::move(enforced.value());
+                    }
+                }
+
+                // FIX #3/#4: Save result before moving to avoid returning moved-from value
+                script_value returnValue = resultValue.clone();
                 environment_->assign(identifier->symbol_id, std::move(resultValue));
-                push_value(resultValue);
+                push_value(std::move(returnValue));
             } else {
                 // Fall back to AST creation for complex lvalues
                 auto regularAssignment = std::make_shared<assignment_expr>(
@@ -3457,7 +3581,41 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
                     } else if (value.type() == script_value_type::jai_object_type) {
-                        // Assign object to shared_ptr - just update the value but keep the shared_ptr type info
+                        // FIX #6: Check type parameter compatibility for shared_ptr<T>
+                        auto ptr_type_info = currentVal->get_type_info();
+                        if (!ptr_type_info->type_params.empty()) {
+                            auto expected_type = ptr_type_info->type_params[0];
+                            auto actual_type = value.get_type_info();
+                            std::string actual_type_name = actual_type ? actual_type->type_name : "unknown";
+
+                            // Check if types are compatible (same type or inheritance)
+                            bool compatible = (actual_type_name == expected_type->type_name);
+
+                            // TODO #7: Check inheritance hierarchy here
+                            // For now, just check exact type match
+                            if (!compatible && actual_type) {
+                                // Try to get class definition and check inheritance
+                                if (auto eng = engine_ref_.lock()) {
+                                    auto actual_class = eng->get_class_definition(actual_type_name);
+                                    if (actual_class) {
+                                        auto parent = actual_class->get_parent();
+                                        while (parent && !compatible) {
+                                            if (parent->get_name() == expected_type->type_name) {
+                                                compatible = true;
+                                            }
+                                            parent = parent->get_parent();
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!compatible) {
+                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                                    "Cannot assign " + actual_type_name + " to shared_ptr<" + expected_type->type_name + ">");
+                            }
+                        }
+
+                        // Assign object to shared_ptr - update the value but keep the shared_ptr type info
                         auto type_info = currentVal->get_type_info();
                         value.set_type_info(type_info);
                         environment_->assign(identifier->symbol_id, std::move(value));
@@ -3497,7 +3655,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                         // The operator= method should have modified the instance in place
                                         return checked_result<void>();
                                     }
-                                    // Method call failed - fall through to type enforcement error
+                                    // FIX #10: Propagate operator= errors instead of silent fallthrough
+                                    return checked_result<void>(result.error(),
+                                        "operator= failed for " + target_type->type_name + ": " + result.message());
                                 }
                             }
                         }
@@ -3521,14 +3681,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
                     // For locked types, the value already has correct type from enforce_type_compatibility
 
-                    // For objects, use move semantics to transfer ownership instead of cloning
-                    // This ensures destructors fire at the right time
-                    if (value.is_object()) {
-                        environment_->assign(identifier->symbol_id, std::move(value));
-                    } else {
-                        // For other types, clone to maintain value semantics
-                        environment_->assign(identifier->symbol_id, std::move(value.clone()));
-                    }
+                    // FIX #1: Always clone for value semantics (objects too!)
+                    // shared_ptr types already handled above with reference semantics
+                    // Regular objects should deep copy like all other value types
+                    script_value assignValue = value.clone();
+                    environment_->assign(identifier->symbol_id, std::move(assignValue));
                 }
             } else {
                 // Variable doesn't exist in environment
@@ -3566,14 +3723,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 }
                                 // Not a C++ property or no setter - use regular field assignment
                                 if (!assigned_to_member) {
-                                    instance->set_field(identifier->symbol_id, std::move(value.clone()));
+                                    instance->set_field(identifier->symbol_id, value.clone());
                                     assigned_to_member = true;
                                 }
                             }
                             // Then try static fields
                             else {
                                 auto class_def = instance->get_class_definition();
-                                if (class_def && class_def->set_static_field(identifier->symbol_id, value)) {
+                                if (class_def && class_def->set_static_field(identifier->symbol_id, value.clone())) {
                                     assigned_to_member = true;
                                 }
                             }
@@ -3586,11 +3743,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // - For static_method_environment: check static fields, then throw if not found
                     // - For method_environment: check 'this' fields, then define locally if not found
                     // - For regular environment: throw error if variable doesn't exist
-                    environment_->assign(identifier->symbol_id, std::move(value.clone()));
+                    environment_->assign(identifier->symbol_id, value.clone());
                 }
             }
 
-            push_value(std::move(value));  // Assignment expressions return the assigned value
+            // FIX #3: Return a valid value, not moved-from
+            // value is still valid here since we only cloned it above
+            push_value(std::move(value));
         }
         // Check if target is a member expression (property assignment)
         else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
@@ -3746,10 +3905,10 @@ checked_result<void> interpreter::visit_expression_stmt(expression_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
-    // Create new environment for the block scope
+    // Create a new child scope for the block
+    // With lazy caching, this is O(1) - no flat_lookup_ copy needed
     auto previous = environment_;
-    auto block_env = get_pooled_environment(environment_);
-    environment_ = block_env;
+    environment_ = get_pooled_environment(environment_);
 
     try {
         for (const auto& decl : stmt->declarations) {
@@ -3764,8 +3923,8 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
             }
 
             if (!result) {
-                // Release the block environment before returning
-                release_environment(block_env);
+                // Restore scope before returning
+                release_environment(environment_);
                 environment_ = previous;
                 return result;
             }
@@ -3776,20 +3935,19 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
             }
         }
     } catch (...) {
-        // Release the block environment even if an error occurs
-        release_environment(block_env);
+        // Restore scope even if an error occurs
+        release_environment(environment_);
         environment_ = previous;
         throw;
     }
 
-    // Release the block environment to destroy all local variables
-    // Clear the value stack before releasing environment
+    // Clear the value stack before releasing scope
     // This ensures any lingering object references on the stack are released
     // Block statements don't produce a value, so the stack should be cleared
     valueStack_.clear();
-    release_environment(block_env);
 
-    // Restore previous environment
+    // Restore the previous scope
+    release_environment(environment_);
     environment_ = previous;
     return {};
 }
@@ -3951,12 +4109,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
 
             // Only clone if initializing from an lvalue (existing object)
             // Temporaries (constructor calls, expressions) should use move semantics
-            bool is_lvalue_init = dynamic_cast<identifier_expr*>(decl->initializer.get()) != nullptr ||
-                                  dynamic_cast<member_expr*>(decl->initializer.get()) != nullptr ||
-                                  (dynamic_cast<binary_expr*>(decl->initializer.get()) != nullptr &&
-                                   dynamic_cast<binary_expr*>(decl->initializer.get())->op.type == token_type::left_bracket);
-
-            if (is_lvalue_init) {
+            if (is_lvalue_expression(decl->initializer.get())) {
                 // Initializing from an existing object - deep copy
                 value = value.clone();
             }
@@ -3980,6 +4133,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         // else: auto without initializer - type_info remains nullptr (uninitialized)
         // First assignment will lock the type
 
+        // Define in the current environment
         environment_->define(decl->name_id, std::move(value));
         // After move, value is in moved-from state, so don't access it
     }
@@ -4999,10 +5153,14 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Use pre-computed member_id from parser
     uint64_t member_id = expr->member_id;
 
-    // First check for property getter method (C++ properties and inherited properties)
-    // This handles both direct C++ classes and script classes that inherit from C++
+    // Check for property getter method (C++ properties and inherited properties)
+    // OPTIMIZATION: Cache getter_id on AST node to avoid repeated string allocation + interning
     try {
-        uint64_t getter_id = string_symbolizer_->intern("_get_" + expr->member);
+        uint64_t getter_id = expr->getter_id;
+        if (getter_id == UINT64_MAX) {
+            getter_id = string_symbolizer_->intern("_get_" + expr->member);
+            expr->getter_id = getter_id;
+        }
         script_value getter = instance->get_method(getter_id, false);
         if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
             // Call the getter with 'this' as argument
@@ -5010,7 +5168,6 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             std::vector<script_value> args = {objectValue};
             auto result = func(args);
             if (!result) {
-                // Function returned error - propagate it up
                 return checked_result<void>(result.error(), result.message());
             }
             push_value(std::move(result.value()));
@@ -5020,19 +5177,16 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         // If get_method fails (e.g., class definition expired), fall back to field access
     }
 
-    // Check if it's a field (registered by the property() method or script field)
-    bool has_field_result = instance->has_field(member_id);
-    if (has_field_result) {
-        // Return the field value directly (for script fields without getters)
+    // Check if it's a field (script class fields without getters, or C++ fields)
+    if (instance->has_field(member_id)) {
         push_value(instance->get_field(member_id));
         return {};
     }
 
-    // Otherwise, look for a method (pass false to avoid throwing)
+    // Look for a method (pass false to avoid throwing)
     script_value method = instance->get_method(member_id, false);
     if (!method.is_null() && !method.is_invalid()) {
         // Return a bound method (function that has 'this' pre-bound)
-        // We'll create a wrapper function that includes the object as first argument
         push_value(create_bound_method(objectValue, method));
         return {};
     }
@@ -5318,7 +5472,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     
     // Create a script_function wrapper
     // capture lambdaFunc by value to ensure it stays alive
-    script_function funcWrapper = [this, lambdaFunc](const std::vector<script_value>& args) -> script_value {
+    script_function funcWrapper = [this, lambdaFunc](const std::vector<script_value>& args) -> checked_result<script_value> {
         return call_function(*lambdaFunc, args);
     };
 
@@ -5847,7 +6001,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             script_int i = init_lit->value.unchecked_as_int();
                             uint64_t var_id = init_var->name_id;
 
-                            // Setup environment once
+                            // Setup environment once (from pool)
                             auto previous = environment_;
                             auto loop_env = get_pooled_environment(previous);
                             environment_ = loop_env;
@@ -5898,6 +6052,15 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             // Native C++ loop with cached pointers for end and step
                             // Per-iteration type check is cheap (~0.1ns) and handles edge cases
                             bool fell_through = false;
+
+                            // Optimization: If body is a block, pre-allocate its environment
+                            // and reuse across iterations (define() overwrites existing vars in place)
+                            auto* body_block = dynamic_cast<block_stmt*>(stmt->body.get());
+                            std::shared_ptr<environment> body_env = nullptr;
+                            if (body_block) {
+                                body_env = get_pooled_environment(loop_env);
+                            }
+
                             while (true) {
                                 script_int current_end = end_ptr ? *end_ptr : end_val;
                                 if (!cmp(i, current_end)) break;
@@ -5909,11 +6072,35 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                 }
                                 var_ptr->unchecked_as_int_ref() = i;
 
-                                auto result = dispatch_stmt(stmt->body.get());
-                                if (!result) {
-                                    release_environment(loop_env);
-                                    environment_ = previous;
-                                    return result;
+                                // Execute body - use pre-allocated environment for blocks
+                                if (body_block) {
+                                    // Reuse body_env - it's already a child of loop_env
+                                    environment_ = body_env;
+                                    for (const auto& decl : body_block->declarations) {
+                                        auto result = dispatch_decl(decl.get());
+                                        if (valueStack_.size() > 0) {
+                                            valueStack_.clear();
+                                        }
+                                        if (!result) {
+                                            release_environment(body_env);
+                                            release_environment(loop_env);
+                                            environment_ = previous;
+                                            return result;
+                                        }
+                                        if (is_unwinding_ || hasBreakRequest_ || hasContinueRequest_ || hasReturnValue_) {
+                                            break;
+                                        }
+                                    }
+                                    valueStack_.clear();
+                                    // No need to clear locals - define() overwrites existing vars in place
+                                    environment_ = loop_env;
+                                } else {
+                                    auto result = dispatch_stmt(stmt->body.get());
+                                    if (!result) {
+                                        release_environment(loop_env);
+                                        environment_ = previous;
+                                        return result;
+                                    }
                                 }
 
                                 if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
@@ -5927,6 +6114,11 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                 } else {
                                     i += step;
                                 }
+                            }
+
+                            // Release body environment if we allocated it
+                            if (body_env) {
+                                release_environment(body_env);
                             }
 
                             // If type changed mid-loop, continue with slow path dispatch
@@ -6474,7 +6666,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     );
 
     // Create wrapper function
-    script_value functionValue = script_value::make_function([this, scriptFunc](const std::vector<script_value>& args) -> script_value {
+    script_value functionValue = script_value::make_function([this, scriptFunc](const std::vector<script_value>& args) -> checked_result<script_value> {
         return call_function(*scriptFunc, args);
     }, engine_ref_);
 
@@ -7795,14 +7987,20 @@ script_value interpreter::execute_method_ast(std::shared_ptr<function_decl> ast,
     // Create a script_defined_function with the method environment
     script_defined_function script_func(
         ast->name,
-        ast->parameters, 
+        ast->parameters,
         ast->return_type,
         ast->body,
         method_env  // Method environment with 'this'
     );
-    
+
     // Execute method with the arguments
-    return call_function(script_func, args);
+    auto result = call_function(script_func, args);
+
+    // Unwrap checked_result - throw on error (execute_method_ast callers expect script_value)
+    if (!result) {
+        throw runtime_error(result.message().empty() ? result.error().message() : result.message());
+    }
+    return std::move(result.value());
 }
 
 // Evaluate field initializers for a script class instance at construction time
@@ -7908,16 +8106,36 @@ script_value interpreter::bind_parameter(
     return (semantics == parameter_semantics::value) ? arg.clone() : arg;
 }
 
-// Function call implementation
-script_value interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args) {
-    // Validate arguments
-    validate_function_arguments(function.parameters, args);
-    
-    
+// Function call implementation - returns checked_result for consistent error handling
+checked_result<script_value> interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args) {
+    // Check recursion depth limit FIRST
+    if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::max_recursion_depth),
+            "Maximum recursion depth (" + std::to_string(JAI_MAX_CALL_DEPTH) + ") exceeded - possible infinite recursion"
+        );
+    }
+
+    // RAII guard for call depth tracking - ensures decrement even on early return
+    struct call_depth_guard {
+        int& depth;
+        call_depth_guard(int& d) : depth(d) { ++depth; }
+        ~call_depth_guard() { --depth; }
+    } depth_guard(current_call_depth_);
+
+    // Validate argument count
+    if (function.parameters.size() != args.size()) {
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::argument_count_mismatch),
+            "Function expected " + std::to_string(function.parameters.size()) +
+            " arguments but got " + std::to_string(args.size())
+        );
+    }
+
     // Create new environment for function execution using pool optimization
     // Both lambdas and functions need a fresh environment for their parameters
     auto previousEnv = environment_;
-    
+
     // For lambdas with closures, the execution environment needs to chain:
     // [parameter env] -> [closure env] -> [global env]
     // For regular functions:
@@ -7928,6 +8146,14 @@ script_value interpreter::call_function(const script_defined_function& function,
             auto this_obj = method_env->get_this_object();
             // Create a new method_environment that preserves implicit 'this' lookups
             environment_ = get_pooled_method_environment(method_env->get_parent(), this_obj);
+        } else if (auto static_env = std::dynamic_pointer_cast<static_method_environment>(function.closure_env)) {
+            // Static method - create new static_method_environment that preserves static field access
+            // Use the closure_env itself as parent to maintain access to class static fields
+            environment_ = std::make_shared<static_method_environment>(
+                static_env->get_parent(),
+                string_symbolizer_,
+                static_env->get_class_definition()
+            );
         } else {
             // Regular closure - create new environment for parameters
             environment_ = get_pooled_environment(function.closure_env);
@@ -7936,214 +8162,198 @@ script_value interpreter::call_function(const script_defined_function& function,
         // Regular function: create fresh environment with current as parent
         environment_ = get_pooled_environment(previousEnv);
     }
-    
+
     // Store previous return state
     bool previousHasReturn = hasReturnValue_;
     std::optional<script_value> previousReturn = returnValue_;
     hasReturnValue_ = false;
-    
-    try {
-        
-        // Bind parameters to arguments
-        for (size_t i = 0; i < function.parameters.size(); ++i) {
-            const auto& param = function.parameters[i];
-            const auto& arg = args[i];
-            
-            
-            // Use pre-cached symbol ID (parameter binding optimization)
-            // Symbol IDs are cached at function definition time in visit_function_decl
-            if (param.is_reference) {
-                // For reference parameters, create a reference value
-                if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
-                    auto symbol_id = current_arg_metadata_[i].first;
-                    auto env = current_arg_metadata_[i].second;
-                    
-                    if (symbol_id != UINT64_MAX && env != nullptr) {
-                        // Get pointer to the argument
-                        script_value* argPtr = env->get_value_ptr(symbol_id);
-                        if (!argPtr) {
-                            throw runtime_error("Cannot take reference of undefined variable");
+
+    // Helper lambda to cleanup and restore state
+    auto cleanup = [&](bool clear_this = true) {
+        auto function_env = environment_;
+        if (clear_this) {
+            if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
+                method_env->clear_this_reference();
+            } else if (function_env->get_parent()) {
+                if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env->get_parent())) {
+                    method_env->clear_this_reference();
+                }
+            }
+        }
+        environment_ = previousEnv;
+        release_environment(function_env, false);
+        hasReturnValue_ = previousHasReturn;
+        returnValue_ = previousReturn;
+    };
+
+    // Bind parameters to arguments
+    for (size_t i = 0; i < function.parameters.size(); ++i) {
+        const auto& param = function.parameters[i];
+        const auto& arg = args[i];
+
+        // Use pre-cached symbol ID (parameter binding optimization)
+        // Symbol IDs are cached at function definition time in visit_function_decl
+        if (param.is_reference) {
+            // For reference parameters, create a reference value
+            if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
+                auto symbol_id = current_arg_metadata_[i].first;
+                auto env = current_arg_metadata_[i].second;
+
+                if (symbol_id != UINT64_MAX && env != nullptr) {
+                    // Get pointer to the argument
+                    script_value* argPtr = env->get_value_ptr(symbol_id);
+                    if (!argPtr) {
+                        cleanup();
+                        return checked_result<script_value>(
+                            make_error_code(runtime_error_code::undefined_variable),
+                            "Cannot take reference of undefined variable"
+                        );
+                    }
+
+                    // If the argument is itself a reference, get the final target
+                    if (argPtr->is_reference()) {
+                        auto refHolder = argPtr->get_reference_holder();
+                        if (!refHolder || !refHolder->target) {
+                            cleanup();
+                            return checked_result<script_value>(
+                                make_error_code(runtime_error_code::invalid_reference),
+                                "Reference target is null"
+                            );
                         }
-                        
-                        // If the argument is itself a reference, get the final target
-                        if (argPtr->is_reference()) {
-                            auto refHolder = argPtr->get_reference_holder();
-                            if (!refHolder || !refHolder->target) {
-                                throw runtime_error("Reference target is null");
-                            }
-                            // Create reference to the final target
-                            script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-                            if (param.symbol_id != UINT64_MAX) {
-                                environment_->define(param.symbol_id, std::move(refValue));
-                            } else {
-                                environment_->define(param.name, std::move(refValue));
-                            }
+                        // Create reference to the final target
+                        script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
+                        if (param.symbol_id != UINT64_MAX) {
+                            environment_->define(param.symbol_id, std::move(refValue));
                         } else {
-                            // Create reference to the argument
-                            script_value refValue = script_value::make_reference(argPtr, env);
-                            if (param.symbol_id != UINT64_MAX) {
-                                environment_->define(param.symbol_id, std::move(refValue));
-                            } else {
-                                environment_->define(param.name, std::move(refValue));
-                            }
+                            environment_->define(param.name, std::move(refValue));
                         }
                     } else {
-                        // No metadata - can't create reference
-                        throw runtime_error("Cannot pass non-lvalue to reference parameter");
+                        // Create reference to the argument
+                        script_value refValue = script_value::make_reference(argPtr, env);
+                        if (param.symbol_id != UINT64_MAX) {
+                            environment_->define(param.symbol_id, std::move(refValue));
+                        } else {
+                            environment_->define(param.name, std::move(refValue));
+                        }
                     }
                 } else {
                     // No metadata - can't create reference
-                    throw runtime_error("Cannot pass non-lvalue to reference parameter");
+                    cleanup();
+                    return checked_result<script_value>(
+                        make_error_code(runtime_error_code::invalid_reference),
+                        "Cannot pass non-lvalue to reference parameter"
+                    );
                 }
             } else {
-                // Non-reference parameter - try to convert the argument to the parameter type if needed
-                script_value converted_arg = try_convert_for_parameter(arg, param.type);
-
-                // Decide between value semantics (clone) or reference semantics (share)
-                // Use reference semantics (no clone) if:
-                // 1. Parameter type is declared as shared_ptr<T>, OR
-                // 2. Argument is already shared_ptr<T> (preserve reference semantics)
-                // Otherwise use value semantics (clone for C++-like behavior)
-
-                bool should_share = false;
-
-                // Check if parameter type is shared_ptr<T>
-                if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
-                    should_share = true;
-                }
-
-                // Check if argument is shared_ptr<T> (preserve reference semantics)
-                if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
-                    should_share = true;
-                }
-
-                if (param.symbol_id != UINT64_MAX) {
-                    if (should_share) {
-                        // Shallow copy - share ownership (reference semantics)
-                        environment_->define(param.symbol_id, converted_arg);
-                    } else {
-                        // Deep copy - value semantics (C++-like default)
-                        auto cloned = converted_arg.clone();
-                        environment_->define(param.symbol_id, std::move(cloned));
-                    }
-                } else {
-                    // Fallback to parameter name if symbol_id not set
-                    if (should_share) {
-                        environment_->define(param.name, converted_arg);
-                    } else {
-                        environment_->define(param.name, converted_arg.clone());
-                    }
-                }
-            }
-        }
-        
-        // Execute function body without creating another environment
-        // (since we already created one for the function call)
-        for (const auto& decl : function.body->declarations) {
-            auto result = dispatch_decl(decl.get());
-
-            // Check for error codes - propagate errors as runtime exceptions
-            if (!result && result.error() != std::error_code()) {
-                // Restore environment before throwing
-                environment_ = previousEnv;
-                hasReturnValue_ = previousHasReturn;
-                returnValue_ = previousReturn;
-
-                // Build a meaningful error message
-                std::string error_msg = result.message();
-                if (error_msg.empty()) {
-                    error_msg = "Error in function body: " + result.error().message();
-                }
-
-                throw runtime_error(error_msg);
-            }
-
-            // Check if we hit a return statement and break early
-            if (hasReturnValue_) {
-                break;
-            }
-        }
-        
-        // Get return value
-        script_value result = make_value();
-        bool is_constructor_with_implicit_return = false;
-
-        if (hasReturnValue_) {
-            result = std::move(returnValue_.value());
-
-            // Apply return type conversion if needed
-            // Skip conversion for void, auto, or any type (implicit return type accepts any value)
-            if (function.return_type && !function.return_type->type_name.empty() &&
-                function.return_type->type_name != "void" &&
-                function.return_type->type_name != "auto" &&
-                function.return_type->base_type != script_value_type::jai_any_type) {
-                result = try_convert_for_parameter(result, function.return_type);
+                // No metadata - can't create reference
+                cleanup();
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::invalid_reference),
+                    "Cannot pass non-lvalue to reference parameter"
+                );
             }
         } else {
-            // Check if this is a constructor (method_environment with no explicit return)
-            // Constructors implicitly return 'this'
-            // Note: The environment_ at this point is a pooled environment for parameters,
-            // so we need to check the PARENT which could be the method_environment
-            auto function_env = environment_;
-            if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
-                result = method_env->get_this_object();
-                is_constructor_with_implicit_return = true;
-            } else if (function_env->get_parent()) {
-                // Check parent - the closure_env passed to call_function might be a method_environment
-                if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env->get_parent())) {
-                    result = method_env->get_this_object();
-                    is_constructor_with_implicit_return = true;
+            // Non-reference parameter - try to convert the argument to the parameter type if needed
+            script_value converted_arg = try_convert_for_parameter(arg, param.type);
+
+            // Decide between value semantics (clone) or reference semantics (share)
+            // Use reference semantics (no clone) if:
+            // 1. Parameter type is declared as shared_ptr<T>, OR
+            // 2. Argument is already shared_ptr<T> (preserve reference semantics)
+            // Otherwise use value semantics (clone for C++-like behavior)
+
+            bool should_share = false;
+
+            // Check if parameter type is shared_ptr<T>
+            if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
+                should_share = true;
+            }
+
+            // Check if argument is shared_ptr<T> (preserve reference semantics)
+            if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+                should_share = true;
+            }
+
+            if (param.symbol_id != UINT64_MAX) {
+                if (should_share) {
+                    // Shallow copy - share ownership (reference semantics)
+                    environment_->define(param.symbol_id, converted_arg);
                 } else {
-                    // Regular function with no return statement returns null
-                    result = make_value();
+                    // Deep copy - value semantics (C++-like default)
+                    auto cloned = converted_arg.clone();
+                    environment_->define(param.symbol_id, std::move(cloned));
                 }
+            } else {
+                // Fallback to parameter name if symbol_id not set
+                if (should_share) {
+                    environment_->define(param.name, converted_arg);
+                } else {
+                    environment_->define(param.name, converted_arg.clone());
+                }
+            }
+        }
+    }
+
+    // Execute function body without creating another environment
+    // (since we already created one for the function call)
+    for (const auto& decl : function.body->declarations) {
+        auto result = dispatch_decl(decl.get());
+
+        // Check for error codes - propagate errors
+        if (!result && result.error() != std::error_code()) {
+            cleanup();
+            std::string error_msg = result.message();
+            if (error_msg.empty()) {
+                error_msg = "Error in function body: " + result.error().message();
+            }
+            return checked_result<script_value>(result.error(), error_msg);
+        }
+
+        // Check if we hit a return statement and break early
+        if (hasReturnValue_) {
+            break;
+        }
+    }
+
+    // Get return value
+    script_value result = make_value();
+
+    if (hasReturnValue_) {
+        result = std::move(returnValue_.value());
+
+        // Apply return type conversion if needed
+        // Skip conversion for void, auto, or any type (implicit return type accepts any value)
+        if (function.return_type && !function.return_type->type_name.empty() &&
+            function.return_type->type_name != "void" &&
+            function.return_type->type_name != "auto" &&
+            function.return_type->base_type != script_value_type::jai_any_type) {
+            result = try_convert_for_parameter(result, function.return_type);
+        }
+    } else {
+        // Check if this is a constructor (method_environment with no explicit return)
+        // Constructors implicitly return 'this'
+        // Note: The environment_ at this point is a pooled environment for parameters,
+        // so we need to check the PARENT which could be the method_environment
+        auto function_env = environment_;
+        if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
+            result = method_env->get_this_object();
+        } else if (function_env->get_parent()) {
+            // Check parent - the closure_env passed to call_function might be a method_environment
+            if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env->get_parent())) {
+                result = method_env->get_this_object();
             } else {
                 // Regular function with no return statement returns null
                 result = make_value();
             }
+        } else {
+            // Regular function with no return statement returns null
+            result = make_value();
         }
-
-        // Clear this_object_ reference for method environments to ensure timely destructors
-        // IMPORTANT: We clear this for BOTH constructors and regular methods
-        // For constructors, we've already grabbed the 'this' object and stored it in 'result' above,
-        // so there's no reason to keep it alive in the method environment
-        auto function_env = environment_;
-        if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
-            method_env->clear_this_reference();
-        } else if (function_env->get_parent()) {
-            // Also check parent for method_environment
-            if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env->get_parent())) {
-                method_env->clear_this_reference();
-            }
-        }
-
-        environment_ = previousEnv;
-        release_environment(function_env, false);
-
-        // Restore previous state
-        hasReturnValue_ = previousHasReturn;
-        returnValue_ = previousReturn;
-
-        return result;
-
-    } catch (...) {
-        // Release environment even on exception
-        auto function_env = environment_;
-
-        // Clear this_object_ reference for method environments to ensure timely destructors
-        // Note: On exception, we can clear constructors too since they won't return a value anyway
-        if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
-            method_env->clear_this_reference();
-        }
-
-        environment_ = previousEnv;
-        release_environment(function_env, false);
-
-        // Restore state on exception
-        hasReturnValue_ = previousHasReturn;
-        returnValue_ = previousReturn;
-        throw;
     }
+
+    // Cleanup and return success
+    cleanup();
+    return result;
 }
 
 void interpreter::validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args) {
@@ -8490,7 +8700,7 @@ script_value interpreter::try_convert_for_parameter(const script_value& arg, typ
 
 script_value interpreter::make_function(std::shared_ptr<script_defined_function> func) {
     // Create a wrapper that handles reference parameters properly
-    script_function wrapper = [this, func](const std::vector<script_value>& args) -> script_value {
+    script_function wrapper = [this, func](const std::vector<script_value>& args) -> checked_result<script_value> {
         // For functions with reference parameters, we need special handling
         bool hasRefParams = false;
         for (const auto& param : func->parameters) {
@@ -8499,12 +8709,12 @@ script_value interpreter::make_function(std::shared_ptr<script_defined_function>
                 break;
             }
         }
-        
+
         if (!hasRefParams) {
             // No reference parameters - use normal call
             return call_function(*func, args);
         }
-        
+
         // Has reference parameters - we need to handle them specially
         // For now, just call normally - we'll implement proper reference handling later
         return call_function(*func, args);

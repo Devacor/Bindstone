@@ -154,6 +154,9 @@ public:
     }
 
     void write_value(const script_value& value) override {
+        // Track depth - throws on overflow (hard failure, no partial data)
+        depth_guard guard(current_depth_);
+
         // Handle shared_ptr types with proper tracking, delegate others to stdlib
         switch (value.type()) {
             
@@ -707,8 +710,11 @@ public:
     }
     
     script_value read_value() override {
+        // Track depth - throws on overflow (hard failure, no partial data)
+        depth_guard guard(current_depth_);
+
         script_value result;
-        
+
         if (current_property_value_) {
             result = *current_property_value_;
             current_property_value_ = nullptr;

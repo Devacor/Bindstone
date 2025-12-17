@@ -4,6 +4,17 @@
 #define JAISCRIPT_SERIALIZATION_ARCHIVE_HPP
 #define JAISCRIPT_ARCHIVE_HPP_INCLUDED
 
+// ============================================================
+// Configurable limits - define these before including to override
+// ============================================================
+
+// Maximum serialization depth (default: 1000)
+// This is high enough for complex nested structures but prevents stack overflow
+// from maliciously crafted data or circular references
+#ifndef JAI_MAX_SERIALIZATION_DEPTH
+#define JAI_MAX_SERIALIZATION_DEPTH 1000
+#endif
+
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/type_info.hpp>
@@ -59,6 +70,34 @@ protected:
     // Shared pointer tracking to prevent duplicate serialization
     std::unordered_map<const void*, uint32_t> shared_ptr_ids_;
     uint32_t next_shared_id_ = 1;  // 0 reserved for null
+
+    // Depth tracking for recursion limit
+    int current_depth_ = 0;
+
+    // RAII guard for depth tracking - throws on depth exceeded
+    struct depth_guard {
+        int& depth;
+        bool acquired = false;
+
+        depth_guard(int& d) : depth(d) {
+            if (depth >= JAI_MAX_SERIALIZATION_DEPTH) {
+                throw serialization_error(
+                    "Maximum serialization depth (" + std::to_string(JAI_MAX_SERIALIZATION_DEPTH) +
+                    ") exceeded - possible circular reference or deeply nested structure"
+                );
+            }
+            ++depth;
+            acquired = true;
+        }
+
+        ~depth_guard() {
+            if (acquired) --depth;
+        }
+
+        // Non-copyable
+        depth_guard(const depth_guard&) = delete;
+        depth_guard& operator=(const depth_guard&) = delete;
+    };
 
     // Check if a shared_ptr has been serialized before
     // Returns: pair<id, is_new> where is_new indicates if this is the first time
@@ -200,14 +239,42 @@ protected:
     // This map stores pre-read properties so factories can access them
     std::map<std::string, script_value> preread_properties_;
     bool has_preread_properties_ = false;
-    
+
+    // Depth tracking for recursion limit
+    int current_depth_ = 0;
+
+    // RAII guard for depth tracking - throws on depth exceeded (hard failure, no partial data)
+    struct depth_guard {
+        int& depth;
+        bool acquired = false;
+
+        depth_guard(int& d) : depth(d) {
+            if (depth >= JAI_MAX_SERIALIZATION_DEPTH) {
+                throw serialization_error(
+                    "Maximum deserialization depth (" + std::to_string(JAI_MAX_SERIALIZATION_DEPTH) +
+                    ") exceeded - possible malicious data or deeply nested structure"
+                );
+            }
+            ++depth;
+            acquired = true;
+        }
+
+        ~depth_guard() {
+            if (acquired) --depth;
+        }
+
+        // Non-copyable
+        depth_guard(const depth_guard&) = delete;
+        depth_guard& operator=(const depth_guard&) = delete;
+    };
+
     // Register a reconstructed shared_ptr
     void register_shared_ptr(uint32_t id, const script_value& ptr) {
         if (id != 0) {  // Don't register null
             id_to_shared_ptr_.insert_or_assign(id, ptr);
         }
     }
-    
+
     // Get previously deserialized shared_ptr by ID
     script_value get_shared_ptr(uint32_t id) const {
         if (id == 0) {

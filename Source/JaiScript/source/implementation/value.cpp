@@ -364,9 +364,32 @@ script_value script_value::clone() const {
                 new_holder->is_class_instance_wrapper = true;
                 result.storage_ = new_holder;
             } else {
-                // For raw C++ objects, use shallow copy for now
-                // TODO: Access polymorphic type registry through engine for deep copy
-                result.storage_ = storage_;
+                // FIX #2: Raw C++ objects need explicit copy support
+                // Try to get copy function from class definition
+                bool copied = false;
+                if (auto eng = engine_ref_.lock()) {
+                    auto class_def = eng->get_class_definition(obj_holder->type_id);
+                    if (class_def && class_def->has_copy_function()) {
+                        auto new_cpp_obj = class_def->copy_object(obj_holder->data.get());
+                        if (new_cpp_obj) {
+                            auto new_holder = std::make_shared<object_holder>();
+                            new_holder->type_name = obj_holder->type_name;
+                            new_holder->type_id = obj_holder->type_id;
+                            new_holder->data = new_cpp_obj;
+                            new_holder->is_class_instance_wrapper = false;
+                            result.storage_ = new_holder;
+                            copied = true;
+                        }
+                    }
+                }
+
+                if (!copied) {
+                    // No copy function registered - throw error instead of silent aliasing
+                    throw runtime_error(
+                        "Cannot deep copy C++ object of type '" + obj_holder->type_name +
+                        "'. Register a copy constructor with class_builder<T>::copy_constructor() "
+                        "or use shared_ptr<" + obj_holder->type_name + "> for reference semantics.");
+                }
             }
             break;
         }

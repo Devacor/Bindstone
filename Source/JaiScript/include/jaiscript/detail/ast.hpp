@@ -250,6 +250,7 @@ namespace jai {
         expression_ptr object;
         std::string member;
         uint64_t member_id = UINT64_MAX;  // Cached interned ID for the member name
+        mutable uint64_t getter_id = UINT64_MAX;  // Cached interned ID for "_get_" + member (computed on first use)
         bool is_arrow;  // true for ->, false for .
         bool is_static; // true for ::, false for . or ->
 

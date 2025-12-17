@@ -3,14 +3,26 @@
 #ifndef __JAISCRIPT_DETAIL_INTERPRETER_HPP__
 #define __JAISCRIPT_DETAIL_INTERPRETER_HPP__
 
+// ============================================================
+// Configurable limits - define these before including to override
+// ============================================================
+
+// Maximum function call recursion depth (default: 10000)
+// This is high enough for complex valid code but prevents stack overflow
+#ifndef JAI_MAX_CALL_DEPTH
+#define JAI_MAX_CALL_DEPTH 10000
+#endif
+
 #include "ast.hpp"
 #include "string_symbolizer.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <vector>
+#include <deque>
 #include <iostream>
 #include <system_error>
 #include <optional>
@@ -27,6 +39,9 @@ namespace jai {
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer)
             : parent_(parent), symbolizer_(symbolizer) {
             validate_parent_chain(parent);
+            // Lazy caching: start empty, populate on first access
+            // This gives O(1) construction instead of O(N) map copy
+            // Lookups walk parent chain on cache miss, then cache for O(1) subsequent access
         }
         virtual ~environment() = default;
         
@@ -153,15 +168,26 @@ namespace jai {
         }
 
     private:
-        std::unordered_map<uint64_t, script_value> values_;  // Use symbolized string IDs for fast lookup
-        std::vector<uint64_t> declaration_order_;  // Track declaration order for LIFO destruction
+        // === Lazy-Cached Flat Lookup ===
+        // Stable storage for THIS scope's values - deque doesn't invalidate pointers on push_back
+        std::deque<script_value> local_storage_;
+
+        // Lazy lookup cache - starts empty, populated on first access to each variable
+        // Key: symbol ID, Value: pointer to script_value in some environment's local_storage_
+        // mutable because const lookup methods cache for performance (doesn't change logical state)
+        mutable std::unordered_map<uint64_t, script_value*> flat_lookup_;
+
+        // Track which IDs we defined locally (for O(1) "is local" checks)
+        std::unordered_set<uint64_t> local_ids_;
+
+        // Parent pointer kept for: closure semantics, method_environment 'this' lookup, debugging
         std::shared_ptr<environment> parent_;
         string_symbolizer* symbolizer_;
 
-        // Internal get method with recursion depth tracking
+        // Legacy: Internal get method with recursion depth tracking (only used as fallback now)
         checked_result<script_value> get(uint64_t id, int depth) const;
         checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id, int depth) const;
-        
+
         friend class interpreter;
         friend class method_environment;
         friend class static_method_environment;
@@ -174,7 +200,8 @@ namespace jai {
             : environment(parent, symbolizer), this_object_(std::move(this_obj)),
               bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
         }
-        
+        ~method_environment() override = default;
+
         // Override get to check 'this' object fields as fallback
         checked_result<script_value> get(const std::string& name) const override;
         checked_result<script_value> get(uint64_t id) const override;
@@ -199,10 +226,12 @@ namespace jai {
         
         // Reset method for pooling
         void reset(std::shared_ptr<environment> parent, script_value this_obj) {
-            // Clear local values
-            values_.clear();
+            // Clear local values (removes from flat_lookup_ too)
+            clear_values();
             // Use set_parent helper which validates the chain (debug mode only)
             set_parent(parent);
+            // With lazy caching, we start with empty flat_lookup_ (no copy needed)
+            flat_lookup_.clear();
             this_object_ = std::move(this_obj);
         }
 
@@ -234,7 +263,8 @@ namespace jai {
             : environment(parent, symbolizer), class_def_(class_def),
               bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
         }
-        
+        ~static_method_environment() override = default;
+
         // Override get to check static fields as fallback
         checked_result<script_value> get(const std::string& name) const override;
         checked_result<script_value> get(uint64_t id) const override;
@@ -250,6 +280,9 @@ namespace jai {
         void assign(const std::string& name, script_value&& value) override;
         void assign(uint64_t id, const script_value& value) override;
         void assign(uint64_t id, script_value&& value) override;
+
+        // Get the class definition for creating child static environments
+        std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
 
     private:
         std::shared_ptr<class_definition> class_def_;
@@ -614,8 +647,7 @@ namespace jai {
         
         // Current environment for variable storage
         std::shared_ptr<environment> environment_;
-        
-        
+
         // Current argument metadata for reference parameter passing
         std::vector<std::pair<uint64_t, std::shared_ptr<environment>>> current_arg_metadata_;
         
@@ -717,15 +749,17 @@ namespace jai {
         // Switch statement control flow state
         bool in_switch_ = false;
         bool should_fallthrough_ = false;
-        
-        
+
+        // Call depth tracking for recursion limit
+        int current_call_depth_ = 0;
+
         // Function call optimization pools
         mutable std::vector<script_value> argument_pool_;  // Reusable argument vector
         std::vector<std::shared_ptr<environment>> environment_pool_;  // Pool of reusable environments
         size_t environment_pool_index_ = 0;  // Current pool position
         std::vector<std::shared_ptr<method_environment>> method_environment_pool_;  // Pool of reusable method environments
         size_t method_environment_pool_index_ = 0;  // Current pool position for method environments
-        
+
         // Class lookup callback for finding C++ classes
         class_lookup_callback class_lookup_callback_;
 
@@ -850,6 +884,11 @@ namespace jai {
         // Returns: nullopt if no custom method, result value if method found
         std::optional<script_value> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
 
+        // Helper to check if an expression is an lvalue (existing object that should be cloned)
+        // Lvalues: identifiers, member access, subscript access
+        // Non-lvalues (temporaries): function calls, constructors, literals, operators
+        bool is_lvalue_expression(expression* e) const;
+
         inline bool is_truthy(const script_value& value) {
             // ULTRA-FAST: Use raw_storage_index() - single integer read, no pointer chasing
             // Avoids type_info_ null check and double-switch overhead
@@ -889,7 +928,8 @@ namespace jai {
         }
         
         // Function call helpers
-        script_value call_function(const script_defined_function& function, const std::vector<script_value>& args);
+        // Returns checked_result - exceptions only thrown at execute() boundary
+        checked_result<script_value> call_function(const script_defined_function& function, const std::vector<script_value>& args);
         void validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args);
         script_value make_function(std::shared_ptr<script_defined_function> func);
 

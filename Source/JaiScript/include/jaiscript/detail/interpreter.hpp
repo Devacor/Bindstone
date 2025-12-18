@@ -871,34 +871,34 @@ namespace jai {
             // Avoids type_info_ null check and double-switch overhead
             // Bool case first since loop conditions almost always evaluate to bool
             switch (value.raw_storage_index()) {
-                case 5: return value.unchecked_as_bool();    // bool - MOST COMMON for conditions
-                case 0: return false;                         // null (monostate)
-                case 1: return value.unchecked_as_int() != 0; // int
-                case 2: return value.unchecked_as_float() != 0.0; // float
-                case 3: return !value.unchecked_as_string().empty(); // string
-                case 4: return true;                          // char - any char is truthy
-                case 6: {
+                case script_value::TYPEID_BOOL: return value.unchecked_as_bool();    // bool - MOST COMMON for conditions
+                case script_value::TYPEID_NULL: return false;                         // null (monostate)
+                case script_value::TYPEID_INT: return value.unchecked_as_int() != 0; // int
+                case script_value::TYPEID_FLOAT: return value.unchecked_as_float() != 0.0; // float
+                case script_value::TYPEID_STRING: return !value.unchecked_as_string().empty(); // string
+                case script_value::TYPEID_CHAR: return true;                          // char - any char is truthy
+                case script_value::TYPEID_ARRAY: {
                     // array - empty is falsy (const_cast required, get_array_storage is non-const)
                     auto& arr = const_cast<script_value&>(value).get_array_storage();
                     return arr && !arr->empty();
                 }
-                case 7: {
+                case script_value::TYPEID_MAP: {
                     // map - empty is falsy (const_cast required, get_map_storage is non-const)
                     auto& map = const_cast<script_value&>(value).get_map_storage();
                     return map && !map->empty();
                 }
-                case 8: return object_to_bool_via_method(value); // object (index 8) - check for to_bool() method
+                case script_value::TYPEID_OBJECT: return object_to_bool_via_method(value); // object - check for to_bool() method
                 default: return true;                         // functions, other complex types
             }
         }
         
         inline script_value to_numeric(const script_value& value) {
             if (value.is_int()) {
-                return make_value(static_cast<script_float>(value.as_int()));
+                return make_value(static_cast<script_float>(value.unchecked_as_int()));
             } else if (value.is_float()) {
                 return value;
             } else if (value.is_bool()) {
-                return make_value(value.as_bool() ? 1.0 : 0.0);
+                return make_value(value.unchecked_as_bool() ? 1.0 : 0.0);
             } else {
                 throw runtime_error("Cannot convert to numeric value");
             }

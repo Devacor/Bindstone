@@ -44,14 +44,14 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.as_array().size()));
+        return interp->make_value(static_cast<script_int>(self.unchecked_as_array().size()));
     }},
 
         {string_symbolizer_->intern("push"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "push() takes exactly one argument");
         }
-        auto& arrayPtr = self.get_array_storage();
+        auto& arrayPtr = self.unchecked_get_array_storage();
         arrayPtr->push_back(args[0].clone());  // Deep copy when pushing
         return interp->make_value();
     }},
@@ -60,7 +60,7 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pop() takes no arguments");
         }
-        auto& arrayPtr = self.get_array_storage();
+        auto& arrayPtr = self.unchecked_get_array_storage();
         if (arrayPtr->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot pop from empty array");
         }
@@ -73,14 +73,14 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
         }
-        return interp->make_value(self.as_array().empty());
+        return interp->make_value(self.unchecked_as_array().empty());
     }},
 
         {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
-        auto& arrayPtr = self.get_array_storage();
+        auto& arrayPtr = self.unchecked_get_array_storage();
         arrayPtr->clear();
         return interp->make_value();
     }},
@@ -89,7 +89,7 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "front() takes no arguments");
         }
-        const auto& arr = self.as_array();
+        const auto& arr = self.unchecked_as_array();
         if (arr.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get front of empty array");
         }
@@ -100,7 +100,7 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "back() takes no arguments");
         }
-        const auto& arr = self.as_array();
+        const auto& arr = self.unchecked_as_array();
         if (arr.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get back of empty array");
         }
@@ -111,7 +111,7 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "index_of() takes exactly one argument");
         }
-        const auto& arr = self.as_array();
+        const auto& arr = self.unchecked_as_array();
         for (size_t i = 0; i < arr.size(); ++i) {
             if (arr[i] == args[0]) {
                 return interp->make_value(static_cast<script_int>(i));
@@ -124,7 +124,7 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "has() takes exactly one argument");
         }
-        const auto& arr = self.as_array();
+        const auto& arr = self.unchecked_as_array();
         for (const auto& elem : arr) {
             if (elem == args[0]) {
                 return interp->make_value(true);
@@ -137,7 +137,7 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
         }
-        const auto& arr = self.as_array();
+        const auto& arr = self.unchecked_as_array();
         for (const auto& elem : arr) {
             if (elem == args[0]) {
                 return interp->make_value(true);
@@ -150,7 +150,7 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "first() takes no arguments");
         }
-        const auto& arr = self.as_array();
+        const auto& arr = self.unchecked_as_array();
         if (arr.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get first of empty array");
         }
@@ -161,7 +161,7 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "last() takes no arguments");
         }
-        const auto& arr = self.as_array();
+        const auto& arr = self.unchecked_as_array();
         if (arr.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get last of empty array");
         }
@@ -172,16 +172,19 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.as_array().size()));
+        return interp->make_value(static_cast<script_int>(self.unchecked_as_array().size()));
     }},
 
         {string_symbolizer_->intern("slice"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 2) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "slice() takes exactly two arguments");
         }
-        const auto& arr = self.as_array();
-        script_int start = args[0].as<script_int>();
-        script_int end = args[1].as<script_int>();
+        if (!args[0].is_int() || !args[1].is_int()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "slice() arguments must be integers");
+        }
+        const auto& arr = self.unchecked_as_array();
+        script_int start = args[0].unchecked_as_int();
+        script_int end = args[1].unchecked_as_int();
 
         // Handle negative indices
         if (start < 0) start = static_cast<script_int>(arr.size()) + start;
@@ -194,7 +197,7 @@ void interpreter::init_builtin_methods() {
         if (start > end) start = end;
 
         script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
-        auto& resultPtr = result.get_array_storage();
+        auto& resultPtr = result.unchecked_get_array_storage();
         for (script_int i = start; i < end; ++i) {
             resultPtr->push_back(arr[i].clone());
         }
@@ -209,17 +212,17 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument");
         }
 
-        const auto& arr = self.as_array();
-        const auto& func = args[0].as_function();
+        const auto& arr = self.unchecked_as_array();
+        const auto& func = args[0].unchecked_as_function();
         script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
-        auto& resultPtr = result.get_array_storage();
+        auto& resultPtr = result.unchecked_get_array_storage();
 
         for (const auto& elem : arr) {
             auto call_result = func({elem});
             if (!call_result) {
                 return call_result.error_value();
             }
-            if (call_result.value().as<bool>()) {
+            if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
                 resultPtr->push_back(elem.clone());
             }
         }
@@ -231,17 +234,17 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "sort() takes zero or one argument");
         }
 
-        auto& arrPtr = self.get_array_storage();
+        auto& arrPtr = self.unchecked_get_array_storage();
 
         if (args.empty()) {
             // Default sort - numeric or lexicographic
             std::sort(arrPtr->begin(), arrPtr->end(), [](const script_value& a, const script_value& b) {
                 if (a.is_int() && b.is_int()) {
-                    return a.as<script_int>() < b.as<script_int>();
+                    return a.unchecked_as_int() < b.unchecked_as_int();
                 } else if (a.is_float() && b.is_float()) {
-                    return a.as<script_float>() < b.as<script_float>();
+                    return a.unchecked_as_float() < b.unchecked_as_float();
                 } else if (a.is_string() && b.is_string()) {
-                    return a.as<std::string>() < b.as<std::string>();
+                    return a.unchecked_as_string() < b.unchecked_as_string();
                 }
                 return false;
             });
@@ -250,11 +253,11 @@ void interpreter::init_builtin_methods() {
             if (!args[0].is_function()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "sort() comparator must be a function");
             }
-            const auto& comparator = args[0].as_function();
+            const auto& comparator = args[0].unchecked_as_function();
             std::sort(arrPtr->begin(), arrPtr->end(), [&comparator](const script_value& a, const script_value& b) {
                 auto result = comparator({a, b});
                 if (!result) return false;
-                return result.value().as<bool>();
+                return result.value().is_bool() && result.value().unchecked_as_bool();
             });
         }
         return interp->make_value();
@@ -264,7 +267,7 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
         }
-        auto& arrPtr = self.get_array_storage();
+        auto& arrPtr = self.unchecked_get_array_storage();
         std::reverse(arrPtr->begin(), arrPtr->end());
         return interp->make_value();
     }},
@@ -273,8 +276,11 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove() takes exactly one argument");
         }
-        auto& arrPtr = self.get_array_storage();
-        script_int index = args[0].as<script_int>();
+        if (!args[0].is_int()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove() argument must be an integer");
+        }
+        auto& arrPtr = self.unchecked_get_array_storage();
+        script_int index = args[0].unchecked_as_int();
 
         if (index < 0 || index >= static_cast<script_int>(arrPtr->size())) {
             return interp->make_value(false);
@@ -292,8 +298,8 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_if() requires a function argument");
         }
 
-        auto& arrPtr = self.get_array_storage();
-        const auto& predicate = args[0].as_function();
+        auto& arrPtr = self.unchecked_get_array_storage();
+        const auto& predicate = args[0].unchecked_as_function();
         script_int removed_count = 0;
 
         for (auto it = arrPtr->begin(); it != arrPtr->end(); ) {
@@ -301,7 +307,7 @@ void interpreter::init_builtin_methods() {
             if (!call_result) {
                 return call_result.error_value();
             }
-            if (call_result.value().as<bool>()) {
+            if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
                 it = arrPtr->erase(it);
                 ++removed_count;
             } else {
@@ -318,21 +324,21 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.as_map().size()));
+        return interp->make_value(static_cast<script_int>(self.unchecked_as_map().size()));
     }},
 
         {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
         }
-        return interp->make_value(self.as_map().empty());
+        return interp->make_value(self.unchecked_as_map().empty());
     }},
 
         {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
-        auto& mapPtr = self.get_map_storage();
+        auto& mapPtr = self.unchecked_get_map_storage();
         mapPtr->clear();
         return interp->make_value();
     }},
@@ -341,7 +347,7 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
         }
-        const auto& map = self.as_map();
+        const auto& map = self.unchecked_as_map();
         return interp->make_value(map.find(args[0]) != map.end());
     }},
 
@@ -349,7 +355,7 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "erase() takes exactly one argument");
         }
-        auto& mapPtr = self.get_map_storage();
+        auto& mapPtr = self.unchecked_get_map_storage();
         mapPtr->erase(args[0]);
         return interp->make_value();
     }},
@@ -358,9 +364,9 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "keys() takes no arguments");
         }
-        const auto& map = self.as_map();
+        const auto& map = self.unchecked_as_map();
         script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
-        auto& arrayPtr = result.get_array_storage();
+        auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
             arrayPtr->push_back(key.clone());
@@ -372,9 +378,9 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "values() takes no arguments");
         }
-        const auto& map = self.as_map();
+        const auto& map = self.unchecked_as_map();
         script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
-        auto& arrayPtr = result.get_array_storage();
+        auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
             arrayPtr->push_back(value.clone());
@@ -386,7 +392,7 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "has() takes exactly one argument");
         }
-        const auto& map = self.as_map();
+        const auto& map = self.unchecked_as_map();
         return interp->make_value(map.find(args[0]) != map.end());
     }},
 
@@ -394,7 +400,7 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 2) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "get() takes exactly two arguments (key, default)");
         }
-        const auto& map = self.as_map();
+        const auto& map = self.unchecked_as_map();
         auto it = map.find(args[0]);
         if (it != map.end()) {
             return it->second;
@@ -406,14 +412,14 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.as_map().size()));
+        return interp->make_value(static_cast<script_int>(self.unchecked_as_map().size()));
     }},
 
         {string_symbolizer_->intern("remove"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove() takes exactly one argument");
         }
-        auto& mapPtr = self.get_map_storage();
+        auto& mapPtr = self.unchecked_get_map_storage();
         auto it = mapPtr->find(args[0]);
         if (it != mapPtr->end()) {
             mapPtr->erase(it);
@@ -430,8 +436,8 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_if() requires a function argument");
         }
 
-        auto& mapPtr = self.get_map_storage();
-        const auto& predicate = args[0].as_function();
+        auto& mapPtr = self.unchecked_get_map_storage();
+        const auto& predicate = args[0].unchecked_as_function();
         script_int removed_count = 0;
 
         for (auto it = mapPtr->begin(); it != mapPtr->end(); ) {
@@ -439,7 +445,8 @@ void interpreter::init_builtin_methods() {
             if (!call_result) {
                 return call_result.error_value();
             }
-            if (call_result.value().as<bool>()) {
+            const auto& val = call_result.value();
+            if (val.is_bool() && val.unchecked_as_bool()) {
                 it = mapPtr->erase(it);
                 ++removed_count;
             } else {
@@ -457,17 +464,18 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument");
         }
 
-        const auto& map = self.as_map();
-        const auto& predicate = args[0].as_function();
+        const auto& map = self.unchecked_as_map();
+        const auto& predicate = args[0].unchecked_as_function();
         script_value result = script_value::make_map(nullptr, nullptr, interp->get_engine_ref());
-        auto& resultPtr = result.get_map_storage();
+        auto& resultPtr = result.unchecked_get_map_storage();
 
         for (const auto& [key, value] : map) {
             auto call_result = predicate({key, value});
             if (!call_result) {
                 return call_result.error_value();
             }
-            if (call_result.value().as<bool>()) {
+            const auto& val = call_result.value();
+            if (val.is_bool() && val.unchecked_as_bool()) {
                 (*resultPtr)[key.clone()] = value.clone();
             }
         }
@@ -478,15 +486,15 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_array() takes no arguments");
         }
-        const auto& map = self.as_map();
+        const auto& map = self.unchecked_as_map();
         script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
-        auto& arrayPtr = result.get_array_storage();
+        auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
 
         // Return array of [key, value] pairs
         for (const auto& [key, value] : map) {
             script_value pair = script_value::make_array(nullptr, interp->get_engine_ref());
-            auto& pairPtr = pair.get_array_storage();
+            auto& pairPtr = pair.unchecked_get_array_storage();
             pairPtr->push_back(key.clone());
             pairPtr->push_back(value.clone());
             arrayPtr->push_back(std::move(pair));
@@ -501,29 +509,32 @@ void interpreter::init_builtin_methods() {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.as_string().size()));
+        return interp->make_value(static_cast<script_int>(self.unchecked_as_string().size()));
     }},
 
         {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.as_string().size()));
+        return interp->make_value(static_cast<script_int>(self.unchecked_as_string().size()));
     }},
 
         {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
         }
-        return interp->make_value(self.as_string().empty());
+        return interp->make_value(self.unchecked_as_string().empty());
     }},
 
         {string_symbolizer_->intern("substr"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() < 1 || args.size() > 2) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "substr() takes 1 or 2 arguments (start, [length])");
         }
-        const auto& str = self.as_string();
-        script_int start = args[0].as<script_int>();
+        if (!args[0].is_int()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "substr() start argument must be an integer");
+        }
+        const auto& str = self.unchecked_as_string();
+        script_int start = args[0].unchecked_as_int();
 
         // Handle negative start index
         if (start < 0) start = static_cast<script_int>(str.size()) + start;
@@ -533,7 +544,10 @@ void interpreter::init_builtin_methods() {
         }
 
         if (args.size() == 2) {
-            script_int len = args[1].as<script_int>();
+            if (!args[1].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "substr() length argument must be an integer");
+            }
+            script_int len = args[1].unchecked_as_int();
             if (len < 0) len = 0;
             return interp->make_value(str.substr(static_cast<size_t>(start), static_cast<size_t>(len)));
         }
@@ -544,8 +558,11 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find() takes exactly one argument");
         }
-        const auto& str = self.as_string();
-        const auto& search = args[0].as_string();
+        if (!args[0].is_string()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find() argument must be a string");
+        }
+        const auto& str = self.unchecked_as_string();
+        const auto& search = args[0].unchecked_as_string();
         auto pos = str.find(search);
         if (pos == std::string::npos) {
             return interp->make_value(static_cast<script_int>(-1));
@@ -557,8 +574,11 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
         }
-        const auto& str = self.as_string();
-        const auto& search = args[0].as_string();
+        if (!args[0].is_string()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "contains() argument must be a string");
+        }
+        const auto& str = self.unchecked_as_string();
+        const auto& search = args[0].unchecked_as_string();
         return interp->make_value(str.find(search) != std::string::npos);
     }}
     };
@@ -1376,7 +1396,7 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
     std::vector<script_value> no_args;
     auto result = method(no_args);
     if (result.has_value() && result.value().is_bool()) {
-        return result.value().as_bool();
+        return result.value().unchecked_as_bool();
     }
     return true;  // Method didn't return a valid bool - treat as truthy
 }
@@ -1405,7 +1425,7 @@ std::optional<bool> interpreter::object_equality_via_method(const script_value& 
 
     auto result = method(args);
     if (result.has_value() && result.value().is_bool()) {
-        return result.value().as_bool();
+        return result.value().unchecked_as_bool();
     }
 
     // Method didn't return a valid bool - fall back to reference comparison
@@ -1434,7 +1454,7 @@ std::optional<bool> interpreter::object_comparison_via_method(const script_value
 
     auto result = method(args);
     if (result.has_value() && result.value().is_bool()) {
-        return result.value().as_bool();
+        return result.value().unchecked_as_bool();
     }
 
     // Method didn't return a valid bool
@@ -2360,8 +2380,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             if (!right.is_int()) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "Array index must be an integer");
             }
-            script_int index = right.as_int();
-            const auto& array = left.as_array();
+            script_int index = right.unchecked_as_int();
+            const auto& array = left.unchecked_as_array();
 
             if (index < 0 || index >= static_cast<script_int>(array.size())) {
                 return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds), "Array index " + std::to_string(index) + " out of bounds for array of size " + std::to_string(array.size()));
@@ -2501,10 +2521,10 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
         switch (expr->op.type) {
             case token_type::minus:
                 if (val.is_int()) {
-                    push_value(make_value(-val.as_int()));
+                    push_value(make_value(-val.unchecked_as_int()));
                     return {};
                 } else if (val.is_float()) {
-                    push_value(make_value(-val.as_float()));
+                    push_value(make_value(-val.unchecked_as_float()));
                     return {};
                 }
                 break;
@@ -2513,7 +2533,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                 return {};
             case token_type::tilde:
                 if (val.is_int()) {
-                    push_value(make_value(~val.as_int()));
+                    push_value(make_value(~val.unchecked_as_int()));
                     return {};
                 }
                 break;
@@ -2526,18 +2546,15 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     JAISCRIPT_TRY(dispatch_expr(expr->operand.get()));
     script_value operand = pop_value();
     
+    const size_t oi = operand.raw_storage_index();
     switch (expr->op.type) {
         case token_type::minus: {
-            // Use single type() call + switch for faster type checking
-            switch (operand.type()) {
-                case script_value_type::jai_int_type:
-                    push_value(make_value(-operand.as_int()));
-                    break;
-                case script_value_type::jai_float_type:
-                    push_value(make_value(-operand.as_float()));
-                    break;
-                default:
-                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
+            if (oi == script_value::TYPEID_INT) {
+                push_value(make_value(-operand.unchecked_as_int()));
+            } else if (oi == script_value::TYPEID_FLOAT) {
+                push_value(make_value(-operand.unchecked_as_float()));
+            } else {
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
             }
             break;
         }
@@ -2548,10 +2565,10 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
 
         case token_type::tilde:
             // Bitwise NOT
-            if (operand.type() != script_value_type::jai_int_type) {
+            if (oi != script_value::TYPEID_INT) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Bitwise NOT requires integer operand");
             }
-            push_value(make_value(~operand.as_int()));
+            push_value(make_value(~operand.unchecked_as_int()));
             break;
             
         case token_type::plus_plus:
@@ -2614,15 +2631,16 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                         if (instance && instance->has_field(identifier->symbol_id)) {
                             script_value currentVal = instance->get_field(identifier->symbol_id);
                             const bool isIncrement = (expr->op.type == token_type::plus_plus);
+                            const size_t ti = currentVal.raw_storage_index();
 
-                            if (currentVal.is_int()) {
-                                script_int oldVal = currentVal.as_int();
+                            if (ti == script_value::TYPEID_INT) {
+                                script_int oldVal = currentVal.unchecked_as_int();
                                 script_int newVal = isIncrement ? oldVal + 1 : oldVal - 1;
                                 instance->set_field(identifier->symbol_id, make_value(newVal));
                                 push_value(make_value(expr->is_postfix ? oldVal : newVal));
                                 return {};
-                            } else if (currentVal.is_float()) {
-                                script_float oldVal = currentVal.as_float();
+                            } else if (ti == script_value::TYPEID_FLOAT) {
+                                script_float oldVal = currentVal.unchecked_as_float();
                                 script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
                                 instance->set_field(identifier->symbol_id, make_value(newVal));
                                 push_value(make_value(expr->is_postfix ? oldVal : newVal));
@@ -2671,7 +2689,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 if (leftType == script_value_type::jai_int_type && !has_custom_numeric_ops_) [[likely]] {
                     if (expr->value->get_type() == node_type::literal_expr) {
                         auto* rhs_lit = static_cast<literal_expr*>(expr->value.get());
-                        if (rhs_lit->value.raw_storage_index() == 1) {  // int literal
+                        if (rhs_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
                             script_int rhs_val = rhs_lit->value.unchecked_as_int();
                             switch (expr->op.type) {
                                 case token_type::plus_equal:
@@ -2706,7 +2724,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             rhs_id->symbol_id = string_symbolizer_->intern(rhs_id->name);
                         }
                         script_value* rhs_ptr = environment_->get_value_ptr(rhs_id->symbol_id);
-                        if (rhs_ptr && rhs_ptr->raw_storage_index() == 1) {  // int value
+                        if (rhs_ptr && rhs_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                             script_int rhs_val = rhs_ptr->unchecked_as_int();
                             switch (expr->op.type) {
                                 case token_type::plus_equal:
@@ -2741,12 +2759,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             auto* left_id = static_cast<identifier_expr*>(rhs_binary->left.get());
                             if (rhs_binary->right->get_type() == node_type::literal_expr) {
                                 auto* right_lit = static_cast<literal_expr*>(rhs_binary->right.get());
-                                if (right_lit->value.raw_storage_index() == 1) {  // int literal
+                                if (right_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
                                     if (left_id->symbol_id == UINT64_MAX) {
                                         left_id->symbol_id = string_symbolizer_->intern(left_id->name);
                                     }
                                     script_value* left_ptr = environment_->get_value_ptr(left_id->symbol_id);
-                                    if (left_ptr && left_ptr->raw_storage_index() == 1) {
+                                    if (left_ptr && left_ptr->raw_storage_index() == script_value::TYPEID_INT) {
                                         script_int left_val = left_ptr->unchecked_as_int();
                                         script_int right_val = right_lit->value.unchecked_as_int();
                                         script_int binary_result = 0;
@@ -2942,43 +2960,58 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
 
                 // Perform the compound operation (using standard path, no in-place mutation for fields)
+                // Cache type indices for fast checking
+                const size_t ci = currentValue.raw_storage_index();
+                const size_t ri = rightValue.raw_storage_index();
                 script_value resultValue = make_value();
                 switch (expr->op.type) {
                     case token_type::plus_equal:
-                        if (currentValue.is_int() && rightValue.is_int()) {
-                            resultValue = make_value(currentValue.as_int() + rightValue.as_int());
-                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = make_value(currentValue.as_float() + rightValue.as_float());
-                        } else if (currentValue.is_string() && rightValue.is_string()) {
-                            resultValue = make_value(currentValue.as_string() + rightValue.as_string());
+                        if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                            resultValue = make_value(currentValue.unchecked_as_int() + rightValue.unchecked_as_int());
+                        } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                                   (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                            script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                            script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                            resultValue = make_value(cf + rf);
+                        } else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+                            resultValue = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
                         break;
                     case token_type::minus_equal:
-                        if (currentValue.is_int() && rightValue.is_int()) {
-                            resultValue = make_value(currentValue.as_int() - rightValue.as_int());
-                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = make_value(currentValue.as_float() - rightValue.as_float());
+                        if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                            resultValue = make_value(currentValue.unchecked_as_int() - rightValue.unchecked_as_int());
+                        } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                                   (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                            script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                            script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                            resultValue = make_value(cf - rf);
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
                         break;
                     case token_type::star_equal:
-                        if (currentValue.is_int() && rightValue.is_int()) {
-                            resultValue = make_value(currentValue.as_int() * rightValue.as_int());
-                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = make_value(currentValue.as_float() * rightValue.as_float());
+                        if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                            resultValue = make_value(currentValue.unchecked_as_int() * rightValue.unchecked_as_int());
+                        } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                                   (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                            script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                            script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                            resultValue = make_value(cf * rf);
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
                         break;
                     case token_type::slash_equal:
-                        if (rightValue.is_int() && rightValue.as_int() == 0) {
+                        if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
                         }
-                        if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = make_value(currentValue.as_float() / rightValue.as_float());
+                        if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                            (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                            script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                            script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                            resultValue = make_value(cf / rf);
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
@@ -3034,16 +3067,22 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
 
             // Perform the compound operation
+            // Cache type indices for fast checking
+            const size_t ci = currentValue.raw_storage_index();
+            const size_t ri = rightValue.raw_storage_index();
             script_value resultValue = make_value();
 
             switch (expr->op.type) {
                 case token_type::plus_equal: {
-                    if (currentValue.is_int() && rightValue.is_int()) {
-                        resultValue = make_value(currentValue.as_int() + rightValue.as_int());
-                    } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                        resultValue = make_value(currentValue.as_float() + rightValue.as_float());
-                    } else if (currentValue.is_string() && rightValue.is_string()) {
-                        resultValue = make_value(currentValue.as_string() + rightValue.as_string());
+                    if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                        resultValue = make_value(currentValue.unchecked_as_int() + rightValue.unchecked_as_int());
+                    } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                               (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                        script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                        resultValue = make_value(cf + rf);
+                    } else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+                        resultValue = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Invalid operands for +=");
@@ -3051,10 +3090,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     break;
                 }
                 case token_type::minus_equal: {
-                    if (currentValue.is_int() && rightValue.is_int()) {
-                        resultValue = make_value(currentValue.as_int() - rightValue.as_int());
-                    } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                        resultValue = make_value(currentValue.as_float() - rightValue.as_float());
+                    if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                        resultValue = make_value(currentValue.unchecked_as_int() - rightValue.unchecked_as_int());
+                    } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                               (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                        script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                        resultValue = make_value(cf - rf);
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Invalid operands for -=");
@@ -3062,10 +3104,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     break;
                 }
                 case token_type::star_equal: {
-                    if (currentValue.is_int() && rightValue.is_int()) {
-                        resultValue = make_value(currentValue.as_int() * rightValue.as_int());
-                    } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                        resultValue = make_value(currentValue.as_float() * rightValue.as_float());
+                    if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                        resultValue = make_value(currentValue.unchecked_as_int() * rightValue.unchecked_as_int());
+                    } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                               (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                        script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                        resultValue = make_value(cf * rf);
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Invalid operands for *=");
@@ -3073,15 +3118,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     break;
                 }
                 case token_type::slash_equal: {
-                    if (rightValue.is_int() && rightValue.as_int() == 0) {
+                    if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                             "Division by zero");
-                    } else if (rightValue.is_float() && rightValue.as_float() == 0.0) {
+                    } else if (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0) {
                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                             "Division by zero");
                     }
-                    if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                        resultValue = make_value(currentValue.as_float() / rightValue.as_float());
+                    if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                        script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                        resultValue = make_value(cf / rf);
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Invalid operands for /=");
@@ -3193,8 +3241,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         break;
                     }
                     case token_type::slash_equal: {
-                        if ((rightValue.is_int() && rightValue.as_int() == 0) ||
-                            (rightValue.is_float() && rightValue.as_float() == 0.0)) {
+                        const size_t ri = rightValue.raw_storage_index();
+                        if ((ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) ||
+                            (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0)) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                                 "Division by zero");
                         }
@@ -3202,7 +3251,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         break;
                     }
                     case token_type::percent_equal: {
-                        if (rightValue.is_int() && rightValue.as_int() == 0) {
+                        if (rightValue.raw_storage_index() == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                                 "Modulo by zero");
                         }
@@ -3915,22 +3964,22 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
     if (target == script_value_type::jai_int_type) {
         if (source_type == script_value_type::jai_float_type) {
             // float -> int (truncate)
-            return make_value(static_cast<script_int>(value.as_float()));
+            return make_value(static_cast<script_int>(value.unchecked_as_float()));
         }
         if (source_type == script_value_type::jai_bool_type) {
             // bool -> int
-            return make_value(static_cast<script_int>(value.as_bool() ? 1 : 0));
+            return make_value(static_cast<script_int>(value.unchecked_as_bool() ? 1 : 0));
         }
     }
 
     if (target == script_value_type::jai_float_type) {
         if (source_type == script_value_type::jai_int_type) {
             // int -> float (widening)
-            return make_value(static_cast<script_float>(value.as_int()));
+            return make_value(static_cast<script_float>(value.unchecked_as_int()));
         }
         if (source_type == script_value_type::jai_bool_type) {
             // bool -> float
-            return make_value(static_cast<script_float>(value.as_bool() ? 1.0 : 0.0));
+            return make_value(static_cast<script_float>(value.unchecked_as_bool() ? 1.0 : 0.0));
         }
     }
 
@@ -4079,7 +4128,7 @@ std::string interpreter::value_to_string_with_method(const script_value& val) {
                 std::vector<script_value> no_args;
                 auto result = method(no_args);
                 if (result.has_value() && result.value().is_string()) {
-                    return result.value().as_string();
+                    return result.value().unchecked_as_string();
                 }
             }
         }
@@ -4089,16 +4138,20 @@ std::string interpreter::value_to_string_with_method(const script_value& val) {
 
 // Binary operation helpers
 checked_result<script_value> interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right) {
+    // Cache type indices for fast checking
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
     // Special case for string concatenation (use move to avoid copying the temporary)
     // Check for to_string() method on objects before falling back to default
-    if (op == token_type::plus && (left.is_string() || right.is_string())) {
+    if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
         return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
     }
 
     // Fast path for pure integer arithmetic (avoid float conversion)
-    if (left.is_int() && right.is_int()) {
-        script_int leftInt = left.as_int();
-        script_int rightInt = right.as_int();
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+        script_int leftInt = left.unchecked_as_int();
+        script_int rightInt = right.unchecked_as_int();
 
         switch (op) {
             case token_type::plus:
@@ -4132,20 +4185,20 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     // Mixed or floating point arithmetic path
     script_float leftNum, rightNum;
 
-    if (left.is_int()) {
-        leftNum = static_cast<script_float>(left.as_int());
-    } else if (left.is_float()) {
-        leftNum = left.as_float();
+    if (li == script_value::TYPEID_INT) {
+        leftNum = static_cast<script_float>(left.unchecked_as_int());
+    } else if (li == script_value::TYPEID_FLOAT) {
+        leftNum = left.unchecked_as_float();
     } else {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
             "Left operand must be numeric");
     }
 
-    if (right.is_int()) {
-        rightNum = static_cast<script_float>(right.as_int());
-    } else if (right.is_float()) {
-        rightNum = right.as_float();
+    if (ri == script_value::TYPEID_INT) {
+        rightNum = static_cast<script_float>(right.unchecked_as_int());
+    } else if (ri == script_value::TYPEID_FLOAT) {
+        rightNum = right.unchecked_as_float();
     } else {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
@@ -4238,9 +4291,11 @@ checked_result<script_value> interpreter::evaluate_comparison(const script_value
     }
 
     // For now, only support numeric and string comparisons
-    if (left.is_string() && right.is_string()) {
-        const auto& leftStr = left.as_string();
-        const auto& rightStr = right.as_string();
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+    if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+        const auto& leftStr = left.unchecked_as_string();
+        const auto& rightStr = right.unchecked_as_string();
 
         switch (op) {
             case token_type::less:
@@ -4267,9 +4322,9 @@ checked_result<script_value> interpreter::evaluate_comparison(const script_value
         }
     }
 
-    // Numeric comparison
-    script_float leftNum = to_numeric(left).as_float();
-    script_float rightNum = to_numeric(right).as_float();
+    // Numeric comparison - to_numeric always returns float type
+    script_float leftNum = to_numeric(left).unchecked_as_float();
+    script_float rightNum = to_numeric(right).unchecked_as_float();
 
     switch (op) {
         case token_type::less:
@@ -4325,14 +4380,16 @@ checked_result<script_value> interpreter::evaluate_logical(const script_value& l
 
 checked_result<script_value> interpreter::evaluate_bitwise(const script_value& left, token_type op, const script_value& right) {
     // Bitwise operations only work on integers
-    if (!left.is_int() || !right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+    if (li != script_value::TYPEID_INT || ri != script_value::TYPEID_INT) {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
             "Bitwise operations require integer operands");
     }
 
-    script_int leftInt = left.as_int();
-    script_int rightInt = right.as_int();
+    script_int leftInt = left.unchecked_as_int();
+    script_int rightInt = right.unchecked_as_int();
 
     switch (op) {
         case token_type::ampersand:
@@ -5704,7 +5761,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 // Check if step is an int literal
                 if (update_assign->value->get_type() == node_type::literal_expr) {
                     auto* step_lit = static_cast<literal_expr*>(update_assign->value.get());
-                    if (step_lit->value.raw_storage_index() == 1) {  // int literal
+                    if (step_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
                         step_value = step_lit->value.unchecked_as_int();
                         valid_update = true;
                     }
@@ -5714,7 +5771,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                     auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
                     // Look up step variable in current environment
                     script_value* step_ptr = environment_->get_value_ptr(step_id->symbol_id);
-                    if (step_ptr && step_ptr->raw_storage_index() == 1) {  // int value
+                    if (step_ptr && step_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                         step_var_id = step_id->symbol_id;
                         step_value = step_ptr->unchecked_as_int();  // Initial value
                         valid_update = true;
@@ -5728,7 +5785,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 update_var_id = update_id->symbol_id;
                 if (update_assign->value->get_type() == node_type::literal_expr) {
                     auto* step_lit = static_cast<literal_expr*>(update_assign->value.get());
-                    if (step_lit->value.raw_storage_index() == 1) {
+                    if (step_lit->value.raw_storage_index() == script_value::TYPEID_INT) {
                         step_value = -step_lit->value.unchecked_as_int();
                         valid_update = true;
                     }
@@ -5737,7 +5794,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 else if (update_assign->value->get_type() == node_type::identifier_expr) {
                     auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
                     script_value* step_ptr = environment_->get_value_ptr(step_id->symbol_id);
-                    if (step_ptr && step_ptr->raw_storage_index() == 1) {  // int value
+                    if (step_ptr && step_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                         step_var_id = step_id->symbol_id;
                         step_value = step_ptr->unchecked_as_int();  // Initial value
                         valid_update = true;
@@ -5772,7 +5829,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
                 if (cond_binary->right->get_type() == node_type::literal_expr) {
                     auto* cond_lit = static_cast<literal_expr*>(cond_binary->right.get());
-                    if (cond_lit->value.raw_storage_index() == 1) {  // int literal
+                    if (cond_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
                         end_literal = cond_lit->value.unchecked_as_int();
                         has_end = true;
                     }
@@ -5790,7 +5847,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                         auto* init_lit = init_var->initializer && init_var->initializer->get_type() == node_type::literal_expr
                             ? static_cast<literal_expr*>(init_var->initializer.get()) : nullptr;
 
-                        if (init_lit && init_lit->value.raw_storage_index() == 1 &&
+                        if (init_lit && init_lit->value.raw_storage_index() == script_value::TYPEID_INT &&
                             init_var->name_id == cond_id->symbol_id) {
 
                             // === PATTERN MATCHED! Run optimized native loop ===
@@ -5818,7 +5875,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             script_int end_val = end_literal;
                             if (end_var_id != UINT64_MAX) {
                                 script_value* end_sv = environment_->get_value_ptr(end_var_id);
-                                if (end_sv && end_sv->raw_storage_index() == 1) {
+                                if (end_sv && end_sv->raw_storage_index() == script_value::TYPEID_INT) {
                                     end_ptr = &end_sv->unchecked_as_int_ref();
                                 } else {
                                     // End variable not int - fall back to slow path
@@ -5832,7 +5889,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             script_int* step_ptr = nullptr;
                             if (step_var_id != UINT64_MAX) {
                                 script_value* step_sv = environment_->get_value_ptr(step_var_id);
-                                if (step_sv && step_sv->raw_storage_index() == 1) {
+                                if (step_sv && step_sv->raw_storage_index() == script_value::TYPEID_INT) {
                                     step_ptr = &step_sv->unchecked_as_int_ref();
                                 } else {
                                     // Step variable not int - fall back to slow path
@@ -8467,11 +8524,11 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
     // Int <-> Float implicit conversions
     if (source_type == script_value_type::jai_int_type &&
         target_base_type == script_value_type::jai_float_type) {
-        return script_value(static_cast<script_float>(derefed_arg.as_int()), engine_ref_);
+        return script_value(static_cast<script_float>(derefed_arg.unchecked_as_int()), engine_ref_);
     }
     if (source_type == script_value_type::jai_float_type &&
         target_base_type == script_value_type::jai_int_type) {
-        return script_value(static_cast<script_int>(derefed_arg.as_float()), engine_ref_);
+        return script_value(static_cast<script_int>(derefed_arg.unchecked_as_float()), engine_ref_);
     }
 
     // Object -> primitive via to_X() methods

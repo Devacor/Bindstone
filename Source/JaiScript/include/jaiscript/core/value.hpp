@@ -228,25 +228,26 @@ namespace jai {
         // Ultra-fast raw storage index - no pointer chasing, single integer read
         // Use this in hot paths like is_truthy() to avoid type_info_ pointer dereference
         inline size_t raw_storage_index() const noexcept { return storage_.index(); }
-        // Type checking methods use current_type() to check what's actually stored
+        // Type checking methods use raw_storage_index() for fastest possible type checks
+        // Direct integer comparison - no switch statement, no enum mapping
         // This ensures a typed variable holding null returns is_null()=true, is_object()=false
-        bool is_null() const { return deref().current_type() == script_value_type::jai_null_type; }
-        bool is_invalid() const { return deref().current_type() == script_value_type::jai_invalid_type; }
-        bool is_int() const { return deref().current_type() == script_value_type::jai_int_type; }
-        bool is_float() const { return deref().current_type() == script_value_type::jai_float_type; }
-        bool is_string() const { return deref().current_type() == script_value_type::jai_string_type; }
-        bool is_char() const { return deref().current_type() == script_value_type::jai_char_type; }
-        bool is_bool() const { return deref().current_type() == script_value_type::jai_bool_type; }
-        bool is_array() const { return deref().current_type() == script_value_type::jai_array_type; }
-        bool is_map() const { return deref().current_type() == script_value_type::jai_map_type; }
+        bool is_null() const { return deref().raw_storage_index() == TYPEID_NULL; }
+        bool is_invalid() const { return deref().raw_storage_index() == TYPEID_INVALID; }
+        bool is_int() const { return deref().raw_storage_index() == TYPEID_INT; }
+        bool is_float() const { return deref().raw_storage_index() == TYPEID_FLOAT; }
+        bool is_string() const { return deref().raw_storage_index() == TYPEID_STRING; }
+        bool is_char() const { return deref().raw_storage_index() == TYPEID_CHAR; }
+        bool is_bool() const { return deref().raw_storage_index() == TYPEID_BOOL; }
+        bool is_array() const { return deref().raw_storage_index() == TYPEID_ARRAY; }
+        bool is_map() const { return deref().raw_storage_index() == TYPEID_MAP; }
         bool is_object() const {
-            auto t = deref().current_type();
-            return t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type;
+            auto idx = deref().raw_storage_index();
+            return idx == TYPEID_OBJECT || idx == TYPEID_SHARED_PTR;
         }
-        bool is_function() const { return deref().current_type() == script_value_type::jai_function_type; }
-        bool is_reference() const { return current_type() == script_value_type::jai_reference_type; }  // Don't deref for this check!
+        bool is_function() const { return deref().raw_storage_index() == TYPEID_FUNCTION; }
+        bool is_reference() const { return raw_storage_index() == TYPEID_REFERENCE; }  // Don't deref for this check!
         bool is_cpp_bound() const { return cpp_bound_ptr_ != nullptr; }
-        bool is_weak_ptr() const { return deref().current_type() == script_value_type::jai_weak_ptr_type; }
+        bool is_weak_ptr() const { return deref().raw_storage_index() == TYPEID_WEAK_PTR; }
 
         // Type marker helpers - check if value has shared_ptr<T> or weak_ptr<T> type info
         bool is_shared_ptr_type() const {
@@ -320,47 +321,72 @@ namespace jai {
             if (cpp_bound_ptr_) {
                 return *static_cast<const bool*>(cpp_bound_ptr_);
             }
-            return *std::get_if<static_cast<size_t>(storage_index::jai_bool)>(&storage_);
+            return *std::get_if<TYPEID_BOOL>(&storage_);
         }
 
         inline script_int unchecked_as_int() const noexcept {
             if (cpp_bound_ptr_) {
                 return static_cast<script_int>(*static_cast<const int*>(cpp_bound_ptr_));
             }
-            return *std::get_if<static_cast<size_t>(storage_index::jai_int)>(&storage_);
+            return *std::get_if<TYPEID_INT>(&storage_);
         }
 
         // Mutable accessor for in-place modification (avoids make_value() overhead in loops)
         inline script_int& unchecked_as_int_ref() noexcept {
-            return *std::get_if<static_cast<size_t>(storage_index::jai_int)>(&storage_);
+            return *std::get_if<TYPEID_INT>(&storage_);
         }
 
         inline script_float unchecked_as_float() const noexcept {
             if (cpp_bound_ptr_) {
                 return static_cast<script_float>(*static_cast<const double*>(cpp_bound_ptr_));
             }
-            return *std::get_if<static_cast<size_t>(storage_index::jai_float)>(&storage_);
+            return *std::get_if<TYPEID_FLOAT>(&storage_);
         }
 
         // Mutable accessor for in-place modification (avoids make_value() overhead in loops)
         inline script_float& unchecked_as_float_ref() noexcept {
-            return *std::get_if<static_cast<size_t>(storage_index::jai_float)>(&storage_);
+            return *std::get_if<TYPEID_FLOAT>(&storage_);
         }
 
         inline const script_string& unchecked_as_string() const noexcept {
-            return *std::get_if<static_cast<size_t>(storage_index::jai_string)>(&storage_);
+            return *std::get_if<TYPEID_STRING>(&storage_);
         }
 
         // Mutable accessor for in-place modification (avoids make_value() overhead)
         inline script_string& unchecked_as_string_ref() noexcept {
-            return *std::get_if<static_cast<size_t>(storage_index::jai_string)>(&storage_);
+            return *std::get_if<TYPEID_STRING>(&storage_);
         }
 
         inline script_char unchecked_as_char() const noexcept {
             if (cpp_bound_ptr_) {
                 return *static_cast<const script_char*>(cpp_bound_ptr_);
             }
-            return *std::get_if<static_cast<size_t>(storage_index::jai_char)>(&storage_);
+            return *std::get_if<TYPEID_CHAR>(&storage_);
+        }
+
+        // Unchecked array accessor - caller must verify is_array() first
+        inline const std::vector<script_value>& unchecked_as_array() const noexcept {
+            return **std::get_if<TYPEID_ARRAY>(&storage_);
+        }
+
+        // Unchecked mutable array storage accessor - caller must verify is_array() first
+        inline std::shared_ptr<std::vector<script_value>>& unchecked_get_array_storage() noexcept {
+            return *std::get_if<TYPEID_ARRAY>(&storage_);
+        }
+
+        // Unchecked function accessor - caller must verify is_function() first
+        inline const script_function& unchecked_as_function() const noexcept {
+            return *std::get_if<TYPEID_FUNCTION>(&storage_);
+        }
+
+        // Unchecked map accessor - caller must verify is_map() first
+        inline const std::map<script_value, script_value>& unchecked_as_map() const noexcept {
+            return **std::get_if<TYPEID_MAP>(&storage_);
+        }
+
+        // Unchecked mutable map storage accessor - caller must verify is_map() first
+        inline std::shared_ptr<std::map<script_value, script_value>>& unchecked_get_map_storage() noexcept {
+            return *std::get_if<TYPEID_MAP>(&storage_);
         }
 
         inline const std::vector<script_value>& as_array() const {
@@ -1266,6 +1292,25 @@ namespace jai {
             jai_weak_ptr = 12,
             jai_invalid = 13
         };
+
+    public:
+        // Constexpr type index constants for fast type checking in hot paths
+        // Use with raw_storage_index() to avoid switch statements
+        static constexpr size_t TYPEID_NULL = 0;
+        static constexpr size_t TYPEID_INT = 1;
+        static constexpr size_t TYPEID_FLOAT = 2;
+        static constexpr size_t TYPEID_STRING = 3;
+        static constexpr size_t TYPEID_CHAR = 4;
+        static constexpr size_t TYPEID_BOOL = 5;
+        static constexpr size_t TYPEID_ARRAY = 6;
+        static constexpr size_t TYPEID_MAP = 7;
+        static constexpr size_t TYPEID_OBJECT = 8;
+        static constexpr size_t TYPEID_FUNCTION = 9;
+        static constexpr size_t TYPEID_REFERENCE = 10;
+        static constexpr size_t TYPEID_SHARED_PTR = 11;
+        static constexpr size_t TYPEID_WEAK_PTR = 12;
+        static constexpr size_t TYPEID_INVALID = 13;
+    private:
 
         // Type-erased storage using variant for efficiency
         using storage = std::variant<

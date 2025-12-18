@@ -1397,7 +1397,9 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
     return make_error_code(parse_error_code::unexpected_token);
             }
 
-            params.push_back(parameter(type, name, is_reference, is_const));
+            parameter param(type, name, is_reference, is_const);
+            param.symbol_id = symbolizer_->intern(name);
+            params.push_back(std::move(param));
         } while (match(token_type::comma));
     }
 

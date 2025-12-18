@@ -703,11 +703,10 @@ public:
             });
         });
 
-        // ===== Strong Types: auto vs var Loop Counter Performance =====
-        // Compares ULTRA fast path (auto/int - locked types) vs VAR fast path (dynamic type check)
-        test("JaiScript: Strong Types Loop Counter (auto vs var, 1000 iterations)", [this]() {
-            // auto counter - ULTRA fast path (type locked, direct int pointer, no checks)
-            benchmark("JaiScript - For Loop (auto i, 1000 iter) - ULTRA fast path", [this]() {
+        // ===== Declaration Type Loop Performance =====
+        // Verifies all declaration types (auto/int/var) use unified fast path
+        test("JaiScript: Declaration Type Loop Performance (1000 iterations)", [this]() {
+            benchmark("JaiScript - Hot Loop (auto, 1000 iter)", [this]() {
                 jai_engine->execute(R"(
                     auto sum = 0;
                     for (auto i = 0; i < 1000; ++i) {
@@ -716,8 +715,7 @@ public:
                 )");
             });
 
-            // int counter - ULTRA fast path (explicit type, should be identical to auto)
-            benchmark("JaiScript - For Loop (int i, 1000 iter) - ULTRA fast path", [this]() {
+            benchmark("JaiScript - Hot Loop (int, 1000 iter)", [this]() {
                 jai_engine->execute(R"(
                     int sum = 0;
                     for (int i = 0; i < 1000; ++i) {
@@ -726,8 +724,7 @@ public:
                 )");
             });
 
-            // var counter - VAR fast path (per-iteration type check)
-            benchmark("JaiScript - For Loop (var i, 1000 iter) - VAR fast path", [this]() {
+            benchmark("JaiScript - Hot Loop (var, 1000 iter)", [this]() {
                 jai_engine->execute(R"(
                     var sum = 0;
                     for (var i = 0; i < 1000; ++i) {
@@ -736,11 +733,8 @@ public:
                 )");
             });
 
-            // Output comparison summary
-            std::cout << "\nStrong Types Loop Performance (1000 iterations):\n";
-            std::cout << "  auto i: ULTRA fast path - direct int pointer, no type checks\n";
-            std::cout << "  int i:  ULTRA fast path - same as auto (locked type)\n";
-            std::cout << "  var i:  VAR fast path - per-iteration type validation\n";
+            std::cout << "\nDeclaration Type Performance (1000 iterations):\n";
+            std::cout << "  All types use unified fast path - performance should be equal\n";
         });
 
         // ===== Range-Based For Loop Comparison =====

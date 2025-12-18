@@ -5348,13 +5348,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         lambdaBody = std::make_shared<block_stmt>(expr->location, std::move(stmts));
     }
     
-    // Pre-cache parameter symbol IDs for optimization
-    for (auto& param : expr->parameters) {
-        if (param.symbol_id == UINT64_MAX) {
-            param.symbol_id = string_symbolizer_->intern(param.name);
-        }
-    }
-    
+    // Note: Parameter symbol IDs are pre-interned by the parser (parse_parameter_list())
+
     // Create the script function
     // Use final_closure_env which is either the capture environment or current environment
     // This ensures lambdas can access variables from their creation context
@@ -5775,14 +5770,13 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
-    // FAST PATHS: Detect and optimize integer counting loops
+    // FAST PATH: Detect and optimize integer counting loops
     // Pattern: for (int/auto/var i = START; i < END; ++i) { body }
     //
-    // Two fast paths based on type declaration:
-    // 1. ULTRA FAST (locked types): int i, auto i = 0 - direct int pointer, no type checks
-    //    Safe because strong types prevent type changes after locking
-    // 2. VAR FAST (dynamic type): var i = 0 - native loop with per-iteration type validation
-    //    Validates type is still int before each iteration (handles rare type changes)
+    // Unified fast path for all declaration types (auto/int/var):
+    // - Native C++ loop with cached pointers for counter, end, and step
+    // - Per-iteration type validation (~0.1ns) handles edge cases
+    // - Falls back to slow path if type changes mid-loop
     //
     if (stmt->initializer && stmt->condition && stmt->update) {
         auto* init_var = stmt->initializer->get_type() == node_type::variable_decl
@@ -6571,12 +6565,8 @@ checked_result<void> interpreter::visit_fallthrough_stmt(fallthrough_stmt* stmt)
 }
 
 checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
-    // Pre-cache symbol IDs for all parameters (parameter binding optimization)
-    for (auto& param : decl->parameters) {
-        if (param.symbol_id == UINT64_MAX) {
-            param.symbol_id = string_symbolizer_->intern(param.name);
-        }
-    }
+    // Note: name_id and parameter symbol_ids are pre-interned by the parser
+    // (see parse_function_body() and parse_parameter_list())
 
     // Don't capture any environment in the closure - just use nullptr
     // The environment stack will handle variable lookup naturally
@@ -6867,12 +6857,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Constructor
                 found_constructor = true;
 
-                // Pre-cache symbol IDs for constructor parameters
-                for (auto& param : func_decl->parameters) {
-                    if (param.symbol_id == UINT64_MAX) {
-                        param.symbol_id = string_symbolizer_->intern(param.name);
-                    }
-                }
+                // Note: Parameter symbol IDs are pre-interned by the parser (parse_parameter_list())
 
                 // Set in_method flag while processing constructor body (for static field access)
                 if (current_class_context_) {

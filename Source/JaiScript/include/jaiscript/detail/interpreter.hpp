@@ -543,14 +543,10 @@ namespace jai {
         // Accessors for script class support
         std::shared_ptr<environment> get_current_environment() const { return environment_; }
 
-        // Get the global (root) environment by walking up the parent chain
-        std::shared_ptr<environment> get_global_environment() const {
-            auto global_env = environment_;
-            while (global_env && global_env->get_parent()) {
-                global_env = global_env->get_parent();
-            }
-            return global_env ? global_env : environment_;
-        }
+        // Get the global (root) environment from the engine directly
+        // Previously walked up the parent chain, but that can diverge when closures/methods
+        // capture stale environment references from different execute() calls
+        std::shared_ptr<environment> get_global_environment() const;
 
         string_symbolizer* get_string_symbolizer() const { return string_symbolizer_; }
         

@@ -1551,7 +1551,7 @@ script_value* method_environment::get_value_ptr(uint64_t id) {
         return it->second;
     }
 
-    // Check 'this' object fields
+    // Check 'this' object fields and static fields
     auto this_type = this_object_.type();
     if (id != symbolizer_->get_this_id() &&
         (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
@@ -1564,6 +1564,17 @@ script_value* method_environment::get_value_ptr(uint64_t id) {
                 // Cache for O(1) access - will be invalidated by clear_parent_cache() on hot reload
                 flat_lookup_[id] = &field_ref;
                 return &field_ref;
+            }
+
+            // Check static fields on the class definition
+            auto class_def = instance->get_class_definition();
+            if (class_def) {
+                script_value* static_field_ptr = class_def->get_static_field_ptr(id);
+                if (static_field_ptr) {
+                    // Cache for O(1) access - will be invalidated by clear_parent_cache() on hot reload
+                    flat_lookup_[id] = static_field_ptr;
+                    return static_field_ptr;
+                }
             }
         }
     }
@@ -2032,6 +2043,21 @@ void interpreter::add_globals(const std::unordered_map<std::string, script_value
 
 void interpreter::add_global(const std::string& name, const script_value& value) {
     environment_->define(name, value);
+}
+
+std::shared_ptr<environment> interpreter::get_global_environment() const {
+    // Get the global environment directly from the engine
+    // This avoids issues with closures/methods capturing stale environment references
+    // from different execute() calls that don't chain to the same root
+    if (auto eng = engine_ref_.lock()) {
+        return eng->get_global_environment();
+    }
+    // Fallback: walk up the parent chain (shouldn't happen if engine is alive)
+    auto global_env = environment_;
+    while (global_env && global_env->get_parent()) {
+        global_env = global_env->get_parent();
+    }
+    return global_env ? global_env : environment_;
 }
 
 void interpreter::prepare_for_execution() {
@@ -6814,12 +6840,18 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // Check if class already exists (for hot reloading)
     std::shared_ptr<script_class_definition> class_def = nullptr;
     bool is_redefinition = false;
-    
+
     // Use a static prefix to avoid repeated allocations
     static const std::string CLASS_PREFIX = "__class_";
     std::string class_var_name = CLASS_PREFIX + decl->name;
-    
-    auto existing_result = environment_->get(class_var_name);
+
+    // Look for existing class in GLOBAL environment (hot reload support)
+    // get_global_environment() now uses engine's global directly (not parent chain walking)
+    auto global_env = get_global_environment();
+    if (!global_env) {
+        return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
+    }
+    auto existing_result = global_env->get(class_var_name);
     if (existing_result) {
         script_value existing = std::move(existing_result.value());
         if (!existing.is_null() && existing.is_object()) {
@@ -7054,19 +7086,19 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             if (method_name == decl->name) {
                 // Constructor
                 found_constructor = true;
-                
+
                 // Pre-cache symbol IDs for constructor parameters
                 for (auto& param : func_decl->parameters) {
                     if (param.symbol_id == UINT64_MAX) {
                         param.symbol_id = string_symbolizer_->intern(param.name);
                     }
                 }
-                
+
                 // Set in_method flag while processing constructor body (for static field access)
                 if (current_class_context_) {
                     current_class_context_->in_method = true;
                 }
-                
+
                 try {
                     class_def->add_constructor_from_ast(
                         std::static_pointer_cast<function_decl>(member.declaration),
@@ -7879,7 +7911,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
     // Store the class definition in a special variable for later retrieval
     // This allows inheritance and other features to work
-    environment_->define(class_var_name, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_ref_, false));
+    // IMPORTANT: Define in GLOBAL environment so it's visible across execute() calls (hot reload)
+    global_env->define(class_var_name, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_ref_, false));
 
     // The constructor function is already registered in the environment
     // which allows "new ClassName()" syntax to work

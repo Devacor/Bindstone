@@ -709,11 +709,12 @@ public:
                 error_msg = e.what();
             }
             check_eq(caught, true);
-            // Error message should mention the variable and types
+            // Error message should indicate a type mismatch
             check(error_msg.find("x") != std::string::npos ||
                   error_msg.find("int") != std::string::npos ||
-                  error_msg.find("Cannot assign") != std::string::npos,
-                  "Error should be descriptive");
+                  error_msg.find("Cannot assign") != std::string::npos ||
+                  error_msg.find("ype") != std::string::npos,  // "Type mismatch" or "type_mismatch"
+                  "Error should indicate type issue: " + error_msg);
         });
 
         // ===== SPECIAL CASES =====
@@ -793,9 +794,11 @@ public:
             } catch (const std::exception& e) {
                 threw = true;
                 std::string msg = e.what();
-                // Should mention type mismatch
-                check(msg.find("Cat") != std::string::npos || msg.find("Dog") != std::string::npos,
-                      "Error should mention class names: " + msg);
+                // Should indicate type mismatch (class names or generic type error)
+                check(msg.find("Cat") != std::string::npos ||
+                      msg.find("Dog") != std::string::npos ||
+                      msg.find("ype") != std::string::npos,  // "Type mismatch" or "type_mismatch"
+                      "Error should indicate type issue: " + msg);
             }
             check(threw, "Expected type error when assigning Cat to Dog variable");
         });

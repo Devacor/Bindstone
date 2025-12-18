@@ -2505,8 +2505,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
     // Use dispatch table for built-in operators with already-evaluated operands
     auto handler = binary_dispatch_table_.find(expr->op.type);
     if (handler != binary_dispatch_table_.end()) {
-        script_value result = (this->*handler->second)(left, right);
-        push_value(result);
+        auto result = (this->*handler->second)(left, right);
+        if (!result) [[unlikely]] {
+            return result.error_value();
+        }
+        push_value(std::move(result.value()));
     } else {
         return checked_result<void>(make_error_code(runtime_error_code::unknown_operator), "Unknown binary operator");
     }
@@ -4322,9 +4325,17 @@ checked_result<script_value> interpreter::evaluate_comparison(const script_value
         }
     }
 
-    // Numeric comparison - to_numeric always returns float type
-    script_float leftNum = to_numeric(left).unchecked_as_float();
-    script_float rightNum = to_numeric(right).unchecked_as_float();
+    // Numeric comparison - to_numeric returns float type on success
+    auto leftResult = to_numeric(left);
+    if (!leftResult) [[unlikely]] {
+        return leftResult.error_value();
+    }
+    auto rightResult = to_numeric(right);
+    if (!rightResult) [[unlikely]] {
+        return rightResult.error_value();
+    }
+    script_float leftNum = leftResult.value().unchecked_as_float();
+    script_float rightNum = rightResult.value().unchecked_as_float();
 
     switch (op) {
         case token_type::less:
@@ -5223,7 +5234,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             // Get the 'this' object that was captured
             auto this_result = captureEnv->get(this_id);
             if (!this_result) {
-                throw runtime_error(this_result.message().empty() ? this_result.error().message() : std::string(this_result.message()));
+                return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
+                    "Failed to capture 'this' reference");
             }
             script_value this_obj = std::move(this_result.value());
 
@@ -7066,8 +7078,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             }
 
             if (!matching_ctor) {
-                throw runtime_error("No constructor found for " + class_name +
-                                  " with " + std::to_string(args.size()) + " arguments");
+                return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                    "No constructor found with matching arguments");
             }
             
             // Create instance
@@ -7088,7 +7100,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // NOTE: Do NOT clone here - these params are just for field initializer evaluation
             // The actual parameter binding with proper value/reference semantics happens in call_function
             if (matching_ctor->parameters.size() != args.size()) {
-                throw runtime_error("Constructor parameter count mismatch");
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "Constructor parameter count mismatch");
             }
             for (size_t i = 0; i < matching_ctor->parameters.size(); ++i) {
                 init_env->define(matching_ctor->parameters[i].name, args[i]);
@@ -7113,9 +7126,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                         for (const auto& arg_expr : initializer.arguments) {
                             auto result = self->dispatch_expr(arg_expr.get());
                             if (!result) {
-                                // Restore environment before throwing
+                                // Restore environment before returning error
                                 self->environment_ = old_env;
-                                throw runtime_error("Failed to evaluate constructor initializer argument");
+                                return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
+                                    "Failed to evaluate constructor initializer argument");
                             }
                             init_args.push_back(self->pop_value());
                         }
@@ -7184,7 +7198,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                                         auto r = self->dispatch_expr(arg_expr.get());
                                                         if (!r) {
                                                             self->environment_ = old_env;
-                                                            throw runtime_error("Failed to evaluate super() argument at inheritance level " + std::to_string(chain_idx));
+                                                            return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
+                                                                "Failed to evaluate super() argument");
                                                         }
                                                         ancestor_args.push_back(self->pop_value());
                                                     }
@@ -7204,7 +7219,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                                         if (ancestor_ctor) {
                                                             ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
                                                         } else if (!ancestor_ctors.empty()) {
-                                                            throw runtime_error("No matching constructor for ancestor class " + ancestor->get_name());
+                                                            return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                                                                "No matching constructor for ancestor class");
                                                         }
                                                     } else {
                                                         // Ancestor is a C++ class - call its constructor NOW
@@ -7213,7 +7229,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                                         if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
                                                             auto cpp_result = cpp_ctor_result.value().as_function()(ancestor_args);
                                                             if (!cpp_result) {
-                                                                throw runtime_error("Failed to call C++ ancestor constructor: " + cpp_name);
+                                                                return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
+                                                                    "Failed to call C++ ancestor constructor");
                                                             }
                                                             script_value cpp_obj = std::move(cpp_result.value());
 
@@ -7282,8 +7299,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                     // and super() called with no arguments - this is valid, nothing to do
                                     // The parent fields will be initialized with their default values
                                 } else {
-                                    throw runtime_error("No matching parent constructor found for super(" +
-                                                      std::to_string(init_args.size()) + " arguments)");
+                                    return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                                        "No matching parent constructor found for super()");
                                 }
                             } else {
                                 // Parent is a C++ class - call its constructor
@@ -7296,8 +7313,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                         // Call C++ constructor with init_args
                                         auto result = cpp_ctor.as_function()(init_args);
                                         if (!result) {
-                                            // Constructor failed - throw exception
-                                            throw runtime_error(result.message().empty() ? result.error().message() : std::string(result.message()));
+                                            // Constructor failed - propagate error
+                                            return result.error_value();
                                         }
                                         script_value cpp_obj = std::move(result.value());
 
@@ -7316,13 +7333,15 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                             }
                                         }
                                     }
-                                } catch (const runtime_error& e) {
-                                    throw runtime_error("Failed to call C++ parent constructor: " + std::string(e.what()));
+                                } catch (const runtime_error&) {
+                                    return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
+                                        "Failed to call C++ parent constructor");
                                 }
                             }
                         }
                     } else {
-                        throw runtime_error("Cannot call super() - class has no base class");
+                        return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                            "Cannot call super() - class has no base class");
                     }
                 } else if (initializer.target == "this") {
                     // Delegate to another constructor in the same class
@@ -7337,9 +7356,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     for (const auto& arg_expr : initializer.arguments) {
                         auto result = self->dispatch_expr(arg_expr.get());
                         if (!result) {
-                            // Restore environment before throwing
+                            // Restore environment before returning error
                             self->environment_ = old_env;
-                            throw runtime_error("Failed to evaluate constructor initializer argument");
+                            return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
+                                "Failed to evaluate constructor initializer argument");
                         }
                         init_args.push_back(self->pop_value());
                     }
@@ -7358,8 +7378,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     }
                     
                     if (!target_ctor) {
-                        throw runtime_error("No matching constructor found for this(" + 
-                                          std::to_string(init_args.size()) + " arguments)");
+                        return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                            "No matching constructor found for this() delegation");
                     }
                     
                     // Call the target constructor on this instance with method environment
@@ -7406,16 +7426,18 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // If no constructor was found, create a default constructor
     else {
         // Create a default constructor that just initializes the instance
-        auto default_ctor_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), class_def, class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+        auto default_ctor_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), class_def, class_name = decl->name](const std::vector<script_value>& args) -> checked_result<script_value> {
             // Get strong reference from weak_ptr
             auto self = weak_self.lock();
             if (!self) {
-                throw runtime_error("Interpreter was destroyed before constructor call");
+                return checked_result<script_value>(make_error_code(runtime_error_code::internal_error),
+                    "Interpreter was destroyed before constructor call");
             }
-            
+
             // Default constructor shouldn't have arguments
             if (!args.empty()) {
-                throw runtime_error("Default constructor for class " + class_name + " takes no arguments");
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "Default constructor takes no arguments");
             }
             
             // Create instance using inherited create_instance()!
@@ -7494,9 +7516,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             std::string field_name = std::string(string_symbolizer_->get_string(field_id));
 
             // Add getter method
-            auto getter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+            auto getter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.empty()) {
-                    throw runtime_error("Property getter called without 'this' object");
+                    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                        "Property getter requires 'this' object");
                 }
 
                 // Extract the class_instance from the first argument (this)
@@ -7509,9 +7532,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             new_methods[getter_id] = script_value::make_function(getter, engine_ref_);
 
             // Add setter method
-            auto setter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+            auto setter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.size() != 2) {
-                    throw runtime_error("Property setter requires 'this' object and value");
+                    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                        "Property setter requires 'this' and value");
                 }
 
                 // Extract the class_instance from the first argument (this)
@@ -7545,9 +7569,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // This enables property-style access (obj.field) to work properly
 
             // Add getter method - capture field_id for performance
-            auto getter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+            auto getter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.empty()) {
-                    throw runtime_error("Property getter called without 'this' object");
+                    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                        "Property getter requires 'this' object");
                 }
 
                 // Extract the class_instance from the first argument (this)
@@ -7559,9 +7584,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             class_def->add_method("_get_" + field_name, getter);
 
             // Add setter method - capture field_id for performance
-            auto setter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+            auto setter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.size() != 2) {
-                    throw runtime_error("Property setter requires 'this' object and value");
+                    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                        "Property setter requires 'this' and value");
                 }
 
                 // Extract the class_instance from the first argument (this)

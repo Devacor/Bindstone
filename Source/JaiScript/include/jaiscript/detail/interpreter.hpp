@@ -553,30 +553,31 @@ namespace jai {
         
     private:
         // Binary operator dispatch table for performance
-        using binary_op_handler = script_value(interpreter::*)(const script_value&, const script_value&);
+        // Returns checked_result for zero-allocation error handling
+        using binary_op_handler = checked_result<script_value>(interpreter::*)(const script_value&, const script_value&);
         std::unordered_map<token_type, binary_op_handler> binary_dispatch_table_;
-        
+
         // Initialize dispatch table
         void init_dispatch_table();
-        
-        // Optimized binary operation handlers
-        script_value handle_add(const script_value& left, const script_value& right);
-        script_value handle_subtract(const script_value& left, const script_value& right);
-        script_value handle_multiply(const script_value& left, const script_value& right);
-        script_value handle_divide(const script_value& left, const script_value& right);
-        script_value handle_modulo(const script_value& left, const script_value& right);
-        script_value handle_less(const script_value& left, const script_value& right);
-        script_value handle_less_equal(const script_value& left, const script_value& right);
-        script_value handle_greater(const script_value& left, const script_value& right);
-        script_value handle_greater_equal(const script_value& left, const script_value& right);
-        script_value handle_equal(const script_value& left, const script_value& right);
-        script_value handle_not_equal(const script_value& left, const script_value& right);
-        script_value handle_spaceship(const script_value& left, const script_value& right);
-        script_value handle_bitwise_and(const script_value& left, const script_value& right);
-        script_value handle_bitwise_or(const script_value& left, const script_value& right);
-        script_value handle_bitwise_xor(const script_value& left, const script_value& right);
-        script_value handle_left_shift(const script_value& left, const script_value& right);
-        script_value handle_right_shift(const script_value& left, const script_value& right);
+
+        // Optimized binary operation handlers - return checked_result for error propagation
+        checked_result<script_value> handle_add(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_subtract(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_multiply(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_divide(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_modulo(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_less(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_less_equal(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_greater(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_greater_equal(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_equal(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_not_equal(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_spaceship(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_bitwise_and(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_bitwise_or(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_bitwise_xor(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_left_shift(const script_value& left, const script_value& right);
+        checked_result<script_value> handle_right_shift(const script_value& left, const script_value& right);
         
         // Performance optimization: Skip custom operator checks for numeric types
         bool has_custom_numeric_ops_ = false;
@@ -892,7 +893,7 @@ namespace jai {
             }
         }
         
-        inline script_value to_numeric(const script_value& value) {
+        inline checked_result<script_value> to_numeric(const script_value& value) {
             if (value.is_int()) {
                 return make_value(static_cast<script_float>(value.unchecked_as_int()));
             } else if (value.is_float()) {
@@ -900,7 +901,7 @@ namespace jai {
             } else if (value.is_bool()) {
                 return make_value(value.unchecked_as_bool() ? 1.0 : 0.0);
             } else {
-                throw runtime_error("Cannot convert to numeric value");
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Cannot convert to numeric value");
             }
         }
         

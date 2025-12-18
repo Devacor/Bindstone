@@ -47,6 +47,8 @@ namespace jai {
         this_outside_method = 54,
         super_outside_method = 55,
         no_parent_class = 56,
+        constructor_failed = 57,
+        evaluation_failed = 58,
 
         // Class errors (71-80)
         class_not_found = 71,
@@ -76,6 +78,7 @@ namespace jai {
         engine_destroyed = 121,
         stdlib_not_loaded = 122,
         cpp_exception = 123,
+        internal_error = 124,
     };
 
     // Error category for JaiScript runtime

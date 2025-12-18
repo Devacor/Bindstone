@@ -321,7 +321,8 @@ script_value script_value::clone() const {
     result.cpp_bound_ptr_ = cpp_bound_ptr_;  // Preserve C++ binding
 
     // Handle deep copying for different types
-    switch (type()) {
+    // Use current_type() to check what's actually stored, not the declared type
+    switch (current_type()) {
         case script_value_type::jai_array_type: {
             // Deep copy the array - each element is also cloned
             auto& other_array = *std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
@@ -444,7 +445,7 @@ script_value script_value::clone() const {
 
 const script_function& script_value::as_function() const {
     const script_value& val = deref();
-    if (val.type() != script_value_type::jai_function_type) {
+    if (val.current_type() != script_value_type::jai_function_type) {
         throw runtime_error("script_value is not a function");
     }
     return std::get<script_function>(val.storage_);
@@ -452,11 +453,12 @@ const script_function& script_value::as_function() const {
 
 std::string script_value::to_string() const {
     // Special handling for references to show what they point to
-    if (type() == script_value_type::jai_reference_type) {
+    if (current_type() == script_value_type::jai_reference_type) {
         return deref().to_string();
     }
-    
-    switch (type()) {
+
+    // Use current_type() to switch on what's actually stored
+    switch (current_type()) {
         case script_value_type::jai_null_type:
             return "null";
         case script_value_type::jai_int_type:
@@ -483,8 +485,8 @@ std::string script_value::to_string() const {
 }
 
 const script_value& script_value::deref() const {
-    // Use storage_type() not type() - references may have type_info with different base_type
-    if (storage_type() == script_value_type::jai_reference_type) {
+    // Use current_type() not defined_type() - references may have type_info with different base_type
+    if (current_type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference");
@@ -501,8 +503,8 @@ const script_value& script_value::deref() const {
 }
 
 script_value& script_value::deref() {
-    // Use storage_type() not type() - references may have type_info with different base_type
-    if (storage_type() == script_value_type::jai_reference_type) {
+    // Use current_type() not defined_type() - references may have type_info with different base_type
+    if (current_type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference");

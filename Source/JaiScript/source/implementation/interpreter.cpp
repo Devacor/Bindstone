@@ -217,7 +217,7 @@ void interpreter::init_builtin_methods() {
         for (const auto& elem : arr) {
             auto call_result = func({elem});
             if (!call_result) {
-                return checked_result<script_value>(call_result.error(), call_result.message());
+                return call_result.error_value();
             }
             if (call_result.value().as<bool>()) {
                 resultPtr->push_back(elem.clone());
@@ -299,7 +299,7 @@ void interpreter::init_builtin_methods() {
         for (auto it = arrPtr->begin(); it != arrPtr->end(); ) {
             auto call_result = predicate({*it});
             if (!call_result) {
-                return checked_result<script_value>(call_result.error(), call_result.message());
+                return call_result.error_value();
             }
             if (call_result.value().as<bool>()) {
                 it = arrPtr->erase(it);
@@ -437,7 +437,7 @@ void interpreter::init_builtin_methods() {
         for (auto it = mapPtr->begin(); it != mapPtr->end(); ) {
             auto call_result = predicate({it->first, it->second});
             if (!call_result) {
-                return checked_result<script_value>(call_result.error(), call_result.message());
+                return call_result.error_value();
             }
             if (call_result.value().as<bool>()) {
                 it = mapPtr->erase(it);
@@ -465,7 +465,7 @@ void interpreter::init_builtin_methods() {
         for (const auto& [key, value] : map) {
             auto call_result = predicate({key, value});
             if (!call_result) {
-                return checked_result<script_value>(call_result.error(), call_result.message());
+                return call_result.error_value();
             }
             if (call_result.value().as<bool>()) {
                 (*resultPtr)[key.clone()] = value.clone();
@@ -993,7 +993,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
                                     std::vector<script_value> args = {this_object_, value};
                                     auto result = setter.as_function()(args);
                                     if (!result) {
-                                        return checked_result<void>(result.error(), result.message());
+                                        return result.error_value();
                                     }
                                     return {};
                                 }
@@ -1062,7 +1062,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
                                     std::vector<script_value> args = {this_object_, std::move(value)};
                                     auto result = setter.as_function()(args);
                                     if (!result) {
-                                        return checked_result<void>(result.error(), result.message());
+                                        return result.error_value();
                                     }
                                     return {};
                                 }
@@ -1289,15 +1289,15 @@ script_value* environment::get_value_ptr(uint64_t id) {
 // interpreter implementation
 
 // Helper to resolve include/import paths
-std::string resolve_include_path(const std::string& path, std::shared_ptr<engine> engine_ptr) {
+checked_result<std::string> resolve_include_path(const std::string& path, std::shared_ptr<engine> engine_ptr) {
     // First, try the path as-is (for absolute paths)
     if (std::filesystem::exists(path)) {
         return std::filesystem::canonical(path).string();
     }
-    
+
     // Get the include paths from the engine
     auto include_paths = engine_ptr->get_include_paths();
-    
+
     // Try each include path
     for (const auto& include_path : include_paths) {
         auto full_path = std::filesystem::path(include_path) / path;
@@ -1305,9 +1305,9 @@ std::string resolve_include_path(const std::string& path, std::shared_ptr<engine
             return std::filesystem::canonical(full_path).string();
         }
     }
-    
+
     // Path not found
-    throw runtime_error("Could not find include/import file: " + path);
+    return checked_result<std::string>(make_error_code(runtime_error_code::file_not_found), "Could not find include/import file");
 }
 
 // Note: Direct engine implementation access removed
@@ -1722,7 +1722,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 // Convert error code to exception at boundary
                 // Include the custom error message if available
                 if (!result.message().empty()) {
-                    throw std::system_error(result.error(), result.message());
+                    throw std::system_error(result.error(), std::string(result.message()));
                 } else {
                     throw std::system_error(result.error());
                 }
@@ -1787,7 +1787,7 @@ script_value interpreter::evaluate(expression_ptr expr) {
 script_value interpreter::get_variable(const std::string& name) const {
     auto result = environment_->get(name);
     if (!result) {
-        throw runtime_error(result.message());
+        throw runtime_error(result.message().empty() ? result.error().message() : std::string(result.message()));
     }
     return result.value().deref();
 }
@@ -1949,13 +1949,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 				// Get both values directly from environment
 				auto leftResult = environment_->get(leftId->symbol_id);
 				if (!leftResult) {
-					return checked_result<void>(leftResult.error(), leftResult.message());
+					return leftResult.error_value();
 				}
 				script_value leftVal = std::move(leftResult.value()).deref();
 
 				auto rightResult = environment_->get(rightId->symbol_id);
 				if (!rightResult) {
-					return checked_result<void>(rightResult.error(), rightResult.message());
+					return rightResult.error_value();
 				}
 				script_value rightVal = std::move(rightResult.value()).deref();
 
@@ -1980,13 +1980,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							return {};
 						case token_type::slash:
 							if (rightInt == 0) {
-								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
 							}
 							push_value(make_value(leftInt / rightInt));
 							return {};
 						case token_type::percent:
 							if (rightInt == 0) {
-								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));
+								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 							}
 							push_value(make_value(leftInt % rightInt));
 							return {};
@@ -2032,13 +2032,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							return {};
 						case token_type::slash:
 							if (rightFloat == 0.0) {
-								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
 							}
 							push_value(make_value(leftFloat / rightFloat));
 							return {};
 						case token_type::percent:
 							if (rightFloat == 0.0) {
-								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));
+								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
 							}
 							push_value(make_value(std::fmod(leftFloat, rightFloat)));
 							return {};
@@ -2086,7 +2086,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 				// Get left value from environment, right value is already in AST
 				auto leftResult = environment_->get(leftId->symbol_id);
 				if (!leftResult) {
-					return checked_result<void>(leftResult.error(), leftResult.message());
+					return leftResult.error_value();
 				}
 				script_value leftVal = std::move(leftResult.value()).deref();
 				const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
@@ -2130,11 +2130,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							push_value(make_value(leftInt * rightInt));
 							return {};
 						case token_type::slash:
-							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
 							push_value(make_value(leftInt / rightInt));
 							return {};
 						case token_type::percent:
-							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));
+							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 							push_value(make_value(leftInt % rightInt));
 							return {};
 						default:
@@ -2171,7 +2171,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							push_value(make_value(leftFloat * rightFloat));
 							return {};
 						case token_type::slash:
-							if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+							if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
 							push_value(make_value(leftFloat / rightFloat));
 							return {};
 						default:
@@ -2193,7 +2193,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 				const script_value& leftVal = leftLit->value;  // Direct access!
 				auto rightResult = environment_->get(rightId->symbol_id);
 				if (!rightResult) {
-					return checked_result<void>(rightResult.error(), rightResult.message());
+					return rightResult.error_value();
 				}
 				script_value rightVal = std::move(rightResult.value()).deref();
 
@@ -2235,11 +2235,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							push_value(make_value(leftInt * rightInt));
 							return {};
 						case token_type::slash:
-							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
 							push_value(make_value(leftInt / rightInt));
 							return {};
 						case token_type::percent:
-							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));
+							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 							push_value(make_value(leftInt % rightInt));
 							return {};
 						default:
@@ -2347,7 +2347,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             auto result = func(args);
             if (!result) {
                 // Function returned error - propagate it up
-                return checked_result<void>(result.error(), result.message());
+                return result.error_value();
             }
             push_value(std::move(result.value()));
             return {};
@@ -2358,13 +2358,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
     if (expr->op.type == token_type::left_bracket) {
         if (left.is_array()) {
             if (!right.is_int()) {
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type));  // [ErrorText] Invalid index type
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "Array index must be an integer");
             }
             script_int index = right.as_int();
             const auto& array = left.as_array();
 
             if (index < 0 || index >= static_cast<script_int>(array.size())) {
-                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds));  // [ErrorText] Index out of bounds
+                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds), "Array index " + std::to_string(index) + " out of bounds for array of size " + std::to_string(array.size()));
             }
 
             // Check if the left side is an lvalue (variable, member access, or subscript)
@@ -2454,7 +2454,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                         std::vector<script_value> args = {left, right};
                         auto result = func(args);
                         if (!result) {
-                            return checked_result<void>(result.error(), result.message());
+                            return result.error_value();
                         }
                         push_value(std::move(result.value()));
                         return {};
@@ -2470,7 +2470,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     auto result = func(args);
                     if (!result) {
                         // Function returned error - propagate it up
-                        return checked_result<void>(result.error(), result.message());
+                        return result.error_value();
                     }
                     push_value(std::move(result.value()));
                     return {};
@@ -2488,7 +2488,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
         script_value result = (this->*handler->second)(left, right);
         push_value(result);
     } else {
-        return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator
+        return checked_result<void>(make_error_code(runtime_error_code::unknown_operator), "Unknown binary operator");
     }
     return {};
 }
@@ -2537,7 +2537,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                     push_value(make_value(-operand.as_float()));
                     break;
                 default:
-                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Unary minus requires numeric operand
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
             }
             break;
         }
@@ -2549,7 +2549,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
         case token_type::tilde:
             // Bitwise NOT
             if (operand.type() != script_value_type::jai_int_type) {
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Bitwise NOT requires integer operand
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Bitwise NOT requires integer operand");
             }
             push_value(make_value(~operand.as_int()));
             break;
@@ -2794,7 +2794,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             std::vector<script_value> args = {target.clone(), rightValue};
                             auto result = func(args);
                             if (!result) {
-                                return checked_result<void>(result.error(), result.message());
+                                return result.error_value();
                             }
                             target = std::move(result.value());
                             push_value(target.clone());
@@ -3131,7 +3131,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 auto result = func(args);
                 if (!result) {
                     // Setter failed - propagate error
-                    return checked_result<void>(result.error(), result.message());
+                    return result.error_value();
                 }
             } else if (instance->has_field(member_id)) {
                 // Direct field assignment (deep copy)
@@ -3170,7 +3170,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 auto result = func(args);
                 if (!result) {
                     // Function returned error - propagate it up
-                    return checked_result<void>(result.error(), result.message());
+                    return result.error_value();
                 }
                 resultValue = std::move(result.value());
             } else {
@@ -3230,7 +3230,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (target_type && target_type->base_type != script_value_type::jai_any_type) {
                         auto enforced = enforce_type_compatibility(std::move(resultValue), target_type, identifier->name);
                         if (!enforced) {
-                            return checked_result<void>(enforced.error(), enforced.message());
+                            return enforced.error_value();
                         }
                         resultValue = std::move(enforced.value());
                     }
@@ -3292,7 +3292,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // Convert shared_ptr to weak_ptr
                         auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
                         if (!weak_result) {
-                            return checked_result<void>(weak_result.error(), weak_result.message());
+                            return weak_result.error_value();
                         }
                         JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(weak_result.value())));
                     } else if (value.type() == script_value_type::jai_object_type) {
@@ -3396,8 +3396,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                         return checked_result<void>();
                                     }
                                     // FIX #10: Propagate operator= errors instead of silent fallthrough
-                                    return checked_result<void>(result.error(),
-                                        "operator= failed for " + target_type->type_name + ": " + result.message());
+                                    return checked_result<void>(result.error(), "operator= failed");
                                 }
                             }
                         }
@@ -3406,7 +3405,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Enforce type compatibility
                     auto enforced = enforce_type_compatibility(std::move(value), target_type, identifier->name);
                     if (!enforced) {
-                        return checked_result<void>(enforced.error(), enforced.message());
+                        return enforced.error_value();
                     }
                     value = std::move(enforced.value());
 
@@ -3457,7 +3456,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                                 std::vector<script_value> args = {this_val, value};
                                                 auto result = setter.as_function()(args);
                                                 if (!result) {
-                                                    return checked_result<void>(result.error(), result.message());
+                                                    return result.error_value();
                                                 }
                                                 assigned_to_member = true;
                                             }
@@ -3584,7 +3583,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 auto result = func(args);
                 if (!result) {
                     // Setter failed - propagate error
-                    return checked_result<void>(result.error(), result.message());
+                    return result.error_value();
                 }
             } else if (instance->has_field(member_id)) {
                 // Direct field assignment (deep copy)
@@ -3615,7 +3614,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     auto refHolder = target_ref.get_reference_holder();
                     script_value* target_ptr = refHolder->target;
                     if (!target_ptr) {
-                        throw runtime_error("Invalid reference in assignment");
+                        return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
                     }
                     
                     // Assign the value  
@@ -3624,13 +3623,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 } else {
                     // Not a reference - this means the subscript expression didn't
                     // return an lvalue (e.g., trying to assign to a function call result)
-                    throw runtime_error("Cannot assign to rvalue expression");
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
                 }
             } else {
-                throw runtime_error("Complex assignment targets not yet implemented");
+                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "Complex assignment targets not yet implemented");
             }
         } else {
-            throw runtime_error("Complex assignment targets not yet implemented");
+            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "Complex assignment targets not yet implemented");
         }
     }
     return {};
@@ -3739,7 +3738,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 // Initialize with shared_ptr - create weak_ptr from it
                 auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
                 if (!weak_result) {
-                    return checked_result<void>(weak_result.error(), weak_result.message());
+                    return weak_result.error_value();
                 }
                 environment_->define(decl->name_id, std::move(weak_result.value()));
             } else if (value.type() == script_value_type::jai_object_type) {
@@ -3777,7 +3776,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 value.set_type_info(decl->type);  // Mark as shared_ptr type
                 environment_->define(decl->name_id, std::move(value));
             } else if (value.is_weak_ptr()) {
-                throw runtime_error("Cannot initialize shared_ptr directly from weak_ptr - use weak.lock() instead");
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_weak_ptr_conversion), "Cannot initialize shared_ptr directly from weak_ptr");
             } else if (value.type() == script_value_type::jai_object_type ||
                       value.type() == script_value_type::jai_shared_ptr_type) {
                 // Initialize with object/shared_ptr - that's fine, objects are already shared_ptr
@@ -3785,15 +3784,13 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 value.set_type_info(decl->type);
                 environment_->define(decl->name_id, std::move(value));
             } else {
-                auto type_info = value.get_type_info();
-                std::string type_name = type_info ? type_info->type_name : "unknown";
-                throw runtime_error("Cannot initialize shared_ptr with " + type_name);
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
             }
         }
     } else if (is_reference) {
         // Reference variable - must have initializer
         if (!decl->initializer) {
-            throw runtime_error("Reference variable '" + decl->name + "' must be initialized");
+            return checked_result<void>(make_error_code(runtime_error_code::uninitialized_reference), "Reference variable must be initialized", decl->name_id);
         }
         
         // Check if initializer is an identifier (can take reference)
@@ -3806,7 +3803,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // This is safe because environment uses unordered_map which doesn't invalidate pointers
             script_value* targetPtr = environment_->get_value_ptr(targetSymbolId);
             if (!targetPtr) {
-                throw runtime_error("Cannot take reference of undefined variable '" + identExpr->name + "'");
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
             }
             
             // Check if the target is itself a reference
@@ -3817,7 +3814,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 // Use the original reference's environment
                 auto target_env = refHolder->sourceEnv.lock();
                 if (!target_env) {
-                    throw runtime_error("Reference target environment has been destroyed");
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
                 }
                 script_value refValue = script_value::make_reference(targetPtr, target_env);
                 environment_->define(decl->name_id, std::move(refValue));
@@ -3837,13 +3834,13 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 script_value* targetPtr = refHolder->target;
                 auto target_env = refHolder->sourceEnv.lock();
                 if (!target_env) {
-                    throw runtime_error("Reference target environment has been destroyed");
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
                 }
                 // Create a new reference to the same target
                 script_value refValue = script_value::make_reference(targetPtr, target_env);
                 environment_->define(decl->name_id, std::move(refValue));
             } else {
-                throw runtime_error("Cannot take reference of non-lvalue expression");
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Cannot take reference of non-lvalue expression");
             }
         }
     } else {
@@ -4017,22 +4014,14 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
                     std::string error_msg = e.what();
                     if (error_msg.find("No constructor found") == std::string::npos) {
                         // Constructor exists but failed - propagate the error
-                        throw runtime_error("Error converting " + source_class_name +
-                                          " to " + target_class_name + ": " + error_msg);
+                        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Constructor conversion failed", target_type->id);
                     }
                     // No matching constructor - fall through to type mismatch error
                 }
             }
 
             // No suitable constructor found - incompatible types
-            std::string msg = "Cannot assign " + source_class_name + " to ";
-            if (!var_name.empty()) {
-                msg += "variable '" + var_name + "' of type " + target_class_name;
-            } else {
-                msg += "type " + target_class_name;
-            }
-            msg += " (incompatible class types)";
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), msg);
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
         }
     }
 
@@ -4064,8 +4053,7 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
                     std::string error_msg = e.what();
                     if (error_msg.find("No constructor found") == std::string::npos) {
                         // Constructor exists but failed - propagate the error
-                        throw runtime_error("Error converting " + get_type_name(source_type) +
-                                          " to " + target_class_name + ": " + error_msg);
+                        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Primitive conversion failed", target_type->id);
                     }
                     // No matching constructor - fall through to type mismatch error
                 }
@@ -4074,18 +4062,7 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
     }
 
     // Incompatible types - error
-    std::string source_name = value.get_type_info() ? value.get_type_info()->type_name : "unknown";
-    if (source_name.empty() || source_name == "unknown") {
-        source_name = get_type_name(source_type);
-    }
-    std::string target_name = target_type->type_name;
-    std::string msg = "Cannot assign " + source_name + " to ";
-    if (!var_name.empty()) {
-        msg += "variable '" + var_name + "' of type " + target_name;
-    } else {
-        msg += "type " + target_name;
-    }
-    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), msg);
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type ? target_type->id : 0);
 }
 
 // Helper to convert value to string, checking for to_string() method on objects
@@ -4405,7 +4382,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                 // Create a weak_ptr from the 'this' object
                 auto weak_result = script_value::make_weak_ptr(this_val, engine_ref_);
                 if (!weak_result) {
-                    return checked_result<void>(weak_result.error(), weak_result.message());
+                    return weak_result.error_value();
                 }
                 push_value(std::move(weak_result.value()));
                 return {};
@@ -4480,7 +4457,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     // Check if function call succeeded
     if (!result_checked) {
         // Function returned an error via checked_result - propagate it
-        return checked_result<void>(result_checked.error(), result_checked.message());
+        return result_checked.error_value();
     }
 
     // Push successful result onto the stack
@@ -4667,7 +4644,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 // Found a class in the namespace - return the constructor
                 auto ctor_result = environment_->get(expr->member_id);
                 if (!ctor_result) {
-                    return checked_result<void>(ctor_result.error(), ctor_result.message());
+                    return ctor_result.error_value();
                 }
                 push_value(std::move(ctor_result.value()));
                 return {};
@@ -4680,7 +4657,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         auto class_var_result = environment_->get("__class_" + name);
         if (!class_var_result) {
             // Class not found
-            return checked_result<void>(class_var_result.error(), class_var_result.message());
+            return class_var_result.error_value();
         }
         script_value class_var = std::move(class_var_result.value());
 
@@ -4726,7 +4703,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             auto result = func(no_args);
             if (!result) {
                 // Function returned error - propagate it up
-                return checked_result<void>(result.error(), result.message());
+                return result.error_value();
             }
             script_value static_value = std::move(result.value());
             push_value(static_value);
@@ -4953,7 +4930,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             std::vector<script_value> args = {objectValue};
             auto result = func(args);
             if (!result) {
-                return checked_result<void>(result.error(), result.message());
+                return result.error_value();
             }
             push_value(std::move(result.value()));
             return {};
@@ -5172,7 +5149,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     // Capture by value - deep copy at capture time
                     auto capture_result = environment_->get(capture.symbol_id);
                     if (!capture_result) {
-                        return checked_result<void>(capture_result.error(), capture_result.message());
+                        return capture_result.error_value();
                     }
                     captureEnv->define(capture.symbol_id, capture_result.value().clone());
                 }
@@ -5189,7 +5166,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             // Get the 'this' object that was captured
             auto this_result = captureEnv->get(this_id);
             if (!this_result) {
-                throw runtime_error(this_result.message());
+                throw runtime_error(this_result.message().empty() ? this_result.error().message() : std::string(this_result.message()));
             }
             script_value this_obj = std::move(this_result.value());
 
@@ -5376,7 +5353,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
             // Create weak_ptr from the shared_ptr
             auto weak_result = script_value::make_weak_ptr(obj, engine_ref_);
             if (!weak_result) {
-                return checked_result<void>(weak_result.error(), weak_result.message());
+                return weak_result.error_value();
             }
             push_value(std::move(weak_result.value()));
         } else {
@@ -5451,7 +5428,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
         auto result = func(args);
         if (!result) {
             // Function returned error - propagate it up
-            return checked_result<void>(result.error(), result.message());
+            return result.error_value();
         }
         push_value(std::move(result.value()));
         return {};
@@ -6159,12 +6136,13 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             auto pair_result = environment_->get_ref(pair_symbol_id);
             if (!pair_result) {
                 pop_scope();
-                return checked_result<void>(pair_result.error(), pair_result.message());
+                return pair_result.error_value();
             }
             const script_value& pairConstructor = pair_result.value().get();
             if (!pairConstructor.is_function()) {
                 pop_scope();
-                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] pair type not registered - make sure stdlib is loaded
+                return checked_result<void>(make_error_code(runtime_error_code::stdlib_not_loaded),
+                    "'pair' type not registered - make sure stdlib is loaded");
             }
             const script_function& pair_func = pairConstructor.as_function();
 
@@ -6191,7 +6169,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 auto result = pair_func(args);
                 if (!result) {
                     pop_scope();
-                    return checked_result<void>(result.error(), result.message());
+                    return result.error_value();
                 }
                 *loop_var_ptr = std::move(result.value());
 
@@ -6277,8 +6255,9 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
 
     if (!try_result) {
         // Checked_result error - treat as catchable exception
-        active_exception_value_ = make_value(try_result.message());
-        current_exception_ = script_exception(try_result.message());
+        std::string error_msg = std::string(try_result.message());
+        active_exception_value_ = make_value(error_msg);
+        current_exception_ = script_exception(error_msg);
         caught_error = true;
     } else if (is_unwinding_ && current_exception_) {
         // Old-style exception unwinding (for script throw statements)
@@ -6606,16 +6585,20 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     } else if (environment_->contains(base_name)) {
                         // Constructor exists but no class definition found
                         // This shouldn't happen with proper engine integration
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Constructor found but no class definition available
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Constructor found for '" + base_name + "' but no class definition available");
                     } else {
-                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Base class not found
+                        return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
+                            "Base class '" + base_name + "' not found");
                     }
                 } else {
                     // No class lookup callback set - check if constructor exists
                     if (environment_->contains(base_name)) {
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Script class inheriting from C++ class requires engine integration
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Script class inheriting from C++ class '" + base_name + "' requires engine integration");
                     } else {
-                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Base class not found
+                        return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
+                            "Base class '" + base_name + "' not found");
                     }
                 }
             }
@@ -6675,21 +6658,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // Check for conflicts (field appears in multiple parents and NOT redefined in derived)
         for (const auto& [field_id, sources] : field_sources) {
             if (sources.size() > 1) {
-                // Convert ID back to string for error message
-                std::string field_name = std::string(string_symbolizer_->get_string(field_id));
-
-                // Build error message with all conflicting parents
-                std::string parent_list;
-                for (size_t i = 0; i < sources.size(); ++i) {
-                    if (i > 0) parent_list += ", ";
-                    parent_list += sources[i];
-                }
-
-                throw runtime_error("Field '" + field_name + "' inherited from multiple parents (" +
-                                  parent_list + ") in class '" + decl->name +
-                                  "'. Ambiguous member access - rename field in one of the parent classes, " +
-                                  "define it in the derived class to shadow the parent fields, " +
-                                  "or use explicit qualification.");
+                // Return error with field_id and class name_id for context
+                return checked_result<void>(make_error_code(runtime_error_code::multiple_inheritance),
+                    "Field inherited from multiple parents", field_id, decl->name_id);
             }
         }
     }
@@ -6850,10 +6821,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                                   method_ast,
                                                   class_def,
                                                   definition_env,
-                                                  class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+                                                  class_name = decl->name](const std::vector<script_value>& args) -> checked_result<script_value> {
                             auto self = weak_self.lock();
                             if (!self) {
-                                throw runtime_error("Interpreter was destroyed before static method call");
+                                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Interpreter was destroyed before static method call");
                             }
 
                             // Create a static method environment (C++ scope rules for static members)
@@ -6876,15 +6847,15 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                            method_ast,
                                            class_def,
                                            definition_env,
-                                           class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+                                           class_name = decl->name](const std::vector<script_value>& args) -> checked_result<script_value> {
                             auto self = weak_self.lock();
                             if (!self) {
-                                throw runtime_error("Interpreter was destroyed before method call");
+                                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Interpreter was destroyed before method call");
                             }
 
                             // First argument should be 'this' object
                             if (args.empty()) {
-                                throw runtime_error("Method called without 'this' object");
+                                return checked_result<script_value>(make_error_code(runtime_error_code::this_outside_method), "Method called without 'this' object");
                             }
 
                             // Extract 'this' from first argument
@@ -6902,9 +6873,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                             );
 
                             // Call the interpreter method directly
-                            auto result = self->execute_method_ast(method_ast, method_env.get(), method_args);
-
-                            return result;
+                            return self->execute_method_ast(method_ast, method_env.get(), method_args);
                         };
 
                         new_methods[method_id] = script_value::make_function(method_func, engine_ref_);
@@ -6958,10 +6927,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                class_def,
                                definition_env,
                                class_name = decl->name,
-                               cpp_object_field_id = cpp_object_field_id_](const std::vector<script_value>& args) -> script_value {
+                               cpp_object_field_id = cpp_object_field_id_](const std::vector<script_value>& args) -> checked_result<script_value> {
             auto self = weak_self.lock();
             if (!self) {
-                throw runtime_error("Interpreter was destroyed before constructor call");
+                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Interpreter was destroyed before constructor call");
             }
             
             // Get all constructor ASTs
@@ -7246,7 +7215,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                             definition_env,
                                             this_value
                                         );
-                                        self->execute_method_ast(it->ctor, method_env.get(), it->args);
+                                        auto ctor_result = self->execute_method_ast(it->ctor, method_env.get(), it->args);
+                                        if (!ctor_result) return ctor_result.error_value();
                                     }
                                     // Mark that we handled all parent field initializers
                                     handled_parent_init = true;
@@ -7270,7 +7240,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                         auto result = cpp_ctor.as_function()(init_args);
                                         if (!result) {
                                             // Constructor failed - throw exception
-                                            throw runtime_error(result.message());
+                                            throw runtime_error(result.message().empty() ? result.error().message() : std::string(result.message()));
                                         }
                                         script_value cpp_obj = std::move(result.value());
 
@@ -7343,7 +7313,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                         this_value
                     );
 
-                    self->execute_method_ast(target_ctor, target_method_env.get(), init_args);
+                    auto target_result = self->execute_method_ast(target_ctor, target_method_env.get(), init_args);
+                    if (!target_result) return target_result.error_value();
                 }
             }
 
@@ -7582,7 +7553,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 if (i > 0) error_msg += ", ";
                 error_msg += "'" + undefined_identifiers[i] + "'";
             }
-            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined identifiers in class
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), error_msg);
         }
     }
 
@@ -7763,7 +7734,11 @@ checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
     }
 
     // Resolve the file path
-    std::string resolved_path = resolve_include_path(path, engine_ptr);
+    auto resolve_result = resolve_include_path(path, engine_ptr);
+    if (!resolve_result) {
+        return resolve_result.error_value();
+    }
+    std::string resolved_path = std::move(resolve_result.value());
 
     // Read the file contents
     std::ifstream file(resolved_path);
@@ -7812,7 +7787,11 @@ checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     }
 
     // Resolve the file path
-    std::string resolved_path = resolve_include_path(path, engine_ptr);
+    auto resolve_result = resolve_include_path(path, engine_ptr);
+    if (!resolve_result) {
+        return resolve_result.error_value();
+    }
+    std::string resolved_path = std::move(resolve_result.value());
 
     // Use the engine's public API to handle import with tracking
     auto result = engine_ptr->execute_import(resolved_path);
@@ -7823,7 +7802,7 @@ checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
 }
 
 // Execute a method AST with a given environment
-script_value interpreter::execute_method_ast(std::shared_ptr<function_decl> ast,
+checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<function_decl> ast,
                                            std::shared_ptr<environment> method_env,
                                            const std::vector<script_value>& args) {
     // Create a script_defined_function with the method environment
@@ -7835,14 +7814,8 @@ script_value interpreter::execute_method_ast(std::shared_ptr<function_decl> ast,
         method_env  // Method environment with 'this'
     );
 
-    // Execute method with the arguments
-    auto result = call_function(script_func, args);
-
-    // Unwrap checked_result - throw on error (execute_method_ast callers expect script_value)
-    if (!result) {
-        throw runtime_error(result.message().empty() ? result.error().message() : result.message());
-    }
-    return std::move(result.value());
+    // Execute method with the arguments - propagate errors to caller
+    return call_function(script_func, args);
 }
 
 // Evaluate field initializers for a script class instance at construction time
@@ -8143,11 +8116,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         // Check for error codes - propagate errors
         if (!result && result.error() != std::error_code()) {
             cleanup();
-            std::string error_msg = result.message();
-            if (error_msg.empty()) {
-                error_msg = "Error in function body: " + result.error().message();
-            }
-            return checked_result<script_value>(result.error(), error_msg);
+            // Propagate the error with static message - nice formatting at API boundary
+            return result.error_value();
         }
 
         // Check if we hit a return statement and break early

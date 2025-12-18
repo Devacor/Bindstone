@@ -589,15 +589,15 @@ bool script_value::operator==(const script_value& other) const {
         case script_value_type::jai_null_type:
             return true;
         case script_value_type::jai_int_type:
-            return as_int() == other.as_int();
+            return unchecked_as_int() == other.unchecked_as_int();
         case script_value_type::jai_float_type:
-            return as_float() == other.as_float();
+            return unchecked_as_float() == other.unchecked_as_float();
         case script_value_type::jai_string_type:
-            return as_string() == other.as_string();
+            return unchecked_as_string() == other.unchecked_as_string();
         case script_value_type::jai_char_type:
-            return as_char() == other.as_char();
+            return unchecked_as_char() == other.unchecked_as_char();
         case script_value_type::jai_bool_type:
-            return as_bool() == other.as_bool();
+            return unchecked_as_bool() == other.unchecked_as_bool();
         default:
             // TODO: Implement for complex types
             return false;
@@ -609,27 +609,27 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
     if (auto cmp = type() <=> other.type(); cmp != 0) {
         return cmp;
     }
-    
+
     // Then compare values for same types
     switch (type()) {
         case script_value_type::jai_null_type:
             return std::strong_ordering::equal; // All nulls are equal
         case script_value_type::jai_int_type:
-            return as_int() <=> other.as_int();
+            return unchecked_as_int() <=> other.unchecked_as_int();
         case script_value_type::jai_float_type:
             // script_float comparison returns partial_ordering, convert to strong
-            if (auto cmp = as_float() <=> other.as_float(); cmp < 0)
+            if (auto cmp = unchecked_as_float() <=> other.unchecked_as_float(); cmp < 0)
                 return std::strong_ordering::less;
             else if (cmp > 0)
                 return std::strong_ordering::greater;
             else
                 return std::strong_ordering::equal;
         case script_value_type::jai_string_type:
-            return as_string() <=> other.as_string();
+            return unchecked_as_string() <=> other.unchecked_as_string();
         case script_value_type::jai_char_type:
-            return as_char() <=> other.as_char();
+            return unchecked_as_char() <=> other.unchecked_as_char();
         case script_value_type::jai_bool_type:
-            return as_bool() <=> other.as_bool();
+            return unchecked_as_bool() <=> other.unchecked_as_bool();
         default:
             // For complex types, compare by address for now
             return &storage_ <=> &other.storage_;

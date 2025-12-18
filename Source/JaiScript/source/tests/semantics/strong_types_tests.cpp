@@ -58,7 +58,7 @@ public:
                     x = 5;        // Locks to int
                     x = "hello";  // ERROR: string to int
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 caught = true;
             }
             check_eq(caught, true, "Should reject string after locking to int");
@@ -837,7 +837,7 @@ public:
                     auto bird = Bird();
                     bird = Animal();  // Animal is NOT-A Bird - SHOULD FAIL
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 threw = true;
             }
             check(threw, "Expected type error when assigning Animal to Bird variable");
@@ -855,7 +855,7 @@ public:
                     pet = null;   // OK - null is allowed for objects
                     pet = Cat();  // SHOULD FAIL - pet is still typed as Dog
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 threw = true;
             }
             check(threw, "Expected type error when assigning Cat to Dog variable (even after null)");
@@ -885,7 +885,7 @@ public:
                     auto p = Point2D();
                     p = Vector2D();  // SHOULD FAIL - structural equality != type equality
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 threw = true;
             }
             check(threw, "Expected type error for structurally equivalent but different classes");
@@ -903,7 +903,7 @@ public:
                     auto pet = Dog();
                     pet = Cat();  // SHOULD FAIL - Cat is not a Dog (even though both are Animals)
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 threw = true;
             }
             check(threw, "Expected type error when assigning Cat to Dog (sibling classes)");
@@ -1003,7 +1003,7 @@ public:
                     auto y = TypeB();
                     x = y;  // No conversion available - SHOULD FAIL
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 threw = true;
             }
             check(threw, "Expected type error when no assignment operator exists");

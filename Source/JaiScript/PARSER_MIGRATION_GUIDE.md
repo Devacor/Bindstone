@@ -259,9 +259,10 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
 
     // Mark last expression as implicit return (existing logic)
     if (!declarations.empty()) {
-        if (auto* expr_decl = dynamic_cast<expression_decl*>(declarations.back().get())) {
-            expr_decl->implicit_return = true;
-        } else if (auto* stmt_decl = dynamic_cast<statement_decl*>(declarations.back().get())) {
+        auto& last_decl = declarations.back();
+        if (last_decl->get_type() == node_type::expression_decl) {
+            static_cast<expression_decl*>(last_decl.get())->implicit_return = true;
+        } else if (last_decl->get_type() == node_type::statement_decl) {
             // ... (keep existing logic)
         }
     }

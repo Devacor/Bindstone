@@ -899,25 +899,20 @@ void engine::add_variadic_function(const std::string& name, script_function func
 
 void engine::add_functionWithArity(const std::string& name, script_function func, size_t arity) {
     // Check if we have an existing function with this name
-    bool hasExistingFunction = false;
-    std::optional<script_value> existing_opt;
     auto existing_result = impl->global_environment_->get(name);
-    if (existing_result) {
-        existing_opt = std::move(existing_result.value());
-        hasExistingFunction = existing_opt && existing_opt->is_function();
-    }
+    bool hasExistingFunction = existing_result && existing_result.value().is_function();
 
     auto overloadIt = impl->overloadedFunctions.find(name);
-    
+
     if (hasExistingFunction) {
         // Move existing function to overloaded set
         if (overloadIt == impl->overloadedFunctions.end()) {
             // Check if we have arity info for the existing function
             auto arityIt = impl->functionArities.find(name);
             size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
-            
+
             impl->getOrCreateOverloadSet(name).setConversionRegistry(impl->conversions);
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing_opt.value());
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, std::move(existing_result.value()));
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
@@ -941,27 +936,22 @@ void engine::add_functionWithArity(const std::string& name, script_function func
 
 void engine::add_overloaded_function(const std::string& name, size_t argCount, script_function func) {
     // Check if we need to move an existing function from global_environment_
-    bool hasExistingFunction = false;
-    std::optional<script_value> existing_opt;
     auto existing_result = impl->global_environment_->get(name);
-    if (existing_result) {
-        existing_opt = std::move(existing_result.value());
-        hasExistingFunction = existing_opt && existing_opt->is_function();
-    }
+    bool hasExistingFunction = existing_result && existing_result.value().is_function();
 
     if (hasExistingFunction) {
         // Move existing function to overloaded set first
         // Check if we have arity info for the existing function
         auto arityIt = impl->functionArities.find(name);
         size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
-        
+
         // Check if this is already an overloaded function by seeing if it's in the overloadedFunctions map
         // This prevents trying to add a dispatcher function to the overload set, which would cause
         // a segfault due to recursive function copying issues
         auto overloadIt = impl->overloadedFunctions.find(name);
         if (overloadIt == impl->overloadedFunctions.end()) {
             // First time creating overload set for this function
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing_opt.value());
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, std::move(existing_result.value()));
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
@@ -975,21 +965,16 @@ void engine::add_overloaded_function(const std::string& name, size_t argCount, s
 
 void engine::add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<script_value_type>& paramTypes) {
     // Check if we need to move an existing function from global_environment_
-    bool hasExistingFunction = false;
-    std::optional<script_value> existing_opt;
     auto existing_result = impl->global_environment_->get(name);
-    if (existing_result) {
-        existing_opt = std::move(existing_result.value());
-        hasExistingFunction = existing_opt && existing_opt->is_function();
-    }
+    bool hasExistingFunction = existing_result && existing_result.value().is_function();
 
     if (hasExistingFunction) {
         // Move existing function to overloaded set first
         // Check if we have arity info for the existing function
         auto arityIt = impl->functionArities.find(name);
         size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
-        
-        impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing_opt.value());
+
+        impl->getOrCreateOverloadSet(name).addOverload(existingArity, std::move(existing_result.value()));
         if (arityIt != impl->functionArities.end()) {
             impl->functionArities.erase(arityIt);
         }
@@ -1002,25 +987,20 @@ void engine::add_overloaded_functionWithTypes(const std::string& name, size_t ar
 
 void engine::add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<script_value_type>& paramTypes) {
     // Check if we have an existing function with this name
-    bool hasExistingFunction = false;
-    std::optional<script_value> existing_opt;
     auto existing_result = impl->global_environment_->get(name);
-    if (existing_result) {
-        existing_opt = std::move(existing_result.value());
-        hasExistingFunction = existing_opt && existing_opt->is_function();
-    }
+    bool hasExistingFunction = existing_result && existing_result.value().is_function();
 
     auto overloadIt = impl->overloadedFunctions.find(name);
-    
+
     if (hasExistingFunction) {
         // Move existing function to overloaded set
         if (overloadIt == impl->overloadedFunctions.end()) {
             // Check if we have arity info for the existing function
             auto arityIt = impl->functionArities.find(name);
             size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
-            
+
             impl->getOrCreateOverloadSet(name).setConversionRegistry(impl->conversions);
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing_opt.value());
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, std::move(existing_result.value()));
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
@@ -1155,14 +1135,20 @@ bool engine::has_variable(const std::string& name) const {
 }
 
 bool engine::has_function(const std::string& name) const {
-    // Check if there's a function in global environment
-    auto val_result = impl->global_environment_->get(name);
-    if (val_result && val_result.value().is_function()) {
+    // Check overloaded functions first (fast hashmap lookup)
+    if (impl->overloadedFunctions.find(name) != impl->overloadedFunctions.end()) {
         return true;
     }
-    
-    // Check overloaded functions
-    return impl->overloadedFunctions.find(name) != impl->overloadedFunctions.end();
+
+    // Check if there's a function in global environment
+    // Use contains() first to avoid string allocation on "not found" path
+    if (!impl->global_environment_->contains(name)) {
+        return false;
+    }
+
+    // Name exists - get it and check if it's a function
+    auto val_result = impl->global_environment_->get(name);
+    return val_result && val_result.value().is_function();
 }
 
 bool engine::is_type_name(const std::string& name) const {

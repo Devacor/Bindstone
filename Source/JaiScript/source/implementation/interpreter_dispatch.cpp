@@ -29,22 +29,27 @@ void interpreter::init_dispatch_table() {
     binary_dispatch_table_[token_type::right_shift] = &interpreter::handle_right_shift;
 }
 
-// Optimized binary operation handlers
+// Optimized binary operation handlers with cached type indices
+// Uses script_value::TYPEID_* constants for fast type checking
 script_value interpreter::handle_add(const script_value& left, const script_value& right) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
     // Fast path for integer addition
-    if (left.is_int() && right.is_int()) {
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         return make_value(left.unchecked_as_int() + right.unchecked_as_int());
     }
 
-    // Fast path for float addition
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    // Fast path for numeric addition (int/float combinations)
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         return make_value(lf + rf);
     }
 
     // String concatenation - check for to_string() method on objects
-    if (left.is_string() || right.is_string()) {
+    if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
         return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
     }
 
@@ -58,13 +63,17 @@ script_value interpreter::handle_add(const script_value& left, const script_valu
 }
 
 script_value interpreter::handle_subtract(const script_value& left, const script_value& right) {
-    if (left.is_int() && right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         return make_value(left.unchecked_as_int() - right.unchecked_as_int());
     }
 
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         return make_value(lf - rf);
     }
 
@@ -78,13 +87,17 @@ script_value interpreter::handle_subtract(const script_value& left, const script
 }
 
 script_value interpreter::handle_multiply(const script_value& left, const script_value& right) {
-    if (left.is_int() && right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         return make_value(left.unchecked_as_int() * right.unchecked_as_int());
     }
 
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         return make_value(lf * rf);
     }
 
@@ -98,15 +111,19 @@ script_value interpreter::handle_multiply(const script_value& left, const script
 }
 
 script_value interpreter::handle_divide(const script_value& left, const script_value& right) {
-    if (left.is_int() && right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         if (right.unchecked_as_int() == 0) throw runtime_error("Division by zero");
         return make_value(left.unchecked_as_int() / right.unchecked_as_int());
     }
 
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         if (rf == 0.0) throw runtime_error("Division by zero");
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
         return make_value(lf / rf);
     }
 
@@ -120,15 +137,19 @@ script_value interpreter::handle_divide(const script_value& left, const script_v
 }
 
 script_value interpreter::handle_modulo(const script_value& left, const script_value& right) {
-    if (left.is_int() && right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         if (right.unchecked_as_int() == 0) throw runtime_error("Division by zero");
         return make_value(left.unchecked_as_int() % right.unchecked_as_int());
     }
 
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         if (rf == 0.0) throw runtime_error("Division by zero");
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
         return make_value(std::fmod(lf, rf));
     }
 
@@ -142,17 +163,21 @@ script_value interpreter::handle_modulo(const script_value& left, const script_v
 }
 
 script_value interpreter::handle_less(const script_value& left, const script_value& right) {
-    if (left.is_int() && right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         return make_value(left.unchecked_as_int() < right.unchecked_as_int());
     }
 
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         return make_value(lf < rf);
     }
 
-    if (left.is_string() && right.is_string()) {
+    if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
         return make_value(left.unchecked_as_string() < right.unchecked_as_string());
     }
 
@@ -166,17 +191,21 @@ script_value interpreter::handle_less(const script_value& left, const script_val
 }
 
 script_value interpreter::handle_less_equal(const script_value& left, const script_value& right) {
-    if (left.is_int() && right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         return make_value(left.unchecked_as_int() <= right.unchecked_as_int());
     }
 
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         return make_value(lf <= rf);
     }
 
-    if (left.is_string() && right.is_string()) {
+    if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
         return make_value(left.unchecked_as_string() <= right.unchecked_as_string());
     }
 
@@ -190,17 +219,21 @@ script_value interpreter::handle_less_equal(const script_value& left, const scri
 }
 
 script_value interpreter::handle_greater(const script_value& left, const script_value& right) {
-    if (left.is_int() && right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         return make_value(left.unchecked_as_int() > right.unchecked_as_int());
     }
 
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         return make_value(lf > rf);
     }
 
-    if (left.is_string() && right.is_string()) {
+    if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
         return make_value(left.unchecked_as_string() > right.unchecked_as_string());
     }
 
@@ -214,17 +247,21 @@ script_value interpreter::handle_greater(const script_value& left, const script_
 }
 
 script_value interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
-    if (left.is_int() && right.is_int()) {
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         return make_value(left.unchecked_as_int() >= right.unchecked_as_int());
     }
 
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+    if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
         return make_value(lf >= rf);
     }
 
-    if (left.is_string() && right.is_string()) {
+    if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
         return make_value(left.unchecked_as_string() >= right.unchecked_as_string());
     }
 

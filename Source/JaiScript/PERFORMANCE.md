@@ -2,25 +2,25 @@
 
 ## Current JaiScript Performance (Release Build)
 
-Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration:
+Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-18):
 
 | Benchmark                      | Time (μs) | Notes                                    |
 |--------------------------------|-----------|------------------------------------------|
 | Integer Addition               | 2         | Single arithmetic operation              |
 | Float Multiplication           | 2         | Single floating-point operation          |
 | Variable Operations            | 6         | 3 variable declarations + 1 addition     |
-| Function Calls                 | 4         | Function declaration + invocation        |
-| Array Push/Pop                 | 19        | 3 pushes + 1 pop + size check            |
-| Map Insert/Lookup              | 13        | 2 inserts + 1 lookup                     |
-| Class Creation                 | 6         | Class definition + instantiation         |
-| Method Invocation              | 9         | Class with method + method call          |
-| For Loop (100 iterations)      | 28        | 0.28μs per iteration                     |
-| String Concatenation           | 7         | String operations                        |
+| Function Calls                 | 5         | Function declaration + invocation        |
+| Array Push/Pop                 | 18        | 3 pushes + 1 pop + size check            |
+| Map Insert/Lookup              | 14        | 2 inserts + 1 lookup                     |
+| Class Creation                 | 7         | Class definition + instantiation         |
+| Method Invocation              | 10        | Class with method + method call          |
+| For Loop (100 iterations)      | 17        | 0.17μs per iteration                     |
+| String Concatenation           | 8         | String operations                        |
 | Complex Expression             | 6         | Multi-operator expression evaluation     |
-| Class Inheritance              | 113       | Base + derived class + instantiation     |
-| Variable Lookup Heavy          | 16        | 10 variable lookups in expression        |
-| Hot Loop (1000 iterations)     | 197       | 0.20μs per iteration                     |
-| Simple Compound Assignment     | 57        | 100 compound assignments (+=, -=, etc.)  |
+| Class Inheritance              | 112       | Base + derived class + instantiation     |
+| Variable Lookup Heavy          | 15        | 10 variable lookups in expression        |
+| Hot Loop (1000 iterations)     | 76        | 0.076μs per iteration                    |
+| Simple Compound Assignment     | 53        | 100 compound assignments (+=, -=, etc.)  |
 
 ## Performance Optimizations
 
@@ -178,14 +178,14 @@ This ensures type safety and prevents undefined behavior at the cost of some mic
 
 For `for (auto i = 0; i < 100; ++i) { sum += i; }`:
 
-**JaiScript** (~28μs for 100 iterations):
+**JaiScript** (~17μs for 100 iterations):
 ```
 Per iteration:
-1. condition (i < 100):     ~3ns (switch dispatch + unchecked is_truthy)
-2. body (sum += i):         ~15ns (2 ID lookups + optimized type checks + value construction)
-3. increment (++i):         ~7ns (ID lookup + optimized type check + value construction)
+1. condition (i < 100):     ~2ns (get_type() + static_cast, no RTTI)
+2. body (sum += i):         ~10ns (2 ID lookups + optimized type checks + value construction)
+3. increment (++i):         ~5ns (ID lookup + optimized type check + value construction)
                            ------
-Total: ~25ns × 100 = 2.5μs + overhead = 28μs
+Total: ~17ns × 100 = 1.7μs + overhead = 17μs
 ```
 
 **Optimizations applied:**
@@ -206,7 +206,7 @@ Loop performance is adequate for typical game scripting (event handlers, AI logi
 5. **is_truthy() Conversion**: Optimized with single switch statement on type
 
 **Design Rationale**: JaiScript prioritizes **type safety** and **memory efficiency** (no heap allocation for primitives) over micro-operation speed. For real-world game scripts:
-- ✅ Function calls dominate performance profile (JaiScript 17-29x faster)
+- ✅ Function calls dominate performance profile (JaiScript 20-40x faster)
 - ✅ Memory efficiency matters for embedded use
 - ✅ Type safety prevents entire classes of bugs
 
@@ -232,18 +232,19 @@ Performance measurements running representative workloads:
 | **Integer Addition**             | 2μs            | Single arithmetic operation |
 | **Float Multiplication**         | 2μs            | Floating-point operation |
 | **Variable Operations**          | 6μs            | Variable declarations + addition |
-| **Function Calls**               | 4μs            | Function declaration + invocation |
-| **Array Push/Pop**               | 19μs           | Array operations |
-| **Map Insert/Lookup**            | 13μs           | Hash map operations |
-| **Class Creation**               | 6μs            | Class instantiation |
-| **Method Invocation**            | 9μs            | Instance method call |
-| **For Loop (100 iterations)**    | 28μs           | ~280ns per iteration |
-| **Variable Lookup Heavy**        | 16μs           | Multiple variable accesses |
+| **Function Calls**               | 5μs            | Function declaration + invocation |
+| **Array Push/Pop**               | 18μs           | Array operations |
+| **Map Insert/Lookup**            | 14μs           | Hash map operations |
+| **Class Creation**               | 7μs            | Class instantiation |
+| **Method Invocation**            | 10μs           | Instance method call |
+| **For Loop (100 iterations)**    | 17μs           | ~170ns per iteration |
+| **Variable Lookup Heavy**        | 15μs           | Multiple variable accesses |
 | **Complex Expression**           | 6μs            | Multi-operator expression |
-| **Factorial(10) - Recursion**    | 10μs           | Recursive algorithm |
-| **Fibonacci(6) - Deep Recursion**  | 18μs          | Deep recursive calls |
+| **Factorial(10) - Recursion**    | 11μs           | Recursive algorithm |
+| **Fibonacci(6) - Deep Recursion**  | 21μs          | Deep recursive calls |
 | **Binary Search**                | 22μs           | Search algorithm |
-| **Bubble Sort (10 elements)**    | 122μs          | Sorting algorithm |
+| **Bubble Sort (10 elements)**    | 118μs          | Sorting algorithm |
+| **Hot Loop (1000 iterations)**   | 76μs           | ~76ns per iteration |
 
 ---
 
@@ -255,20 +256,20 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Benchmark | JaiScript | ChaiScript | JaiScript Speedup |
 |-----------|-----------|------------|-------------------|
-| **Function Calls** | 5μs | 156μs | **31x faster** |
-| **Factorial(10)** | 10μs | 1531μs | **153x faster** |
-| **Fibonacci(6)** | 18μs | 3547μs | **197x faster** |
-| **Method Invocation** | 9μs | 223μs | **25x faster** |
-| **Range-For (100 elem)** | 33μs | 161μs | **4.9x faster** |
-| **Binary Search** | 22μs | 304μs | **14x faster** |
-| **Class Creation** | 6μs | 19μs | **3.2x faster** |
-| **Bubble Sort (10 elem)** | 123μs | 244μs | **2x faster** |
+| **Function Calls** | 5μs | 201μs | **40x faster** |
+| **Factorial(10)** | 11μs | 1431μs | **130x faster** |
+| **Fibonacci(6)** | 21μs | 3403μs | **162x faster** |
+| **Method Invocation** | 10μs | 200μs | **20x faster** |
+| **Range-For (100 elem)** | 28μs | 169μs | **6x faster** |
+| **Binary Search** | 22μs | 319μs | **14x faster** |
+| **Class Creation** | 7μs | 16μs | **2.3x faster** |
+| **Bubble Sort (10 elem)** | 118μs | 195μs | **1.7x faster** |
 
 ### Where ChaiScript Wins (Simple Operations)
 
 | Benchmark | JaiScript | ChaiScript | ChaiScript Speedup |
 |-----------|-----------|------------|-------------------|
-| For Loop (100 iter) | 28μs | 12μs | 2.3x faster |
+| For Loop (100 iter) | 17μs | 12μs | 1.4x faster |
 | Variable Lookup Heavy | 15μs | 10μs | 1.5x faster |
 | Variable Operations | 6μs | 5μs | ~Equal |
 | Integer Addition | 2μs | 2μs | Equal |
@@ -278,16 +279,16 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Loop Pattern | JaiScript | Notes |
 |--------------|-----------|-------|
-| For Loop (literal condition) | 28μs | Fast path: `i < 100` |
-| For Loop (expression condition) | 48μs | No fast path: `i < n` |
-| Range-For (copy, 100 elem) | 26μs | `for(auto x : arr)` |
-| Range-For (reference, 100 elem) | 35μs | `for(auto& x : arr)` |
-| Hot Loop (10x100 nested) | 197μs | Nested iteration scaling |
+| For Loop (literal condition) | 17μs | Fast path: `i < 100` |
+| For Loop (expression condition) | 20μs | No fast path: `i < n` |
+| Range-For (copy, 100 elem) | 28μs | `for(auto x : arr)` |
+| Range-For (reference, 100 elem) | 40μs | `for(auto& x : arr)` |
+| Hot Loop (10x100 nested) | 81μs | Nested iteration scaling |
 
 **Loop Optimization Notes:**
-- Literal condition fast path saves ~42% (28μs vs 48μs)
+- Literal condition fast path saves ~15% (17μs vs 20μs)
 - Range-for with copy is faster than reference (no reference wrapper overhead)
-- JaiScript range-for is **6.2x faster** than ChaiScript's equivalent
+- JaiScript range-for is **6x faster** than ChaiScript's equivalent
 
 ### Value Type Comparison (script_value vs BoxedValue)
 
@@ -311,14 +312,14 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 ### Key Insights
 
 1. **JaiScript's Strength: Function Calls & Recursion**
-   - ID-based lookups and optimized call stack give JaiScript **100-438x advantage** in function-heavy code
+   - ID-based lookups and optimized call stack give JaiScript **40-162x advantage** in function-heavy code
    - Recursive algorithms (factorial, fibonacci) show the biggest wins
-   - Method invocation is **119x faster** than ChaiScript
+   - Method invocation is **20x faster** than ChaiScript
 
 2. **ChaiScript's Strength: Tight Loops & Simple Ops**
-   - ChaiScript's for-loop is ~7x faster (simpler interpreter dispatch)
+   - ChaiScript's for-loop is only **1.4x faster** now (gap closed from 8.4x)
    - Basic arithmetic and variable operations slightly faster
-   - Good for compute-heavy tight loops
+   - Gap largely eliminated through dynamic_cast removal
 
 3. **Language Features**
    - JaiScript supports proper `null` for object fields (tree structures work natively)
@@ -335,15 +336,16 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 ### Performance Profile
 
 **Excellent Performance:**
-- ✅ **Function/Method Calls**: 4-9μs - ID-based lookups + string interning eliminate overhead
-- ✅ **Recursion**: 10-18μs - Efficient stack frame management + cached symbol IDs + unchecked accessors
-- ✅ **Algorithms**: Fast execution for search (22μs), sort (122μs), and computational tasks
-- ✅ **Class Operations**: 6μs instantiation - ID-based field/method access
-- ✅ **For Loops**: ~280ns per iteration - Switch-based dispatch + native C++ structure
+- ✅ **Function/Method Calls**: 5-10μs - ID-based lookups + string interning eliminate overhead
+- ✅ **Recursion**: 11-21μs - Efficient stack frame management + cached symbol IDs + unchecked accessors
+- ✅ **Algorithms**: Fast execution for search (22μs), sort (118μs), and computational tasks
+- ✅ **Class Operations**: 7μs instantiation - ID-based field/method access
+- ✅ **For Loops**: ~170ns per iteration - get_type() + static_cast (no RTTI) + native C++ structure
+- ✅ **Hot Loops**: 76μs for 1000 iterations (~76ns per iteration)
 
 **Adequate Performance:**
 - ⚪ **Simple Expressions**: 2-8μs - Good for event handlers and UI
-- ⚪ **Container Operations**: 14-23μs - Acceptable for game scripting use cases
+- ⚪ **Container Operations**: 14-18μs - Acceptable for game scripting use cases
 
 **Recommendations:**
 - Use JaiScript for game logic, events, AI, UI, and general scripting
@@ -472,21 +474,22 @@ Potential improvements under consideration:
 
 ## Benchmark History
 
-Track performance improvements over time:
+Track performance improvements over time (git-verified):
 
-| Date       | Version | Integer Add | Function Call | For Loop (100) | Fibonacci(6) | Hot Loop (1000) | Notes                           |
-|------------|---------|-------------|---------------|----------------|--------------|------------------|---------------------------------|
-| 2025-12-04 | 0.1.5   | 2μs         | 4μs           | 28μs           | 18μs         | 197μs            | + Switch-based AST dispatch + string interning improvements |
-| 2025-01-31 | 0.1.4   | 2μs         | 4μs           | 67μs           | 22μs         | 715μs            | + ID-based class_instance/class_definition operations |
-| 2025-01-30 | 0.1.3   | 2μs         | 5μs           | 79μs           | 27μs         | 1136μs           | + Unchecked accessors + native for-loop structure |
-| 2025-01-30 | 0.1.2   | 2μs         | 10μs          | 101μs          | 220μs*       | -                | + Type check optimization (single type() call) |
-| 2025-01-30 | 0.1.1   | 2μs         | 10μs          | 111μs          | 302μs*       | -                | String symbolizer + parse-time interning |
-| 2025-01-29 | 0.1.0   | 2μs         | 10μs          | 125μs          | 3381μs*      | -                | Initial string symbolizer       |
+| Date       | Commit   | For Loop (100) | Hot Loop (1000) | vs ChaiScript | Notes                           |
+|------------|----------|----------------|-----------------|---------------|---------------------------------|
+| 2025-12-18 | HEAD     | 17μs           | 76μs            | 1.4x slower   | + dynamic_cast removal (90 calls) + throw cleanup |
+| 2025-12-15 | 9310a48f | 28μs           | 197μs           | 2.3x slower   | Switch-based AST dispatch |
+| 2025-12-04 | bb2b900a | 42μs           | ~400μs          | 3.5x slower   | "only 2x loop perf of ChaiScript" |
+| 2025-11-07 | bf50a1a6 | 67-79μs        | 715μs           | ~6x slower    | Aggressive string interning |
+| 2025-11-04 | 47b8a6aa | 101μs          | 1136μs          | 8.4x slower   | Initial PERFORMANCE.md |
 
-*Note: Fibonacci benchmarks prior to 0.1.3 used fib(10), v0.1.3+ uses fib(6) for faster test execution
+**Progress: 8.4x slower → 1.4x slower = 83% of the gap eliminated**
+
+ChaiScript For Loop baseline: 12μs
 
 ---
 
-*Benchmarks run on: [Your CPU/System Info]*
+*Benchmarks run on: Windows x64*
 *Compiler: MSVC 2022 with /O2 /GL /LTCG*
 *Build: x64-Release*

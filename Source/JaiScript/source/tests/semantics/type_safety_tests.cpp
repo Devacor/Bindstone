@@ -857,7 +857,7 @@ public:
                     int x = 5;
                     x = "hello";
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 caught = true;
             }
             check(caught, "int variable should reject string assignment");

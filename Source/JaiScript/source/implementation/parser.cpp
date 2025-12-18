@@ -49,21 +49,25 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
 
     // Mark the last expression declaration as an implicit return
     if (!declarations.empty()) {
-        if (auto* expr_decl = dynamic_cast<expression_decl*>(declarations.back().get())) {
-            expr_decl->implicit_return = true;
-        } else if (auto* stmt_decl = dynamic_cast<statement_decl*>(declarations.back().get())) {
+        auto& last_decl = declarations.back();
+        if (last_decl->get_type() == node_type::expression_decl) {
+            static_cast<expression_decl*>(last_decl.get())->implicit_return = true;
+        } else if (last_decl->get_type() == node_type::statement_decl) {
+            auto* stmt_decl = static_cast<statement_decl*>(last_decl.get());
             // If the last declaration is a statement_decl containing a block,
             // mark the last expression in that block as implicit return
-            if (auto* block = dynamic_cast<block_stmt*>(stmt_decl->statement.get())) {
+            if (stmt_decl->statement->get_type() == node_type::block_stmt) {
+                auto* block = static_cast<block_stmt*>(stmt_decl->statement.get());
                 if (!block->declarations.empty()) {
-                    if (auto* expr_decl = dynamic_cast<expression_decl*>(block->declarations.back().get())) {
-                        expr_decl->implicit_return = true;
+                    if (block->declarations.back()->get_type() == node_type::expression_decl) {
+                        static_cast<expression_decl*>(block->declarations.back().get())->implicit_return = true;
                     }
                 }
             }
             // If the last declaration is a statement_decl containing an expression_stmt,
             // mark it as implicit return by setting a flag on the statement_decl
-            else if (auto* expr_stmt = dynamic_cast<expression_stmt*>(stmt_decl->statement.get())) {
+            else if (stmt_decl->statement->get_type() == node_type::expression_stmt) {
+                auto* expr_stmt = static_cast<expression_stmt*>(stmt_decl->statement.get());
                 // We need to mark this expression statement as an implicit return
                 // Since expression_stmt doesn't have implicit_return flag, we need to convert
                 // this statement_decl to an expression_decl
@@ -928,13 +932,13 @@ checked_result<expression_ptr> parser::shift() {
 // Constant folding optimization: evaluates literal operations at parse time
 // If both operands are literals, compute the result now instead of at runtime
 expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, expression_ptr right) {
-    auto* leftLit = dynamic_cast<literal_expr*>(left.get());
-    auto* rightLit = dynamic_cast<literal_expr*>(right.get());
-
-    if (!leftLit || !rightLit) {
+    if (left->get_type() != node_type::literal_expr || right->get_type() != node_type::literal_expr) {
         // Not both literals, return binary_expr
         return std::make_shared<binary_expr>(op.location, left, op, right);
     }
+
+    auto* leftLit = static_cast<literal_expr*>(left.get());
+    auto* rightLit = static_cast<literal_expr*>(right.get());
 
     const script_value& leftVal = leftLit->value;
     const script_value& rightVal = rightLit->value;
@@ -1083,7 +1087,8 @@ checked_result<expression_ptr> parser::postfix() {
         } else if (match(token_type::left_brace)) {
             // Brace initialization: Type{args...}
             // This should only be valid if expr is an identifier (type name)
-            if (auto* identExpr = dynamic_cast<identifier_expr*>(expr.get())) {
+            if (expr->get_type() == node_type::identifier_expr) {
+                auto* identExpr = static_cast<identifier_expr*>(expr.get());
                 std::vector<expression_ptr> arguments;
 
                 if (!check(token_type::right_brace)) {

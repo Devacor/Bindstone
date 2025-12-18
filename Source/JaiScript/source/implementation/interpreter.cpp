@@ -3472,17 +3472,52 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
                     // For locked types, the value already has correct type from enforce_type_compatibility
 
-                    // FIX #1: Always clone for value semantics (objects too!)
-                    // shared_ptr types already handled above with reference semantics
-                    // Regular objects should deep copy like all other value types
-                    script_value assignValue = value.clone();
-                    JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(assignValue)));
+                    // C++ style move/copy semantics:
+                    // - If RHS is a variable/field/index read (lvalue), clone for value semantics
+                    // - If RHS is a temporary (function result, constructor, literal, operator), move
+                    bool is_lvalue_read = (expr->value->get_type() == node_type::identifier_expr ||
+                                          expr->value->get_type() == node_type::member_expr);
+                    // Also check for subscript access (binary_expr with left_bracket operator)
+                    if (!is_lvalue_read && expr->value->get_type() == node_type::binary_expr) {
+                        auto* bin = static_cast<binary_expr*>(expr->value.get());
+                        if (bin->op.type == token_type::left_bracket) {
+                            is_lvalue_read = true;
+                        }
+                    }
+
+                    if (is_lvalue_read) {
+                        // Reading from storage location - clone for value semantics
+                        script_value assignValue = value.clone();
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(assignValue)));
+                        // value is still valid for push_value below
+                        push_value(std::move(value));
+                    } else {
+                        // Temporary value - move directly (like C++ RVO/move semantics)
+                        // No clone needed - the temporary becomes the stored value
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
+                        // Get the stored value back for the expression result
+                        // Use shallow copy (shares object_holder) - like C++ returning lvalue reference
+                        script_value* stored = environment_->get_value_ptr(identifier->symbol_id);
+                        push_value(stored ? *stored : make_value());  // Shallow copy, not clone
+                    }
                 }
             } else {
                 // Variable doesn't exist in environment
                 // Try static_method_environment's assign (which handles static fields)
                 // or instance method's 'this' field assignment
                 bool assigned_to_member = false;
+
+                // Determine if RHS is lvalue (needs clone) or temporary (can move)
+                bool is_lvalue_read = (expr->value->get_type() == node_type::identifier_expr ||
+                                      expr->value->get_type() == node_type::member_expr);
+                // Also check for subscript access (binary_expr with left_bracket operator)
+                if (!is_lvalue_read && expr->value->get_type() == node_type::binary_expr) {
+                    auto* bin = static_cast<binary_expr*>(expr->value.get());
+                    if (bin->op.type == token_type::left_bracket) {
+                        is_lvalue_read = true;
+                    }
+                }
+
                 auto this_result = environment_->get(string_symbolizer_->get_this_id());
                 if (this_result) {
                     script_value this_val = std::move(this_result.value());
@@ -3517,15 +3552,29 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 }
                                 // Not a C++ property or no setter - use regular field assignment
                                 if (!assigned_to_member) {
-                                    instance->set_field(identifier->symbol_id, value.clone());
+                                    if (is_lvalue_read) {
+                                        instance->set_field(identifier->symbol_id, value.clone());
+                                    } else {
+                                        instance->set_field(identifier->symbol_id, std::move(value));
+                                        value = instance->get_field(identifier->symbol_id);  // Shallow copy for return
+                                    }
                                     assigned_to_member = true;
                                 }
                             }
                             // Then try static fields
                             else {
                                 auto class_def = instance->get_class_definition();
-                                if (class_def && class_def->set_static_field(identifier->symbol_id, value.clone())) {
-                                    assigned_to_member = true;
+                                if (class_def) {
+                                    if (is_lvalue_read) {
+                                        if (class_def->set_static_field(identifier->symbol_id, value.clone())) {
+                                            assigned_to_member = true;
+                                        }
+                                    } else {
+                                        if (class_def->set_static_field(identifier->symbol_id, std::move(value))) {
+                                            value = class_def->get_static_field(identifier->symbol_id);  // Get back
+                                            assigned_to_member = true;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -3537,13 +3586,17 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // - For static_method_environment: check static fields, then return error if not found
                     // - For method_environment: check 'this' fields, then define locally if not found
                     // - For regular environment: return error if variable doesn't exist
-                    JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, value.clone()));
+                    if (is_lvalue_read) {
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, value.clone()));
+                    } else {
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
+                        // Get back the stored value for the return (shallow copy)
+                        script_value* stored = environment_->get_value_ptr(identifier->symbol_id);
+                        value = stored ? *stored : make_value();  // Shallow copy, not clone
+                    }
                 }
+                push_value(std::move(value));
             }
-
-            // FIX #3: Return a valid value, not moved-from
-            // value is still valid here since we only cloned it above
-            push_value(std::move(value));
         }
         // Check if target is a member expression (property assignment)
         else if (expr->target->get_type() == node_type::member_expr) {

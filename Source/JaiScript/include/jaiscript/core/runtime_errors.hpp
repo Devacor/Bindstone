@@ -66,6 +66,7 @@ namespace jai {
         unknown_operator = 101,
         unsupported_operation = 102,
         invalid_assignment_target = 103,
+        invalid_operation = 104,
 
         // Capture errors (111-120)
         capture_undefined_variable = 111,

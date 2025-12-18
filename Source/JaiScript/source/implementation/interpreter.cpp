@@ -764,9 +764,9 @@ checked_result<script_value> environment::get(uint64_t id, int /*depth*/) const 
     return get(id);
 }
 
-void environment::assign(const std::string& name, const script_value& value) {
+checked_result<void> environment::assign(const std::string& name, const script_value& value) {
     uint64_t id = symbolizer_->intern(name);
-    assign(id, value);
+    return assign(id, value);
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(const std::string& name) const {
@@ -830,17 +830,17 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
         "Undefined variable '" + name + "'");
 }
 
-void environment::assign(const std::string& name, script_value&& value) {
+checked_result<void> environment::assign(const std::string& name, script_value&& value) {
     uint64_t id = symbolizer_->intern(name);
-    assign(id, std::move(value));
+    return assign(id, std::move(value));
 }
 
-void environment::assign(uint64_t id, const script_value& value) {
+checked_result<void> environment::assign(uint64_t id, const script_value& value) {
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
         *(it->second) = value;
-        return;
+        return {};
     }
 
     // Cache miss - walk parent chain
@@ -850,20 +850,22 @@ void environment::assign(uint64_t id, const script_value& value) {
             // Cache for future O(1) access, then assign
             flat_lookup_[id] = ptr;
             *ptr = value;
-            return;
+            return {};
         }
     }
 
     std::string name{symbolizer_->get_string(id)};
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
-void environment::assign(uint64_t id, script_value&& value) {
+checked_result<void> environment::assign(uint64_t id, script_value&& value) {
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
         *(it->second) = std::move(value);
-        return;
+        return {};
     }
 
     // Cache miss - walk parent chain
@@ -873,12 +875,14 @@ void environment::assign(uint64_t id, script_value&& value) {
             // Cache for future O(1) access, then assign
             flat_lookup_[id] = ptr;
             *ptr = std::move(value);
-            return;
+            return {};
         }
     }
 
     std::string name{symbolizer_->get_string(id)};
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
 bool environment::contains(const std::string& name) const {
@@ -1349,7 +1353,7 @@ checked_result<std::reference_wrapper<script_value>> method_environment::get_ref
     return env_result;
 }
 
-void method_environment::assign(const std::string& name, const script_value& value) {
+checked_result<void> method_environment::assign(const std::string& name, const script_value& value) {
     // First check if it's a local variable or parameter
     uint64_t id = symbolizer_->intern(name);
     if (local_ids_.count(id) > 0) {
@@ -1357,16 +1361,15 @@ void method_environment::assign(const std::string& name, const script_value& val
         auto it = flat_lookup_.find(id);
         if (it != flat_lookup_.end()) {
             *(it->second) = value;
-            return;
+            return {};
         }
     }
-    
+
     // Check parent environments
     if (parent_ && parent_->contains(name)) {
-        parent_->assign(name, value);
-        return;
+        return parent_->assign(name, value);
     }
-    
+
     // If not found anywhere and 'this' has this field, update it
     auto this_type = this_object_.type();
     if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
@@ -1375,30 +1378,31 @@ void method_environment::assign(const std::string& name, const script_value& val
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
             if (instance && instance->has_field(id)) {
                 instance->set_field(id, value.clone());
-                return;
+                return {};
             }
         }
     }
-    
-    // Not found anywhere - throw error to prevent typos
-    throw runtime_error("Undefined variable '" + name + "'");
+
+    // Not found anywhere - return error
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
-void method_environment::assign(uint64_t id, const script_value& value) {
+checked_result<void> method_environment::assign(uint64_t id, const script_value& value) {
     // First check if it's a local variable or parameter
     if (local_ids_.count(id) > 0) {
         // It's a local variable - update via flat_lookup_
         auto it = flat_lookup_.find(id);
         if (it != flat_lookup_.end()) {
             *(it->second) = value;
-            return;
+            return {};
         }
     }
 
     // Check parent environments
     if (parent_ && parent_->contains(id)) {
-        parent_->assign(id, value);
-        return;
+        return parent_->assign(id, value);
     }
 
     // If not found anywhere and 'this' has this field, update it
@@ -1422,15 +1426,15 @@ void method_environment::assign(uint64_t id, const script_value& value) {
                             if (setter.is_function()) {
                                 // Call setter with this and value
                                 std::vector<script_value> args = {this_object_, value};
-                                setter.as_function()(args);
-                                return;
+                                (void)setter.as_function()(args);  // Setter return value intentionally ignored
+                                return {};
                             }
                         }
                     }
                 }
                 // Not a C++ property or no setter - use regular field assignment
                 instance->set_field(id, value.clone());
-                return;
+                return {};
             }
 
             // Check for static field on class definition
@@ -1438,32 +1442,33 @@ void method_environment::assign(uint64_t id, const script_value& value) {
             if (class_def) {
                 if (class_def->has_static_field(id)) {
                     [[maybe_unused]] bool success = class_def->set_static_field(id, value);
-                    return;
+                    return {};
                 }
             }
         }
     }
 
-    // Not found anywhere - throw error to prevent typos
+    // Not found anywhere - return error
     std::string name{symbolizer_->get_string(id)};
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
-void method_environment::assign(uint64_t id, script_value&& value) {
+checked_result<void> method_environment::assign(uint64_t id, script_value&& value) {
     // First check if it's a local variable or parameter
     if (local_ids_.count(id) > 0) {
         // It's a local variable - update via flat_lookup_
         auto it = flat_lookup_.find(id);
         if (it != flat_lookup_.end()) {
             *(it->second) = std::move(value);
-            return;
+            return {};
         }
     }
 
     // Check parent environments
     if (parent_ && parent_->contains(id)) {
-        parent_->assign(id, std::move(value));
-        return;
+        return parent_->assign(id, std::move(value));
     }
 
     // If not found anywhere and 'this' has this field, update it
@@ -1486,15 +1491,15 @@ void method_environment::assign(uint64_t id, script_value&& value) {
                             if (setter.is_function()) {
                                 // Call setter with this and value
                                 std::vector<script_value> args = {this_object_, std::move(value)};
-                                setter.as_function()(args);
-                                return;
+                                (void)setter.as_function()(args);  // Setter return value intentionally ignored
+                                return {};
                             }
                         }
                     }
                 }
                 // Not a C++ property or no setter - use regular field assignment
                 instance->set_field(id, std::move(value));
-                return;
+                return {};
             }
 
             // Check for static field on class definition
@@ -1502,15 +1507,17 @@ void method_environment::assign(uint64_t id, script_value&& value) {
             if (class_def) {
                 if (class_def->has_static_field(id)) {
                     [[maybe_unused]] bool success = class_def->set_static_field(id, std::move(value));
-                    return;
+                    return {};
                 }
             }
         }
     }
 
-    // Not found anywhere - throw error to prevent typos
+    // Not found anywhere - return error
     std::string name{symbolizer_->get_string(id)};
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
 bool method_environment::contains(const std::string& name) const {
@@ -1662,7 +1669,7 @@ checked_result<std::reference_wrapper<script_value>> static_method_environment::
     return env_result;
 }
 
-void static_method_environment::assign(const std::string& name, const script_value& value) {
+checked_result<void> static_method_environment::assign(const std::string& name, const script_value& value) {
     // First check if it's a local variable or parameter
     uint64_t id = symbolizer_->intern(name);
     if (local_ids_.count(id) > 0) {
@@ -1670,26 +1677,27 @@ void static_method_environment::assign(const std::string& name, const script_val
         auto it = flat_lookup_.find(id);
         if (it != flat_lookup_.end()) {
             *(it->second) = value;
-            return;
+            return {};
         }
     }
 
     // Check parent environments
     if (parent_ && parent_->contains(name)) {
-        parent_->assign(name, value);
-        return;
+        return parent_->assign(name, value);
     }
 
     // Check if it's a static field (set_static_field does the lookup)
     if (class_def_ && class_def_->set_static_field(id, value)) {
-        return;
+        return {};
     }
 
-    // Not found anywhere - throw error
-    throw runtime_error("Undefined variable '" + name + "'");
+    // Not found anywhere - return error
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
-void static_method_environment::assign(const std::string& name, script_value&& value) {
+checked_result<void> static_method_environment::assign(const std::string& name, script_value&& value) {
     // First check if it's a local variable or parameter
     uint64_t id = symbolizer_->intern(name);
     if (local_ids_.count(id) > 0) {
@@ -1697,77 +1705,80 @@ void static_method_environment::assign(const std::string& name, script_value&& v
         auto it = flat_lookup_.find(id);
         if (it != flat_lookup_.end()) {
             *(it->second) = std::move(value);
-            return;
+            return {};
         }
     }
 
     // Check parent environments
     if (parent_ && parent_->contains(name)) {
-        parent_->assign(name, std::move(value));
-        return;
+        return parent_->assign(name, std::move(value));
     }
 
     // Check if it's a static field (set_static_field does the lookup)
     if (class_def_ && class_def_->set_static_field(id, std::move(value))) {
-        return;
+        return {};
     }
 
-    // Not found anywhere - throw error
-    throw runtime_error("Undefined variable '" + name + "'");
+    // Not found anywhere - return error
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
-void static_method_environment::assign(uint64_t id, const script_value& value) {
+checked_result<void> static_method_environment::assign(uint64_t id, const script_value& value) {
     // First check if it's a local variable or parameter
     if (local_ids_.count(id) > 0) {
         // It's a local variable - update via flat_lookup_
         auto it = flat_lookup_.find(id);
         if (it != flat_lookup_.end()) {
             *(it->second) = value;
-            return;
+            return {};
         }
     }
 
     // Check parent environments
     if (parent_ && parent_->contains(id)) {
-        parent_->assign(id, value);
-        return;
+        return parent_->assign(id, value);
     }
 
     // Check if it's a static field (set_static_field does the lookup)
     if (class_def_ && class_def_->set_static_field(id, value)) {
-        return;
+        return {};
     }
 
-    // Not found anywhere - throw error
+    // Not found anywhere - return error
     std::string name{symbolizer_->get_string(id)};
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
-void static_method_environment::assign(uint64_t id, script_value&& value) {
+checked_result<void> static_method_environment::assign(uint64_t id, script_value&& value) {
     // First check if it's a local variable or parameter
     if (local_ids_.count(id) > 0) {
         // It's a local variable - update via flat_lookup_
         auto it = flat_lookup_.find(id);
         if (it != flat_lookup_.end()) {
             *(it->second) = std::move(value);
-            return;
+            return {};
         }
     }
 
     // Check parent environments
     if (parent_ && parent_->contains(id)) {
-        parent_->assign(id, std::move(value));
-        return;
+        return parent_->assign(id, std::move(value));
     }
 
     // Check if it's a static field (set_static_field does the lookup)
     if (class_def_ && class_def_->set_static_field(id, std::move(value))) {
-        return;
+        return {};
     }
 
-    // Not found anywhere - throw error
+    // Not found anywhere - return error
     std::string name{symbolizer_->get_string(id)};
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<void>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
 interpreter::interpreter()
@@ -3443,34 +3454,39 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             } else {
                 // Fall back to built-in operators
                 switch (expr->op.type) {
-                    case token_type::plus_equal:
+                    case token_type::plus_equal: {
                         if (currentValue.is_string() || rightValue.is_string()) {
                             resultValue = make_value(currentValue.to_string() + rightValue.to_string());
                         } else {
-                            resultValue = evaluate_arithmetic(currentValue, token_type::plus, rightValue);
+                            JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue));
                         }
                         break;
-                    case token_type::minus_equal:
-                        resultValue = evaluate_arithmetic(currentValue, token_type::minus, rightValue);
+                    }
+                    case token_type::minus_equal: {
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue));
                         break;
-                    case token_type::star_equal:
-                        resultValue = evaluate_arithmetic(currentValue, token_type::star, rightValue);
+                    }
+                    case token_type::star_equal: {
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue));
                         break;
-                    case token_type::slash_equal:
+                    }
+                    case token_type::slash_equal: {
                         if ((rightValue.is_int() && rightValue.as_int() == 0) ||
                             (rightValue.is_float() && rightValue.as_float() == 0.0)) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                                 "Division by zero");
                         }
-                        resultValue = evaluate_arithmetic(currentValue, token_type::slash, rightValue);
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue));
                         break;
-                    case token_type::percent_equal:
+                    }
+                    case token_type::percent_equal: {
                         if (rightValue.is_int() && rightValue.as_int() == 0) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                                 "Modulo by zero");
                         }
-                        resultValue = evaluate_arithmetic(currentValue, token_type::percent, rightValue);
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
                         break;
+                    }
                     default:
                         return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
                             "Unknown compound assignment operator");
@@ -3499,7 +3515,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 // FIX #3/#4: Save result before moving to avoid returning moved-from value
                 script_value returnValue = resultValue.clone();
-                environment_->assign(identifier->symbol_id, std::move(resultValue));
+                JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(resultValue)));
                 push_value(std::move(returnValue));
             } else {
                 // Fall back to AST creation for complex lvalues
@@ -3544,17 +3560,17 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (value.is_null()) {
                         // Assign null - create empty weak_ptr
                         auto type_info = currentVal->get_type_info();
-                        environment_->assign(identifier->symbol_id, script_value::make_empty_weak_ptr(type_info, engine_ref_));
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, script_value::make_empty_weak_ptr(type_info, engine_ref_)));
                     } else if (value.is_weak_ptr()) {
                         // Assign another weak_ptr
-                        environment_->assign(identifier->symbol_id, std::move(value));
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
                     } else if (value.type() == script_value_type::jai_shared_ptr_type) {
                         // Convert shared_ptr to weak_ptr
                         auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
                         if (!weak_result) {
                             return checked_result<void>(weak_result.error(), weak_result.message());
                         }
-                        environment_->assign(identifier->symbol_id, std::move(weak_result.value()));
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(weak_result.value())));
                     } else if (value.type() == script_value_type::jai_object_type) {
                         // Helpful error for value-semantic objects
                         auto type_info = currentVal->get_type_info();
@@ -3576,7 +3592,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Special handling for shared_ptr assignment
                     if (value.is_null()) {
                         // Assign null - that's fine
-                        environment_->assign(identifier->symbol_id, std::move(value));
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
                     } else if (value.is_weak_ptr()) {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
@@ -3618,7 +3634,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // Assign object to shared_ptr - update the value but keep the shared_ptr type info
                         auto type_info = currentVal->get_type_info();
                         value.set_type_info(type_info);
-                        environment_->assign(identifier->symbol_id, std::move(value));
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
                     } else {
                         auto type_info = value.get_type_info();
                         std::string type_name = type_info ? type_info->type_name : "unknown";
@@ -3685,7 +3701,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // shared_ptr types already handled above with reference semantics
                     // Regular objects should deep copy like all other value types
                     script_value assignValue = value.clone();
-                    environment_->assign(identifier->symbol_id, std::move(assignValue));
+                    JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(assignValue)));
                 }
             } else {
                 // Variable doesn't exist in environment
@@ -3740,10 +3756,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 if (!assigned_to_member) {
                     // Use environment->assign() which will:
-                    // - For static_method_environment: check static fields, then throw if not found
+                    // - For static_method_environment: check static fields, then return error if not found
                     // - For method_environment: check 'this' fields, then define locally if not found
-                    // - For regular environment: throw error if variable doesn't exist
-                    environment_->assign(identifier->symbol_id, value.clone());
+                    // - For regular environment: return error if variable doesn't exist
+                    JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, value.clone()));
                 }
             }
 
@@ -4365,18 +4381,18 @@ std::string interpreter::value_to_string_with_method(const script_value& val) {
 }
 
 // Binary operation helpers
-script_value interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right) {
+checked_result<script_value> interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right) {
     // Special case for string concatenation (use move to avoid copying the temporary)
     // Check for to_string() method on objects before falling back to default
     if (op == token_type::plus && (left.is_string() || right.is_string())) {
         return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
     }
-    
+
     // Fast path for pure integer arithmetic (avoid float conversion)
     if (left.is_int() && right.is_int()) {
         script_int leftInt = left.as_int();
         script_int rightInt = right.as_int();
-        
+
         switch (op) {
             case token_type::plus:
                 return make_value(leftInt + rightInt);
@@ -4386,39 +4402,49 @@ script_value interpreter::evaluate_arithmetic(const script_value& left, token_ty
                 return make_value(leftInt * rightInt);
             case token_type::slash:
                 if (rightInt == 0) {
-                    throw runtime_error("Division by zero");
+                    return checked_result<script_value>(
+                        make_error_code(runtime_error_code::division_by_zero),
+                        "Division by zero");
                 }
                 // Integer division returns integer (C++ semantics)
                 return make_value(leftInt / rightInt);
             case token_type::percent:
                 if (rightInt == 0) {
-                    throw runtime_error("Division by zero");
+                    return checked_result<script_value>(
+                        make_error_code(runtime_error_code::modulo_by_zero),
+                        "Division by zero");
                 }
                 return make_value(leftInt % rightInt);
             default:
-                throw runtime_error("Unknown arithmetic operator");
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::unknown_operator),
+                    "Unknown arithmetic operator");
         }
     }
-    
+
     // Mixed or floating point arithmetic path
     script_float leftNum, rightNum;
-    
+
     if (left.is_int()) {
         leftNum = static_cast<script_float>(left.as_int());
     } else if (left.is_float()) {
         leftNum = left.as_float();
     } else {
-        throw runtime_error("Left operand must be numeric");
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::invalid_numeric_operand),
+            "Left operand must be numeric");
     }
-    
+
     if (right.is_int()) {
         rightNum = static_cast<script_float>(right.as_int());
     } else if (right.is_float()) {
         rightNum = right.as_float();
     } else {
-        throw runtime_error("Right operand must be numeric");
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::invalid_numeric_operand),
+            "Right operand must be numeric");
     }
-    
+
     switch (op) {
         case token_type::plus:
             return make_value(leftNum + rightNum);
@@ -4428,20 +4454,26 @@ script_value interpreter::evaluate_arithmetic(const script_value& left, token_ty
             return make_value(leftNum * rightNum);
         case token_type::slash:
             if (rightNum == 0.0) {
-                throw runtime_error("Division by zero");
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::division_by_zero),
+                    "Division by zero");
             }
             return make_value(leftNum / rightNum);
         case token_type::percent:
             if (rightNum == 0.0) {
-                throw runtime_error("Division by zero");
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::modulo_by_zero),
+                    "Division by zero");
             }
             return make_value(std::fmod(leftNum, rightNum));
         default:
-            throw runtime_error("Unknown arithmetic operator");
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::unknown_operator),
+                "Unknown arithmetic operator");
     }
 }
 
-script_value interpreter::evaluate_comparison(const script_value& left, token_type op, const script_value& right) {
+checked_result<script_value> interpreter::evaluate_comparison(const script_value& left, token_type op, const script_value& right) {
     // Handle weak_ptr comparisons with null
     if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
         if (op == token_type::equal_equal || op == token_type::bang_equal) {
@@ -4475,7 +4507,7 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
                     is_expired = true;
                 }
             }
-            
+
             if (op == token_type::equal_equal) {
                 return make_value(is_expired);  // weak == null is true if expired
             } else {
@@ -4483,7 +4515,7 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
             }
         }
     }
-    
+
     // Handle null comparisons
     if (left.is_null() || right.is_null()) {
         switch (op) {
@@ -4492,15 +4524,17 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
             case token_type::bang_equal:
                 return make_value(!(left.is_null() && right.is_null()));
             default:
-                throw runtime_error("Cannot compare null values with relational operators");
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::invalid_operation),
+                    "Cannot compare null values with relational operators");
         }
     }
-    
+
     // For now, only support numeric and string comparisons
     if (left.is_string() && right.is_string()) {
         const auto& leftStr = left.as_string();
         const auto& rightStr = right.as_string();
-        
+
         switch (op) {
             case token_type::less:
                 return make_value(leftStr < rightStr);
@@ -4520,14 +4554,16 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
                 return make_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
             }
             default:
-                throw runtime_error("Unknown comparison operator");
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::unknown_operator),
+                    "Unknown comparison operator");
         }
     }
-    
+
     // Numeric comparison
     script_float leftNum = to_numeric(left).as_float();
     script_float rightNum = to_numeric(right).as_float();
-    
+
     switch (op) {
         case token_type::less:
             return make_value(leftNum < rightNum);
@@ -4549,11 +4585,13 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
             else return make_value(script_int(0));
         }
         default:
-            throw runtime_error("Unknown comparison operator");
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::unknown_operator),
+                "Unknown comparison operator");
     }
 }
 
-script_value interpreter::evaluate_logical(const script_value& left, token_type op, const script_value& right) {
+checked_result<script_value> interpreter::evaluate_logical(const script_value& left, token_type op, const script_value& right) {
     bool leftTruthy = is_truthy(left);
 
     switch (op) {
@@ -4572,19 +4610,23 @@ script_value interpreter::evaluate_logical(const script_value& left, token_type 
             return make_value(is_truthy(right));  // Return truthiness of right
 
         default:
-            throw runtime_error("Unknown logical operator");
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::unknown_operator),
+                "Unknown logical operator");
     }
 }
 
-script_value interpreter::evaluate_bitwise(const script_value& left, token_type op, const script_value& right) {
+checked_result<script_value> interpreter::evaluate_bitwise(const script_value& left, token_type op, const script_value& right) {
     // Bitwise operations only work on integers
     if (!left.is_int() || !right.is_int()) {
-        throw runtime_error("Bitwise operations require integer operands");
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::invalid_numeric_operand),
+            "Bitwise operations require integer operands");
     }
-    
+
     script_int leftInt = left.as_int();
     script_int rightInt = right.as_int();
-    
+
     switch (op) {
         case token_type::ampersand:
             return make_value(leftInt & rightInt);
@@ -4597,7 +4639,9 @@ script_value interpreter::evaluate_bitwise(const script_value& left, token_type 
         case token_type::right_shift:
             return make_value(leftInt >> rightInt);
         default:
-            throw runtime_error("Unknown bitwise operator");
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::unknown_operator),
+                "Unknown bitwise operator");
     }
 }
 
@@ -8254,7 +8298,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
         } else {
             // Non-reference parameter - try to convert the argument to the parameter type if needed
-            script_value converted_arg = try_convert_for_parameter(arg, param.type);
+            script_value converted_arg = make_value();
+            JAISCRIPT_TRY_ASSIGN(converted_arg, try_convert_for_parameter(arg, param.type));
 
             // Decide between value semantics (clone) or reference semantics (share)
             // Use reference semantics (no clone) if:
@@ -8327,7 +8372,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             function.return_type->type_name != "void" &&
             function.return_type->type_name != "auto" &&
             function.return_type->base_type != script_value_type::jai_any_type) {
-            result = try_convert_for_parameter(result, function.return_type);
+            JAISCRIPT_TRY_ASSIGN(result, try_convert_for_parameter(result, function.return_type));
         }
     } else {
         // Check if this is a constructor (method_environment with no explicit return)
@@ -8454,7 +8499,7 @@ bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr 
     return false;
 }
 
-script_value interpreter::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type) {
+checked_result<script_value> interpreter::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type) {
     if (!target_type) {
         return arg;  // No type specified = any type accepted
     }
@@ -8617,9 +8662,11 @@ script_value interpreter::try_convert_for_parameter(const script_value& arg, typ
 
                     if (!has_matching_ctor) {
                         // No constructor directly accepts the source type - don't allow chained conversion
-                        throw runtime_error("Cannot convert " + get_type_name(source_type) +
-                                          " to " + target_class_name +
-                                          " (no suitable single-argument constructor)");
+                        return checked_result<script_value>(
+                            make_error_code(runtime_error_code::type_mismatch),
+                            "Cannot convert " + get_type_name(source_type) +
+                            " to " + target_class_name +
+                            " (no suitable single-argument constructor)");
                     }
                 }
             }
@@ -8642,9 +8689,11 @@ script_value interpreter::try_convert_for_parameter(const script_value& arg, typ
         }
 
         // No suitable constructor found
-        throw runtime_error("Cannot convert " + get_type_name(source_type) +
-                          " to " + target_class_name +
-                          " (no suitable single-argument constructor)");
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::type_mismatch),
+            "Cannot convert " + get_type_name(source_type) +
+            " to " + target_class_name +
+            " (no suitable single-argument constructor)");
     }
 
     // Built-in type conversions
@@ -8693,9 +8742,11 @@ script_value interpreter::try_convert_for_parameter(const script_value& arg, typ
         }
     }
 
-    // Type mismatch - throw error
-    throw runtime_error("Type mismatch: expected " + target_type->type_name +
-                       " but got " + get_type_name(source_type));
+    // Type mismatch - return error
+    return checked_result<script_value>(
+        make_error_code(runtime_error_code::type_mismatch),
+        "Type mismatch: expected " + target_type->type_name +
+        " but got " + get_type_name(source_type));
 }
 
 script_value interpreter::make_function(std::shared_ptr<script_defined_function> func) {

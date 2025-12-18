@@ -70,10 +70,11 @@ namespace jai {
         virtual checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id);
         
         // Assign to an existing variable (searches parent scopes)
-        virtual void assign(const std::string& name, const script_value& value);
-        virtual void assign(const std::string& name, script_value&& value);
-        virtual void assign(uint64_t id, const script_value& value);
-        virtual void assign(uint64_t id, script_value&& value);
+        // Returns checked_result to avoid exceptions in regular control flow
+        [[nodiscard]] virtual checked_result<void> assign(const std::string& name, const script_value& value);
+        [[nodiscard]] virtual checked_result<void> assign(const std::string& name, script_value&& value);
+        [[nodiscard]] virtual checked_result<void> assign(uint64_t id, const script_value& value);
+        [[nodiscard]] virtual checked_result<void> assign(uint64_t id, script_value&& value);
         
         // Check if variable exists in current or parent scopes
         bool contains(const std::string& name) const;
@@ -213,9 +214,9 @@ namespace jai {
         checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id) override;
         
         // Override assign to update 'this' object fields when appropriate
-        void assign(const std::string& name, const script_value& value) override;
-        void assign(uint64_t id, const script_value& value) override;
-        void assign(uint64_t id, script_value&& value) override;
+        [[nodiscard]] checked_result<void> assign(const std::string& name, const script_value& value) override;
+        [[nodiscard]] checked_result<void> assign(uint64_t id, const script_value& value) override;
+        [[nodiscard]] checked_result<void> assign(uint64_t id, script_value&& value) override;
 
         // Override contains to include 'this'
         bool contains(const std::string& name) const;
@@ -276,10 +277,10 @@ namespace jai {
         checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id) override;
         
         // Override assign to update static fields when appropriate
-        void assign(const std::string& name, const script_value& value) override;
-        void assign(const std::string& name, script_value&& value) override;
-        void assign(uint64_t id, const script_value& value) override;
-        void assign(uint64_t id, script_value&& value) override;
+        [[nodiscard]] checked_result<void> assign(const std::string& name, const script_value& value) override;
+        [[nodiscard]] checked_result<void> assign(const std::string& name, script_value&& value) override;
+        [[nodiscard]] checked_result<void> assign(uint64_t id, const script_value& value) override;
+        [[nodiscard]] checked_result<void> assign(uint64_t id, script_value&& value) override;
 
         // Get the class definition for creating child static environments
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
@@ -851,10 +852,10 @@ namespace jai {
         }
         
         // Binary operation helpers
-        script_value evaluate_arithmetic(const script_value& left, token_type op, const script_value& right);
-        script_value evaluate_comparison(const script_value& left, token_type op, const script_value& right);
-        script_value evaluate_logical(const script_value& left, token_type op, const script_value& right);
-        script_value evaluate_bitwise(const script_value& left, token_type op, const script_value& right);
+        [[nodiscard]] checked_result<script_value> evaluate_arithmetic(const script_value& left, token_type op, const script_value& right);
+        [[nodiscard]] checked_result<script_value> evaluate_comparison(const script_value& left, token_type op, const script_value& right);
+        [[nodiscard]] checked_result<script_value> evaluate_logical(const script_value& left, token_type op, const script_value& right);
+        [[nodiscard]] checked_result<script_value> evaluate_bitwise(const script_value& left, token_type op, const script_value& right);
 
         // Strong types: Type enforcement for assignment
         // Returns error if value cannot be assigned to a variable with target_type
@@ -936,8 +937,8 @@ namespace jai {
         // Type conversion helpers (constructor-based conversions)
         // Attempts to convert a value to a target type using constructor-based conversion.
         // Returns the converted value on success, or the original value if no conversion is needed/possible.
-        // Throws runtime_error if conversion fails.
-        script_value try_convert_for_parameter(const script_value& arg, type_info_ptr target_type);
+        // Returns checked_result with error if conversion fails.
+        [[nodiscard]] checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type);
 
         // Check if a conversion is possible from source value to target type
         bool can_convert_to_type(const script_value& source, type_info_ptr target_type) const;

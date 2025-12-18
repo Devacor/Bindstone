@@ -11,7 +11,7 @@ void interpreter::init_dispatch_table() {
     binary_dispatch_table_[token_type::star] = &interpreter::handle_multiply;
     binary_dispatch_table_[token_type::slash] = &interpreter::handle_divide;
     binary_dispatch_table_[token_type::percent] = &interpreter::handle_modulo;
-    
+
     // Comparison operators
     binary_dispatch_table_[token_type::less] = &interpreter::handle_less;
     binary_dispatch_table_[token_type::less_equal] = &interpreter::handle_less_equal;
@@ -20,7 +20,7 @@ void interpreter::init_dispatch_table() {
     binary_dispatch_table_[token_type::equal_equal] = &interpreter::handle_equal;
     binary_dispatch_table_[token_type::bang_equal] = &interpreter::handle_not_equal;
     binary_dispatch_table_[token_type::spaceship] = &interpreter::handle_spaceship;
-    
+
     // Bitwise operators
     binary_dispatch_table_[token_type::ampersand] = &interpreter::handle_bitwise_and;
     binary_dispatch_table_[token_type::pipe] = &interpreter::handle_bitwise_or;
@@ -31,7 +31,8 @@ void interpreter::init_dispatch_table() {
 
 // Optimized binary operation handlers with cached type indices
 // Uses script_value::TYPEID_* constants for fast type checking
-script_value interpreter::handle_add(const script_value& left, const script_value& right) {
+// Returns checked_result for zero-allocation error handling
+checked_result<script_value> interpreter::handle_add(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
@@ -59,10 +60,10 @@ script_value interpreter::handle_add(const script_value& left, const script_valu
         return custom_result.value();
     }
 
-    throw runtime_error("Invalid operands for + operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
 }
 
-script_value interpreter::handle_subtract(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_subtract(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
@@ -83,10 +84,10 @@ script_value interpreter::handle_subtract(const script_value& left, const script
         return custom_result.value();
     }
 
-    throw runtime_error("Invalid operands for - operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for - operator");
 }
 
-script_value interpreter::handle_multiply(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_multiply(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
@@ -107,22 +108,26 @@ script_value interpreter::handle_multiply(const script_value& left, const script
         return custom_result.value();
     }
 
-    throw runtime_error("Invalid operands for * operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for * operator");
 }
 
-script_value interpreter::handle_divide(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_divide(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        if (right.unchecked_as_int() == 0) throw runtime_error("Division by zero");
+        if (right.unchecked_as_int() == 0) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+        }
         return make_value(left.unchecked_as_int() / right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-        if (rf == 0.0) throw runtime_error("Division by zero");
+        if (rf == 0.0) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+        }
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
         return make_value(lf / rf);
     }
@@ -133,22 +138,26 @@ script_value interpreter::handle_divide(const script_value& left, const script_v
         return custom_result.value();
     }
 
-    throw runtime_error("Invalid operands for / operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for / operator");
 }
 
-script_value interpreter::handle_modulo(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_modulo(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        if (right.unchecked_as_int() == 0) throw runtime_error("Division by zero");
+        if (right.unchecked_as_int() == 0) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+        }
         return make_value(left.unchecked_as_int() % right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-        if (rf == 0.0) throw runtime_error("Division by zero");
+        if (rf == 0.0) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+        }
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
         return make_value(std::fmod(lf, rf));
     }
@@ -159,10 +168,10 @@ script_value interpreter::handle_modulo(const script_value& left, const script_v
         return custom_result.value();
     }
 
-    throw runtime_error("Invalid operands for % operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for % operator");
 }
 
-script_value interpreter::handle_less(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_less(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
@@ -187,10 +196,10 @@ script_value interpreter::handle_less(const script_value& left, const script_val
         return make_value(custom_result.value());
     }
 
-    throw runtime_error("Invalid operands for < operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
 }
 
-script_value interpreter::handle_less_equal(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_less_equal(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
@@ -215,10 +224,10 @@ script_value interpreter::handle_less_equal(const script_value& left, const scri
         return make_value(custom_result.value());
     }
 
-    throw runtime_error("Invalid operands for <= operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
 }
 
-script_value interpreter::handle_greater(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_greater(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
@@ -243,10 +252,10 @@ script_value interpreter::handle_greater(const script_value& left, const script_
         return make_value(custom_result.value());
     }
 
-    throw runtime_error("Invalid operands for > operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
 }
 
-script_value interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
@@ -271,10 +280,10 @@ script_value interpreter::handle_greater_equal(const script_value& left, const s
         return make_value(custom_result.value());
     }
 
-    throw runtime_error("Invalid operands for >= operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
 }
 
-script_value interpreter::handle_equal(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_equal(const script_value& left, const script_value& right) {
     // Handle weak_ptr comparisons with null
     if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
         // For weak_ptr, null comparison checks if expired
@@ -307,10 +316,10 @@ script_value interpreter::handle_equal(const script_value& left, const script_va
                 is_expired = true;
             }
         }
-        
+
         return make_value(is_expired);  // weak == null is true if expired
     }
-    
+
     // Handle numeric type comparison (int vs float should compare by value)
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         // Convert both to float for comparison to handle 5 == 5.0 correctly
@@ -363,7 +372,7 @@ script_value interpreter::handle_equal(const script_value& left, const script_va
     return make_value(false);
 }
 
-script_value interpreter::handle_not_equal(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_not_equal(const script_value& left, const script_value& right) {
     // Handle weak_ptr comparisons with null
     if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
         // For weak_ptr, null comparison checks if expired
@@ -396,15 +405,19 @@ script_value interpreter::handle_not_equal(const script_value& left, const scrip
                 is_expired = true;
             }
         }
-        
+
         return make_value(!is_expired);  // weak != null is true if not expired
     }
-    
+
     // For other cases, just negate the equality result
-    return make_value(!handle_equal(left, right).unchecked_as_bool());
+    auto eq_result = handle_equal(left, right);
+    if (!eq_result) [[unlikely]] {
+        return eq_result.error_value();
+    }
+    return make_value(!eq_result.value().unchecked_as_bool());
 }
 
-script_value interpreter::handle_spaceship(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_spaceship(const script_value& left, const script_value& right) {
     // Fast path for integer spaceship - avoid function calls
     if (left.type() == script_value_type::jai_int_type && right.type() == script_value_type::jai_int_type) {
         // Direct storage access, single C++20 spaceship operation
@@ -426,40 +439,40 @@ script_value interpreter::handle_spaceship(const script_value& left, const scrip
         return make_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
     }
 
-    throw runtime_error("Invalid operands for <=> operator");
+    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <=> operator");
 }
 
-script_value interpreter::handle_bitwise_and(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_bitwise_and(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
-        throw runtime_error("Bitwise & requires integer operands");
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise & requires integer operands");
     }
     return make_value(left.unchecked_as_int() & right.unchecked_as_int());
 }
 
-script_value interpreter::handle_bitwise_or(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_bitwise_or(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
-        throw runtime_error("Bitwise | requires integer operands");
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise | requires integer operands");
     }
     return make_value(left.unchecked_as_int() | right.unchecked_as_int());
 }
 
-script_value interpreter::handle_bitwise_xor(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_bitwise_xor(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
-        throw runtime_error("Bitwise ^ requires integer operands");
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise ^ requires integer operands");
     }
     return make_value(left.unchecked_as_int() ^ right.unchecked_as_int());
 }
 
-script_value interpreter::handle_left_shift(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_left_shift(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
-        throw runtime_error("Left shift requires integer operands");
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Left shift requires integer operands");
     }
     return make_value(left.unchecked_as_int() << right.unchecked_as_int());
 }
 
-script_value interpreter::handle_right_shift(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::handle_right_shift(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
-        throw runtime_error("Right shift requires integer operands");
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Right shift requires integer operands");
     }
     return make_value(left.unchecked_as_int() >> right.unchecked_as_int());
 }

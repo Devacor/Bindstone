@@ -165,6 +165,8 @@ namespace jai {
         static script_value make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
     public:
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, std::weak_ptr<engine> eng);
+        // Overload for container subscript references with element type constraint
+        static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, std::weak_ptr<engine> eng, type_info_ptr container_element_type);
         static script_value make_function(const script_function& func, std::weak_ptr<engine> eng);
         
         // Factory method for C++ bound values
@@ -1268,6 +1270,7 @@ namespace jai {
         struct reference_holder {
             script_value* target = nullptr;  // Points to the referenced value
             std::weak_ptr<environment> sourceEnv;  // environment that owns the target
+            type_info_ptr container_element_type = nullptr;  // For array/map subscript refs: the element type constraint
         };
         
         

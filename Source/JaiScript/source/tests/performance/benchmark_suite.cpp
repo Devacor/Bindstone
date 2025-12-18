@@ -176,6 +176,111 @@ public:
                 auto result = a + b + c + a + b + c + a + b + c + a;
             )");
         });
+
+        // === var vs auto nested container benchmarks ===
+        // These measure the overhead of homogeneity validation for auto
+
+        benchmark("auto: Simple Array [10 ints]", [this]() {
+            test_engine->execute(R"(
+                auto arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+            )");
+        });
+
+        benchmark("var: Simple Array [10 ints]", [this]() {
+            test_engine->execute(R"(
+                var arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+            )");
+        });
+
+        benchmark("auto: 2D Array [[5x5 ints]]", [this]() {
+            test_engine->execute(R"(
+                auto matrix = [
+                    [1, 2, 3, 4, 5],
+                    [6, 7, 8, 9, 10],
+                    [11, 12, 13, 14, 15],
+                    [16, 17, 18, 19, 20],
+                    [21, 22, 23, 24, 25]
+                ];
+            )");
+        });
+
+        benchmark("var: 2D Array [[5x5 ints]]", [this]() {
+            test_engine->execute(R"(
+                var matrix = [
+                    [1, 2, 3, 4, 5],
+                    [6, 7, 8, 9, 10],
+                    [11, 12, 13, 14, 15],
+                    [16, 17, 18, 19, 20],
+                    [21, 22, 23, 24, 25]
+                ];
+            )");
+        });
+
+        benchmark("auto: 3D Array [[[2x2x2 ints]]]", [this]() {
+            test_engine->execute(R"(
+                auto cube = [
+                    [[1, 2], [3, 4]],
+                    [[5, 6], [7, 8]]
+                ];
+            )");
+        });
+
+        benchmark("var: 3D Array [[[2x2x2 ints]]]", [this]() {
+            test_engine->execute(R"(
+                var cube = [
+                    [[1, 2], [3, 4]],
+                    [[5, 6], [7, 8]]
+                ];
+            )");
+        });
+
+        benchmark("auto: Homogeneous Map {5 string keys -> ints}", [this]() {
+            test_engine->execute(R"(
+                auto m = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5};
+            )");
+        });
+
+        benchmark("var: Heterogeneous Map {5 mixed values}", [this]() {
+            test_engine->execute(R"(
+                var m = {"name": "test", "age": 30, "active": true, "score": 3.14, "count": 100};
+            )");
+        });
+
+        benchmark("auto: Nested Map 2 levels {k: {k: int}}", [this]() {
+            test_engine->execute(R"(
+                auto data = {
+                    "group1": {"x": 1, "y": 2, "z": 3},
+                    "group2": {"x": 4, "y": 5, "z": 6}
+                };
+            )");
+        });
+
+        benchmark("var: Nested Map 2 levels {k: {k: mixed}}", [this]() {
+            test_engine->execute(R"(
+                var data = {
+                    "user1": {"name": "Alice", "age": 30},
+                    "user2": {"name": "Bob", "age": 25}
+                };
+            )");
+        });
+
+        benchmark("auto: Mixed Array+Map 3 levels [[{k: int}]]", [this]() {
+            test_engine->execute(R"(
+                auto data = [
+                    [{"a": 1, "b": 2}, {"c": 3, "d": 4}],
+                    [{"e": 5, "f": 6}, {"g": 7, "h": 8}]
+                ];
+            )");
+        });
+
+        benchmark("var: Mixed Array+Map 3 levels [[{k: mixed}]]", [this]() {
+            test_engine->execute(R"(
+                var data = [
+                    [{"name": "a", "val": 1}, {"name": "b", "val": 2}],
+                    [{"name": "c", "val": 3}, {"name": "d", "val": 4}]
+                ];
+            )");
+        });
     }
 };
 

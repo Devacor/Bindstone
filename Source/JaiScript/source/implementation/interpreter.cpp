@@ -14,6 +14,128 @@
 
 namespace jai {
 
+// Helper function to check if a value is compatible with a target element type
+// Returns: true if compatible, false otherwise
+// For array<var>: any element is allowed
+// For array<auto> (nullptr element_type): deduces type from first element, locks it
+// For array<T>: only T or convertible types allowed
+static bool is_element_type_compatible(
+    const script_value& element,
+    type_info_ptr element_type,
+    script_value& array_owner  // Mutable for auto type deduction
+) {
+    // Dereference if element is a reference to get the actual value type
+    const script_value& actual_element = element.is_reference() ? element.deref() : element;
+
+    // Case 1: array<var> - any_type allows anything
+    if (element_type && element_type->base_type == script_value_type::jai_any_type) {
+        return true;
+    }
+
+    // Case 2: array<auto> or untyped - deduce from first element and lock
+    if (!element_type) {
+        // For untyped arrays, we allow anything (legacy behavior)
+        // This happens with bare array literals like [1, 2, 3]
+        return true;
+    }
+
+    // Case 3: array<T> - validate element matches T
+    auto elem_type = actual_element.type();
+    auto target_type = element_type->base_type;
+
+    // Exact match
+    if (elem_type == target_type) {
+        // For object types, also check class name match
+        if (target_type == script_value_type::jai_object_type) {
+            auto elem_type_info = actual_element.get_type_info();
+            if (elem_type_info && !element_type->type_name.empty()) {
+                return elem_type_info->type_name == element_type->type_name;
+            }
+        }
+        return true;
+    }
+
+    // Numeric conversions: int <-> float allowed
+    if (target_type == script_value_type::jai_int_type &&
+        elem_type == script_value_type::jai_float_type) {
+        return true;  // float -> int (truncation)
+    }
+    if (target_type == script_value_type::jai_float_type &&
+        elem_type == script_value_type::jai_int_type) {
+        return true;  // int -> float (widening)
+    }
+
+    // Nested arrays: array<array<T>> must match recursively
+    if (target_type == script_value_type::jai_array_type &&
+        elem_type == script_value_type::jai_array_type) {
+        // Check inner element types match
+        auto inner_target = element_type->element_type();
+        auto elem_type_info = actual_element.get_type_info();
+        auto inner_elem = elem_type_info ? elem_type_info->element_type() : nullptr;
+
+        // Both have inner types - they must match
+        if (inner_target && inner_elem) {
+            return inner_target->base_type == inner_elem->base_type;
+        }
+        // If target has inner type but element doesn't, it's a mismatch
+        if (inner_target && !inner_elem) {
+            return false;
+        }
+        // If target doesn't have inner type, allow any array
+        return true;
+    }
+
+    // Nested maps: check key/value types
+    if (target_type == script_value_type::jai_map_type &&
+        elem_type == script_value_type::jai_map_type) {
+        auto target_key = element_type->key_type();
+        auto target_val = element_type->value_type();
+        auto elem_type_info = actual_element.get_type_info();
+        auto elem_key = elem_type_info ? elem_type_info->key_type() : nullptr;
+        auto elem_val = elem_type_info ? elem_type_info->value_type() : nullptr;
+
+        // Both have types - they must match
+        if (target_key && elem_key && target_key->base_type != elem_key->base_type) {
+            return false;
+        }
+        if (target_val && elem_val && target_val->base_type != elem_val->base_type) {
+            return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+// Helper to convert element if needed (e.g., int -> float for array<float>)
+static script_value convert_array_element(
+    interpreter* interp,
+    const script_value& element,
+    type_info_ptr element_type
+) {
+    // Dereference if element is a reference to get the actual value
+    const script_value& actual_element = element.is_reference() ? element.deref() : element;
+
+    if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
+        return actual_element.clone();
+    }
+
+    auto elem_type = actual_element.type();
+    auto target_type = element_type->base_type;
+
+    // Numeric conversions
+    if (target_type == script_value_type::jai_int_type &&
+        elem_type == script_value_type::jai_float_type) {
+        return interp->make_value(static_cast<script_int>(actual_element.unchecked_as_float()));
+    }
+    if (target_type == script_value_type::jai_float_type &&
+        elem_type == script_value_type::jai_int_type) {
+        return interp->make_value(static_cast<script_float>(actual_element.unchecked_as_int()));
+    }
+
+    return actual_element.clone();
+}
+
 // Helper function to convert script_value_type to a human-readable string
 static std::string get_type_name(script_value_type type) {
     switch (type) {
@@ -36,6 +158,168 @@ static std::string get_type_name(script_value_type type) {
     }
 }
 
+// Forward declaration for mutual recursion
+static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path = "");
+
+// Helper to validate map value homogeneity for auto declarations
+// Returns: error_code if values have different types, success otherwise
+static checked_result<void> validate_map_homogeneous(const script_value& map_value, const std::string& path) {
+    if (!map_value.is_map()) {
+        return {};  // Not a map, nothing to validate
+    }
+
+    const auto& map = map_value.as_map();
+    if (map.size() <= 1) {
+        // Empty or single-value maps are trivially homogeneous
+        // But still need to recursively validate the single value if it's a container
+        if (map.size() == 1) {
+            const script_value& first_val = map.begin()->second.is_reference() ?
+                map.begin()->second.deref() : map.begin()->second;
+            JAISCRIPT_TRY(validate_container_homogeneous(first_val, path + "[0]"));
+        }
+        return {};
+    }
+
+    // Get the type of the first value (deduced type)
+    auto first_it = map.begin();
+    const script_value& first_val = first_it->second.is_reference() ? first_it->second.deref() : first_it->second;
+    script_value_type deduced_type = first_val.type();
+    std::string deduced_type_name = get_type_name(deduced_type);
+
+    // For object types, also track class name
+    std::string deduced_class_name;
+    if (deduced_type == script_value_type::jai_object_type) {
+        auto type_info = first_val.get_type_info();
+        if (type_info) {
+            deduced_class_name = type_info->type_name;
+        }
+    }
+
+    // Recursively validate the first value if it's a container
+    JAISCRIPT_TRY(validate_container_homogeneous(first_val, path + "[first]"));
+
+    // Check all other values match
+    size_t idx = 1;
+    for (auto it = ++map.begin(); it != map.end(); ++it, ++idx) {
+        const script_value& val = it->second.is_reference() ? it->second.deref() : it->second;
+        script_value_type val_type = val.type();
+
+        // Check base type match
+        if (val_type != deduced_type) {
+            std::string val_type_name = get_type_name(val_type);
+            return checked_result<void>(
+                make_error_code(runtime_error_code::map_value_type_mismatch),
+                "Map declared with 'auto' must have homogeneous values. "
+                "First value is '" + deduced_type_name + "' but value at index " +
+                std::to_string(idx) + " is '" + val_type_name + "'" +
+                (path.empty() ? "" : " at " + path));
+        }
+
+        // For object types, also check class name match
+        if (deduced_type == script_value_type::jai_object_type && !deduced_class_name.empty()) {
+            auto val_type_info = val.get_type_info();
+            std::string val_class_name = val_type_info ? val_type_info->type_name : "";
+            if (val_class_name != deduced_class_name) {
+                return checked_result<void>(
+                    make_error_code(runtime_error_code::map_value_type_mismatch),
+                    "Map declared with 'auto' must have homogeneous values. "
+                    "First value is '" + deduced_class_name + "' but value at index " +
+                    std::to_string(idx) + " is '" + val_class_name + "'" +
+                    (path.empty() ? "" : " at " + path));
+            }
+        }
+
+        // Recursively validate this value if it's a container
+        JAISCRIPT_TRY(validate_container_homogeneous(val, path + "[" + std::to_string(idx) + "]"));
+    }
+
+    return {};
+}
+
+// Helper to validate array homogeneity for auto/array<auto> declarations
+// Returns: error_code if elements have different types, success otherwise
+// For auto x = [...] and array<auto> x = [...], all elements must have the same type
+// Recursively validates nested arrays and maps to arbitrary depth
+static checked_result<void> validate_array_homogeneous(const script_value& array_value, const std::string& path = "") {
+    if (!array_value.is_array()) {
+        return {};  // Not an array, nothing to validate
+    }
+
+    const auto& elements = array_value.as_array();
+    if (elements.size() <= 1) {
+        // Empty or single-element arrays are trivially homogeneous
+        // But still need to recursively validate the single element if it's a container
+        if (elements.size() == 1) {
+            const script_value& first = elements[0].is_reference() ? elements[0].deref() : elements[0];
+            JAISCRIPT_TRY(validate_container_homogeneous(first, path + "[0]"));
+        }
+        return {};
+    }
+
+    // Get the type of the first element (deduced type)
+    const script_value& first = elements[0].is_reference() ? elements[0].deref() : elements[0];
+    script_value_type deduced_type = first.type();
+    std::string deduced_type_name = get_type_name(deduced_type);
+
+    // For object types, also track class name
+    std::string deduced_class_name;
+    if (deduced_type == script_value_type::jai_object_type) {
+        auto type_info = first.get_type_info();
+        if (type_info) {
+            deduced_class_name = type_info->type_name;
+        }
+    }
+
+    // Recursively validate the first element if it's a container
+    JAISCRIPT_TRY(validate_container_homogeneous(first, path + "[0]"));
+
+    // Check all other elements match
+    for (size_t i = 1; i < elements.size(); ++i) {
+        const script_value& elem = elements[i].is_reference() ? elements[i].deref() : elements[i];
+        script_value_type elem_type = elem.type();
+
+        // Check base type match
+        if (elem_type != deduced_type) {
+            std::string elem_type_name = get_type_name(elem_type);
+            return checked_result<void>(
+                make_error_code(runtime_error_code::array_element_type_mismatch),
+                "Array declared with 'auto' must have homogeneous elements. "
+                "First element is '" + deduced_type_name + "' but element at index " +
+                std::to_string(i) + " is '" + elem_type_name + "'" +
+                (path.empty() ? "" : " at " + path));
+        }
+
+        // For object types, also check class name match
+        if (deduced_type == script_value_type::jai_object_type && !deduced_class_name.empty()) {
+            auto elem_type_info = elem.get_type_info();
+            std::string elem_class_name = elem_type_info ? elem_type_info->type_name : "";
+            if (elem_class_name != deduced_class_name) {
+                return checked_result<void>(
+                    make_error_code(runtime_error_code::array_element_type_mismatch),
+                    "Array declared with 'auto' must have homogeneous elements. "
+                    "First element is '" + deduced_class_name + "' but element at index " +
+                    std::to_string(i) + " is '" + elem_class_name + "'" +
+                    (path.empty() ? "" : " at " + path));
+            }
+        }
+
+        // Recursively validate this element if it's a container
+        JAISCRIPT_TRY(validate_container_homogeneous(elem, path + "[" + std::to_string(i) + "]"));
+    }
+
+    return {};  // All elements are the same type
+}
+
+// Unified container homogeneity validation - handles both arrays and maps recursively
+static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path) {
+    if (container.is_array()) {
+        return validate_array_homogeneous(container, path);
+    } else if (container.is_map()) {
+        return validate_map_homogeneous(container, path);
+    }
+    return {};  // Not a container, nothing to validate
+}
+
 // Initialize built-in method registries with interned method names for O(1) lookup
 void interpreter::init_builtin_methods() {
     // Array methods
@@ -51,8 +335,25 @@ void interpreter::init_builtin_methods() {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "push() takes exactly one argument");
         }
+
+        // Get element type from array's type_info
+        auto array_type_info = self.get_type_info();
+        type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
+
+        // Validate element type compatibility
+        if (!is_element_type_compatible(args[0], element_type, self)) {
+            std::string expected = element_type ? get_type_name(element_type->base_type) : "unknown";
+            std::string actual = get_type_name(args[0].type());
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::array_element_type_mismatch),
+                "Cannot push '" + actual + "' to array<" + expected + ">");
+        }
+
+        // Convert element if needed (e.g., int -> float for array<float>)
+        script_value converted = convert_array_element(interp, args[0], element_type);
+
         auto& arrayPtr = self.unchecked_get_array_storage();
-        arrayPtr->push_back(args[0].clone());  // Deep copy when pushing
+        arrayPtr->push_back(std::move(converted));
         return interp->make_value();
     }},
 
@@ -2405,7 +2706,10 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 // This is an lvalue expression, return a reference to allow modification
                 auto& mut_array = const_cast<std::vector<script_value>&>(array);
                 script_value* element_ptr = &mut_array[index];
-                script_value ref_value = script_value::make_reference(element_ptr, environment_);
+                // Get element type constraint from the array's type_info for validation on assignment
+                auto array_type_info = left.get_type_info();
+                type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
+                script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_ref_, element_type);
                 push_value(ref_value);
             } else {
                 // True temporary (e.g., function return), read-only access
@@ -2437,7 +2741,10 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     }
 
                     script_value* element_ptr = &value_ref;
-                    script_value ref_value = script_value::make_reference(element_ptr, environment_);
+                    // Get value type constraint from the map's type_info for validation on assignment
+                    auto map_type_info = left.get_type_info();
+                    type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
+                    script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_ref_, value_type);
                     push_value(ref_value);
                 } else {
                     // This is a true temporary (e.g., function return), read-only access
@@ -3728,9 +4035,25 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (!target_ptr) {
                         return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
                     }
-                    
-                    // Assign the value  
-                    *target_ptr = std::move(value.clone());
+
+                    // Validate element type if this is a container subscript reference
+                    type_info_ptr element_type = refHolder->container_element_type;
+                    if (element_type) {
+                        // Validate element type compatibility
+                        if (!is_element_type_compatible(value, element_type, *target_ptr)) {
+                            std::string expected = get_type_name(element_type->base_type);
+                            std::string actual = get_type_name(value.type());
+                            return checked_result<void>(
+                                make_error_code(runtime_error_code::array_element_type_mismatch),
+                                "Cannot assign '" + actual + "' to element of type '" + expected + "'");
+                        }
+                        // Convert element if needed (e.g., int -> float for array<float>)
+                        script_value converted = convert_array_element(this, value, element_type);
+                        *target_ptr = std::move(converted);
+                    } else {
+                        // No element type constraint - allow anything
+                        *target_ptr = std::move(value.clone());
+                    }
                     push_value(std::move(value));  // Assignment expressions return the assigned value
                 } else {
                     // Not a reference - this means the subscript expression didn't
@@ -3969,6 +4292,49 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 value = value.clone();
             }
             // else: Initializing from a temporary - use move semantics (no clone)
+
+            // === HOMOGENEOUS CONTAINER VALIDATION ===
+            // For auto x = [...] and array<auto> x = [...], all elements must be the same type
+            // For var x = [...] and array<var> x = [...], heterogeneous elements are allowed
+            // Also validates maps: auto m = {...} requires homogeneous values
+            // Recursively validates nested containers to arbitrary depth
+            if (value.is_array() || value.is_map()) {
+                bool requires_homogeneity = false;
+
+                if (!decl->type) {
+                    // auto x = [...] or auto m = {...} - requires homogeneous elements
+                    requires_homogeneity = true;
+                } else if (decl->type->is_array()) {
+                    // array<...> declaration
+                    auto element_type = decl->type->element_type();
+                    if (!element_type) {
+                        // array<auto> - requires homogeneous elements
+                        requires_homogeneity = true;
+                    } else if (element_type->base_type == script_value_type::jai_any_type) {
+                        // array<var> - heterogeneous allowed
+                        requires_homogeneity = false;
+                    }
+                    // else: array<T> - type validation handled elsewhere
+                } else if (decl->type->is_map()) {
+                    // map<...> declaration
+                    auto value_type = decl->type->value_type();
+                    if (!value_type) {
+                        // map<K, auto> - requires homogeneous values
+                        requires_homogeneity = true;
+                    } else if (value_type->base_type == script_value_type::jai_any_type) {
+                        // map<K, var> - heterogeneous values allowed
+                        requires_homogeneity = false;
+                    }
+                    // else: map<K, V> - type validation handled elsewhere
+                } else if (decl->type->base_type == script_value_type::jai_any_type) {
+                    // var x = [...] or var m = {...} - heterogeneous allowed
+                    requires_homogeneity = false;
+                }
+
+                if (requires_homogeneity) {
+                    JAISCRIPT_TRY(validate_container_homogeneous(value, ""));
+                }
+            }
         }
         // If no initializer, value remains null
 
@@ -5586,11 +5952,10 @@ checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
 }
 
 checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* expr) {
-    // Create array script_value with mixed element type (for now)
-    type_info_ptr element_type = nullptr;
-    if (auto eng = engine_ref_.lock()) {
-        element_type = eng->get_type_info_int(); // TODO: Better type inference
-    }
+    // Create array script_value with no element type constraint
+    // Untyped array literals (e.g., [1, 2, 3]) allow any element type
+    // The type will be set by the variable declaration if one exists (e.g., array<int> arr = [...])
+    type_info_ptr element_type = nullptr;  // No constraint - allows any type
     script_value arrayValue = script_value::make_array(element_type, engine_ref_);
 
     // Get the internal vector to populate
@@ -5610,13 +5975,11 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
 }
 
 checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr) {
-    // Create map script_value with mixed key/value types (for now)
-    type_info_ptr keyType = nullptr;
-    type_info_ptr valueType = nullptr;
-    if (auto eng = engine_ref_.lock()) {
-        keyType = eng->get_type_info_string(); // TODO: Better type inference
-        valueType = eng->get_type_info_int(); // TODO: Better type inference
-    }
+    // Create map script_value with no key/value type constraints
+    // Untyped map literals (e.g., {"a": 1}) allow any key/value types
+    // The type will be set by the variable declaration if one exists (e.g., map<string,int> m = {...})
+    type_info_ptr keyType = nullptr;    // No constraint - allows any key type
+    type_info_ptr valueType = nullptr;  // No constraint - allows any value type
     script_value mapValue = script_value::make_map(keyType, valueType, engine_ref_);
 
     // Get the internal map to populate

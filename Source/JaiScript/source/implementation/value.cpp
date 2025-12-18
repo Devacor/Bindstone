@@ -268,6 +268,24 @@ script_value script_value::make_reference(script_value* target, const std::share
     return v;
 }
 
+script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env, std::weak_ptr<engine> eng, type_info_ptr container_element_type) {
+    if (!target) {
+        throw runtime_error("Cannot create reference to null");
+    }
+    auto locked_engine = eng.lock();
+    if (!locked_engine) {
+        throw runtime_error("Cannot create reference: engine reference expired");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = locked_engine->get_type_info_reference(target->get_type_info());
+    auto ref = std::make_shared<reference_holder>();
+    ref->target = target;
+    ref->sourceEnv = env;
+    ref->container_element_type = container_element_type;  // Store the container's element type constraint
+    v.storage_ = ref;
+    return v;
+}
+
 script_value script_value::make_function(const script_function& func, std::weak_ptr<engine> eng) {
     if (eng.expired()) {
         throw runtime_error("Cannot create function with expired engine reference");

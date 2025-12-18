@@ -15,8 +15,9 @@ public:
         test("map_literal_basic", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for maps with heterogeneous values (string and int)
             eng->execute(R"(
-                auto m = {"name": "John", "age": 30, "city": "NYC"};
+                var m = {"name": "John", "age": 30, "city": "NYC"};
             )");
 
             auto result = eng->execute("m");
@@ -30,8 +31,10 @@ public:
         test("map_literal_mixed_types", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for heterogeneous map values
+            // 'auto' requires homogeneous values
             eng->execute(R"(
-                auto mixed = {
+                var mixed = {
                     "int_val": 42,
                     "str_val": "hello",
                     "float_val": 3.14,
@@ -58,8 +61,9 @@ public:
         test("map_access_read", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
-                auto person = {"name": "Alice", "age": 25};
+                var person = {"name": "Alice", "age": 25};
             )");
 
             check_eq(eng->execute("person[\"name\"]").as<std::string>(), "Alice");
@@ -69,8 +73,9 @@ public:
         test("map_access_write", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
-                auto person = {"name": "Alice"};
+                var person = {"name": "Alice"};
                 person["name"] = "Bob";
                 person["age"] = 30;
             )");
@@ -149,8 +154,9 @@ public:
         test("map_keys_method", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
-                auto m = {"name": "Alice", "age": 30, "city": "NYC"};
+                var m = {"name": "Alice", "age": 30, "city": "NYC"};
                 auto keys = m.keys();
             )");
 
@@ -185,8 +191,9 @@ public:
         test("map_nested_in_map", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
-                auto person = {
+                var person = {
                     "name": "Alice",
                     "address": {
                         "street": "123 Main St",
@@ -205,8 +212,9 @@ public:
         test("map_nested_modification", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
-                auto data = {
+                var data = {
                     "user": {
                         "name": "Alice",
                         "age": 30
@@ -241,8 +249,9 @@ public:
         test("map_with_array_values", [&]() {
             auto eng = engine::make();
 
+            // Arrays have homogeneous elements, but the map values are heterogeneous (array types differ)
             eng->execute(R"(
-                auto data = {
+                var data = {
                     "numbers": [1, 2, 3],
                     "strings": ["a", "b", "c"]
                 };
@@ -257,8 +266,9 @@ public:
         test("array_with_map_elements", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for arrays containing heterogeneous maps
             eng->execute(R"(
-                auto users = [
+                var users = [
                     {"name": "Alice", "age": 30},
                     {"name": "Bob", "age": 25},
                     {"name": "Charlie", "age": 35}
@@ -274,8 +284,9 @@ public:
         test("map_complex_nested_structure", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for deeply nested heterogeneous structures
             eng->execute(R"(
-                auto company = {
+                var company = {
                     "name": "TechCorp",
                     "employees": [
                         {
@@ -336,12 +347,13 @@ public:
             auto eng = engine::make();
 
             eng->execute(R"(
-                function getProperty(auto obj, string key) -> auto {
+                function getProperty(var obj, string key) -> var {
                     return obj[key];
                 }
             )");
 
-            eng->execute("auto person = {\"name\": \"Alice\", \"age\": 30};");
+            // Use 'var' for maps with heterogeneous values
+            eng->execute("var person = {\"name\": \"Alice\", \"age\": 30};");
 
             check_eq(eng->execute("getProperty(person, \"name\")").as<std::string>(), "Alice");
             check_eq(eng->execute("getProperty(person, \"age\")").as<int>(), 30);

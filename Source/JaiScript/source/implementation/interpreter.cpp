@@ -2632,7 +2632,8 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                             }
                         }
                     }
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                        "Undefined variable '" + identifier->name + "'");
                 }
             } else {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target));
@@ -2897,7 +2898,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Check if 'this' exists and has this field
                 auto this_result = environment_->get(string_symbolizer_->get_this_id());
                 if (!this_result || !this_result.value().is_object()) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                        "Undefined variable '" + identifier->name + "' (no 'this' in scope)");
                 }
 
                 script_value this_val = std::move(this_result.value());
@@ -2907,7 +2909,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     : nullptr;
 
                 if (!instance || !instance->has_field(identifier->symbol_id)) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                        "Undefined variable '" + identifier->name + "' (not a field of 'this')");
                 }
 
                 // Get current field value
@@ -4731,7 +4734,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
 
         // Class has no static member
-        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+        return checked_result<void>(make_error_code(runtime_error_code::static_member_not_found),
+            "Class '" + name + "' has no static member '" + expr->member + "'");
     }
 
     // Check if this is a super:: member access
@@ -4783,7 +4787,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         script_value method = parent_def->get_method(expr->member_id);
         if (method.is_null()) {
             // Parent class has no method
-            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+            return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+                "Parent class has no method '" + expr->member + "'");
         }
 
         // Return a bound method that calls the parent's implementation
@@ -4858,7 +4863,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
         else {
             // Map has no method
-            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+            return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+                "Map has no method '" + expr->member + "'");
         }
     }
 
@@ -4879,10 +4885,11 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
         else {
             // weak_ptr has no method
-            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+            return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+                "weak_ptr has no method '" + expr->member + "'");
         }
     }
-    
+
     // Handle shared_ptr methods (shared_ptr<T> explicitly marked objects)
     // After refactor: check type_info marker instead of storage type
     if (objectValue.get_type_info() &&
@@ -5158,7 +5165,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         captureEnv->define(capture.symbol_id, std::move(refValue));
                     } else {
                         // Cannot capture variable by reference
-                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
+                        return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
+                            "Cannot capture variable '" + capture.name + "' by reference");
                     }
                 } else {
                     // Capture by value - deep copy at capture time
@@ -5170,7 +5178,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 }
             } else {
                 // Cannot capture undefined variable
-                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
+                return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+                    "Cannot capture undefined variable '" + capture.name + "'");
             }
         }
 
@@ -5449,7 +5458,8 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
     }
 
     // No constructor found for class
-    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
+    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+        "No constructor found for class '" + className + "'");
 }
 
 checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
@@ -5542,7 +5552,8 @@ checked_result<void> interpreter::visit_this_expr(this_expr* expr) {
     auto this_result = environment_->get(string_symbolizer_->get_this_id());
     if (!this_result) {
         // 'this' can only be used inside methods
-        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+        return checked_result<void>(make_error_code(runtime_error_code::this_outside_method),
+            "'this' can only be used inside methods");
     }
     push_value(std::move(this_result.value()));
     return {};
@@ -5557,12 +5568,14 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
     auto this_result = environment_->get(string_symbolizer_->get_this_id());
     if (!this_result) {
         // 'this' not found - super used outside of class method
-        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+        return checked_result<void>(make_error_code(runtime_error_code::super_outside_method),
+            "'super' can only be used inside methods");
     }
     script_value this_value = std::move(this_result.value());
     if (this_value.is_null()) {
         // 'this' is null - super used outside of class method
-        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+        return checked_result<void>(make_error_code(runtime_error_code::super_outside_method),
+            "'super' can only be used inside methods");
     }
 
     // Push 'this' onto the stack - visit_member_expr will handle the parent lookup

@@ -606,16 +606,16 @@ namespace jai {
     // Helper function to check if an expression is GUARANTEED to return a boolean
     // This allows skipping is_truthy() type dispatch and using unchecked_as_bool() directly
     [[nodiscard]] inline bool expression_returns_bool(const expression* expr) noexcept {
-        if (auto* bin = dynamic_cast<const binary_expr*>(expr)) {
-            return bin->returns_bool();
+        switch (expr->get_type()) {
+            case node_type::binary_expr:
+                return static_cast<const binary_expr*>(expr)->returns_bool();
+            case node_type::unary_expr:
+                return static_cast<const unary_expr*>(expr)->returns_bool();
+            case node_type::literal_expr:
+                return static_cast<const literal_expr*>(expr)->value.is_bool();
+            default:
+                return false;
         }
-        if (auto* un = dynamic_cast<const unary_expr*>(expr)) {
-            return un->returns_bool();
-        }
-        if (auto* lit = dynamic_cast<const literal_expr*>(expr)) {
-            return lit->value.is_bool();
-        }
-        return false;
     }
 
 } // namespace jai

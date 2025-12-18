@@ -746,7 +746,7 @@ checked_result<script_value> environment::get(uint64_t id) const {
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
-            // Cache for future O(1) access (flat_lookup_ is mutable)
+            // Cache for future O(1) access
             flat_lookup_[id] = ptr;
             return *ptr;
         }
@@ -785,7 +785,6 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
-            // Cache for future O(1) access (flat_lookup_ is mutable)
             flat_lookup_[id] = ptr;
             return std::cref(*ptr);
         }
@@ -818,7 +817,6 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
-            // Cache for future O(1) access
             flat_lookup_[id] = ptr;
             return std::ref(*ptr);
         }
@@ -847,7 +845,6 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
-            // Cache for future O(1) access, then assign
             flat_lookup_[id] = ptr;
             *ptr = value;
             return {};
@@ -872,7 +869,6 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
-            // Cache for future O(1) access, then assign
             flat_lookup_[id] = ptr;
             *ptr = std::move(value);
             return {};
@@ -900,7 +896,6 @@ bool environment::contains(uint64_t id) const {
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
-            // Cache for future O(1) access (often followed by get())
             flat_lookup_[id] = ptr;
             return true;
         }
@@ -929,6 +924,18 @@ void environment::clear_values() {
     // Clear local storage (destroys script_values)
     local_storage_.clear();
     local_ids_.clear();
+}
+
+void environment::clear_parent_cache() {
+    // Remove non-local entries (parent/field pointers that may be stale)
+    // Keep local variable entries (which have stable pointers into local_storage_)
+    for (auto it = flat_lookup_.begin(); it != flat_lookup_.end(); ) {
+        if (local_ids_.find(it->first) == local_ids_.end()) {
+            it = flat_lookup_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void environment::reset(std::shared_ptr<environment> new_parent) {
@@ -975,7 +982,6 @@ script_value* environment::get_value_ptr(uint64_t id) {
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
-            // Cache for future O(1) access
             flat_lookup_[id] = ptr;
             return ptr;
         }
@@ -1538,6 +1544,42 @@ bool method_environment::contains(uint64_t id) const {
     return environment::contains(id);
 }
 
+script_value* method_environment::get_value_ptr(uint64_t id) {
+    // First check local variables via cache
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        return it->second;
+    }
+
+    // Check 'this' object fields
+    auto this_type = this_object_.type();
+    if (id != symbolizer_->get_this_id() &&
+        (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
+        !this_object_.is_null()) {
+        auto obj_holder = this_object_.get_object_holder();
+        if (obj_holder && obj_holder->data) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+            script_value& field_ref = instance->get_field(id, false);
+            if (!field_ref.is_invalid()) {
+                // Cache for O(1) access - will be invalidated by clear_parent_cache() on hot reload
+                flat_lookup_[id] = &field_ref;
+                return &field_ref;
+            }
+        }
+    }
+
+    // Check parent chain
+    if (parent_) {
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            flat_lookup_[id] = ptr;
+            return ptr;
+        }
+    }
+
+    return nullptr;
+}
+
 // static_method_environment implementation
 checked_result<script_value> static_method_environment::get(const std::string& name) const {
     // First try normal environment lookup
@@ -1779,6 +1821,35 @@ checked_result<void> static_method_environment::assign(uint64_t id, script_value
     return checked_result<void>(
         make_error_code(runtime_error_code::undefined_variable),
         "Undefined variable '" + name + "'");
+}
+
+script_value* static_method_environment::get_value_ptr(uint64_t id) {
+    // First check local variables via cache
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        return it->second;
+    }
+
+    // Check static fields
+    if (class_def_) {
+        script_value* field_ptr = class_def_->get_static_field_ptr(id);
+        if (field_ptr) {
+            // Cache for O(1) access - will be invalidated by clear_parent_cache() on hot reload
+            flat_lookup_[id] = field_ptr;
+            return field_ptr;
+        }
+    }
+
+    // Check parent chain
+    if (parent_) {
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            flat_lookup_[id] = ptr;
+            return ptr;
+        }
+    }
+
+    return nullptr;
 }
 
 interpreter::interpreter()
@@ -7712,6 +7783,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // Call redefine_class with the new field defaults and methods
         // Call redefine_class to migrate existing instances
         class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_ref_);
+
+        // Invalidate cached field pointers - they may point to stale storage after migration
+        environment_->clear_all_parent_caches();
     } else {
         // For new classes, add the fields normally
         for (const auto& [field_id, default_val] : new_field_defaults) {

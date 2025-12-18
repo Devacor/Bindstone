@@ -182,20 +182,10 @@ namespace jai {
         
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
-        script_value_type type() const {
-            // For any_type (var keyword), return actual storage type for operations
-            // but keep any_type in type_info_ for assignment enforcement
-            if (type_info_) {
-                if (type_info_->base_type == script_value_type::jai_any_type) {
-                    return storage_type();  // Dynamic typing - use actual value type
-                }
-                return type_info_->base_type;
-            }
-            return storage_type();
-        }
 
-        // Get type from storage variant - useful for AST literals that have nullptr type_info
-        script_value_type storage_type() const {
+        // current_type() - What type is ACTUALLY stored in the variant right now
+        // Use this for runtime type checks (is_null, is_object, etc.)
+        script_value_type current_type() const {
             switch (storage_.index()) {
                 case 0: return script_value_type::jai_null_type;        // std::monostate
                 case 1: return script_value_type::jai_int_type;         // script_int
@@ -215,26 +205,48 @@ namespace jai {
             }
         }
 
+        // defined_type() - What type the variable was DECLARED as (from type_info)
+        // For any_type (var), returns current_type() since it's dynamically typed
+        // Use this for type enforcement, assignment compatibility checks
+        script_value_type defined_type() const {
+            if (type_info_) {
+                if (type_info_->base_type == script_value_type::jai_any_type) {
+                    return current_type();  // Dynamic typing - use actual value type
+                }
+                return type_info_->base_type;
+            }
+            return current_type();
+        }
+
+        // type() - Legacy alias, returns defined_type() for backward compatibility
+        // Prefer using current_type() or defined_type() for clarity
+        script_value_type type() const { return defined_type(); }
+
+        // storage_type() - Legacy alias for current_type()
+        script_value_type storage_type() const { return current_type(); }
+
         // Ultra-fast raw storage index - no pointer chasing, single integer read
         // Use this in hot paths like is_truthy() to avoid type_info_ pointer dereference
         inline size_t raw_storage_index() const noexcept { return storage_.index(); }
-        bool is_null() const { return deref().type() == script_value_type::jai_null_type; }
-        bool is_invalid() const { return deref().type() == script_value_type::jai_invalid_type; }
-        bool is_int() const { return deref().type() == script_value_type::jai_int_type; }
-        bool is_float() const { return deref().type() == script_value_type::jai_float_type; }
-        bool is_string() const { return deref().type() == script_value_type::jai_string_type; }
-        bool is_char() const { return deref().type() == script_value_type::jai_char_type; }
-        bool is_bool() const { return deref().type() == script_value_type::jai_bool_type; }
-        bool is_array() const { return deref().type() == script_value_type::jai_array_type; }
-        bool is_map() const { return deref().type() == script_value_type::jai_map_type; }
+        // Type checking methods use current_type() to check what's actually stored
+        // This ensures a typed variable holding null returns is_null()=true, is_object()=false
+        bool is_null() const { return deref().current_type() == script_value_type::jai_null_type; }
+        bool is_invalid() const { return deref().current_type() == script_value_type::jai_invalid_type; }
+        bool is_int() const { return deref().current_type() == script_value_type::jai_int_type; }
+        bool is_float() const { return deref().current_type() == script_value_type::jai_float_type; }
+        bool is_string() const { return deref().current_type() == script_value_type::jai_string_type; }
+        bool is_char() const { return deref().current_type() == script_value_type::jai_char_type; }
+        bool is_bool() const { return deref().current_type() == script_value_type::jai_bool_type; }
+        bool is_array() const { return deref().current_type() == script_value_type::jai_array_type; }
+        bool is_map() const { return deref().current_type() == script_value_type::jai_map_type; }
         bool is_object() const {
-            auto t = deref().type();
+            auto t = deref().current_type();
             return t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type;
         }
-        bool is_function() const { return deref().type() == script_value_type::jai_function_type; }
-        bool is_reference() const { return type() == script_value_type::jai_reference_type; }  // Don't deref for this check!
+        bool is_function() const { return deref().current_type() == script_value_type::jai_function_type; }
+        bool is_reference() const { return current_type() == script_value_type::jai_reference_type; }  // Don't deref for this check!
         bool is_cpp_bound() const { return cpp_bound_ptr_ != nullptr; }
-        bool is_weak_ptr() const { return deref().type() == script_value_type::jai_weak_ptr_type; }
+        bool is_weak_ptr() const { return deref().current_type() == script_value_type::jai_weak_ptr_type; }
 
         // Type marker helpers - check if value has shared_ptr<T> or weak_ptr<T> type info
         bool is_shared_ptr_type() const {
@@ -1235,9 +1247,9 @@ namespace jai {
         const storage& get_storage() const { return storage_; }
         
         // Extract object_holder for class_instance operations
-        // Returns nullptr if not an object type
+        // Returns nullptr if not actually storing an object (uses current_type, not defined_type)
         std::shared_ptr<object_holder> get_object_holder() {
-            auto t = type();
+            auto t = current_type();  // Use actual current type, not declared type
             if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                 // After refactor: both object and shared_ptr store object_holder directly
                 // shared_ptr<T> is just a type marker affecting clone behavior
@@ -1245,9 +1257,9 @@ namespace jai {
             }
             return nullptr;
         }
-        
+
         const std::shared_ptr<object_holder> get_object_holder() const {
-            auto t = type();
+            auto t = current_type();  // Use actual current type, not declared type
             if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                 // After refactor: both object and shared_ptr store object_holder directly
                 // shared_ptr<T> is just a type marker affecting clone behavior

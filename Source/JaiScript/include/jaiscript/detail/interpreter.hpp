@@ -50,7 +50,7 @@ namespace jai {
             uint64_t target_id;  // Symbol ID of the target variable
             std::shared_ptr<environment> target_env;  // environment containing the target
         };
-        
+
         // Define a variable in the current scope
         void define(const std::string& name, const script_value& value);
         void define(const std::string& name, script_value&& value);
@@ -81,7 +81,8 @@ namespace jai {
         bool contains(uint64_t id) const;
         
         // Get a pointer to a value (for references)
-        script_value* get_value_ptr(uint64_t id);
+        // Virtual to allow method_environment/static_method_environment to check 'this'/static fields
+        virtual script_value* get_value_ptr(uint64_t id);
         
         // Get all variables in this scope (not including parent scopes)
         // Returns a map with string_view keys pointing into the symbolizer (stable until engine destruction)
@@ -95,6 +96,18 @@ namespace jai {
 
         // Clear all values but keep parent chain intact (for proper scope cleanup)
         void clear_values();
+
+        // Clear cached parent pointers (keeps local variable pointers which are stable)
+        // Call on hot reload to invalidate stale pointers to object fields
+        void clear_parent_cache();
+
+        // Clear parent caches in this environment and all parents (for hot reload)
+        void clear_all_parent_caches() {
+            clear_parent_cache();
+            if (parent_) {
+                parent_->clear_all_parent_caches();
+            }
+        }
 
         // Get parent environment (needed for method_environment handling)
         std::shared_ptr<environment> get_parent() const { return parent_; }
@@ -222,6 +235,9 @@ namespace jai {
         bool contains(const std::string& name) const;
         bool contains(uint64_t id) const;
 
+        // Override get_value_ptr to check 'this' object fields
+        script_value* get_value_ptr(uint64_t id) override;
+
         // Get the 'this' object for super access
         const script_value& get_this_object() const { return this_object_; }
         
@@ -281,6 +297,9 @@ namespace jai {
         [[nodiscard]] checked_result<void> assign(const std::string& name, script_value&& value) override;
         [[nodiscard]] checked_result<void> assign(uint64_t id, const script_value& value) override;
         [[nodiscard]] checked_result<void> assign(uint64_t id, script_value&& value) override;
+
+        // Override get_value_ptr to check static fields
+        script_value* get_value_ptr(uint64_t id) override;
 
         // Get the class definition for creating child static environments
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }

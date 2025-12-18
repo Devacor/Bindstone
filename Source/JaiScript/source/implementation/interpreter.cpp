@@ -1699,10 +1699,17 @@ void interpreter::prepare_for_execution() {
     active_exception_value_.reset();  // No need to create a value here either
     current_catch_var_id_ = 0;
 
-    // Reset to global scope but keep all variables defined at global scope
-    // Only pop scopes if we're in a nested scope
-    while (environment_->parent_) {
-        environment_ = environment_->parent_;
+    // Reset to the engine's global environment directly
+    // This fixes issues where the interpreter's environment_ can become disconnected
+    // from the engine's actual global (e.g., due to pooled environments or exception unwinding)
+    auto eng_global = get_global_environment();
+    if (eng_global) {
+        environment_ = eng_global;
+    } else {
+        // Fallback: walk up the parent chain (shouldn't happen if engine is alive)
+        while (environment_->parent_) {
+            environment_ = environment_->parent_;
+        }
     }
     // Note: We don't clear the global environment, so variables persist between executions
 }

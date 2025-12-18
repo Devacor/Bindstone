@@ -96,6 +96,8 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Unsupported operation";
         case runtime_error_code::invalid_assignment_target:
             return "Invalid assignment target";
+        case runtime_error_code::invalid_operation:
+            return "Invalid operation";
 
         // Capture errors
         case runtime_error_code::capture_undefined_variable:

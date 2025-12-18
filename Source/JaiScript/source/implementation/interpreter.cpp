@@ -991,7 +991,10 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
                                 auto setter = cpp_base->get_method(setter_id, false);
                                 if (setter.is_function()) {
                                     std::vector<script_value> args = {this_object_, value};
-                                    (void)setter.as_function()(args);
+                                    auto result = setter.as_function()(args);
+                                    if (!result) {
+                                        return checked_result<void>(result.error(), result.message());
+                                    }
                                     return {};
                                 }
                             }
@@ -1007,8 +1010,10 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
     // Kind-specific fallback: assign to static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
         if (class_def_->has_static_field(id)) {
-            class_def_->set_static_field(id, value.clone());
-            return {};
+            if (class_def_->set_static_field(id, value.clone())) {
+                return {};
+            }
+            // Field existed but set failed - shouldn't happen, but handle gracefully
         }
     }
 
@@ -1055,7 +1060,10 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
                                 auto setter = cpp_base->get_method(setter_id, false);
                                 if (setter.is_function()) {
                                     std::vector<script_value> args = {this_object_, std::move(value)};
-                                    (void)setter.as_function()(args);
+                                    auto result = setter.as_function()(args);
+                                    if (!result) {
+                                        return checked_result<void>(result.error(), result.message());
+                                    }
                                     return {};
                                 }
                             }
@@ -1071,8 +1079,10 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
     // Kind-specific fallback: assign to static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
         if (class_def_->has_static_field(id)) {
-            class_def_->set_static_field(id, std::move(value));
-            return {};
+            if (class_def_->set_static_field(id, std::move(value))) {
+                return {};
+            }
+            // Field existed but set failed - shouldn't happen, but handle gracefully
         }
     }
 
@@ -1326,17 +1336,18 @@ bool interpreter::is_lvalue_expression(expression* e) const {
     if (!e) return false;
 
     // Direct identifier - always an lvalue
-    if (dynamic_cast<identifier_expr*>(e)) {
+    if (e->get_type() == node_type::identifier_expr) {
         return true;
     }
 
     // Member access - always an lvalue
-    if (dynamic_cast<member_expr*>(e)) {
+    if (e->get_type() == node_type::member_expr) {
         return true;
     }
 
     // Array/map subscript (binary expr with left_bracket) - lvalue
-    if (auto* bin = dynamic_cast<binary_expr*>(e)) {
+    if (e->get_type() == node_type::binary_expr) {
+        auto* bin = static_cast<binary_expr*>(e);
         if (bin->op.type == token_type::left_bracket) {
             return true;
         }
@@ -1736,7 +1747,8 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         }
         
         // Check if this is an implicit return expression
-        if (auto* expr_decl = dynamic_cast<expression_decl*>(decl.get())) {
+        if (decl->get_type() == node_type::expression_decl) {
+            auto* expr_decl = static_cast<expression_decl*>(decl.get());
             if (expr_decl->implicit_return && !valueStack_.empty()) {
                 last_script_value = pop_value();
                 // Dereference in case it's a reference (for expressions like m["key"] that return references)
@@ -1912,8 +1924,9 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             }
         }
 
-        // Use error code instead of exception state
-        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable  // [ErrorText] Undefined variable
+        // Use error code instead of exception state - include variable name for debugging
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+            "Undefined variable '" + expr->name + "'");
     }
     return checked_result<void>();
 }
@@ -1927,10 +1940,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 	// Skip logical operators - they need short-circuit evaluation
 	// Skip if we're in a catch block - catch variables need special handling
 	if (expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe && current_catch_var_id_ == 0) {
-		if (auto* leftId = dynamic_cast<identifier_expr*>(expr->left.get())) {
-			if (auto* rightId = dynamic_cast<identifier_expr*>(expr->right.get())) {
+		if (expr->left->get_type() == node_type::identifier_expr) {
+			auto* leftId = static_cast<identifier_expr*>(expr->left.get());
+			if (expr->right->get_type() == node_type::identifier_expr) {
+				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				// Both operands are simple identifiers - direct variable lookup without AST traversal
-				// This is safe because we check dynamic_cast, so order of operations is preserved
 
 				// Get both values directly from environment
 				auto leftResult = environment_->get(leftId->symbol_id);
@@ -2067,7 +2081,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 				already_have_values = true;
 			}
 			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
-			else if (auto* rightLit = dynamic_cast<literal_expr*>(expr->right.get())) {
+			else if (expr->right->get_type() == node_type::literal_expr) {
+				auto* rightLit = static_cast<literal_expr*>(expr->right.get());
 				// Get left value from environment, right value is already in AST
 				auto leftResult = environment_->get(leftId->symbol_id);
 				if (!leftResult) {
@@ -2171,8 +2186,10 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			}
 		}
 		// FAST PATH 3: literal + identifier (e.g., "100 > i", "5 + x")
-		else if (auto* leftLit = dynamic_cast<literal_expr*>(expr->left.get())) {
-			if (auto* rightId = dynamic_cast<identifier_expr*>(expr->right.get())) {
+		else if (expr->left->get_type() == node_type::literal_expr) {
+			auto* leftLit = static_cast<literal_expr*>(expr->left.get());
+			if (expr->right->get_type() == node_type::identifier_expr) {
+				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				const script_value& leftVal = leftLit->value;  // Direct access!
 				auto rightResult = environment_->get(rightId->symbol_id);
 				if (!rightResult) {
@@ -2352,10 +2369,10 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
             // Check if the left side is an lvalue (variable, member access, or subscript)
             // These should allow modification, even if use_count == 1
-            bool is_lvalue = dynamic_cast<identifier_expr*>(expr->left.get()) != nullptr ||
-                            dynamic_cast<member_expr*>(expr->left.get()) != nullptr ||
-                            (dynamic_cast<binary_expr*>(expr->left.get()) != nullptr &&
-                             dynamic_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
+            bool is_lvalue = expr->left->get_type() == node_type::identifier_expr ||
+                            expr->left->get_type() == node_type::member_expr ||
+                            (expr->left->get_type() == node_type::binary_expr &&
+                             static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
 
             if (is_lvalue) {
                 // This is an lvalue expression, return a reference to allow modification
@@ -2374,10 +2391,10 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 auto& map = const_cast<std::map<script_value, script_value>&>(left.as_map());
 
                 // Check if the left side is an lvalue (variable, member access, or subscript)
-                bool is_lvalue = dynamic_cast<identifier_expr*>(expr->left.get()) != nullptr ||
-                                dynamic_cast<member_expr*>(expr->left.get()) != nullptr ||
-                                (dynamic_cast<binary_expr*>(expr->left.get()) != nullptr &&
-                                 dynamic_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
+                bool is_lvalue = expr->left->get_type() == node_type::identifier_expr ||
+                                expr->left->get_type() == node_type::member_expr ||
+                                (expr->left->get_type() == node_type::binary_expr &&
+                                 static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
 
                 if (is_lvalue) {
                     // This is an lvalue expression, return a reference to allow modification
@@ -2477,7 +2494,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 }
 checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     // Fast path for literal unary operations
-    if (auto* literal = dynamic_cast<literal_expr*>(expr->operand.get())) {
+    if (expr->operand->get_type() == node_type::literal_expr) {
+        auto* literal = static_cast<literal_expr*>(expr->operand.get());
         const script_value& val = literal->value;
 
         switch (expr->op.type) {
@@ -2539,7 +2557,8 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
         case token_type::plus_plus:
         case token_type::minus_minus: {
             // Handle increment/decrement with in-place mutation (ChaiScript-style)
-            if (auto* identifier = dynamic_cast<identifier_expr*>(expr->operand.get())) {
+            if (expr->operand->get_type() == node_type::identifier_expr) {
+                auto* identifier = static_cast<identifier_expr*>(expr->operand.get());
                 // Cache symbol ID if not already cached
                 if (identifier->symbol_id == UINT64_MAX) {
                     identifier->symbol_id = string_symbolizer_->intern(identifier->name);
@@ -2632,7 +2651,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
     // For compound assignment operators, we need the current value
     if (expr->op.type != token_type::equal) {
         // Get current value of the target
-        if (auto* identifier = dynamic_cast<identifier_expr*>(expr->target.get())) {
+        if (expr->target->get_type() == node_type::identifier_expr) {
+            auto* identifier = static_cast<identifier_expr*>(expr->target.get());
             // Cache symbol ID if not already cached
             if (identifier->symbol_id == UINT64_MAX) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
@@ -2648,7 +2668,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // === ULTRA FAST PATH: int += int literal (e.g., sum += 1) ===
                 // Skip dispatch_expr entirely for int literal RHS
                 if (leftType == script_value_type::jai_int_type && !has_custom_numeric_ops_) [[likely]] {
-                    if (auto* rhs_lit = dynamic_cast<literal_expr*>(expr->value.get())) {
+                    if (expr->value->get_type() == node_type::literal_expr) {
+                        auto* rhs_lit = static_cast<literal_expr*>(expr->value.get());
                         if (rhs_lit->value.raw_storage_index() == 1) {  // int literal
                             script_int rhs_val = rhs_lit->value.unchecked_as_int();
                             switch (expr->op.type) {
@@ -2678,7 +2699,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
                     // === ULTRA FAST PATH: int += int variable (e.g., sum += i) ===
                     // Skip dispatch_expr for simple identifier RHS
-                    else if (auto* rhs_id = dynamic_cast<identifier_expr*>(expr->value.get())) {
+                    else if (expr->value->get_type() == node_type::identifier_expr) {
+                        auto* rhs_id = static_cast<identifier_expr*>(expr->value.get());
                         if (rhs_id->symbol_id == UINT64_MAX) {
                             rhs_id->symbol_id = string_symbolizer_->intern(rhs_id->name);
                         }
@@ -2711,10 +2733,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         }
                     }
                     // === FAST PATH: int += simple binary expr (e.g., sum += i * 2) ===
-                    else if (auto* rhs_binary = dynamic_cast<binary_expr*>(expr->value.get())) {
+                    else if (expr->value->get_type() == node_type::binary_expr) {
+                        auto* rhs_binary = static_cast<binary_expr*>(expr->value.get());
                         // Handle identifier * literal pattern (most common in loops)
-                        if (auto* left_id = dynamic_cast<identifier_expr*>(rhs_binary->left.get())) {
-                            if (auto* right_lit = dynamic_cast<literal_expr*>(rhs_binary->right.get())) {
+                        if (rhs_binary->left->get_type() == node_type::identifier_expr) {
+                            auto* left_id = static_cast<identifier_expr*>(rhs_binary->left.get());
+                            if (rhs_binary->right->get_type() == node_type::literal_expr) {
+                                auto* right_lit = static_cast<literal_expr*>(rhs_binary->right.get());
                                 if (right_lit->value.raw_storage_index() == 1) {  // int literal
                                     if (left_id->symbol_id == UINT64_MAX) {
                                         left_id->symbol_id = string_symbolizer_->intern(left_id->name);
@@ -2963,7 +2988,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 instance->set_field(identifier->symbol_id, resultValue.clone());
                 push_value(std::move(resultValue));
             }
-        } else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
+        } else if (expr->target->get_type() == node_type::member_expr) {
+            auto* memberExpr = static_cast<member_expr*>(expr->target.get());
             // Handle compound assignment to member expression (e.g., obj.value += 10)
             // First, get the current value of the property
             JAISCRIPT_TRY(dispatch_expr(memberExpr));
@@ -3187,7 +3213,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
             
             // Directly assign the result without creating new AST nodes (optimization)
-            if (auto* identifier = dynamic_cast<identifier_expr*>(expr->target.get())) {
+            if (expr->target->get_type() == node_type::identifier_expr) {
+                auto* identifier = static_cast<identifier_expr*>(expr->target.get());
                 // Fast path for simple identifier assignment
                 if (identifier->symbol_id == UINT64_MAX) {
                     identifier->symbol_id = string_symbolizer_->intern(identifier->name);
@@ -3234,7 +3261,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
         
         
         // Check if target is an identifier
-        if (auto* identifier = dynamic_cast<identifier_expr*>(expr->target.get())) {
+        if (expr->target->get_type() == node_type::identifier_expr) {
+            auto* identifier = static_cast<identifier_expr*>(expr->target.get());
             // Cache symbol ID if not already cached
             if (identifier->symbol_id == UINT64_MAX) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
@@ -3424,7 +3452,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                             if (setter.is_function()) {
                                                 // Call setter with this and value
                                                 std::vector<script_value> args = {this_val, value};
-                                                setter.as_function()(args);
+                                                auto result = setter.as_function()(args);
+                                                if (!result) {
+                                                    return checked_result<void>(result.error(), result.message());
+                                                }
                                                 assigned_to_member = true;
                                             }
                                         }
@@ -3461,15 +3492,16 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             push_value(std::move(value));
         }
         // Check if target is a member expression (property assignment)
-        else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
+        else if (expr->target->get_type() == node_type::member_expr) {
+            auto* memberExpr = static_cast<member_expr*>(expr->target.get());
             // Check if this is a static member assignment
             if (memberExpr->is_static) {
                 // For static assignment, get the class definition
-                auto* ident_expr = dynamic_cast<identifier_expr*>(memberExpr->object.get());
-                if (!ident_expr) {
+                if (memberExpr->object->get_type() != node_type::identifier_expr) {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                         "Static member assignment requires a class name");
                 }
+                auto* ident_expr = static_cast<identifier_expr*>(memberExpr->object.get());
                 
                 std::string class_name = ident_expr->name;
 
@@ -3566,7 +3598,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             push_value(std::move(value));  // Assignment expressions return the assigned value
         }
         // Check if target is a subscript expression (array[index] or map[key])
-        else if (auto* binaryExpr = dynamic_cast<binary_expr*>(expr->target.get())) {
+        else if (expr->target->get_type() == node_type::binary_expr) {
+            auto* binaryExpr = static_cast<binary_expr*>(expr->target.get());
             if (binaryExpr->op.type == token_type::left_bracket) {
                 // Evaluate the entire target expression (e.g., nested["nums"][1])
                 // This should return a reference if it's a valid lvalue
@@ -3761,7 +3794,8 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         }
         
         // Check if initializer is an identifier (can take reference)
-        if (auto identExpr = dynamic_cast<identifier_expr*>(decl->initializer.get())) {
+        if (decl->initializer->get_type() == node_type::identifier_expr) {
+            auto* identExpr = static_cast<identifier_expr*>(decl->initializer.get());
             // Get the target variable's address
             uint64_t targetSymbolId = string_symbolizer_->intern(identExpr->name);
             
@@ -4342,7 +4376,8 @@ checked_result<script_value> interpreter::evaluate_bitwise(const script_value& l
 // Placeholder implementations for remaining visitors
 checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     // Special handling for weak_from_this() and shared_from_this()
-    if (auto* ident_expr = dynamic_cast<identifier_expr*>(expr->callee.get())) {
+    if (expr->callee->get_type() == node_type::identifier_expr) {
+        auto* ident_expr = static_cast<identifier_expr*>(expr->callee.get());
         // Use interned symbol IDs for fast comparison
         if (ident_expr->symbol_id == weak_from_this_id_ || ident_expr->symbol_id == shared_from_this_id_) {
             // These functions take no arguments
@@ -4398,7 +4433,8 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     
     for (const auto& argExpr : expr->arguments) {
         // Check if this is a simple identifier (needed for references)
-        if (auto identExpr = dynamic_cast<identifier_expr*>(argExpr.get())) {
+        if (argExpr->get_type() == node_type::identifier_expr) {
+            auto* identExpr = static_cast<identifier_expr*>(argExpr.get());
             // Get the symbol ID for this variable
             uint64_t symbol_id = string_symbolizer_->intern(identExpr->name);
             argMetadata.emplace_back(symbol_id, environment_);
@@ -4453,7 +4489,10 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Check if this is a static member access (::)
     if (expr->is_static) {
         // For static access, the object should be an identifier (class or namespace name)
-        auto* ident_expr = dynamic_cast<identifier_expr*>(expr->object.get());
+        identifier_expr* ident_expr = nullptr;
+        if (expr->object->get_type() == node_type::identifier_expr) {
+            ident_expr = static_cast<identifier_expr*>(expr->object.get());
+        }
         // Handle nested namespace access: outer::inner::getValue()
         // Build the full namespace path
         std::string name;
@@ -4469,13 +4508,15 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 name_id = string_symbolizer_->intern(name);
                 ident_expr->symbol_id = name_id;
             }
-        } else if (auto* member_expr_obj = dynamic_cast<member_expr*>(expr->object.get())) {
+        } else if (expr->object->get_type() == node_type::member_expr) {
+            auto* member_expr_obj = static_cast<member_expr*>(expr->object.get());
             // Nested namespace: outer::inner where the object is "outer::inner" (a member_expr)
             // Recursively build the full path
             std::function<std::string(expression*)> build_namespace_path = [&](expression* e) -> std::string {
-                if (auto* ident = dynamic_cast<identifier_expr*>(e)) {
-                    return ident->name;
-                } else if (auto* member = dynamic_cast<member_expr*>(e)) {
+                if (e->get_type() == node_type::identifier_expr) {
+                    return static_cast<identifier_expr*>(e)->name;
+                } else if (e->get_type() == node_type::member_expr) {
+                    auto* member = static_cast<member_expr*>(e);
                     if (member->is_static) {
                         // This is a :: access, continue building the path
                         return build_namespace_path(member->object.get()) + "::" + member->member;
@@ -4694,7 +4735,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     }
 
     // Check if this is a super:: member access
-    bool is_super_access = dynamic_cast<super_expr*>(expr->object.get()) != nullptr;
+    bool is_super_access = expr->object->get_type() == node_type::super_expr;
 
     // Evaluate the object expression
     JAISCRIPT_TRY(dispatch_expr(expr->object.get()));
@@ -4951,7 +4992,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         // Helper to recursively find all identifiers in an expression
         std::function<void(expression*)> find_identifiers;
         find_identifiers = [&](expression* e) {
-            if (auto* ident = dynamic_cast<identifier_expr*>(e)) {
+            if (e->get_type() == node_type::identifier_expr) {
+                auto* ident = static_cast<identifier_expr*>(e);
                 // Skip parameter names
                 bool is_param = false;
                 for (const auto& param : expr->parameters) {
@@ -4963,22 +5005,28 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 if (!is_param) {
                     used_variables.insert(ident->name);
                 }
-            } else if (auto* binary = dynamic_cast<binary_expr*>(e)) {
+            } else if (e->get_type() == node_type::binary_expr) {
+                auto* binary = static_cast<binary_expr*>(e);
                 find_identifiers(binary->left.get());
                 find_identifiers(binary->right.get());
-            } else if (auto* unary = dynamic_cast<unary_expr*>(e)) {
+            } else if (e->get_type() == node_type::unary_expr) {
+                auto* unary = static_cast<unary_expr*>(e);
                 find_identifiers(unary->operand.get());
-            } else if (auto* call = dynamic_cast<call_expr*>(e)) {
+            } else if (e->get_type() == node_type::call_expr) {
+                auto* call = static_cast<call_expr*>(e);
                 find_identifiers(call->callee.get());
                 for (const auto& arg : call->arguments) {
                     find_identifiers(arg.get());
                 }
-            } else if (auto* member = dynamic_cast<member_expr*>(e)) {
+            } else if (e->get_type() == node_type::member_expr) {
+                auto* member = static_cast<member_expr*>(e);
                 find_identifiers(member->object.get());
-            } else if (auto* assign = dynamic_cast<assignment_expr*>(e)) {
+            } else if (e->get_type() == node_type::assignment_expr) {
+                auto* assign = static_cast<assignment_expr*>(e);
                 find_identifiers(assign->target.get());
                 find_identifiers(assign->value.get());
-            } else if (auto* ternary = dynamic_cast<ternary_expr*>(e)) {
+            } else if (e->get_type() == node_type::ternary_expr) {
+                auto* ternary = static_cast<ternary_expr*>(e);
                 find_identifiers(ternary->condition.get());
                 find_identifiers(ternary->then_expression.get());
                 find_identifiers(ternary->else_expression.get());
@@ -4989,26 +5037,33 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         // Helper to find identifiers in statements
         std::function<void(statement*)> find_in_statement;
         find_in_statement = [&](statement* s) {
-            if (auto* expr_stmt = dynamic_cast<expression_stmt*>(s)) {
+            if (s->get_type() == node_type::expression_stmt) {
+                auto* expr_stmt = static_cast<expression_stmt*>(s);
                 find_identifiers(expr_stmt->expression.get());
-            } else if (auto* block = dynamic_cast<block_stmt*>(s)) {
+            } else if (s->get_type() == node_type::block_stmt) {
+                auto* block = static_cast<block_stmt*>(s);
                 for (const auto& decl : block->declarations) {
-                    if (auto* expr_decl = dynamic_cast<expression_decl*>(decl.get())) {
+                    if (decl->get_type() == node_type::expression_decl) {
+                        auto* expr_decl = static_cast<expression_decl*>(decl.get());
                         find_identifiers(expr_decl->expression.get());
-                    } else if (auto* stmt_decl = dynamic_cast<statement_decl*>(decl.get())) {
+                    } else if (decl->get_type() == node_type::statement_decl) {
+                        auto* stmt_decl = static_cast<statement_decl*>(decl.get());
                         find_in_statement(stmt_decl->statement.get());
                     }
                 }
-            } else if (auto* if_s = dynamic_cast<if_stmt*>(s)) {
+            } else if (s->get_type() == node_type::if_stmt) {
+                auto* if_s = static_cast<if_stmt*>(s);
                 find_identifiers(if_s->condition.get());
                 find_in_statement(if_s->then_statement.get());
                 if (if_s->else_statement) {
                     find_in_statement(if_s->else_statement.get());
                 }
-            } else if (auto* while_s = dynamic_cast<while_stmt*>(s)) {
+            } else if (s->get_type() == node_type::while_stmt) {
+                auto* while_s = static_cast<while_stmt*>(s);
                 find_identifiers(while_s->condition.get());
                 find_in_statement(while_s->body.get());
-            } else if (auto* return_s = dynamic_cast<return_stmt*>(s)) {
+            } else if (s->get_type() == node_type::return_stmt) {
+                auto* return_s = static_cast<return_stmt*>(s);
                 if (return_s->value) {
                     find_identifiers(return_s->value.get());
                 }
@@ -5618,12 +5673,16 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     //    Validates type is still int before each iteration (handles rare type changes)
     //
     if (stmt->initializer && stmt->condition && stmt->update) {
-        auto* init_var = dynamic_cast<variable_decl*>(stmt->initializer.get());
-        auto* cond_binary = dynamic_cast<binary_expr*>(stmt->condition.get());
+        auto* init_var = stmt->initializer->get_type() == node_type::variable_decl
+            ? static_cast<variable_decl*>(stmt->initializer.get()) : nullptr;
+        auto* cond_binary = stmt->condition->get_type() == node_type::binary_expr
+            ? static_cast<binary_expr*>(stmt->condition.get()) : nullptr;
 
         // Try to match update patterns: ++i, i++, i += step, i = i + step
-        auto* update_unary = dynamic_cast<unary_expr*>(stmt->update.get());
-        auto* update_assign = dynamic_cast<assignment_expr*>(stmt->update.get());
+        auto* update_unary = stmt->update->get_type() == node_type::unary_expr
+            ? static_cast<unary_expr*>(stmt->update.get()) : nullptr;
+        auto* update_assign = stmt->update->get_type() == node_type::assignment_expr
+            ? static_cast<assignment_expr*>(stmt->update.get()) : nullptr;
 
         // Extract update info: which variable, what step
         uint64_t update_var_id = UINT64_MAX;
@@ -5633,31 +5692,36 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
         if (update_unary && update_unary->op.type == token_type::plus_plus) {
             // Pattern: ++i or i++
-            if (auto* update_id = dynamic_cast<identifier_expr*>(update_unary->operand.get())) {
+            if (update_unary->operand->get_type() == node_type::identifier_expr) {
+                auto* update_id = static_cast<identifier_expr*>(update_unary->operand.get());
                 update_var_id = update_id->symbol_id;
                 step_value = 1;
                 valid_update = true;
             }
         } else if (update_unary && update_unary->op.type == token_type::minus_minus) {
             // Pattern: --i or i-- (step = -1, but this is unusual for counting up)
-            if (auto* update_id = dynamic_cast<identifier_expr*>(update_unary->operand.get())) {
+            if (update_unary->operand->get_type() == node_type::identifier_expr) {
+                auto* update_id = static_cast<identifier_expr*>(update_unary->operand.get());
                 update_var_id = update_id->symbol_id;
                 step_value = -1;
                 valid_update = true;
             }
         } else if (update_assign && update_assign->op.type == token_type::plus_equal) {
             // Pattern: i += step (literal or variable)
-            if (auto* update_id = dynamic_cast<identifier_expr*>(update_assign->target.get())) {
+            if (update_assign->target->get_type() == node_type::identifier_expr) {
+                auto* update_id = static_cast<identifier_expr*>(update_assign->target.get());
                 update_var_id = update_id->symbol_id;
                 // Check if step is an int literal
-                if (auto* step_lit = dynamic_cast<literal_expr*>(update_assign->value.get())) {
+                if (update_assign->value->get_type() == node_type::literal_expr) {
+                    auto* step_lit = static_cast<literal_expr*>(update_assign->value.get());
                     if (step_lit->value.raw_storage_index() == 1) {  // int literal
                         step_value = step_lit->value.unchecked_as_int();
                         valid_update = true;
                     }
                 }
                 // Check if step is an identifier (i += j where j is int)
-                else if (auto* step_id = dynamic_cast<identifier_expr*>(update_assign->value.get())) {
+                else if (update_assign->value->get_type() == node_type::identifier_expr) {
+                    auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
                     // Look up step variable in current environment
                     script_value* step_ptr = environment_->get_value_ptr(step_id->symbol_id);
                     if (step_ptr && step_ptr->raw_storage_index() == 1) {  // int value
@@ -5669,16 +5733,19 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             }
         } else if (update_assign && update_assign->op.type == token_type::minus_equal) {
             // Pattern: i -= step (literal or variable)
-            if (auto* update_id = dynamic_cast<identifier_expr*>(update_assign->target.get())) {
+            if (update_assign->target->get_type() == node_type::identifier_expr) {
+                auto* update_id = static_cast<identifier_expr*>(update_assign->target.get());
                 update_var_id = update_id->symbol_id;
-                if (auto* step_lit = dynamic_cast<literal_expr*>(update_assign->value.get())) {
+                if (update_assign->value->get_type() == node_type::literal_expr) {
+                    auto* step_lit = static_cast<literal_expr*>(update_assign->value.get());
                     if (step_lit->value.raw_storage_index() == 1) {
                         step_value = -step_lit->value.unchecked_as_int();
                         valid_update = true;
                     }
                 }
                 // Check if step is an identifier (i -= j where j is int)
-                else if (auto* step_id = dynamic_cast<identifier_expr*>(update_assign->value.get())) {
+                else if (update_assign->value->get_type() == node_type::identifier_expr) {
+                    auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
                     script_value* step_ptr = environment_->get_value_ptr(step_id->symbol_id);
                     if (step_ptr && step_ptr->raw_storage_index() == 1) {  // int value
                         step_var_id = step_id->symbol_id;
@@ -5705,19 +5772,22 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             }
 
             if (cmp) {
-                auto* cond_id = dynamic_cast<identifier_expr*>(cond_binary->left.get());
+                auto* cond_id = cond_binary->left->get_type() == node_type::identifier_expr
+                    ? static_cast<identifier_expr*>(cond_binary->left.get()) : nullptr;
 
                 // End value can be literal OR variable
                 script_int end_literal = 0;
                 uint64_t end_var_id = UINT64_MAX;
                 bool has_end = false;
 
-                if (auto* cond_lit = dynamic_cast<literal_expr*>(cond_binary->right.get())) {
+                if (cond_binary->right->get_type() == node_type::literal_expr) {
+                    auto* cond_lit = static_cast<literal_expr*>(cond_binary->right.get());
                     if (cond_lit->value.raw_storage_index() == 1) {  // int literal
                         end_literal = cond_lit->value.unchecked_as_int();
                         has_end = true;
                     }
-                } else if (auto* cond_end_id = dynamic_cast<identifier_expr*>(cond_binary->right.get())) {
+                } else if (cond_binary->right->get_type() == node_type::identifier_expr) {
+                    auto* cond_end_id = static_cast<identifier_expr*>(cond_binary->right.get());
                     // End is a variable - we'll bind to its pointer
                     end_var_id = cond_end_id->symbol_id;
                     has_end = true;
@@ -5727,7 +5797,8 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                     // Check: update variable matches condition variable
                     if (update_var_id == cond_id->symbol_id) {
                         // Check: init is variable i = literal (same identifier, int literal)
-                        auto* init_lit = dynamic_cast<literal_expr*>(init_var->initializer.get());
+                        auto* init_lit = init_var->initializer && init_var->initializer->get_type() == node_type::literal_expr
+                            ? static_cast<literal_expr*>(init_var->initializer.get()) : nullptr;
 
                         if (init_lit && init_lit->value.raw_storage_index() == 1 &&
                             init_var->name_id == cond_id->symbol_id) {
@@ -5792,7 +5863,8 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
                             // Optimization: If body is a block, pre-allocate its environment
                             // and reuse across iterations (define() overwrites existing vars in place)
-                            auto* body_block = dynamic_cast<block_stmt*>(stmt->body.get());
+                            auto* body_block = stmt->body->get_type() == node_type::block_stmt
+                                ? static_cast<block_stmt*>(stmt->body.get()) : nullptr;
                             std::shared_ptr<environment> body_env = nullptr;
                             if (body_block) {
                                 body_env = get_pooled_environment(loop_env);
@@ -6561,9 +6633,11 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // This is needed for multiple inheritance conflict detection
     std::unordered_set<uint64_t> derived_field_names;
     for (const auto& member : decl->members) {
-        auto* var_decl = dynamic_cast<variable_decl*>(member.declaration.get());
-        if (var_decl && !var_decl->is_static) {
-            derived_field_names.insert(var_decl->name_id);
+        if (member.declaration->get_type() == node_type::variable_decl) {
+            auto* var_decl = static_cast<variable_decl*>(member.declaration.get());
+            if (!var_decl->is_static) {
+                derived_field_names.insert(var_decl->name_id);
+            }
         }
     }
 
@@ -6613,8 +6687,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // Process class members
     for (const auto& member : decl->members) {
         // Extract the actual declaration from the member
-        auto* var_decl = dynamic_cast<variable_decl*>(member.declaration.get());
-        auto* func_decl = dynamic_cast<function_decl*>(member.declaration.get());
+        auto* var_decl = member.declaration->get_type() == node_type::variable_decl
+            ? static_cast<variable_decl*>(member.declaration.get()) : nullptr;
+        auto* func_decl = member.declaration->get_type() == node_type::function_decl
+            ? static_cast<function_decl*>(member.declaration.get()) : nullptr;
 
         if (var_decl) {
             // Field declaration
@@ -6627,10 +6703,12 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             if (var_decl->initializer) {
                 // Check if the initializer is an assignment expression
                 // This happens when the parser sees "x = 0" and creates assignment_expr
-                auto* assign_expr = dynamic_cast<assignment_expr*>(var_decl->initializer.get());
+                auto* assign_expr = var_decl->initializer->get_type() == node_type::assignment_expr
+                    ? static_cast<assignment_expr*>(var_decl->initializer.get()) : nullptr;
                 if (assign_expr) {
                     // For field declarations like "x = 0", we need to get the field name from the assignment
-                    if (auto* ident_expr = dynamic_cast<identifier_expr*>(assign_expr->target.get())) {
+                    if (assign_expr->target->get_type() == node_type::identifier_expr) {
+                        auto* ident_expr = static_cast<identifier_expr*>(assign_expr->target.get());
                         field_name = ident_expr->name;
                         field_id = ident_expr->symbol_id;  // FIX: Also update the ID to match the field name
                     }
@@ -6858,8 +6936,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     
     // After processing all members, create a dispatcher for constructors if any were found
     if (found_constructor) {
-        // Capture the definition environment for constructor execution
-        auto definition_env = environment_;
+        // Capture the global environment for constructor execution
+        // This ensures constructor body has access to global definitions (classes, functions)
+        auto definition_env = get_global_environment();
 
         // Create a constructor dispatcher that selects based on argument count
         auto ctor_dispatcher = [weak_self = std::weak_ptr<interpreter>(shared_from_this()),
@@ -7278,11 +7357,11 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // Constructor executed and returned 'this'
             return result;
         };
-        
-        // Register the dispatcher
-        environment_->define(decl->name_id, script_value::make_function(ctor_dispatcher, engine_ref_));
+
+        // Register the dispatcher in global environment (constructors are always global)
+        get_global_environment()->define(decl->name_id, script_value::make_function(ctor_dispatcher, engine_ref_));
     }
-    
+
     // If no constructor was found, create a default constructor
     else {
         // Create a default constructor that just initializes the instance
@@ -7332,9 +7411,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // Default constructor object wrapped
             return this_value;
         };
-        
-        // Register default constructor
-        environment_->define(decl->name_id, script_value::make_function(default_ctor_func, engine_ref_));
+
+        // Register default constructor in global environment (constructors are always global)
+        get_global_environment()->define(decl->name_id, script_value::make_function(default_ctor_func, engine_ref_));
         // std::cerr << "DEBUG: Registered default constructor for class: " << decl->name << std::endl;
     }
     
@@ -7534,7 +7613,8 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
     // Functions, variables, and classes are stored in the namespace_data registry
     for (const auto& member_decl : decl->declarations) {
         // Check what kind of declaration this is
-        if (auto* func_decl = dynamic_cast<function_decl*>(member_decl.get())) {
+        if (member_decl->get_type() == node_type::function_decl) {
+            auto* func_decl = static_cast<function_decl*>(member_decl.get());
             // Intern the function name if not already done
             if (func_decl->name_id == UINT64_MAX) {
                 func_decl->name_id = string_symbolizer_->intern(func_decl->name);
@@ -7587,7 +7667,8 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // Store function declaration
             overloads.emplace_back(std::make_shared<function_decl>(*func_decl));
 
-        } else if (auto* var_decl = dynamic_cast<variable_decl*>(member_decl.get())) {
+        } else if (member_decl->get_type() == node_type::variable_decl) {
+            auto* var_decl = static_cast<variable_decl*>(member_decl.get());
             // Intern the variable name if not already done
             if (var_decl->name_id == UINT64_MAX) {
                 var_decl->name_id = string_symbolizer_->intern(var_decl->name);
@@ -7603,7 +7684,8 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 ns_data->variables[var_decl->name_id] = make_value();
             }
 
-        } else if (auto* class_decl_ptr = dynamic_cast<class_decl*>(member_decl.get())) {
+        } else if (member_decl->get_type() == node_type::class_decl) {
+            auto* class_decl_ptr = static_cast<class_decl*>(member_decl.get());
             // Intern the class name if not already done
             if (class_decl_ptr->name_id == UINT64_MAX) {
                 class_decl_ptr->name_id = string_symbolizer_->intern(class_decl_ptr->name);
@@ -8374,7 +8456,8 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         }
 
         // Try to find and call the constructor with the source value
-        auto ctor_result = environment_->get(target_class_name);
+        // Use global environment since constructors are always registered at global scope
+        auto ctor_result = get_global_environment()->get(target_class_name);
         if (ctor_result && ctor_result.value().is_function()) {
             const script_function& ctor = ctor_result.value().as_function();
 

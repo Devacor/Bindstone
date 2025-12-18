@@ -188,10 +188,10 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
     methods_.insert_or_assign(name_id, script_value::make_function(
-        [class_def, name_id, interp, name, definition_env](const std::vector<script_value>& args) -> script_value {
+        [class_def, name_id, interp, definition_env](const std::vector<script_value>& args) -> checked_result<script_value> {
             // First argument should be 'this' object
             if (args.empty()) {
-                throw runtime_error("Method called without 'this' object");
+                return checked_result<script_value>(make_error_code(runtime_error_code::this_outside_method), "Method called without 'this' object");
             }
 
             // Extract 'this' from first argument
@@ -203,7 +203,7 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
             // Get the overloads for this method and find the best match
             auto it = class_def->method_overloads_.find(name_id);
             if (it == class_def->method_overloads_.end() || it->second.empty()) {
-                throw runtime_error("No method overloads found for '" + name + "'");
+                return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "No method overloads found", name_id);
             }
 
             const auto& overloads = it->second;
@@ -328,8 +328,7 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
             }
 
             if (!best_ast) {
-                throw runtime_error("No matching overload found for method '" + name +
-                                  "' with " + std::to_string(method_args.size()) + " arguments");
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "No matching overload found", name_id);
             }
 
             std::shared_ptr<function_decl> ast = best_ast;
@@ -345,10 +344,10 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
             // Call the interpreter method directly
             auto result = interp->execute_method_ast(ast, method_env, method_args);
 
-            // Release the method environment back to the pool
+            // Always release the method environment back to the pool (even on error!)
             interp->release_environment(method_env, false);
 
-            return result;
+            return result;  // checked_result<script_value> propagates automatically
         },
         engine_ref_  // Pass engine reference for proper function value creation
     ));
@@ -365,7 +364,7 @@ inline void class_definition::add_static_script_method(const std::string& name, 
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
     static_methods_.insert_or_assign(name_id, script_value::make_function(
-        [ast, interp, class_def, definition_env](const std::vector<script_value>& args) -> script_value {
+        [ast, interp, class_def, definition_env](const std::vector<script_value>& args) -> checked_result<script_value> {
             // Create a static method environment (C++ scope rules for static members)
             // This environment automatically resolves unqualified static member access
             // Use definition_env (captured at class definition time) as parent

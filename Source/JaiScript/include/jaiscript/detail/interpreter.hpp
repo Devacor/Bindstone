@@ -519,7 +519,7 @@ namespace jai {
         }
         
         // Execute a method AST with a given environment
-        script_value execute_method_ast(std::shared_ptr<function_decl> ast,
+        checked_result<script_value> execute_method_ast(std::shared_ptr<function_decl> ast,
                                       std::shared_ptr<environment> method_env,
                                       const std::vector<script_value>& args);
 

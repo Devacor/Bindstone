@@ -268,66 +268,45 @@ namespace jai {
         }
 
         // script_value extraction (inlined for performance)
+        // These throwing versions delegate to checked_* versions for consistency
         inline script_int as_int() const {
-            const script_value& val = deref();
-            if (val.type() == script_value_type::jai_int_type) {
-                if (val.cpp_bound_ptr_) {
-                    // cpp_bound_ptr might point to various integer types, not just script_int
-                    // For now, we assume it's the same size or we handle common cases
-                    // TODO: Store type metadata with cpp_bound values for proper casting
-                    return static_cast<script_int>(*static_cast<const int*>(val.cpp_bound_ptr_));
-                }
-                return std::get<script_int>(val.storage_);
-            } else if (val.type() == script_value_type::jai_float_type) {
-                // Float to int conversion with truncation (like C++)
-                if (val.cpp_bound_ptr_) {
-                    return static_cast<script_int>(*static_cast<const float*>(val.cpp_bound_ptr_));
-                }
-                return static_cast<script_int>(std::get<script_float>(val.storage_));
-            } else {
-                throw runtime_error("script_value is not an integer or float");
+            auto result = checked_as_int();
+            if (!result) {
+                throw runtime_error(std::string(result.message()));
             }
+            return result.value();
         }
-        
+
         inline script_float as_float() const {
-            const script_value& val = deref();
-            if (val.type() != script_value_type::jai_float_type) {
-                throw runtime_error("script_value is not a float");
+            auto result = checked_as_float();
+            if (!result) {
+                throw runtime_error(std::string(result.message()));
             }
-            if (val.cpp_bound_ptr_) {
-                return *static_cast<const script_float*>(val.cpp_bound_ptr_);
-            }
-            return std::get<script_float>(val.storage_);
+            return result.value();
         }
-        
+
         inline const script_string& as_string() const {
             auto result = checked_as_string();
             if (!result) {
-                throw runtime_error(result.message());
+                throw runtime_error(std::string(result.message()));
             }
             return *result.value();
         }
-        
+
         inline script_bool as_bool() const {
-            const script_value& val = deref();
-            if (val.type() != script_value_type::jai_bool_type) {
-                throw runtime_error("script_value is not a boolean");
+            auto result = checked_as_bool();
+            if (!result) {
+                throw runtime_error(std::string(result.message()));
             }
-            if (val.cpp_bound_ptr_) {
-                return *static_cast<const script_bool*>(val.cpp_bound_ptr_);
-            }
-            return std::get<script_bool>(val.storage_);
+            return result.value();
         }
-        
+
         inline script_char as_char() const {
-            const script_value& val = deref();
-            if (val.type() != script_value_type::jai_char_type) {
-                throw runtime_error("script_value is not a character");
+            auto result = checked_as_char();
+            if (!result) {
+                throw runtime_error(std::string(result.message()));
             }
-            if (val.cpp_bound_ptr_) {
-                return *static_cast<const script_char*>(val.cpp_bound_ptr_);
-            }
-            return std::get<script_char>(val.storage_);
+            return result.value();
         }
 
         // ============================================================================
@@ -377,10 +356,17 @@ namespace jai {
             return *std::get_if<static_cast<size_t>(storage_index::jai_string)>(&storage_);
         }
 
+        inline script_char unchecked_as_char() const noexcept {
+            if (cpp_bound_ptr_) {
+                return *static_cast<const script_char*>(cpp_bound_ptr_);
+            }
+            return *std::get_if<static_cast<size_t>(storage_index::jai_char)>(&storage_);
+        }
+
         inline const std::vector<script_value>& as_array() const {
             auto result = checked_as_array();
             if (!result) {
-                throw runtime_error(result.message());
+                throw runtime_error(std::string(result.message()));
             }
             return *result.value();
         }
@@ -397,7 +383,7 @@ namespace jai {
         inline const std::map<script_value, script_value>& as_map() const {
             auto result = checked_as_map();
             if (!result) {
-                throw runtime_error(result.message());
+                throw runtime_error(std::string(result.message()));
             }
             return *result.value();
         }
@@ -459,7 +445,7 @@ namespace jai {
         T as() const {
             auto result = checked_as<T>();
             if (!result) {
-                throw runtime_error(result.message().empty() ? "Type conversion failed" : result.message());
+                throw runtime_error(result.message().empty() ? std::string("Type conversion failed") : std::string(result.message()));
             }
             return std::move(result.value());
         }
@@ -552,6 +538,74 @@ namespace jai {
                 );
             }
             return checked_result<const std::map<script_value, script_value>*>(std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_).get());
+        }
+
+        inline checked_result<script_int> checked_as_int() const {
+            const script_value& val = deref();
+            if (val.type() == script_value_type::jai_int_type) {
+                if (val.cpp_bound_ptr_) {
+                    return checked_result<script_int>(static_cast<script_int>(*static_cast<const int*>(val.cpp_bound_ptr_)));
+                }
+                return checked_result<script_int>(std::get<script_int>(val.storage_));
+            } else if (val.type() == script_value_type::jai_float_type) {
+                // Float to int conversion with truncation (like C++)
+                if (val.cpp_bound_ptr_) {
+                    return checked_result<script_int>(static_cast<script_int>(*static_cast<const float*>(val.cpp_bound_ptr_)));
+                }
+                return checked_result<script_int>(static_cast<script_int>(std::get<script_float>(val.storage_)));
+            }
+            return checked_result<script_int>(
+                make_error_code(runtime_error_code::type_mismatch),
+                "script_value is not an integer or float"
+            );
+        }
+
+        inline checked_result<script_float> checked_as_float() const {
+            const script_value& val = deref();
+            if (val.type() == script_value_type::jai_float_type) {
+                if (val.cpp_bound_ptr_) {
+                    return checked_result<script_float>(*static_cast<const script_float*>(val.cpp_bound_ptr_));
+                }
+                return checked_result<script_float>(std::get<script_float>(val.storage_));
+            } else if (val.type() == script_value_type::jai_int_type) {
+                // Int to float conversion
+                if (val.cpp_bound_ptr_) {
+                    return checked_result<script_float>(static_cast<script_float>(*static_cast<const int*>(val.cpp_bound_ptr_)));
+                }
+                return checked_result<script_float>(static_cast<script_float>(std::get<script_int>(val.storage_)));
+            }
+            return checked_result<script_float>(
+                make_error_code(runtime_error_code::type_mismatch),
+                "script_value is not a float or integer"
+            );
+        }
+
+        inline checked_result<script_bool> checked_as_bool() const {
+            const script_value& val = deref();
+            if (val.type() != script_value_type::jai_bool_type) {
+                return checked_result<script_bool>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "script_value is not a boolean"
+                );
+            }
+            if (val.cpp_bound_ptr_) {
+                return checked_result<script_bool>(*static_cast<const script_bool*>(val.cpp_bound_ptr_));
+            }
+            return checked_result<script_bool>(std::get<script_bool>(val.storage_));
+        }
+
+        inline checked_result<script_char> checked_as_char() const {
+            const script_value& val = deref();
+            if (val.type() != script_value_type::jai_char_type) {
+                return checked_result<script_char>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "script_value is not a character"
+                );
+            }
+            if (val.cpp_bound_ptr_) {
+                return checked_result<script_char>(*static_cast<const script_char*>(val.cpp_bound_ptr_));
+            }
+            return checked_result<script_char>(std::get<script_char>(val.storage_));
         }
 
         // ============================================================================
@@ -717,7 +771,7 @@ namespace jai {
                     } else if constexpr (std::is_same_v<base_type, std::map<script_value, script_value>>) {
                         auto map_result = checked_as_map();
                         if (!map_result) {
-                            return checked_result<T>(map_result.error(), map_result.message());
+                            return map_result.error_value();
                         }
                         return checked_result<T>(*map_result.value());
                     } else {
@@ -900,8 +954,7 @@ namespace jai {
                     } else {
                         auto elem_result = elem.checked_as<element_type>();
                         if (!elem_result) {
-                            return checked_result<T>(elem_result.error(),
-                                "Failed to convert array element: " + elem_result.message());
+                            return elem_result.error_value();
                         }
                         result.push_back(elem_result.value());
                     }
@@ -943,7 +996,7 @@ namespace jai {
                 T result;
                 auto map_result = checked_as_map();
                 if (!map_result) {
-                    return checked_result<T>(map_result.error(), map_result.message());
+                    return map_result.error_value();
                 }
                 const auto& m = *map_result.value();
 
@@ -953,27 +1006,23 @@ namespace jai {
                     } else if constexpr (std::is_same_v<key_type, script_value>) {
                         auto val_result = v.checked_as<mapped_type>();
                         if (!val_result) {
-                            return checked_result<T>(val_result.error(),
-                                "Failed to convert map value: " + val_result.message());
+                            return val_result.error_value();
                         }
                         result.emplace(k, val_result.value());
                     } else if constexpr (std::is_same_v<mapped_type, script_value>) {
                         auto key_result = k.checked_as<key_type>();
                         if (!key_result) {
-                            return checked_result<T>(key_result.error(),
-                                "Failed to convert map key: " + key_result.message());
+                            return key_result.error_value();
                         }
                         result.emplace(key_result.value(), v);
                     } else {
                         auto key_result = k.checked_as<key_type>();
                         if (!key_result) {
-                            return checked_result<T>(key_result.error(),
-                                "Failed to convert map key: " + key_result.message());
+                            return key_result.error_value();
                         }
                         auto val_result = v.checked_as<mapped_type>();
                         if (!val_result) {
-                            return checked_result<T>(val_result.error(),
-                                "Failed to convert map value: " + val_result.message());
+                            return val_result.error_value();
                         }
                         result.emplace(key_result.value(), val_result.value());
                     }

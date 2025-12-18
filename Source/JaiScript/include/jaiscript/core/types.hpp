@@ -67,43 +67,41 @@ namespace jai {
     };
     
     // Base exception class with source location tracking
+    // Uses std::string for nice formatted messages (cold path, user-facing)
     class exception : public std::runtime_error {
     public:
         exception(const std::string& message, const source_location& location = {})
             : std::runtime_error(message), location_(location) {}
-            
+
         const source_location& location() const { return location_; }
-        
+
     private:
         source_location location_;
     };
-    
+
     // Specific exception types
     class parse_error : public exception {
         using exception::exception;
     };
-    
+
     class runtime_error : public exception {
         using exception::exception;
     };
-    
-    
+
     // Control flow exceptions for break/continue statements
     class break_exception : public exception {
     public:
         break_exception() : exception("break statement") {}
     };
-    
+
     class continue_exception : public exception {
     public:
         continue_exception() : exception("continue statement") {}
     };
-    
+
     // Script exception for try/catch/throw
     class script_exception : public runtime_error {
-    public:
-        script_exception(const std::string& message, const source_location& loc = {})
-            : runtime_error(message, loc) {}
+        using runtime_error::runtime_error;
     };
     
 } // namespace jai

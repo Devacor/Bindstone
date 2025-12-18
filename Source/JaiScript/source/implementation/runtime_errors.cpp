@@ -52,6 +52,10 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Cannot access element of empty array";
         case runtime_error_code::map_key_not_found:
             return "Map key not found";
+        case runtime_error_code::array_element_type_mismatch:
+            return "Array element type mismatch";
+        case runtime_error_code::map_value_type_mismatch:
+            return "Map value type mismatch";
 
         // Function/Method errors
         case runtime_error_code::argument_count_mismatch:

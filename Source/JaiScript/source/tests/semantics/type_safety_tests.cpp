@@ -821,25 +821,459 @@ public:
                 "KNOWN ISSUE: -3.9 truncates to -3 (toward zero)");
         });
 
-        // --- Issue 6: Typed Array Element Validation ---
+        // --- Issue 6: Typed Array Element Validation (FIXED) ---
 
-        test("KNOWN_ISSUE_typed_array_accepts_wrong_element", [this]() {
+        test("typed_array_rejects_wrong_element", [this]() {
             auto eng = engine::make();
 
-            // This test checks if array<int> enforces element types
+            // array<int> should reject pushing a string
             bool caught = false;
             try {
                 eng->execute(R"(
                     array<int> nums = [1, 2, 3];
-                    nums.push("hello");  // Should this be rejected?
+                    nums.push("hello");  // Should be rejected
+                )");
+            } catch (const std::exception& e) {
+                caught = true;
+                std::string msg = e.what();
+                check_true(msg.find("Cannot push 'string' to array<int>") != std::string::npos,
+                    "Error message should mention type mismatch");
+            }
+
+            check_true(caught, "array<int> should reject push(string)");
+        });
+
+        test("typed_array_allows_correct_element", [this]() {
+            auto eng = engine::make();
+
+            // array<int> should accept integers
+            auto result = eng->execute(R"(
+                array<int> nums = [1, 2, 3];
+                nums.push(4);
+                nums.size()
+            )");
+
+            check_eq(result.as<int>(), 4, "array<int> accepts int elements");
+        });
+
+        test("typed_array_allows_numeric_conversion", [this]() {
+            auto eng = engine::make();
+
+            // array<float> should accept int (widening conversion)
+            auto result = eng->execute(R"(
+                array<float> nums = [1.0, 2.0];
+                nums.push(3);  // int -> float conversion
+                nums.size()
+            )");
+
+            check_eq(result.as<int>(), 3, "array<float> accepts int with conversion");
+        });
+
+        test("untyped_array_allows_anything", [this]() {
+            auto eng = engine::make();
+
+            // Untyped arrays should accept any element
+            auto result = eng->execute(R"(
+                auto nums = [1, 2, 3];
+                nums.push("hello");
+                nums.push(true);
+                nums.size()
+            )");
+
+            check_eq(result.as<int>(), 5, "untyped array allows mixed types");
+        });
+
+        test("typed_array_subscript_rejects_wrong_type", [this]() {
+            auto eng = engine::make();
+
+            // array<int>[i] = string should be rejected
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    array<int> nums = [1, 2, 3];
+                    nums[0] = "hello";  // Should be rejected
+                )");
+            } catch (const std::exception& e) {
+                caught = true;
+                std::string msg = e.what();
+                check_true(msg.find("Cannot assign 'string' to element of type 'int'") != std::string::npos,
+                    "Error message should mention type mismatch");
+            }
+
+            check_true(caught, "array<int>[i] = string should be rejected");
+        });
+
+        test("typed_array_subscript_allows_correct_type", [this]() {
+            auto eng = engine::make();
+
+            // array<int>[i] = int should work
+            auto result = eng->execute(R"(
+                array<int> nums = [1, 2, 3];
+                nums[0] = 42;
+                nums[0]
+            )");
+
+            check_eq(result.as<int>(), 42, "array<int>[i] = int works");
+        });
+
+        // --- Nested Array/Map Type Validation ---
+
+        test("nested_array_basic", [this]() {
+            auto eng = engine::make();
+
+            // array<array<int>> should work with nested int arrays
+            auto result = eng->execute(R"(
+                array<array<int>> matrix = [[1, 2], [3, 4]];
+                matrix[0][1]
+            )");
+
+            check_eq(result.as<int>(), 2, "nested array access works");
+        });
+
+        test("nested_array_push_correct_type", [this]() {
+            auto eng = engine::make();
+
+            // Pushing an int array to array<array<int>> should work
+            auto result = eng->execute(R"(
+                array<array<int>> matrix = [[1, 2]];
+                matrix.push([3, 4]);
+                matrix.size()
+            )");
+
+            check_eq(result.as<int>(), 2, "push array to array<array<int>> works");
+        });
+
+        test("LIMITATION_nested_array_inner_type_not_checked", [this]() {
+            auto eng = engine::make();
+
+            // LIMITATION: Pushing a string array to array<array<int>> doesn't fail
+            // because array literals are untyped - they don't carry element type info
+            // The check only verifies "is this an array?" not "is this array<int>?"
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    array<array<int>> matrix = [[1, 2]];
+                    matrix.push(["hello", "world"]);  // Should fail but doesn't
                 )");
             } catch (const std::exception&) {
                 caught = true;
             }
 
-            // Current behavior: May or may not enforce element types
-            // Document actual behavior here
-            // Note: If this fails, element type checking was added (good!)
+            // Current behavior: Does NOT catch the mismatch
+            // Future enhancement: Recursively validate inner element types
+            check_false(caught, "LIMITATION: nested array inner types not validated");
+        });
+
+        test("array_of_maps", [this]() {
+            auto eng = engine::make();
+
+            // array<map<string, int>> basic usage
+            auto result = eng->execute(R"(
+                auto items = [{"a": 1}, {"b": 2}];
+                items[0]["a"]
+            )");
+
+            check_eq(result.as<int>(), 1, "array of maps works");
+        });
+
+        test("map_of_arrays", [this]() {
+            auto eng = engine::make();
+
+            // map<string, array<int>> basic usage
+            auto result = eng->execute(R"(
+                auto data = {"nums": [1, 2, 3], "more": [4, 5]};
+                data["nums"][1]
+            )");
+
+            check_eq(result.as<int>(), 2, "map of arrays works");
+        });
+
+        // --- Homogeneous Array Validation (auto vs var) ---
+
+        test("auto_array_requires_homogeneous_int", [this]() {
+            auto eng = engine::make();
+
+            // auto x = [1, 2, 3] - all ints, should work
+            auto result = eng->execute(R"(
+                auto nums = [1, 2, 3];
+                nums.size()
+            )");
+
+            check_eq(result.as<int>(), 3, "auto [int, int, int] succeeds");
+        });
+
+        test("auto_array_requires_homogeneous_string", [this]() {
+            auto eng = engine::make();
+
+            // auto x = ["a", "b"] - all strings, should work
+            auto result = eng->execute(R"(
+                auto strs = ["hello", "world"];
+                strs.size()
+            )");
+
+            check_eq(result.as<int>(), 2, "auto [string, string] succeeds");
+        });
+
+        test("auto_array_rejects_mixed_types", [this]() {
+            auto eng = engine::make();
+
+            // auto x = [1, "hello"] - mixed types, should fail
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    auto mixed = [1, "hello"];
+                )");
+            } catch (const std::exception& e) {
+                caught = true;
+                std::string msg = e.what();
+                check_true(msg.find("homogeneous") != std::string::npos ||
+                           msg.find("Array declared with 'auto'") != std::string::npos,
+                    "Error should mention homogeneous requirement");
+            }
+
+            check_true(caught, "auto [int, string] should fail");
+        });
+
+        test("auto_array_rejects_int_float_mix", [this]() {
+            auto eng = engine::make();
+
+            // auto x = [5.0, 5] - float and int are different types
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    auto mixed = [5.0, 5];
+                )");
+            } catch (const std::exception& e) {
+                caught = true;
+            }
+
+            check_true(caught, "auto [float, int] should fail - different types");
+        });
+
+        test("var_array_allows_mixed_types", [this]() {
+            auto eng = engine::make();
+
+            // var x = [1, "hello", 3.14] - should work with var
+            auto result = eng->execute(R"(
+                var mixed = [1, "hello", 3.14, true];
+                mixed.size()
+            )");
+
+            check_eq(result.as<int>(), 4, "var allows heterogeneous array");
+        });
+
+        test("var_array_allows_int_float_mix", [this]() {
+            auto eng = engine::make();
+
+            // var x = [5.0, 5] - should work with var
+            auto result = eng->execute(R"(
+                var nums = [5.0, 5];
+                nums.size()
+            )");
+
+            check_eq(result.as<int>(), 2, "var allows [float, int]");
+        });
+
+        test("array_auto_requires_homogeneous", [this]() {
+            auto eng = engine::make();
+
+            // array<auto> x = [1, "hello"] - should fail, auto requires same type
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    array<auto> items = [1, "hello"];
+                )");
+            } catch (const std::exception& e) {
+                caught = true;
+            }
+
+            check_true(caught, "array<auto> [int, string] should fail");
+        });
+
+        test("array_auto_allows_homogeneous", [this]() {
+            auto eng = engine::make();
+
+            // array<auto> x = [1, 2, 3] - should work, all same type
+            auto result = eng->execute(R"(
+                array<auto> nums = [1, 2, 3];
+                nums.size()
+            )");
+
+            check_eq(result.as<int>(), 3, "array<auto> [int, int, int] succeeds");
+        });
+
+        test("array_var_allows_heterogeneous", [this]() {
+            auto eng = engine::make();
+
+            // array<var> x = [1, "hello"] - should work, var allows any type
+            auto result = eng->execute(R"(
+                array<var> items = [1, "hello", 3.14];
+                items.size()
+            )");
+
+            check_eq(result.as<int>(), 3, "array<var> allows heterogeneous elements");
+        });
+
+        test("auto_empty_array_succeeds", [this]() {
+            auto eng = engine::make();
+
+            // auto x = [] - empty array is trivially homogeneous
+            auto result = eng->execute(R"(
+                auto empty = [];
+                empty.size()
+            )");
+
+            check_eq(result.as<int>(), 0, "auto [] succeeds (empty array)");
+        });
+
+        test("auto_single_element_array_succeeds", [this]() {
+            auto eng = engine::make();
+
+            // auto x = [1] - single element is trivially homogeneous
+            auto result = eng->execute(R"(
+                auto single = [42];
+                single[0]
+            )");
+
+            check_eq(result.as<int>(), 42, "auto [single element] succeeds");
+        });
+
+        // --- Nested Container Homogeneity (up to 3 levels deep) ---
+
+        test("nested_array_2_levels_homogeneous", [this]() {
+            auto eng = engine::make();
+
+            // [[1,2], [3,4]] - all inner arrays have ints, outer has arrays
+            auto result = eng->execute(R"(
+                auto matrix = [[1, 2], [3, 4]];
+                matrix[1][1]
+            )");
+
+            check_eq(result.as<int>(), 4, "auto [[int]] succeeds");
+        });
+
+        test("nested_array_2_levels_heterogeneous_inner_fails", [this]() {
+            auto eng = engine::make();
+
+            // [[1, "a"], [2, "b"]] - inner arrays have mixed types
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    auto mixed = [[1, "a"], [2, "b"]];
+                )");
+            } catch (const std::exception&) {
+                caught = true;
+            }
+
+            check_true(caught, "auto [[int, string]] fails - inner array heterogeneous");
+        });
+
+        test("nested_array_3_levels_homogeneous", [this]() {
+            auto eng = engine::make();
+
+            // [[[1,2], [3,4]], [[5,6], [7,8]]] - 3 levels all homogeneous
+            auto result = eng->execute(R"(
+                auto cube = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+                cube[1][0][1]
+            )");
+
+            check_eq(result.as<int>(), 6, "auto [[[int]]] succeeds");
+        });
+
+        test("nested_array_3_levels_heterogeneous_deepest_fails", [this]() {
+            auto eng = engine::make();
+
+            // [[[1, "x"]]] - deepest level is heterogeneous
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    auto deep = [[[1, "x"]]];
+                )");
+            } catch (const std::exception&) {
+                caught = true;
+            }
+
+            check_true(caught, "auto [[[int, string]]] fails - deepest level heterogeneous");
+        });
+
+        test("nested_map_2_levels_homogeneous", [this]() {
+            auto eng = engine::make();
+
+            // {"a": {"x": 1, "y": 2}, "b": {"x": 3, "y": 4}} - all values are maps with ints
+            auto result = eng->execute(R"(
+                auto data = {"a": {"x": 1, "y": 2}, "b": {"x": 3, "y": 4}};
+                data["b"]["y"]
+            )");
+
+            check_eq(result.as<int>(), 4, "auto {k: {k: int}} succeeds");
+        });
+
+        test("nested_map_2_levels_heterogeneous_inner_fails", [this]() {
+            auto eng = engine::make();
+
+            // {"a": {"x": 1, "y": "bad"}} - inner map has mixed values
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    auto bad = {"a": {"x": 1, "y": "bad"}};
+                )");
+            } catch (const std::exception&) {
+                caught = true;
+            }
+
+            check_true(caught, "auto {k: {k: mixed}} fails - inner map heterogeneous");
+        });
+
+        test("mixed_array_map_3_levels_homogeneous", [this]() {
+            auto eng = engine::make();
+
+            // [[{"a": 1, "b": 2}], [{"c": 3, "d": 4}]] - arrays of arrays of homogeneous maps
+            auto result = eng->execute(R"(
+                auto data = [[{"a": 1, "b": 2}], [{"c": 3, "d": 4}]];
+                data[1][0]["d"]
+            )");
+
+            check_eq(result.as<int>(), 4, "auto [[{k: int}]] succeeds");
+        });
+
+        test("mixed_map_array_3_levels_homogeneous", [this]() {
+            auto eng = engine::make();
+
+            // {"items": [[1, 2], [3, 4]]} - map with value being 2D int array
+            auto result = eng->execute(R"(
+                auto data = {"items": [[1, 2], [3, 4]]};
+                data["items"][1][0]
+            )");
+
+            check_eq(result.as<int>(), 3, "auto {k: [[int]]} succeeds");
+        });
+
+        test("mixed_3_levels_heterogeneous_fails", [this]() {
+            auto eng = engine::make();
+
+            // {"items": [[1, "bad"]]} - deepest array has mixed types
+            bool caught = false;
+            try {
+                eng->execute(R"(
+                    auto bad = {"items": [[1, "bad"]]};
+                )");
+            } catch (const std::exception&) {
+                caught = true;
+            }
+
+            check_true(caught, "auto {k: [[int, string]]} fails");
+        });
+
+        test("var_allows_any_nesting", [this]() {
+            auto eng = engine::make();
+
+            // var bypasses all homogeneity checks at any depth
+            auto result = eng->execute(R"(
+                var chaos = [[1, "a", true], {"x": [1, "b"]}, 42];
+                chaos.size()
+            )");
+
+            check_eq(result.as<int>(), 3, "var allows deeply nested heterogeneous");
         });
 
         // ============================================================

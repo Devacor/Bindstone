@@ -28,11 +28,12 @@ public:
             check_eq(vec[4].as<int>(), 5);
         });
 
-        test("array_literal_mixed_types", [&]() {
+        test("array_literal_mixed_types_with_var", [&]() {
+            // Mixed-type arrays require 'var' declaration (heterogeneous)
             auto eng = engine::make();
 
             eng->execute(R"(
-                auto mixed = [1, "hello", 3.14, true];
+                var mixed = [1, "hello", 3.14, true];
             )");
 
             auto result = eng->execute("mixed");
@@ -43,6 +44,30 @@ public:
             check_eq(vec[1].as<std::string>(), "hello");
             check_eq(vec[2].as<double>(), 3.14);
             check_eq(vec[3].as<bool>(), true);
+        });
+
+        test("array_literal_auto_requires_homogeneous", [&]() {
+            // auto x = [...] requires all elements to be the same type
+            auto eng = engine::make();
+
+            // This should fail - mixed types with auto
+            bool threw = false;
+            try {
+                eng->execute(R"(
+                    auto mixed = [1, "hello"];
+                )");
+            } catch (const std::exception&) {
+                threw = true;
+            }
+            check(threw);  // Should fail with heterogeneous array
+
+            // This should succeed - homogeneous types with auto
+            eng->execute(R"(
+                auto nums = [1, 2, 3];
+            )");
+            auto arr = eng->execute("nums");
+            check(arr.is_array());
+            check_eq(arr.as<std::vector<script_value>>().size(), 3);
         });
 
         test("array_literal_empty", [&]() {
@@ -213,8 +238,10 @@ public:
         test("array_with_nested_mixed_types", [&]() {
             auto eng = engine::make();
 
+            // Use 'var' for heterogeneous nested arrays
+            // 'auto' requires homogeneous elements at all levels
             eng->execute(R"(
-                auto complex = [
+                var complex = [
                     [1, "hello"],
                     [3.14, true],
                     [[1, 2], "nested"]

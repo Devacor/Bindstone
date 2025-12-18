@@ -33,17 +33,47 @@ namespace jai {
     class script_class_definition;
 
     // environment for storing variables in a scope
+    // Environment kind - replaces virtual dispatch with simple enum check
+    enum class env_kind {
+        standard,       // Regular scope (function, block, global)
+        method,         // Instance method - has 'this' object for field access
+        static_method   // Static method - has class_def for static field access
+    };
+
     class environment {
     public:
-        environment(string_symbolizer* symbolizer) : symbolizer_(symbolizer) {}
+        // Standard environment constructor
+        environment(string_symbolizer* symbolizer)
+            : symbolizer_(symbolizer), kind_(env_kind::standard),
+              this_object_(std::monostate{}, std::weak_ptr<engine>{}),
+              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {}
+
+        // Standard environment with parent
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer)
-            : parent_(parent), symbolizer_(symbolizer) {
+            : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::standard),
+              this_object_(std::monostate{}, std::weak_ptr<engine>{}),
+              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
             validate_parent_chain(parent);
-            // Lazy caching: start empty, populate on first access
-            // This gives O(1) construction instead of O(N) map copy
-            // Lookups walk parent chain on cache miss, then cache for O(1) subsequent access
         }
-        virtual ~environment() = default;
+
+        // Method environment constructor (with 'this' object)
+        environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, script_value this_obj)
+            : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::method),
+              this_object_(std::move(this_obj)),
+              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
+            validate_parent_chain(parent);
+        }
+
+        // Static method environment constructor (with class definition)
+        environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, std::shared_ptr<class_definition> class_def)
+            : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::static_method),
+              class_def_(class_def),
+              this_object_(std::monostate{}, std::weak_ptr<engine>{}),
+              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
+            validate_parent_chain(parent);
+        }
+
+        ~environment() = default;
         
         // Reference tracking for proper reference parameter support
         struct ref_info {
@@ -57,42 +87,66 @@ namespace jai {
         void define(uint64_t id, const script_value& value);
         void define(uint64_t id, script_value&& value);
         
-        // Get a variable value (searches parent scopes)
+        // Get a variable value (searches parent scopes, then this/static fields based on kind)
         // Returns checked_result to avoid exceptions in regular control flow
-        virtual checked_result<script_value> get(const std::string& name) const;
-        virtual checked_result<script_value> get(uint64_t id) const;  // Optimized direct lookup
-        
+        checked_result<script_value> get(const std::string& name) const;
+        checked_result<script_value> get(uint64_t id) const;
+
         // Get a reference to variable value (for avoiding copies)
         // Returns checked_result to avoid exceptions in regular control flow
-        virtual checked_result<std::reference_wrapper<const script_value>> get_ref(const std::string& name) const;
-        virtual checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id) const;
-        virtual checked_result<std::reference_wrapper<script_value>> get_ref(const std::string& name);
-        virtual checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id);
-        
-        // Assign to an existing variable (searches parent scopes)
+        checked_result<std::reference_wrapper<const script_value>> get_ref(const std::string& name) const;
+        checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id) const;
+        checked_result<std::reference_wrapper<script_value>> get_ref(const std::string& name);
+        checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id);
+
+        // Assign to an existing variable (searches parent scopes, then this/static fields based on kind)
         // Returns checked_result to avoid exceptions in regular control flow
-        [[nodiscard]] virtual checked_result<void> assign(const std::string& name, const script_value& value);
-        [[nodiscard]] virtual checked_result<void> assign(const std::string& name, script_value&& value);
-        [[nodiscard]] virtual checked_result<void> assign(uint64_t id, const script_value& value);
-        [[nodiscard]] virtual checked_result<void> assign(uint64_t id, script_value&& value);
+        [[nodiscard]] checked_result<void> assign(const std::string& name, const script_value& value);
+        [[nodiscard]] checked_result<void> assign(const std::string& name, script_value&& value);
+        [[nodiscard]] checked_result<void> assign(uint64_t id, const script_value& value);
+        [[nodiscard]] checked_result<void> assign(uint64_t id, script_value&& value);
         
         // Check if variable exists in current or parent scopes
         bool contains(const std::string& name) const;
         bool contains(uint64_t id) const;
         
         // Get a pointer to a value (for references)
-        // Virtual to allow method_environment/static_method_environment to check 'this'/static fields
-        virtual script_value* get_value_ptr(uint64_t id);
-        
+        // Checks local storage, parent chain, and this/static fields based on kind
+        script_value* get_value_ptr(uint64_t id);
+
         // Get all variables in this scope (not including parent scopes)
         // Returns a map with string_view keys pointing into the symbolizer (stable until engine destruction)
         std::unordered_map<std::string_view, script_value> get_local_variables() const;
 
         // Get all variables including parent scopes
         std::unordered_map<std::string_view, script_value> get_all_variables() const;
-        
+
         // Reset environment for reuse (optimization helper)
-        virtual void reset(std::shared_ptr<environment> new_parent);
+        void reset(std::shared_ptr<environment> new_parent);
+
+        // Reset for method environment reuse (sets kind to method)
+        void reset_as_method(std::shared_ptr<environment> parent, script_value this_obj);
+
+        // Reset for static method environment reuse (sets kind to static_method)
+        void reset_as_static_method(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def);
+
+        // Environment kind accessors
+        env_kind get_kind() const { return kind_; }
+        bool is_method_env() const { return kind_ == env_kind::method; }
+        bool is_static_method_env() const { return kind_ == env_kind::static_method; }
+
+        // Method environment accessors (only valid when kind == method)
+        const script_value& get_this_object() const { return this_object_; }
+
+        // Clear just the this_object without clearing local values
+        // Called when a method/constructor returns to ensure timely destruction
+        void clear_this_reference() {
+            this_object_ = script_value::make_null(std::weak_ptr<engine>{});
+            bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+        }
+
+        // Static method environment accessors (only valid when kind == static_method)
+        std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
 
         // Clear all values but keep parent chain intact (for proper scope cleanup)
         void clear_values();
@@ -194,121 +248,30 @@ namespace jai {
         // Track which IDs we defined locally (for O(1) "is local" checks)
         std::unordered_set<uint64_t> local_ids_;
 
-        // Parent pointer kept for: closure semantics, method_environment 'this' lookup, debugging
+        // Parent pointer kept for: closure semantics, 'this' lookup, debugging
         std::shared_ptr<environment> parent_;
         string_symbolizer* symbolizer_;
 
-        // Legacy: Internal get method with recursion depth tracking (only used as fallback now)
-        checked_result<script_value> get(uint64_t id, int depth) const;
-        checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id, int depth) const;
+        // === Unified environment fields (replaces method_environment / static_method_environment) ===
+        env_kind kind_;
+
+        // For method environments: the 'this' object for field access
+        script_value this_object_;
+
+        // For static method environments: the class definition for static field access
+        std::shared_ptr<class_definition> class_def_;
+
+        // Storage for bound methods (used by method and static_method kinds)
+        mutable script_value bound_method_storage_;
+
+        // Internal helpers for kind-specific lookups
+        // These check this_object_ fields (for method kind) or class_def_ static fields (for static_method kind)
+        script_value* get_this_field_ptr(uint64_t id);
+        script_value* get_static_field_ptr(uint64_t id);
 
         friend class interpreter;
-        friend class method_environment;
-        friend class static_method_environment;
     };
     
-    // Special environment for script class methods that provides implicit 'this' field access
-    class method_environment : public environment {
-    public:
-        method_environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, script_value this_obj)
-            : environment(parent, symbolizer), this_object_(std::move(this_obj)),
-              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
-        }
-        ~method_environment() override = default;
-
-        // Override get to check 'this' object fields as fallback
-        checked_result<script_value> get(const std::string& name) const override;
-        checked_result<script_value> get(uint64_t id) const override;
-
-        // Override get_ref to check 'this' object fields as fallback
-        checked_result<std::reference_wrapper<const script_value>> get_ref(const std::string& name) const override;
-        checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id) const override;
-        checked_result<std::reference_wrapper<script_value>> get_ref(const std::string& name) override;
-        checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id) override;
-        
-        // Override assign to update 'this' object fields when appropriate
-        [[nodiscard]] checked_result<void> assign(const std::string& name, const script_value& value) override;
-        [[nodiscard]] checked_result<void> assign(uint64_t id, const script_value& value) override;
-        [[nodiscard]] checked_result<void> assign(uint64_t id, script_value&& value) override;
-
-        // Override contains to include 'this'
-        bool contains(const std::string& name) const;
-        bool contains(uint64_t id) const;
-
-        // Override get_value_ptr to check 'this' object fields
-        script_value* get_value_ptr(uint64_t id) override;
-
-        // Get the 'this' object for super access
-        const script_value& get_this_object() const { return this_object_; }
-        
-        // Reset method for pooling
-        void reset(std::shared_ptr<environment> parent, script_value this_obj) {
-            // Clear local values (removes from flat_lookup_ too)
-            clear_values();
-            // Use set_parent helper which validates the chain (debug mode only)
-            set_parent(parent);
-            // With lazy caching, we start with empty flat_lookup_ (no copy needed)
-            flat_lookup_.clear();
-            this_object_ = std::move(this_obj);
-        }
-
-        // Override base reset to clear this_object_
-        void reset(std::shared_ptr<environment> new_parent) override {
-            // Clear local values using base implementation
-            environment::reset(new_parent);
-            // Also clear the this object to release its reference (no engine ref needed for cleanup)
-            this_object_ = script_value::make_null(std::weak_ptr<engine>{});
-            bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
-        }
-
-        // Clear just the this_object without clearing local values
-        // Called when a method/constructor returns to ensure timely destruction
-        void clear_this_reference() {
-            this_object_ = script_value::make_null(std::weak_ptr<engine>{});
-            bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
-        }
-
-    private:
-        script_value this_object_;
-        mutable script_value bound_method_storage_;  // Storage for bound methods
-    };
-    
-    // Special environment for static script methods that provides implicit static field access
-    class static_method_environment : public environment {
-    public:
-        static_method_environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, std::shared_ptr<class_definition> class_def)
-            : environment(parent, symbolizer), class_def_(class_def),
-              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
-        }
-        ~static_method_environment() override = default;
-
-        // Override get to check static fields as fallback
-        checked_result<script_value> get(const std::string& name) const override;
-        checked_result<script_value> get(uint64_t id) const override;
-
-        // Override get_ref to check static fields as fallback
-        checked_result<std::reference_wrapper<const script_value>> get_ref(const std::string& name) const override;
-        checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id) const override;
-        checked_result<std::reference_wrapper<script_value>> get_ref(const std::string& name) override;
-        checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id) override;
-        
-        // Override assign to update static fields when appropriate
-        [[nodiscard]] checked_result<void> assign(const std::string& name, const script_value& value) override;
-        [[nodiscard]] checked_result<void> assign(const std::string& name, script_value&& value) override;
-        [[nodiscard]] checked_result<void> assign(uint64_t id, const script_value& value) override;
-        [[nodiscard]] checked_result<void> assign(uint64_t id, script_value&& value) override;
-
-        // Override get_value_ptr to check static fields
-        script_value* get_value_ptr(uint64_t id) override;
-
-        // Get the class definition for creating child static environments
-        std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
-
-    private:
-        std::shared_ptr<class_definition> class_def_;
-        mutable script_value bound_method_storage_;  // Storage for bound methods
-    };
-
     // Forward declare interpreter for scoped_method_environment
     class interpreter;
 
@@ -324,10 +287,10 @@ namespace jai {
         ~scoped_method_environment();
 
         // Get the managed environment
-        std::shared_ptr<method_environment> get() const { return env_; }
+        std::shared_ptr<environment> get() const { return env_; }
 
-        // Implicit conversion to method_environment for convenience
-        operator std::shared_ptr<method_environment>() const { return env_; }
+        // Implicit conversion to environment for convenience
+        operator std::shared_ptr<environment>() const { return env_; }
 
         // Prevent copying
         scoped_method_environment(const scoped_method_environment&) = delete;
@@ -335,7 +298,7 @@ namespace jai {
 
     private:
         interpreter* interp_;
-        std::shared_ptr<method_environment> env_;
+        std::shared_ptr<environment> env_;
     };
 
     // The interpreter implements the visitor pattern to execute the AST
@@ -771,10 +734,8 @@ namespace jai {
 
         // Function call optimization pools
         mutable std::vector<script_value> argument_pool_;  // Reusable argument vector
-        std::vector<std::shared_ptr<environment>> environment_pool_;  // Pool of reusable environments
+        std::vector<std::shared_ptr<environment>> environment_pool_;  // Pool of reusable environments (all kinds)
         size_t environment_pool_index_ = 0;  // Current pool position
-        std::vector<std::shared_ptr<method_environment>> method_environment_pool_;  // Pool of reusable method environments
-        size_t method_environment_pool_index_ = 0;  // Current pool position for method environments
 
         // Class lookup callback for finding C++ classes
         class_lookup_callback class_lookup_callback_;
@@ -991,7 +952,7 @@ namespace jai {
 
         // Environment pooling functions (public so class_definition can use them)
         std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
-        std::shared_ptr<method_environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj);
+        std::shared_ptr<environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj);
         void release_environment(std::shared_ptr<environment> env, bool clear_now = true);
         void reset_environment_pool();
     };

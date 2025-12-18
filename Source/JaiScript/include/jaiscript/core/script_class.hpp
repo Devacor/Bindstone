@@ -369,7 +369,7 @@ inline void class_definition::add_static_script_method(const std::string& name, 
             // Create a static method environment (C++ scope rules for static members)
             // This environment automatically resolves unqualified static member access
             // Use definition_env (captured at class definition time) as parent
-            auto static_env = std::make_shared<static_method_environment>(
+            auto static_env = std::make_shared<environment>(
                 definition_env,
                 interp->get_string_symbolizer(),
                 class_def

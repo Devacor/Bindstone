@@ -736,6 +736,11 @@ checked_result<script_value> environment::get(const std::string& name) const {
 }
 
 checked_result<script_value> environment::get(uint64_t id) const {
+    // For method environments, handle 'this' specially
+    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
+        return this_object_;
+    }
+
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
@@ -752,16 +757,55 @@ checked_result<script_value> environment::get(uint64_t id) const {
         }
     }
 
+    // Kind-specific fallback: check 'this' object fields for method environments
+    if (kind_ == env_kind::method) {
+        auto this_type = this_object_.type();
+        if (id != symbolizer_->get_this_id() &&
+            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
+            !this_object_.is_null()) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+
+                // Try to get field first (non-throwing)
+                const script_value& field_ref = instance->get_field(id, false);
+                if (!field_ref.is_invalid()) {
+                    return field_ref;
+                }
+
+                // Try to get method (non-throwing)
+                script_value method = instance->get_method(id, false);
+                if (!method.is_invalid()) {
+                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                    return bound_method_storage_;
+                }
+
+                // Try to get static field from class definition
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->has_static_field(id)) {
+                    return class_def->get_static_field(id);
+                }
+            }
+        }
+    }
+
+    // Kind-specific fallback: check static fields for static_method environments
+    if (kind_ == env_kind::static_method && class_def_) {
+        // Check static fields
+        if (class_def_->has_static_field(id)) {
+            return class_def_->get_static_field(id);
+        }
+
+        // Check static methods (for calling other static methods)
+        if (class_def_->has_static_method(id)) {
+            return class_def_->get_static_method(id);
+        }
+    }
+
     // Not found anywhere
     std::string name{symbolizer_->get_string(id)};
     return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
         "Undefined variable '" + name + "'");
-}
-
-checked_result<script_value> environment::get(uint64_t id, int /*depth*/) const {
-    // Legacy method kept for compatibility - just delegate to O(1) version
-    // The depth parameter is no longer needed since we don't recurse
-    return get(id);
 }
 
 checked_result<void> environment::assign(const std::string& name, const script_value& value) {
@@ -775,6 +819,11 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id) const {
+    // For method environments, handle 'this' specially
+    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
+        return std::cref(this_object_);
+    }
+
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
@@ -790,15 +839,46 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
         }
     }
 
+    // Kind-specific fallback: check 'this' object fields for method environments
+    if (kind_ == env_kind::method) {
+        auto this_type = this_object_.type();
+        if (id != symbolizer_->get_this_id() &&
+            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
+            !this_object_.is_null()) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+
+                // Try to get instance field first (return const reference)
+                const script_value& inst_field_ref = instance->get_field(id, false);
+                if (!inst_field_ref.is_invalid()) {
+                    return std::cref(inst_field_ref);
+                }
+
+                // Try to get static field from class definition (return const reference)
+                auto class_def = instance->get_class_definition();
+                if (class_def) {
+                    const script_value* field_ptr = class_def->get_static_field_ptr(id);
+                    if (field_ptr) {
+                        return std::cref(*field_ptr);
+                    }
+                }
+            }
+        }
+    }
+
+    // Kind-specific fallback: check static fields for static_method environments
+    if (kind_ == env_kind::static_method && class_def_) {
+        const script_value* field_ptr = class_def_->get_static_field_ptr(id);
+        if (field_ptr) {
+            return std::cref(*field_ptr);
+        }
+    }
+
     std::string name{symbolizer_->get_string(id)};
     return checked_result<std::reference_wrapper<const script_value>>(
         make_error_code(runtime_error_code::undefined_variable),
         "Undefined variable '" + name + "'");
-}
-
-checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id, int /*depth*/) const {
-    // Legacy method - delegate to O(1) version
-    return get_ref(id);
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(const std::string& name) {
@@ -807,6 +887,11 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(const 
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64_t id) {
+    // For method environments, handle 'this' specially (note: this is non-const so we return mutable ref)
+    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
+        return std::ref(this_object_);
+    }
+
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
@@ -819,6 +904,42 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
         if (ptr) {
             flat_lookup_[id] = ptr;
             return std::ref(*ptr);
+        }
+    }
+
+    // Kind-specific fallback: check 'this' object fields for method environments
+    if (kind_ == env_kind::method) {
+        auto this_type = this_object_.type();
+        if (id != symbolizer_->get_this_id() &&
+            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
+            !this_object_.is_null()) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+
+                // Try to get instance field first (return non-const reference)
+                script_value& inst_field_ref = instance->get_field(id, false);
+                if (!inst_field_ref.is_invalid()) {
+                    return std::ref(inst_field_ref);
+                }
+
+                // Try to get static field from class definition (return non-const reference)
+                auto class_def = instance->get_class_definition();
+                if (class_def) {
+                    script_value* field_ptr = class_def->get_static_field_ptr(id);
+                    if (field_ptr) {
+                        return std::ref(*field_ptr);
+                    }
+                }
+            }
+        }
+    }
+
+    // Kind-specific fallback: check static fields for static_method environments
+    if (kind_ == env_kind::static_method && class_def_) {
+        script_value* field_ptr = class_def_->get_static_field_ptr(id);
+        if (field_ptr) {
+            return std::ref(*field_ptr);
         }
     }
 
@@ -851,6 +972,46 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
         }
     }
 
+    // Kind-specific fallback: assign to 'this' object fields for method environments
+    if (kind_ == env_kind::method) {
+        auto this_type = this_object_.type();
+        if (id != symbolizer_->get_this_id() &&
+            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                if (instance && instance->has_field(id)) {
+                    // Check if this is a C++ parent property that needs setter method
+                    auto class_def = instance->get_class_definition();
+                    if (class_def) {
+                        auto cpp_base = class_def->get_cpp_base_class();
+                        if (cpp_base) {
+                            uint64_t setter_id = cpp_base->get_property_setter_id(id);
+                            if (setter_id != 0) {
+                                auto setter = cpp_base->get_method(setter_id, false);
+                                if (setter.is_function()) {
+                                    std::vector<script_value> args = {this_object_, value};
+                                    (void)setter.as_function()(args);
+                                    return {};
+                                }
+                            }
+                        }
+                    }
+                    instance->set_field(id, value.clone());
+                    return {};
+                }
+            }
+        }
+    }
+
+    // Kind-specific fallback: assign to static fields for static_method environments
+    if (kind_ == env_kind::static_method && class_def_) {
+        if (class_def_->has_static_field(id)) {
+            class_def_->set_static_field(id, value.clone());
+            return {};
+        }
+    }
+
     std::string name{symbolizer_->get_string(id)};
     return checked_result<void>(
         make_error_code(runtime_error_code::undefined_variable),
@@ -871,6 +1032,46 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
         if (ptr) {
             flat_lookup_[id] = ptr;
             *ptr = std::move(value);
+            return {};
+        }
+    }
+
+    // Kind-specific fallback: assign to 'this' object fields for method environments
+    if (kind_ == env_kind::method) {
+        auto this_type = this_object_.type();
+        if (id != symbolizer_->get_this_id() &&
+            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                if (instance && instance->has_field(id)) {
+                    // Check if this is a C++ parent property that needs setter method
+                    auto class_def = instance->get_class_definition();
+                    if (class_def) {
+                        auto cpp_base = class_def->get_cpp_base_class();
+                        if (cpp_base) {
+                            uint64_t setter_id = cpp_base->get_property_setter_id(id);
+                            if (setter_id != 0) {
+                                auto setter = cpp_base->get_method(setter_id, false);
+                                if (setter.is_function()) {
+                                    std::vector<script_value> args = {this_object_, std::move(value)};
+                                    (void)setter.as_function()(args);
+                                    return {};
+                                }
+                            }
+                        }
+                    }
+                    instance->set_field(id, std::move(value));
+                    return {};
+                }
+            }
+        }
+    }
+
+    // Kind-specific fallback: assign to static fields for static_method environments
+    if (kind_ == env_kind::static_method && class_def_) {
+        if (class_def_->has_static_field(id)) {
+            class_def_->set_static_field(id, std::move(value));
             return {};
         }
     }
@@ -947,8 +1148,52 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
 
     parent_ = new_parent;
 
+    // Reset to standard kind and clear kind-specific fields
+    kind_ = env_kind::standard;
+    this_object_ = script_value::make_null(std::weak_ptr<engine>{});
+    class_def_.reset();
+    bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+
     // With lazy caching, we start with empty flat_lookup_ (no copy needed)
     // Variables will be cached on first access
+    flat_lookup_.clear();
+}
+
+void environment::reset_as_method(std::shared_ptr<environment> parent, script_value this_obj) {
+    // Clear all local values first
+    clear_values();
+
+    // Validate the parent chain before setting (debug mode only)
+    validate_parent_chain(parent);
+
+    parent_ = parent;
+
+    // Set to method kind with this object
+    kind_ = env_kind::method;
+    this_object_ = std::move(this_obj);
+    class_def_.reset();
+    bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+
+    // With lazy caching, we start with empty flat_lookup_
+    flat_lookup_.clear();
+}
+
+void environment::reset_as_static_method(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def) {
+    // Clear all local values first
+    clear_values();
+
+    // Validate the parent chain before setting (debug mode only)
+    validate_parent_chain(parent);
+
+    parent_ = parent;
+
+    // Set to static_method kind with class definition
+    kind_ = env_kind::static_method;
+    this_object_ = script_value::make_null(std::weak_ptr<engine>{});
+    class_def_ = class_def;
+    bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+
+    // With lazy caching, we start with empty flat_lookup_
     flat_lookup_.clear();
 }
 
@@ -972,6 +1217,11 @@ std::unordered_map<std::string_view, script_value> environment::get_all_variable
 }
 
 script_value* environment::get_value_ptr(uint64_t id) {
+    // For method environments, handle 'this' specially
+    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
+        return &this_object_;
+    }
+
     // Check cache first (O(1))
     auto it = flat_lookup_.find(id);
     if (it != flat_lookup_.end()) {
@@ -986,6 +1236,43 @@ script_value* environment::get_value_ptr(uint64_t id) {
             return ptr;
         }
     }
+
+    // Kind-specific fallback: check 'this' object fields for method environments
+    if (kind_ == env_kind::method) {
+        auto this_type = this_object_.type();
+        if (id != symbolizer_->get_this_id() &&
+            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
+            !this_object_.is_null()) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+
+                // Try to get instance field - get_field returns a reference
+                script_value& field_ref = instance->get_field(id, false);
+                if (!field_ref.is_invalid()) {
+                    return &field_ref;
+                }
+
+                // Try to get static field from class definition
+                auto class_def = instance->get_class_definition();
+                if (class_def) {
+                    script_value* static_ptr = class_def->get_static_field_ptr(id);
+                    if (static_ptr) {
+                        return static_ptr;
+                    }
+                }
+            }
+        }
+    }
+
+    // Kind-specific fallback: check static fields for static_method environments
+    if (kind_ == env_kind::static_method && class_def_) {
+        script_value* field_ptr = class_def_->get_static_field_ptr(id);
+        if (field_ptr) {
+            return field_ptr;
+        }
+    }
+
     return nullptr;
 }
 
@@ -1170,697 +1457,6 @@ std::optional<script_value> interpreter::object_arithmetic_via_method(const scri
 
     // Method call failed
     return std::nullopt;
-}
-
-// method_environment implementation
-checked_result<script_value> method_environment::get(const std::string& name) const {
-    // DEBUG: Log method environment lookup
-    // std::cerr << "DEBUG: method_environment::get(\"" << name << "\")\n";
-
-    // Special handling for 'this'
-    if (name == "this") {
-        return this_object_;
-    }
-
-    // First try normal environment lookup
-    auto env_result = environment::get(name);
-    if (env_result) {
-        return env_result;
-    }
-
-    // If not found in environment, check 'this' object fields and methods
-    // During class definition, we shouldn't resolve methods - let the unresolved identifier handling take over
-    // The this_object_ might be invalid during class parsing
-    auto this_type = this_object_.type();
-    if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-            // Intern the name to ID
-            auto class_def = instance->get_class_definition();
-            if (class_def) {
-                auto eng = class_def->get_engine_ref().lock();
-                if (eng) {
-                    uint64_t name_id = eng->symbolize(name);
-
-                    // Try to get field first (non-throwing) - now returns a reference
-                    const script_value& field_ref = instance->get_field(name_id, false);
-                    if (!field_ref.is_invalid()) {
-                        return field_ref;
-                    }
-
-                    // Try to get method (non-throwing)
-                    script_value method = instance->get_method(name_id, false);
-                    if (!method.is_invalid()) {
-                        // Found the method! Store in instance member
-                        bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                        return bound_method_storage_;
-                    }
-
-                    // Try to get static field from class definition
-                    if (class_def->has_static_field(name_id)) {
-                        return class_def->get_static_field(name_id);
-                    }
-                }
-            }
-        }
-    }
-
-    // Nothing found - return the original error from environment lookup
-    return env_result;
-}
-
-checked_result<script_value> method_environment::get(uint64_t id) const {
-    // Special handling for 'this' using cached ID
-    if (id == symbolizer_->get_this_id()) {
-        return this_object_;
-    }
-
-    // First try normal environment lookup
-    auto env_result = environment::get(id);
-    if (env_result) {
-        return env_result;
-    }
-
-    // If not found, check 'this' object fields and methods
-    auto this_type = this_object_.type();
-    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-            // Try to get field first (non-throwing) - now returns a reference
-            const script_value& field_ref = instance->get_field(id, false);
-            if (!field_ref.is_invalid()) {
-                return field_ref;
-            }
-
-            // Try to get method (non-throwing)
-            script_value method = instance->get_method(id, false);
-            if (!method.is_invalid()) {
-                // Found the method! Store in instance member
-                bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                return bound_method_storage_;
-            }
-
-            // Try to get static field from class definition
-            auto class_def = instance->get_class_definition();
-            if (class_def) {
-                if (class_def->has_static_field(id)) {
-                    return class_def->get_static_field(id);
-                }
-            }
-        }
-    }
-
-    // Nothing found - return the original error from environment lookup
-    return env_result;
-}
-
-checked_result<std::reference_wrapper<const script_value>> method_environment::get_ref(const std::string& name) const {
-    // Convert to ID and use the ID-based override that checks static fields
-    uint64_t id = symbolizer_->intern(name);
-    return get_ref(id);
-}
-
-checked_result<std::reference_wrapper<const script_value>> method_environment::get_ref(uint64_t id) const {
-    // First try normal environment lookup
-    auto env_result = environment::get_ref(id);
-    if (env_result) {
-        return env_result;
-    }
-
-    // If not found, check 'this' object fields and static fields
-    auto this_type = this_object_.type();
-    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-            // Try to get instance field first (return const reference)
-            const script_value& inst_field_ref = instance->get_field(id, false);
-            if (!inst_field_ref.is_invalid()) {
-                return std::cref(inst_field_ref);
-            }
-
-            // Try to get static field from class definition (return const reference)
-            auto class_def = instance->get_class_definition();
-            if (class_def) {
-                const script_value* field_ptr = class_def->get_static_field_ptr(id);
-                if (field_ptr) {
-                    return std::cref(*field_ptr);
-                }
-            }
-        }
-    }
-
-    // Nothing found - return the original error
-    return env_result;
-}
-
-checked_result<std::reference_wrapper<script_value>> method_environment::get_ref(const std::string& name) {
-    uint64_t id = symbolizer_->intern(name);
-    return get_ref(id);
-}
-
-checked_result<std::reference_wrapper<script_value>> method_environment::get_ref(uint64_t id) {
-    // First try normal environment lookup
-    auto env_result = environment::get_ref(id);
-    if (env_result) {
-        return env_result;
-    }
-
-    // If not found, check 'this' object fields and static fields
-    auto this_type = this_object_.type();
-    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-            // Try to get instance field first (return non-const reference)
-            script_value& inst_field_ref = instance->get_field(id, false);
-            if (!inst_field_ref.is_invalid()) {
-                return std::ref(inst_field_ref);
-            }
-
-            // Try to get static field from class definition (return non-const reference)
-            auto class_def = instance->get_class_definition();
-            if (class_def) {
-                script_value* field_ptr = class_def->get_static_field_ptr(id);
-                if (field_ptr) {
-                    return std::ref(*field_ptr);
-                }
-            }
-        }
-    }
-
-    // Nothing found - return the original error
-    return env_result;
-}
-
-checked_result<void> method_environment::assign(const std::string& name, const script_value& value) {
-    // First check if it's a local variable or parameter
-    uint64_t id = symbolizer_->intern(name);
-    if (local_ids_.count(id) > 0) {
-        // It's a local variable - update via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = value;
-            return {};
-        }
-    }
-
-    // Check parent environments
-    if (parent_ && parent_->contains(name)) {
-        return parent_->assign(name, value);
-    }
-
-    // If not found anywhere and 'this' has this field, update it
-    auto this_type = this_object_.type();
-    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-            if (instance && instance->has_field(id)) {
-                instance->set_field(id, value.clone());
-                return {};
-            }
-        }
-    }
-
-    // Not found anywhere - return error
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
-}
-
-checked_result<void> method_environment::assign(uint64_t id, const script_value& value) {
-    // First check if it's a local variable or parameter
-    if (local_ids_.count(id) > 0) {
-        // It's a local variable - update via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = value;
-            return {};
-        }
-    }
-
-    // Check parent environments
-    if (parent_ && parent_->contains(id)) {
-        return parent_->assign(id, value);
-    }
-
-    // If not found anywhere and 'this' has this field, update it
-    auto this_type = this_object_.type();
-
-    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-            if (instance && instance->has_field(id)) {
-                // Check if this is a C++ parent property that needs setter method
-                auto class_def = instance->get_class_definition();
-                if (class_def) {
-                    auto cpp_base = class_def->get_cpp_base_class();
-                    if (cpp_base) {
-                        // Check if field has a pre-registered setter ID (fast path)
-                        uint64_t setter_id = cpp_base->get_property_setter_id(id);
-                        if (setter_id != 0) {
-                            // This is a C++ property - call the setter method
-                            auto setter = cpp_base->get_method(setter_id, false);
-                            if (setter.is_function()) {
-                                // Call setter with this and value
-                                std::vector<script_value> args = {this_object_, value};
-                                (void)setter.as_function()(args);  // Setter return value intentionally ignored
-                                return {};
-                            }
-                        }
-                    }
-                }
-                // Not a C++ property or no setter - use regular field assignment
-                instance->set_field(id, value.clone());
-                return {};
-            }
-
-            // Check for static field on class definition
-            auto class_def = instance->get_class_definition();
-            if (class_def) {
-                if (class_def->has_static_field(id)) {
-                    [[maybe_unused]] bool success = class_def->set_static_field(id, value);
-                    return {};
-                }
-            }
-        }
-    }
-
-    // Not found anywhere - return error
-    std::string name{symbolizer_->get_string(id)};
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
-}
-
-checked_result<void> method_environment::assign(uint64_t id, script_value&& value) {
-    // First check if it's a local variable or parameter
-    if (local_ids_.count(id) > 0) {
-        // It's a local variable - update via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = std::move(value);
-            return {};
-        }
-    }
-
-    // Check parent environments
-    if (parent_ && parent_->contains(id)) {
-        return parent_->assign(id, std::move(value));
-    }
-
-    // If not found anywhere and 'this' has this field, update it
-    auto this_type = this_object_.type();
-    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-            if (instance && instance->has_field(id)) {
-                // Check if this is a C++ parent property that needs setter method
-                auto class_def = instance->get_class_definition();
-                if (class_def) {
-                    auto cpp_base = class_def->get_cpp_base_class();
-                    if (cpp_base) {
-                        // Check if field has a pre-registered setter ID (fast path)
-                        uint64_t setter_id = cpp_base->get_property_setter_id(id);
-                        if (setter_id != 0) {
-                            // This is a C++ property - call the setter method
-                            auto setter = cpp_base->get_method(setter_id, false);
-                            if (setter.is_function()) {
-                                // Call setter with this and value
-                                std::vector<script_value> args = {this_object_, std::move(value)};
-                                (void)setter.as_function()(args);  // Setter return value intentionally ignored
-                                return {};
-                            }
-                        }
-                    }
-                }
-                // Not a C++ property or no setter - use regular field assignment
-                instance->set_field(id, std::move(value));
-                return {};
-            }
-
-            // Check for static field on class definition
-            auto class_def = instance->get_class_definition();
-            if (class_def) {
-                if (class_def->has_static_field(id)) {
-                    [[maybe_unused]] bool success = class_def->set_static_field(id, std::move(value));
-                    return {};
-                }
-            }
-        }
-    }
-
-    // Not found anywhere - return error
-    std::string name{symbolizer_->get_string(id)};
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
-}
-
-bool method_environment::contains(const std::string& name) const {
-    // Check if it's 'this'
-    if (name == "this") {
-        return true;
-    }
-    // Otherwise use base environment::contains
-    return environment::contains(name);
-}
-
-bool method_environment::contains(uint64_t id) const {
-    // Check if it's 'this' using cached ID
-    if (id == symbolizer_->get_this_id()) {
-        return true;
-    }
-    // Otherwise use base environment::contains
-    return environment::contains(id);
-}
-
-script_value* method_environment::get_value_ptr(uint64_t id) {
-    // First check local variables via cache
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return it->second;
-    }
-
-    // Check 'this' object fields and static fields
-    auto this_type = this_object_.type();
-    if (id != symbolizer_->get_this_id() &&
-        (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-        !this_object_.is_null()) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-            script_value& field_ref = instance->get_field(id, false);
-            if (!field_ref.is_invalid()) {
-                // Cache for O(1) access - will be invalidated by clear_parent_cache() on hot reload
-                flat_lookup_[id] = &field_ref;
-                return &field_ref;
-            }
-
-            // Check static fields on the class definition
-            auto class_def = instance->get_class_definition();
-            if (class_def) {
-                script_value* static_field_ptr = class_def->get_static_field_ptr(id);
-                if (static_field_ptr) {
-                    // Cache for O(1) access - will be invalidated by clear_parent_cache() on hot reload
-                    flat_lookup_[id] = static_field_ptr;
-                    return static_field_ptr;
-                }
-            }
-        }
-    }
-
-    // Check parent chain
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            flat_lookup_[id] = ptr;
-            return ptr;
-        }
-    }
-
-    return nullptr;
-}
-
-// static_method_environment implementation
-checked_result<script_value> static_method_environment::get(const std::string& name) const {
-    // First try normal environment lookup
-    auto env_result = environment::get(name);
-    if (env_result) {
-        return env_result;
-    }
-
-    // Convert name to ID for class member lookups
-    if (class_def_) {
-        auto eng = class_def_->get_engine_ref().lock();
-        if (eng) {
-            uint64_t name_id = eng->symbolize(name);
-
-            // Check static fields
-            if (class_def_->has_static_field(name_id)) {
-                return class_def_->get_static_field(name_id);
-            }
-
-            // Check static methods (for calling other static methods)
-            if (class_def_->has_static_method(name_id)) {
-                return class_def_->get_static_method(name_id);
-            }
-        }
-    }
-
-    // Nothing found - return the original error from environment lookup
-    return env_result;
-}
-
-checked_result<script_value> static_method_environment::get(uint64_t id) const {
-    // First try normal environment lookup
-    auto env_result = environment::get(id);
-    if (env_result) {
-        return env_result;
-    }
-
-    if (class_def_) {
-        // Check static fields
-        if (class_def_->has_static_field(id)) {
-            return class_def_->get_static_field(id);
-        }
-
-        // Check static methods (for calling other static methods)
-        if (class_def_->has_static_method(id)) {
-            return class_def_->get_static_method(id);
-        }
-    }
-
-    // Nothing found - return the original error from environment lookup
-    return env_result;
-}
-
-checked_result<std::reference_wrapper<const script_value>> static_method_environment::get_ref(const std::string& name) const {
-    // First try normal environment lookup
-    uint64_t id = symbolizer_->intern(name);
-    auto env_result = environment::get_ref(id);
-    if (env_result) {
-        return env_result;
-    }
-
-    // If not found, check static fields (return reference to the field in class_def)
-    if (class_def_) {
-        const script_value* field_ptr = class_def_->get_static_field_ptr(id);
-        if (field_ptr) {
-            return std::cref(*field_ptr);
-        }
-    }
-
-    // Nothing found - return the original error
-    return env_result;
-}
-
-checked_result<std::reference_wrapper<const script_value>> static_method_environment::get_ref(uint64_t id) const {
-    // First try normal environment lookup
-    auto env_result = environment::get_ref(id);
-    if (env_result) {
-        return env_result;
-    }
-
-    // If not found, check static fields
-    if (class_def_) {
-        const script_value* field_ptr = class_def_->get_static_field_ptr(id);
-        if (field_ptr) {
-            return std::cref(*field_ptr);
-        }
-    }
-
-    // Nothing found - return the original error
-    return env_result;
-}
-
-checked_result<std::reference_wrapper<script_value>> static_method_environment::get_ref(const std::string& name) {
-    // First try normal environment lookup
-    uint64_t id = symbolizer_->intern(name);
-    auto env_result = environment::get_ref(id);
-    if (env_result) {
-        return env_result;
-    }
-
-    // If not found, check static fields (return non-const reference)
-    if (class_def_) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(id);
-        if (field_ptr) {
-            return std::ref(*field_ptr);
-        }
-    }
-
-    // Nothing found - return the original error
-    return env_result;
-}
-
-checked_result<std::reference_wrapper<script_value>> static_method_environment::get_ref(uint64_t id) {
-    // First try normal environment lookup
-    auto env_result = environment::get_ref(id);
-    if (env_result) {
-        return env_result;
-    }
-
-    // If not found, check static fields (return non-const reference)
-    if (class_def_) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(id);
-        if (field_ptr) {
-            return std::ref(*field_ptr);
-        }
-    }
-
-    // Nothing found - return the original error
-    return env_result;
-}
-
-checked_result<void> static_method_environment::assign(const std::string& name, const script_value& value) {
-    // First check if it's a local variable or parameter
-    uint64_t id = symbolizer_->intern(name);
-    if (local_ids_.count(id) > 0) {
-        // It's a local variable - update via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = value;
-            return {};
-        }
-    }
-
-    // Check parent environments
-    if (parent_ && parent_->contains(name)) {
-        return parent_->assign(name, value);
-    }
-
-    // Check if it's a static field (set_static_field does the lookup)
-    if (class_def_ && class_def_->set_static_field(id, value)) {
-        return {};
-    }
-
-    // Not found anywhere - return error
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
-}
-
-checked_result<void> static_method_environment::assign(const std::string& name, script_value&& value) {
-    // First check if it's a local variable or parameter
-    uint64_t id = symbolizer_->intern(name);
-    if (local_ids_.count(id) > 0) {
-        // It's a local variable - update via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = std::move(value);
-            return {};
-        }
-    }
-
-    // Check parent environments
-    if (parent_ && parent_->contains(name)) {
-        return parent_->assign(name, std::move(value));
-    }
-
-    // Check if it's a static field (set_static_field does the lookup)
-    if (class_def_ && class_def_->set_static_field(id, std::move(value))) {
-        return {};
-    }
-
-    // Not found anywhere - return error
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
-}
-
-checked_result<void> static_method_environment::assign(uint64_t id, const script_value& value) {
-    // First check if it's a local variable or parameter
-    if (local_ids_.count(id) > 0) {
-        // It's a local variable - update via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = value;
-            return {};
-        }
-    }
-
-    // Check parent environments
-    if (parent_ && parent_->contains(id)) {
-        return parent_->assign(id, value);
-    }
-
-    // Check if it's a static field (set_static_field does the lookup)
-    if (class_def_ && class_def_->set_static_field(id, value)) {
-        return {};
-    }
-
-    // Not found anywhere - return error
-    std::string name{symbolizer_->get_string(id)};
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
-}
-
-checked_result<void> static_method_environment::assign(uint64_t id, script_value&& value) {
-    // First check if it's a local variable or parameter
-    if (local_ids_.count(id) > 0) {
-        // It's a local variable - update via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = std::move(value);
-            return {};
-        }
-    }
-
-    // Check parent environments
-    if (parent_ && parent_->contains(id)) {
-        return parent_->assign(id, std::move(value));
-    }
-
-    // Check if it's a static field (set_static_field does the lookup)
-    if (class_def_ && class_def_->set_static_field(id, std::move(value))) {
-        return {};
-    }
-
-    // Not found anywhere - return error
-    std::string name{symbolizer_->get_string(id)};
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
-}
-
-script_value* static_method_environment::get_value_ptr(uint64_t id) {
-    // First check local variables via cache
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return it->second;
-    }
-
-    // Check static fields
-    if (class_def_) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(id);
-        if (field_ptr) {
-            // Cache for O(1) access - will be invalidated by clear_parent_cache() on hot reload
-            flat_lookup_[id] = field_ptr;
-            return field_ptr;
-        }
-    }
-
-    // Check parent chain
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            flat_lookup_[id] = ptr;
-            return ptr;
-        }
-    }
-
-    return nullptr;
 }
 
 interpreter::interpreter()
@@ -7172,7 +6768,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                             // Create a static method environment (C++ scope rules for static members)
                             // This environment automatically resolves unqualified static member access
                             // Use definition_env (namespace/global) as parent
-                            auto static_env = std::make_shared<static_method_environment>(
+                            auto static_env = std::make_shared<environment>(
                                 definition_env,
                                 self->string_symbolizer_,
                                 class_def
@@ -8292,18 +7888,18 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // For regular functions:
     // [parameter env] -> [current env]
     if (function.closure_env) {
-        // Check if the closure is a method_environment
-        if (auto method_env = std::dynamic_pointer_cast<method_environment>(function.closure_env)) {
-            auto this_obj = method_env->get_this_object();
-            // Create a new method_environment that preserves implicit 'this' lookups
-            environment_ = get_pooled_method_environment(method_env->get_parent(), this_obj);
-        } else if (auto static_env = std::dynamic_pointer_cast<static_method_environment>(function.closure_env)) {
-            // Static method - create new static_method_environment that preserves static field access
+        // Check if the closure is a method environment
+        if (function.closure_env->is_method_env()) {
+            auto this_obj = function.closure_env->get_this_object();
+            // Create a new method environment that preserves implicit 'this' lookups
+            environment_ = get_pooled_method_environment(function.closure_env->get_parent(), this_obj);
+        } else if (function.closure_env->is_static_method_env()) {
+            // Static method - create new static method environment that preserves static field access
             // Use the closure_env itself as parent to maintain access to class static fields
-            environment_ = std::make_shared<static_method_environment>(
-                static_env->get_parent(),
+            environment_ = std::make_shared<environment>(
+                function.closure_env->get_parent(),
                 string_symbolizer_,
-                static_env->get_class_definition()
+                function.closure_env->get_class_definition()
             );
         } else {
             // Regular closure - create new environment for parameters
@@ -8323,12 +7919,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     auto cleanup = [&](bool clear_this = true) {
         auto function_env = environment_;
         if (clear_this) {
-            if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
-                method_env->clear_this_reference();
-            } else if (function_env->get_parent()) {
-                if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env->get_parent())) {
-                    method_env->clear_this_reference();
-                }
+            if (function_env->is_method_env()) {
+                function_env->clear_this_reference();
+            } else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
+                function_env->get_parent()->clear_this_reference();
             }
         }
         environment_ = previousEnv;
@@ -8482,17 +8076,17 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             JAISCRIPT_TRY_ASSIGN(result, try_convert_for_parameter(result, function.return_type));
         }
     } else {
-        // Check if this is a constructor (method_environment with no explicit return)
+        // Check if this is a constructor (method environment with no explicit return)
         // Constructors implicitly return 'this'
         // Note: The environment_ at this point is a pooled environment for parameters,
-        // so we need to check the PARENT which could be the method_environment
+        // so we need to check the PARENT which could be the method environment
         auto function_env = environment_;
-        if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env)) {
-            result = method_env->get_this_object();
+        if (function_env->is_method_env()) {
+            result = function_env->get_this_object();
         } else if (function_env->get_parent()) {
-            // Check parent - the closure_env passed to call_function might be a method_environment
-            if (auto method_env = std::dynamic_pointer_cast<method_environment>(function_env->get_parent())) {
-                result = method_env->get_this_object();
+            // Check parent - the closure_env passed to call_function might be a method environment
+            if (function_env->get_parent()->is_method_env()) {
+                result = function_env->get_parent()->get_this_object();
             } else {
                 // Regular function with no return statement returns null
                 result = make_value();
@@ -8907,46 +8501,36 @@ void interpreter::release_environment(std::shared_ptr<environment> env, bool cle
         env->reset(nullptr);
     }
 
-    // Check if this is a method_environment and decrement the appropriate pool index
-    if (std::dynamic_pointer_cast<method_environment>(env)) {
-        if (method_environment_pool_index_ > 0) {
-            --method_environment_pool_index_;
-        }
-    } else {
-        if (environment_pool_index_ > 0) {
-            --environment_pool_index_;
-        }
+    // All environments use the unified pool now
+    if (environment_pool_index_ > 0) {
+        --environment_pool_index_;
     }
 }
 
-std::shared_ptr<method_environment> interpreter::get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj) {
-    if (method_environment_pool_index_ < method_environment_pool_.size()) {
-        // Reuse existing method environment from pool
-        auto env = method_environment_pool_[method_environment_pool_index_++];
-        // Reset with new parent and this object
-        env->reset(parent, std::move(this_obj));
+std::shared_ptr<environment> interpreter::get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj) {
+    // Use unified pool - get an environment and reset it as a method environment
+    if (environment_pool_index_ < environment_pool_.size()) {
+        // Reuse existing environment from pool
+        auto env = environment_pool_[environment_pool_index_++];
+        // Reset as method environment with this object
+        env->reset_as_method(parent, std::move(this_obj));
         return env;
     } else {
         // Pool is exhausted, create new method environment and add to pool
-        auto newEnv = std::make_shared<method_environment>(parent, string_symbolizer_, std::move(this_obj));
-        method_environment_pool_.emplace_back(newEnv);
-        ++method_environment_pool_index_;
+        auto newEnv = std::make_shared<environment>(parent, string_symbolizer_, std::move(this_obj));
+        environment_pool_.emplace_back(newEnv);
+        ++environment_pool_index_;
         return newEnv;
     }
 }
 
 void interpreter::reset_environment_pool() {
     environment_pool_index_ = 0;
-    method_environment_pool_index_ = 0;
 
-    // Clear the environment values to release references
+    // Clear all environments in the unified pool to release references
     for (auto& env : environment_pool_) {
-        // Reset the environment by clearing its parent and values
+        // Reset the environment by clearing its parent, values, and kind-specific fields
         env->reset(nullptr);
-    }
-    for (auto& env : method_environment_pool_) {
-        // Reset the method environment (clear values and this_object to release references)
-        env->reset(nullptr, make_value());
     }
 }
 

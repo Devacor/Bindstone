@@ -2,25 +2,25 @@
 
 ## Current JaiScript Performance (Release Build)
 
-Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-18):
+Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-19):
 
 | Benchmark                      | Time (μs) | Notes                                    |
 |--------------------------------|-----------|------------------------------------------|
 | Integer Addition               | 2         | Single arithmetic operation              |
 | Float Multiplication           | 2         | Single floating-point operation          |
 | Variable Operations            | 6         | 3 variable declarations + 1 addition     |
-| Function Calls                 | 5         | Function declaration + invocation        |
-| Array Push/Pop                 | 18        | 3 pushes + 1 pop + size check            |
-| Map Insert/Lookup              | 14        | 2 inserts + 1 lookup                     |
+| Function Calls                 | 4         | Function declaration + invocation        |
+| Array Push/Pop                 | 19        | 3 pushes + 1 pop + size check            |
+| Map Insert/Lookup              | 13        | 2 inserts + 1 lookup                     |
 | Class Creation                 | 7         | Class definition + instantiation         |
-| Method Invocation              | 10        | Class with method + method call          |
-| For Loop (100 iterations)      | 17        | 0.17μs per iteration                     |
+| Method Invocation              | 9         | Class with method + method call          |
+| For Loop (100 iterations)      | 15        | 0.15μs per iteration                     |
 | String Concatenation           | 8         | String operations                        |
 | Complex Expression             | 6         | Multi-operator expression evaluation     |
-| Class Inheritance              | 112       | Base + derived class + instantiation     |
+| Class Inheritance              | 109       | Base + derived class + instantiation     |
 | Variable Lookup Heavy          | 15        | 10 variable lookups in expression        |
-| Hot Loop (1000 iterations)     | 76        | 0.076μs per iteration                    |
-| Simple Compound Assignment     | 53        | 100 compound assignments (+=, -=, etc.)  |
+| Hot Loop (1000 iterations)     | 49        | 0.049μs per iteration                    |
+| Simple Compound Assignment     | 55        | 100 compound assignments (+=, -=, etc.)  |
 
 ## Performance Optimizations
 
@@ -145,6 +145,37 @@ if (leftType == jai_int_type && rightType == jai_int_type) {
 - **Function calls**: ~60% faster (Function Calls: 10μs → 5μs → 4μs)
 - **Class operations**: ~75% faster (Class Creation: 24μs → 22μs → 7μs → 6μs, Class Inheritance: 139μs → 133μs → 109μs)
 
+### 4. Raw Engine Pointer & Shared String Optimization (v0.1.5)
+
+Two key optimizations to reduce `script_value` overhead:
+
+**Raw Engine Pointer:**
+```cpp
+// Before: weak_ptr has atomic refcount overhead on every copy
+std::weak_ptr<engine> engine_ref_;  // 16 bytes + atomic ops
+
+// After: raw pointer, safely nulled on engine destruction
+engine* engine_;  // 8 bytes, no atomic overhead
+```
+
+**Shared String/Function Storage:**
+```cpp
+// Before: string/function stored directly (copies entire string)
+script_string storage_;  // Expensive to copy
+
+// After: shared_ptr for cheap copies
+std::shared_ptr<script_string> string_ptr_;  // Copy = atomic increment only
+std::shared_ptr<function> function_ptr_;
+```
+
+**Performance Impact (v0.1.5):**
+- **Hot Loops**: 71μs → 49μs (**31% faster**)
+- **For Loops**: 17μs → 15μs (**12% faster**, gap now 1.25x vs ChaiScript)
+- **Bubble Sort**: 115μs → 82μs (**29% faster**)
+- **BST**: 700μs → 596μs (**15% faster**)
+- **Fibonacci**: 20μs → 17μs (**15% faster**)
+- **String concat**: Neutral (shared_ptr indirection hidden by actual string work)
+
 ## Architecture: Value Type Implementation
 
 JaiScript uses a type-safe design prioritizing correctness over raw micro-operation speed.
@@ -154,9 +185,10 @@ JaiScript uses a type-safe design prioritizing correctness over raw micro-operat
 **JaiScript's `script_value`** uses **discriminated union (std::variant)**:
 ```cpp
 class script_value {
-    type_info_ptr type_info_;         // Shared type metadata (16 bytes)
-    std::weak_ptr<engine> engine_ref_; // Engine reference (16 bytes)
+    type_info_ptr type_info_;         // Shared type metadata (8 bytes)
+    engine* engine_;                   // Raw engine pointer (8 bytes)
     std::variant<...> storage_;        // 14 alternatives, ~40 bytes
+    // Note: strings/functions use shared_ptr for cheap copies
     void* cpp_bound_ptr_;              // C++ binding (8 bytes)
 };
 ```
@@ -256,20 +288,20 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Benchmark | JaiScript | ChaiScript | JaiScript Speedup |
 |-----------|-----------|------------|-------------------|
-| **Function Calls** | 5μs | 201μs | **40x faster** |
-| **Factorial(10)** | 11μs | 1431μs | **130x faster** |
-| **Fibonacci(6)** | 21μs | 3403μs | **162x faster** |
-| **Method Invocation** | 10μs | 200μs | **20x faster** |
-| **Range-For (100 elem)** | 28μs | 169μs | **6x faster** |
-| **Binary Search** | 22μs | 319μs | **14x faster** |
+| **Function Calls** | 4μs | 162μs | **40x faster** |
+| **Factorial(10)** | 9μs | 1560μs | **173x faster** |
+| **Fibonacci(6)** | 17μs | 3879μs | **228x faster** |
+| **Method Invocation** | 9μs | 170μs | **19x faster** |
+| **Range-For (100 elem)** | 23μs | 165μs | **7x faster** |
+| **Binary Search** | 20μs | 317μs | **16x faster** |
 | **Class Creation** | 7μs | 16μs | **2.3x faster** |
-| **Bubble Sort (10 elem)** | 118μs | 195μs | **1.7x faster** |
+| **Bubble Sort (10 elem)** | 82μs | 234μs | **2.9x faster** |
 
 ### Where ChaiScript Wins (Simple Operations)
 
 | Benchmark | JaiScript | ChaiScript | ChaiScript Speedup |
 |-----------|-----------|------------|-------------------|
-| For Loop (100 iter) | 17μs | 12μs | 1.4x faster |
+| For Loop (100 iter) | 15μs | 12μs | 1.25x faster |
 | Variable Lookup Heavy | 15μs | 10μs | 1.5x faster |
 | Variable Operations | 6μs | 5μs | ~Equal |
 | Integer Addition | 2μs | 2μs | Equal |
@@ -279,16 +311,18 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Loop Pattern | JaiScript | Notes |
 |--------------|-----------|-------|
-| For Loop (literal condition) | 17μs | Fast path: `i < 100` |
-| For Loop (expression condition) | 20μs | No fast path: `i < n` |
-| Range-For (copy, 100 elem) | 28μs | `for(auto x : arr)` |
-| Range-For (reference, 100 elem) | 40μs | `for(auto& x : arr)` |
-| Hot Loop (10x100 nested) | 81μs | Nested iteration scaling |
+| For Loop (literal condition) | 15μs | Fast path: `i < 100` |
+| For Loop (expression condition) | 17μs | Dynamic end: `i < n` |
+| Range-For (copy, 100 elem) | 23μs | `for(auto x : arr)` |
+| Range-For (reference, 100 elem) | 30μs | `for(auto& x : arr)` |
+| Hot Loop (10x100 nested) | 59μs | Nested iteration scaling |
+| Hot Loop (1000 iter) | 49μs | Single tight loop |
 
 **Loop Optimization Notes:**
-- Literal condition fast path saves ~15% (17μs vs 20μs)
+- Literal condition fast path saves ~12% (15μs vs 17μs)
 - Range-for with copy is faster than reference (no reference wrapper overhead)
-- JaiScript range-for is **6x faster** than ChaiScript's equivalent
+- JaiScript range-for is **7x faster** than ChaiScript's equivalent
+- All declaration types (auto/int/var) use unified fast path with equal performance
 
 ### Value Type Comparison (script_value vs BoxedValue)
 
@@ -306,20 +340,30 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Implementation | JaiScript | ChaiScript | Notes |
 |----------------|-----------|------------|-------|
-| Native Script TreeNode (15 nodes) | 700μs | **SKIPPED** | ChaiScript lacks null support for object fields |
-| C++ Bound TreeNode (15 nodes) | 115μs | 72μs | ChaiScript 1.6x faster with C++ FFI |
+| Native Script TreeNode (15 nodes) | 596μs | **SKIPPED** | ChaiScript lacks null support for object fields |
+| C++ Bound TreeNode (15 nodes) | 111μs | 72μs | ChaiScript 1.5x faster with C++ FFI |
+
+### String Operations Comparison
+
+| Operation | JaiScript | ChaiScript | Notes |
+|-----------|-----------|------------|-------|
+| String Copy (5 copies) | 19μs | 14μs | ChaiScript 1.4x faster |
+| String Concat (20 iter) | 18μs | 20μs | **JaiScript faster** |
+| String Methods (find/substr) | 18μs | 14μs | ChaiScript 1.3x faster |
+
+**Note:** JaiScript uses `shared_ptr<string>` for cheap value copies while maintaining fast concatenation.
 
 ### Key Insights
 
 1. **JaiScript's Strength: Function Calls & Recursion**
-   - ID-based lookups and optimized call stack give JaiScript **40-162x advantage** in function-heavy code
+   - ID-based lookups and optimized call stack give JaiScript **40-228x advantage** in function-heavy code
    - Recursive algorithms (factorial, fibonacci) show the biggest wins
-   - Method invocation is **20x faster** than ChaiScript
+   - Method invocation is **19x faster** than ChaiScript
 
 2. **ChaiScript's Strength: Tight Loops & Simple Ops**
-   - ChaiScript's for-loop is only **1.4x faster** now (gap closed from 8.4x)
+   - ChaiScript's for-loop is only **1.25x faster** now (gap closed from 8.4x)
    - Basic arithmetic and variable operations slightly faster
-   - Gap largely eliminated through dynamic_cast removal
+   - Gap largely eliminated through raw engine pointer + dynamic_cast removal
 
 3. **Language Features**
    - JaiScript supports proper `null` for object fields (tree structures work natively)
@@ -336,16 +380,16 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 ### Performance Profile
 
 **Excellent Performance:**
-- ✅ **Function/Method Calls**: 5-10μs - ID-based lookups + string interning eliminate overhead
-- ✅ **Recursion**: 11-21μs - Efficient stack frame management + cached symbol IDs + unchecked accessors
-- ✅ **Algorithms**: Fast execution for search (22μs), sort (118μs), and computational tasks
+- ✅ **Function/Method Calls**: 4-9μs - ID-based lookups + string interning eliminate overhead
+- ✅ **Recursion**: 9-17μs - Efficient stack frame management + cached symbol IDs + unchecked accessors
+- ✅ **Algorithms**: Fast execution for search (20μs), sort (82μs), and computational tasks
 - ✅ **Class Operations**: 7μs instantiation - ID-based field/method access
-- ✅ **For Loops**: ~170ns per iteration - get_type() + static_cast (no RTTI) + native C++ structure
-- ✅ **Hot Loops**: 76μs for 1000 iterations (~76ns per iteration)
+- ✅ **For Loops**: ~150ns per iteration - get_type() + static_cast (no RTTI) + native C++ structure
+- ✅ **Hot Loops**: 49μs for 1000 iterations (~49ns per iteration)
 
 **Adequate Performance:**
 - ⚪ **Simple Expressions**: 2-8μs - Good for event handlers and UI
-- ⚪ **Container Operations**: 14-18μs - Acceptable for game scripting use cases
+- ⚪ **Container Operations**: 13-19μs - Acceptable for game scripting use cases
 
 **Recommendations:**
 - Use JaiScript for game logic, events, AI, UI, and general scripting

@@ -303,6 +303,16 @@ namespace jai {
             return info;
         }
 
+        // shared_ptr<T>
+        static type_info make_shared_ptr(string_symbolizer& symbolizer, type_info_ptr pointee_type) {
+            type_info info(script_value_type::jai_shared_ptr_type);
+            info.type_params.push_back(pointee_type);
+            // Use inner type's name for canonical name (matches parser behavior)
+            info.type_name = pointee_type ? pointee_type->type_name : "shared_ptr";
+            info.id = symbolizer.intern(info.canonical_name());
+            return info;
+        }
+
         // T&
         static type_info make_reference(string_symbolizer& symbolizer, type_info_ptr referenced_type) {
             type_info info(script_value_type::jai_reference_type);

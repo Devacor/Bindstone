@@ -276,7 +276,7 @@ public:
                 }
             )");
             auto result = eng->execute(R"(
-                auto obj = shared_ptr<TestClass>(TestClass());
+                auto obj = shared_ptr<TestClass>();
                 obj = null;
                 obj == null
             )");
@@ -291,7 +291,7 @@ public:
                 }
             )");
             auto result = eng->execute(R"(
-                auto shared = shared_ptr<TestClass>(TestClass());
+                auto shared = shared_ptr<TestClass>();
                 auto weak = weak_ptr<TestClass>(shared);
                 shared = null;
                 weak.expired()

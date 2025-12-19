@@ -158,6 +158,26 @@ static std::string get_type_name(script_value_type type) {
     }
 }
 
+// Helper to get a human-readable type name from a script_value
+static std::string get_value_type_name(const script_value& val) {
+    auto type_info = val.get_type_info();
+    if (type_info && !type_info->type_name.empty()) {
+        return type_info->type_name;
+    }
+    return get_type_name(val.type());
+}
+
+// Helper to get type name from a type_info, falling back to base type
+static std::string get_type_info_name(type_info_ptr info) {
+    if (info && !info->type_name.empty()) {
+        return info->type_name;
+    }
+    if (info) {
+        return get_type_name(info->base_type);
+    }
+    return "unknown";
+}
+
 // Forward declaration for mutual recursion
 static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path = "");
 
@@ -206,13 +226,10 @@ static checked_result<void> validate_map_homogeneous(const script_value& map_val
 
         // Check base type match
         if (val_type != deduced_type) {
-            std::string val_type_name = get_type_name(val_type);
             return checked_result<void>(
                 make_error_code(runtime_error_code::map_value_type_mismatch),
-                "Map declared with 'auto' must have homogeneous values. "
-                "First value is '" + deduced_type_name + "' but value at index " +
-                std::to_string(idx) + " is '" + val_type_name + "'" +
-                (path.empty() ? "" : " at " + path));
+                "Map 'auto' requires homogeneous values - type mismatch at index {0}",
+                static_cast<uint64_t>(idx), val.type_id());
         }
 
         // For object types, also check class name match
@@ -222,10 +239,8 @@ static checked_result<void> validate_map_homogeneous(const script_value& map_val
             if (val_class_name != deduced_class_name) {
                 return checked_result<void>(
                     make_error_code(runtime_error_code::map_value_type_mismatch),
-                    "Map declared with 'auto' must have homogeneous values. "
-                    "First value is '" + deduced_class_name + "' but value at index " +
-                    std::to_string(idx) + " is '" + val_class_name + "'" +
-                    (path.empty() ? "" : " at " + path));
+                    "Map 'auto' requires homogeneous class types - mismatch at index {0}",
+                    static_cast<uint64_t>(idx), val.type_id());
             }
         }
 
@@ -280,13 +295,10 @@ static checked_result<void> validate_array_homogeneous(const script_value& array
 
         // Check base type match
         if (elem_type != deduced_type) {
-            std::string elem_type_name = get_type_name(elem_type);
             return checked_result<void>(
                 make_error_code(runtime_error_code::array_element_type_mismatch),
-                "Array declared with 'auto' must have homogeneous elements. "
-                "First element is '" + deduced_type_name + "' but element at index " +
-                std::to_string(i) + " is '" + elem_type_name + "'" +
-                (path.empty() ? "" : " at " + path));
+                "Array 'auto' requires homogeneous elements - type mismatch at index {0}",
+                static_cast<uint64_t>(i), elem.type_id());
         }
 
         // For object types, also check class name match
@@ -296,10 +308,8 @@ static checked_result<void> validate_array_homogeneous(const script_value& array
             if (elem_class_name != deduced_class_name) {
                 return checked_result<void>(
                     make_error_code(runtime_error_code::array_element_type_mismatch),
-                    "Array declared with 'auto' must have homogeneous elements. "
-                    "First element is '" + deduced_class_name + "' but element at index " +
-                    std::to_string(i) + " is '" + elem_class_name + "'" +
-                    (path.empty() ? "" : " at " + path));
+                    "Array 'auto' requires homogeneous class types - mismatch at index {0}",
+                    static_cast<uint64_t>(i), elem.type_id());
             }
         }
 
@@ -342,11 +352,16 @@ void interpreter::init_builtin_methods() {
 
         // Validate element type compatibility
         if (!is_element_type_compatible(args[0], element_type, self)) {
-            std::string expected = element_type ? get_type_name(element_type->base_type) : "unknown";
-            std::string actual = get_type_name(args[0].type());
+            // Get type names for error message
+            std::string value_type = get_value_type_name(args[0]);
+            std::string expected_type = get_type_info_name(element_type);
+            // Intern the type names for the error message
+            uint64_t value_type_id = interp->get_string_symbolizer()->intern(value_type);
+            uint64_t expected_type_id = interp->get_string_symbolizer()->intern(expected_type);
             return checked_result<script_value>(
                 make_error_code(runtime_error_code::array_element_type_mismatch),
-                "Cannot push '" + actual + "' to array<" + expected + ">");
+                "Cannot push '{0}' to array<{1}>",
+                value_type_id, expected_type_id);
         }
 
         // Convert element if needed (e.g., int -> float for array<float>)
@@ -1123,10 +1138,9 @@ checked_result<script_value> environment::get(uint64_t id) const {
         }
     }
 
-    // Not found anywhere
-    std::string name{symbolizer_->get_string(id)};
+    // Not found anywhere - id is already the interned variable name
     return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
+        "Undefined variable '{0}'", id);
 }
 
 checked_result<void> environment::assign(const std::string& name, const script_value& value) {
@@ -1196,10 +1210,9 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
         }
     }
 
-    std::string name{symbolizer_->get_string(id)};
     return checked_result<std::reference_wrapper<const script_value>>(
         make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
+        "Undefined variable '{0}'", id);
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(const std::string& name) {
@@ -1264,10 +1277,9 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
         }
     }
 
-    std::string name{symbolizer_->get_string(id)};
     return checked_result<std::reference_wrapper<script_value>>(
         make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
+        "Undefined variable '{0}'", id);
 }
 
 checked_result<void> environment::assign(const std::string& name, script_value&& value) {
@@ -1338,10 +1350,9 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
         }
     }
 
-    std::string name{symbolizer_->get_string(id)};
     return checked_result<void>(
         make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
+        "Undefined variable '{0}'", id);
 }
 
 checked_result<void> environment::assign(uint64_t id, script_value&& value) {
@@ -1407,10 +1418,9 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
         }
     }
 
-    std::string name{symbolizer_->get_string(id)};
     return checked_result<void>(
         make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '" + name + "'");
+        "Undefined variable '{0}'", id);
 }
 
 bool environment::contains(const std::string& name) const {
@@ -2048,9 +2058,12 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
             auto result = dispatch_decl(decl.get());
             if (!result) [[unlikely]] {
                 // Convert error code to exception at boundary
-                // Include the custom error message if available
+                // Include the custom error message if available, formatted with symbol resolution
                 if (!result.message().empty()) {
-                    throw std::system_error(result.error(), std::string(result.message()));
+                    auto formatted = format_error_message(result.message(),
+                        string_symbolizer_->get_string(result.symbol_id()),
+                        string_symbolizer_->get_string(result.symbol_id2()));
+                    throw std::system_error(result.error(), formatted);
                 } else {
                     throw std::system_error(result.error());
                 }
@@ -2115,7 +2128,13 @@ script_value interpreter::evaluate(expression_ptr expr) {
 script_value interpreter::get_variable(const std::string& name) const {
     auto result = environment_->get(name);
     if (!result) {
-        throw runtime_error(result.message().empty() ? result.error().message() : std::string(result.message()));
+        if (!result.message().empty()) {
+            auto formatted = format_error_message(result.message(),
+                string_symbolizer_->get_string(result.symbol_id()),
+                string_symbolizer_->get_string(result.symbol_id2()));
+            throw runtime_error(formatted);
+        }
+        throw runtime_error(result.error().message());
     }
     return result.value().deref();
 }
@@ -2253,8 +2272,9 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         }
 
         // Use error code instead of exception state - include variable name for debugging
+        uint64_t name_id = string_symbolizer_->intern(expr->name);
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-            "Undefined variable '" + expr->name + "'");
+            "Undefined variable '{0}'", name_id);
     }
     return checked_result<void>();
 }
@@ -2692,7 +2712,9 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             const auto& array = left.unchecked_as_array();
 
             if (index < 0 || index >= static_cast<script_int>(array.size())) {
-                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds), "Array index " + std::to_string(index) + " out of bounds for array of size " + std::to_string(array.size()));
+                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
+                    "Array index {0} out of bounds for array of size {1}",
+                    static_cast<uint64_t>(index), static_cast<uint64_t>(array.size()));
             }
 
             // Check if the left side is an lvalue (variable, member access, or subscript)
@@ -2967,8 +2989,9 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                             }
                         }
                     }
+                    uint64_t name_id = string_symbolizer_->intern(identifier->name);
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Undefined variable '" + identifier->name + "'");
+                        "Undefined variable '{0}'", name_id);
                 }
             } else {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target));
@@ -3234,7 +3257,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 auto this_result = environment_->get(string_symbolizer_->get_this_id());
                 if (!this_result || !this_result.value().is_object()) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Undefined variable '" + identifier->name + "' (no 'this' in scope)");
+                        "Undefined variable '{0}' (no 'this' in scope)", identifier->symbol_id);
                 }
 
                 script_value this_val = std::move(this_result.value());
@@ -3245,7 +3268,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 if (!instance || !instance->has_field(identifier->symbol_id)) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Undefined variable '" + identifier->name + "' (not a field of 'this')");
+                        "Undefined variable '{0}' (not a field of 'this')", identifier->symbol_id);
                 }
 
                 // Get current field value
@@ -3655,6 +3678,35 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // Assign another weak_ptr
                         JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
                     } else if (value.type() == script_value_type::jai_shared_ptr_type) {
+                        // Validate type parameter - weak_ptr<T> should only accept shared_ptr<T> or subclass
+                        auto weak_type_info = currentVal->get_type_info();
+                        auto expected_type = weak_type_info ? weak_type_info->element_type() : nullptr;
+                        auto value_type_info = value.get_type_info();
+                        if (expected_type && value_type_info &&
+                            expected_type->base_type != script_value_type::jai_any_type) {
+                            std::string expected_class = expected_type->type_name;
+                            std::string actual_class = value_type_info->element_type()
+                                ? value_type_info->element_type()->type_name
+                                : value_type_info->type_name;
+
+                            if (expected_class != actual_class) {
+                                auto eng = engine_ref_.lock();
+                                if (eng) {
+                                    auto actual_def = eng->get_class_definition(actual_class);
+                                    if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
+                                        uint64_t expected_id = expected_type->id;
+                                        uint64_t actual_id = value_type_info->element_type()
+                                            ? value_type_info->element_type()->id
+                                            : value_type_info->id;
+                                        return checked_result<void>(
+                                            make_error_code(runtime_error_code::type_mismatch),
+                                            "Cannot assign shared_ptr<{}> to weak_ptr<{}>: type must match or be a subclass",
+                                            actual_id, expected_id);
+                                    }
+                                }
+                            }
+                        }
+
                         // Convert shared_ptr to weak_ptr
                         auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
                         if (!weak_result) {
@@ -3664,72 +3716,129 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     } else if (value.type() == script_value_type::jai_object_type) {
                         // Helpful error for value-semantic objects
                         auto type_info = currentVal->get_type_info();
-                        std::string weak_type = type_info && !type_info->type_params.empty() ?
-                            "weak_ptr<" + type_info->type_params[0]->type_name + ">" : "weak_ptr";
+                        uint64_t weak_type_id = (type_info && !type_info->type_params.empty())
+                            ? type_info->type_params[0]->id : 0;
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign value-semantic object to " + weak_type + ". Use shared_ptr<T> to enable reference semantics.");
+                            "Cannot assign value-semantic object to weak_ptr<{}>: use shared_ptr<T>",
+                            weak_type_id);
                     } else {
                         auto type_info = value.get_type_info();
-                        std::string type_name = type_info ? type_info->type_name : "unknown";
+                        uint64_t actual_type_id = type_info ? type_info->id : 0;
                         auto weak_type_info = currentVal->get_type_info();
-                        std::string weak_type = weak_type_info && !weak_type_info->type_params.empty() ?
-                            "weak_ptr<" + weak_type_info->type_params[0]->type_name + ">" : "weak_ptr";
+                        uint64_t weak_type_id = (weak_type_info && !weak_type_info->type_params.empty())
+                            ? weak_type_info->type_params[0]->id : 0;
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign " + type_name + " to " + weak_type + ". Use shared_ptr<T> to enable reference semantics.");
+                            "Cannot assign {} to weak_ptr<{}>: use shared_ptr<T>",
+                            actual_type_id, weak_type_id);
                     }
                 } else if (currentVal && currentVal->get_type_info() &&
                           currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
-                    // Special handling for shared_ptr assignment
+                    // Special handling for shared_ptr<T> assignment with auto-unwrap semantics
+                    // See TYPE_SYSTEM_DESIGN.md "Assignment Semantics" section
+                    auto ptr_type_info = currentVal->get_type_info();
+                    auto expected_type = ptr_type_info->element_type();
+                    std::string expected_type_name = expected_type ? expected_type->type_name : "";
+
                     if (value.is_null()) {
-                        // Assign null - that's fine
+                        // POINTER OP: Nullify pointer
                         JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
                     } else if (value.is_weak_ptr()) {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
-                    } else if (value.type() == script_value_type::jai_object_type) {
-                        // FIX #6: Check type parameter compatibility for shared_ptr<T>
-                        auto ptr_type_info = currentVal->get_type_info();
-                        if (!ptr_type_info->type_params.empty()) {
-                            auto expected_type = ptr_type_info->type_params[0];
-                            auto actual_type = value.get_type_info();
-                            std::string actual_type_name = actual_type ? actual_type->type_name : "unknown";
+                    } else if (value.get_type_info() &&
+                              value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+                        // POINTER OP: shared_ptr<U> to shared_ptr<T> - polymorphic reassignment
+                        auto value_type_info = value.get_type_info();
+                        auto value_element = value_type_info->element_type();
+                        std::string actual_type_name = value_element ? value_element->type_name : "";
 
-                            // Check if types are compatible (same type or inheritance)
-                            bool compatible = (actual_type_name == expected_type->type_name);
-
-                            // TODO #7: Check inheritance hierarchy here
-                            // For now, just check exact type match
-                            if (!compatible && actual_type) {
-                                // Try to get class definition and check inheritance
-                                if (auto eng = engine_ref_.lock()) {
-                                    auto actual_class = eng->get_class_definition(actual_type_name);
-                                    if (actual_class) {
-                                        auto parent = actual_class->get_parent();
-                                        while (parent && !compatible) {
-                                            if (parent->get_name() == expected_type->type_name) {
-                                                compatible = true;
-                                            }
-                                            parent = parent->get_parent();
-                                        }
-                                    }
+                        // Check type compatibility (same type or derived)
+                        bool compatible = (actual_type_name == expected_type_name);
+                        if (!compatible && !actual_type_name.empty()) {
+                            if (auto eng = engine_ref_.lock()) {
+                                auto actual_class = eng->get_class_definition(actual_type_name);
+                                if (actual_class && actual_class->is_subtype_of(expected_type_name)) {
+                                    compatible = true;
                                 }
-                            }
-
-                            if (!compatible) {
-                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                                    "Cannot assign " + actual_type_name + " to shared_ptr<" + expected_type->type_name + ">");
                             }
                         }
 
-                        // Assign object to shared_ptr - update the value but keep the shared_ptr type info
-                        auto type_info = currentVal->get_type_info();
-                        value.set_type_info(type_info);
+                        if (!compatible) {
+                            uint64_t actual_id = value_element ? value_element->id : 0;
+                            uint64_t expected_id = expected_type ? expected_type->id : 0;
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                                "Cannot assign shared_ptr<{0}> to shared_ptr<{1}>", actual_id, expected_id);
+                        }
+
+                        // Compatible - reassign pointer (keep target's type info for polymorphism)
+                        value.set_type_info(ptr_type_info);
                         JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
                     } else {
+                        // VALUE OP: Auto-unwrap - delegate to underlying object
+                        // Equivalent to: *currentVal = value (like C++ dereference + assign)
+
+                        // Get the underlying class instance
+                        auto holder = currentVal->get_object_holder();
+                        if (!holder || !holder->data) {
+                            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
+                                "Cannot assign to null shared_ptr");
+                        }
+
+                        auto instance = holder->is_class_instance_wrapper
+                            ? std::static_pointer_cast<class_instance>(holder->data)
+                            : nullptr;
+                        if (!instance) {
+                            // Not a class instance wrapper (e.g., raw C++ object not registered via class_builder)
+                            auto type_info = value.get_type_info();
+                            uint64_t type_id = type_info ? type_info->id : 0;
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                                "Cannot assign {0} to shared_ptr - object is not a class instance", type_id);
+                        }
+
+                        // Get source type info
+                        auto source_type_info = value.get_type_info();
+                        std::string source_type_name = source_type_info ? source_type_info->type_name : "unknown";
+
+                        // Case 1: Same underlying type (T = T) - copy the object's fields
+                        if (source_type_name == expected_type_name) {
+                            if (value.type() == script_value_type::jai_object_type ||
+                                value.type() == script_value_type::jai_shared_ptr_type) {
+                                // Copy fields from source to target (deep copy semantics for the contents)
+                                auto source_holder = const_cast<script_value&>(value).get_object_holder();
+                                if (source_holder && source_holder->data && source_holder->is_class_instance_wrapper) {
+                                    auto source_instance = std::static_pointer_cast<class_instance>(source_holder->data);
+                                    if (source_instance) {
+                                        // Copy all fields from source to target
+                                        instance->copy_fields_from(*source_instance);
+                                        return checked_result<void>();
+                                    }
+                                }
+                            }
+                            // Fallthrough to operator= check
+                        }
+
+                        // Case 2: Different type - try operator=
+                        script_value method = instance->get_method(assign_operator_id_, false);
+                        if (method.is_function()) {
+                            // Found operator= method - call it with the source value
+                            const script_function& func = method.as_function();
+                            std::vector<script_value> args;
+                            args.push_back(*currentVal);  // 'this' - the shared_ptr (transparent access)
+                            args.push_back(std::move(value));  // the value being assigned
+                            auto result = func(args);
+                            if (result) {
+                                // Operator= succeeded - underlying object was modified in place
+                                return checked_result<void>();
+                            }
+                            return checked_result<void>(result.error(), "operator= failed");
+                        }
+
+                        // No operator= found - type error
                         auto type_info = value.get_type_info();
-                        std::string type_name = type_info ? type_info->type_name : "unknown";
+                        uint64_t type_id = type_info ? type_info->id : 0;
+                        uint64_t expected_id = expected_type ? expected_type->id : 0;
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign " + type_name + " to shared_ptr");
+                            "Cannot assign {0} to shared_ptr<{1}>: no operator=({0}) defined", type_id, expected_id);
                     }
                 } else {
                     // Regular variable assignment with STRONG TYPES enforcement
@@ -3926,24 +4035,25 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 
                 std::string class_name = ident_expr->name;
 
+                uint64_t class_name_id = ident_expr->symbol_id;
                 auto class_result = environment_->get("__class_" + class_name);
                 if (!class_result) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Class '" + class_name + "' not found");
+                        "Class '{0}' not found", class_name_id);
                 }
                 script_value class_var = std::move(class_result.value());
 
                 if (!class_var.is_object()) {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                        "'" + class_name + "' is not a class");
+                        "'{0}' is not a class", class_name_id);
                 }
 
                 auto objHolder = class_var.get_object_holder();
                 if (!objHolder || objHolder->type_name != "class_definition") {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                        "'" + class_name + "' is not a valid class");
+                        "'{0}' is not a valid class", class_name_id);
                 }
-                
+
                 auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
                 // Evaluate the value
@@ -3953,7 +4063,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Set the static field
                 if (!class_def->set_static_field(memberExpr->member_id, value.clone())) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Cannot assign to static member: field '" + memberExpr->member + "' not found");
+                        "Cannot assign to static member: field '{0}' not found", memberExpr->member_id);
                 }
 
 
@@ -4041,11 +4151,16 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (element_type) {
                         // Validate element type compatibility
                         if (!is_element_type_compatible(value, element_type, *target_ptr)) {
-                            std::string expected = get_type_name(element_type->base_type);
-                            std::string actual = get_type_name(value.type());
+                            // Get type names for error message
+                            std::string value_type = get_value_type_name(value);
+                            std::string expected_type = get_type_info_name(element_type);
+                            // Intern the type names for the error message
+                            uint64_t value_type_id = string_symbolizer_->intern(value_type);
+                            uint64_t expected_type_id = string_symbolizer_->intern(expected_type);
                             return checked_result<void>(
                                 make_error_code(runtime_error_code::array_element_type_mismatch),
-                                "Cannot assign '" + actual + "' to element of type '" + expected + "'");
+                                "Cannot assign '{0}' to element of type '{1}'",
+                                value_type_id, expected_type_id);
                         }
                         // Convert element if needed (e.g., int -> float for array<float>)
                         script_value converted = convert_array_element(this, value, element_type);
@@ -4170,6 +4285,34 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 // Initialize with another weak_ptr - copy it
                 environment_->define(decl->name_id, std::move(value));
             } else if (value.type() == script_value_type::jai_shared_ptr_type) {
+                // Validate type parameter - weak_ptr<T> should only accept shared_ptr<T> or subclass
+                auto expected_type = decl->type ? decl->type->element_type() : nullptr;
+                auto value_type_info = value.get_type_info();
+                if (expected_type && value_type_info &&
+                    expected_type->base_type != script_value_type::jai_any_type) {
+                    std::string expected_class = expected_type->type_name;
+                    std::string actual_class = value_type_info->element_type()
+                        ? value_type_info->element_type()->type_name
+                        : value_type_info->type_name;
+
+                    if (expected_class != actual_class) {
+                        auto eng = engine_ref_.lock();
+                        if (eng) {
+                            auto actual_def = eng->get_class_definition(actual_class);
+                            if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
+                                uint64_t expected_id = expected_type->id;
+                                uint64_t actual_id = value_type_info->element_type()
+                                    ? value_type_info->element_type()->id
+                                    : value_type_info->id;
+                                return checked_result<void>(
+                                    make_error_code(runtime_error_code::type_mismatch),
+                                    "Cannot initialize weak_ptr<{}> from shared_ptr<{}>: type must match or be a subclass",
+                                    expected_id, actual_id);
+                            }
+                        }
+                    }
+                }
+
                 // Initialize with shared_ptr - create weak_ptr from it
                 auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
                 if (!weak_result) {
@@ -4179,18 +4322,20 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             } else if (value.type() == script_value_type::jai_object_type) {
                 // Helpful error for value-semantic objects
                 auto type_info = decl->type;
-                std::string weak_type = type_info && !type_info->type_params.empty() ?
-                    "weak_ptr<" + type_info->type_params[0]->type_name + ">" : "weak_ptr";
+                uint64_t weak_type_id = (type_info && !type_info->type_params.empty())
+                    ? type_info->type_params[0]->id : 0;
                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                    "Cannot initialize " + weak_type + " from a value-semantic object. Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<T>(...); auto weak = weak_ptr<T>(obj);");
+                    "Cannot initialize weak_ptr<{}> from value-semantic object: use shared_ptr<T>",
+                    weak_type_id);
             } else {
                 auto type_info = value.get_type_info();
-                std::string type_name = type_info ? type_info->type_name : "unknown";
+                uint64_t actual_type_id = type_info ? type_info->id : 0;
                 auto weak_type_info = decl->type;
-                std::string weak_type = weak_type_info && !weak_type_info->type_params.empty() ?
-                    "weak_ptr<" + weak_type_info->type_params[0]->type_name + ">" : "weak_ptr";
+                uint64_t weak_type_id = (weak_type_info && !weak_type_info->type_params.empty())
+                    ? weak_type_info->type_params[0]->id : 0;
                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                    "Cannot initialize " + weak_type + " with " + type_name + ". Use shared_ptr<T> to enable reference semantics.");
+                    "Cannot initialize weak_ptr<{}> with {}: use shared_ptr<T>",
+                    weak_type_id, actual_type_id);
             }
         }
     } else if (is_shared_ptr) {
@@ -4857,19 +5002,19 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             // These functions take no arguments
             if (!expr->arguments.empty()) {
                 return checked_result<void>(make_error_code(runtime_error_code::argument_count_mismatch),
-                    ident_expr->name + "() takes no arguments");
+                    "{0}() takes no arguments", ident_expr->symbol_id);
             }
 
             // Get 'this' from the current environment
             auto this_result = environment_->get(string_symbolizer_->get_this_id());
             if (!this_result) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                    ident_expr->name + "() can only be called from within a method");
+                    "{0}() can only be called from within a method", ident_expr->symbol_id);
             }
             script_value this_val = std::move(this_result.value());
             if (!this_val.is_object()) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                    ident_expr->name + "() can only be called from within a method");
+                    "{0}() can only be called from within a method", ident_expr->symbol_id);
             }
 
             if (ident_expr->symbol_id == weak_from_this_id_) {
@@ -5117,7 +5262,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
                     // Neither namespace nor class has matching method
                     return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
-                        "No matching function overload in namespace '" + name + "' for " + std::to_string(args.size()) + " arguments");
+                        "No matching overload in namespace '{0}' for {1} arguments",
+                        namespace_id, static_cast<uint64_t>(args.size()));
                 };
 
                 push_value(script_value::make_function(namespace_func, engine_ref_));
@@ -5206,7 +5352,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
         // Class has no static member
         return checked_result<void>(make_error_code(runtime_error_code::static_member_not_found),
-            "Class '" + name + "' has no static member '" + expr->member + "'");
+            "Class '{0}' has no static member '{1}'", name_id, expr->member_id);
     }
 
     // Check if this is a super:: member access
@@ -5259,7 +5405,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         if (method.is_null()) {
             // Parent class has no method
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
-                "Parent class has no method '" + expr->member + "'");
+                "Parent class has no method '{0}'", expr->member_id);
         }
 
         // Return a bound method that calls the parent's implementation
@@ -5335,7 +5481,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         else {
             // Map has no method
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
-                "Map has no method '" + expr->member + "'");
+                "Map has no method '{0}'", expr->member_id);
         }
     }
 
@@ -5357,7 +5503,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         else {
             // weak_ptr has no method
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
-                "weak_ptr has no method '" + expr->member + "'");
+                "weak_ptr has no method '{0}'", expr->member_id);
         }
     }
 
@@ -5637,7 +5783,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     } else {
                         // Cannot capture variable by reference
                         return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
-                            "Cannot capture variable '" + capture.name + "' by reference");
+                            "Cannot capture variable '{0}' by reference", capture.symbol_id);
                     }
                 } else {
                     // Capture by value - deep copy at capture time
@@ -5650,7 +5796,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             } else {
                 // Cannot capture undefined variable
                 return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
-                    "Cannot capture undefined variable '" + capture.name + "'");
+                    "Cannot capture undefined variable '{0}'", capture.symbol_id);
             }
         }
 
@@ -5826,17 +5972,54 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
             // Check if obj is a shared_ptr (required for weak_ptr)
             if (obj.type() != script_value_type::jai_shared_ptr_type) {
+                // Get expected type ID for error context
+                uint64_t expected_id = (expr->type && !expr->type->type_params.empty())
+                    ? expr->type->type_params[0]->id : 0;
+
                 if (obj.type() == script_value_type::jai_object_type) {
                     // Helpful error for value-semantic objects
                     return checked_result<void>(
                         make_error_code(runtime_error_code::type_mismatch),
-                        "Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T>: auto obj = shared_ptr<" + expr->type->type_params[0]->type_name + ">(...); auto weak = weak_ptr<" + expr->type->type_params[0]->type_name + ">(obj);");
+                        "Cannot create weak_ptr from value-semantic object. Use shared_ptr<T>.",
+                        expected_id);
                 } else {
                     auto type_info = obj.get_type_info();
-                    std::string type_name = type_info ? type_info->type_name : "unknown";
+                    uint64_t actual_id = type_info ? type_info->id : 0;
                     return checked_result<void>(
                         make_error_code(runtime_error_code::type_mismatch),
-                        "Cannot create weak_ptr from " + type_name + ". Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<" + expr->type->type_params[0]->type_name + ">(...); auto weak = weak_ptr<" + expr->type->type_params[0]->type_name + ">(obj);");
+                        "Cannot create weak_ptr from non-shared_ptr type. Use shared_ptr<T>.",
+                        expected_id, actual_id);
+                }
+            }
+
+            // Validate type parameter - weak_ptr<T> should only accept shared_ptr<T> or subclass
+            // Skip validation for weak_ptr<var> (any type)
+            auto expected_type = expr->type->element_type();
+            auto obj_type_info = obj.get_type_info();
+            if (expected_type && obj_type_info &&
+                expected_type->base_type != script_value_type::jai_any_type) {
+                // Get the actual class name from the shared_ptr's inner type
+                std::string expected_class = expected_type->type_name;
+                std::string actual_class = obj_type_info->element_type()
+                    ? obj_type_info->element_type()->type_name
+                    : obj_type_info->type_name;
+
+                // Check if types match or if actual is a subclass of expected
+                if (expected_class != actual_class) {
+                    auto eng = engine_ref_.lock();
+                    if (eng) {
+                        auto actual_def = eng->get_class_definition(actual_class);
+                        if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
+                            uint64_t expected_id = expected_type->id;
+                            uint64_t actual_id = obj_type_info->element_type()
+                                ? obj_type_info->element_type()->id
+                                : obj_type_info->id;
+                            return checked_result<void>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "weak_ptr type mismatch: type must match or be a subclass",
+                                expected_id, actual_id);
+                        }
+                    }
                 }
             }
 
@@ -5854,49 +6037,78 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
     }
     
     if (expr->type->base_type == script_value_type::jai_shared_ptr_type) {
-        // shared_ptr<T>() or shared_ptr<T>(obj) constructor
-        // shared_ptr is now a TYPE MARKER only - it affects cloning behavior, not storage
+        // shared_ptr<T>(args...) - forward args to T's constructor, then mark as shared_ptr
+        // This is like C++ make_shared - args go directly to T's constructor
+        // shared_ptr is a TYPE MARKER only - it affects cloning behavior, not storage
 
         if (expr->arguments.empty()) {
-            // No arguments - create empty shared_ptr (null)
-            push_value(make_value());
-        } else if (expr->arguments.size() == 1) {
-            // One argument - mark it as shared_ptr type
-            JAISCRIPT_TRY(dispatch_expr(expr->arguments[0].get()));
-            script_value value = pop_value();
-
-            // Handle null
-            if (value.is_null()) {
-                push_value(value);
+            // No arguments - call T's default constructor
+            auto inner_type = expr->type->element_type();
+            if (!inner_type) {
+                // shared_ptr with no type parameter and no args - create null
+                push_value(make_value());
                 return {};
             }
+            std::string innerTypeName = inner_type->type_name;
 
-            // Cannot create shared_ptr from weak_ptr directly
-            if (value.is_weak_ptr()) {
-                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
+            // Look up T's constructor
+            auto ctor_result = environment_->get(innerTypeName);
+            if (!ctor_result || !ctor_result.value().is_function()) {
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                    "No constructor found for class '{0}'", inner_type->id);
             }
 
-            // If it's already a shared_ptr, just return it
-            if (value.get_type_info() && value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
-                push_value(std::move(value));
-                return {};
+            script_value constructorFunc = std::move(ctor_result.value());
+            const script_function& func = constructorFunc.as_function();
+            auto result = func({});  // Call with no args
+            if (!result) {
+                return result.error_value();
             }
 
-            // For objects, just mark as shared_ptr type (no wrapping needed)
-            // Objects are already stored as shared_ptr<object_holder>
+            script_value value = std::move(result.value());
+            // Mark as shared_ptr type
             if (value.type() == script_value_type::jai_object_type) {
-                value.set_type_info(expr->type);  // Mark as shared_ptr<T>
-                push_value(std::move(value));
-                return {};
+                value.set_type_info(expr->type);
             }
-
-            // Primitives, arrays, maps, and functions not supported yet
-            // TODO: Add primitive wrapping support later if needed
-            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] shared_ptr only supports objects currently
-        } else {
-            // shared_ptr() expects 0 or 1 arguments
-            return checked_result<void>(make_error_code(runtime_error_code::argument_count_mismatch));  // [ErrorText] Invalid argument count
+            push_value(std::move(value));
+            return {};
         }
+
+        // Has arguments - forward them to T's constructor
+        auto inner_type = expr->type->element_type();
+        if (!inner_type) {
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                "shared_ptr requires a type parameter when called with arguments");
+        }
+        std::string innerTypeName = inner_type->type_name;
+
+        // Evaluate all arguments
+        std::vector<script_value> args;
+        for (const auto& argExpr : expr->arguments) {
+            JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+            args.push_back(std::move(pop_value()));
+        }
+
+        // Look up T's constructor
+        auto ctor_result = environment_->get(innerTypeName);
+        if (!ctor_result || !ctor_result.value().is_function()) {
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                "No constructor found for class '{0}'", inner_type->id);
+        }
+
+        script_value constructorFunc = std::move(ctor_result.value());
+        const script_function& func = constructorFunc.as_function();
+        auto result = func(args);
+        if (!result) {
+            return result.error_value();
+        }
+
+        script_value value = std::move(result.value());
+        // Mark as shared_ptr type
+        if (value.type() == script_value_type::jai_object_type) {
+            value.set_type_info(expr->type);
+        }
+        push_value(std::move(value));
         return {};
     }
     
@@ -5926,7 +6138,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
     // No constructor found for class
     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-        "No constructor found for class '" + className + "'");
+        "No constructor found for class '{0}'", expr->type->id);
 }
 
 checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
@@ -6741,7 +6953,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
 
     if (!try_result) {
         // Checked_result error - treat as catchable exception
-        std::string error_msg = std::string(try_result.message());
+        std::string error_msg = format_error(try_result, *string_symbolizer_);
         active_exception_value_ = make_value(error_msg);
         current_exception_ = script_exception(error_msg);
         caught_error = true;
@@ -7067,20 +7279,24 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     } else if (environment_->contains(base_name)) {
                         // Constructor exists but no class definition found
                         // This shouldn't happen with proper engine integration
+                        uint64_t base_id = string_symbolizer_->intern(base_name);
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Constructor found for '" + base_name + "' but no class definition available");
+                            "Constructor found for '{0}' but no class definition available", base_id);
                     } else {
+                        uint64_t base_id = string_symbolizer_->intern(base_name);
                         return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
-                            "Base class '" + base_name + "' not found");
+                            "Base class '{0}' not found", base_id);
                     }
                 } else {
                     // No class lookup callback set - check if constructor exists
                     if (environment_->contains(base_name)) {
+                        uint64_t base_id = string_symbolizer_->intern(base_name);
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Script class inheriting from C++ class '" + base_name + "' requires engine integration");
+                            "Script class inheriting from C++ class '{0}' requires engine integration", base_id);
                     } else {
+                        uint64_t base_id = string_symbolizer_->intern(base_name);
                         return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
-                            "Base class '" + base_name + "' not found");
+                            "Base class '{0}' not found", base_id);
                     }
                 }
             }
@@ -8039,12 +8255,11 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         
         // If there are still undefined identifiers, throw an error
         if (!undefined_identifiers.empty()) {
-            std::string error_msg = "Undefined identifiers in class '" + decl->name + "': ";
-            for (size_t i = 0; i < undefined_identifiers.size(); ++i) {
-                if (i > 0) error_msg += ", ";
-                error_msg += "'" + undefined_identifiers[i] + "'";
-            }
-            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), error_msg);
+            // Use class name_id and first undefined identifier for error context
+            uint64_t class_id = (decl->name_id != UINT64_MAX) ? decl->name_id : string_symbolizer_->intern(decl->name);
+            uint64_t first_undef_id = string_symbolizer_->intern(undefined_identifiers[0]);
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                "Undefined identifier '{0}' in class '{1}'", first_undef_id, class_id);
         }
     }
 
@@ -8101,11 +8316,10 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 if ((*it)->parameters.size() == func_decl->parameters.size()) {
                     // Collision detected!
                     if (!func_decl->is_override) {
-                        std::string error_msg = "Function '" + func_decl->name + "' with " +
-                                              std::to_string(func_decl->parameters.size()) +
-                                              " parameters already exists in namespace '" + decl->name +
-                                              "'. Use 'override' keyword to replace it.";
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), error_msg);
+                        // func_decl->name_id already interned at line 8216
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
+                            func_decl->name_id, decl->name_id);
                     }
                     // Override is specified - remove old definition
                     overloads.erase(it);
@@ -8127,12 +8341,9 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
 
                             // Arity-aware collision check
                             if (class_def->has_static_method_with_arity(func_decl->name_id, func_decl->parameters.size())) {
-                                std::string error_msg = "Function '" + func_decl->name + "' with " +
-                                                      std::to_string(func_decl->parameters.size()) +
-                                                      " parameters in namespace '" + decl->name +
-                                                      "' collides with static method in class '" + decl->name +
-                                                      "'. Use 'override' keyword to override the class static method.";
-                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), error_msg);
+                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                                    "Function '{0}' in namespace '{1}' collides with static method. Use 'override' to override.",
+                                    func_decl->name_id, decl->name_id);
                             }
                         }
                     }
@@ -8418,7 +8629,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::max_recursion_depth),
-            "Maximum recursion depth (" + std::to_string(JAI_MAX_CALL_DEPTH) + ") exceeded - possible infinite recursion"
+            "Maximum recursion depth ({0}) exceeded - possible infinite recursion",
+            static_cast<uint64_t>(JAI_MAX_CALL_DEPTH)
         );
     }
 
@@ -8433,8 +8645,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     if (function.parameters.size() != args.size()) {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::argument_count_mismatch),
-            "Function expected " + std::to_string(function.parameters.size()) +
-            " arguments but got " + std::to_string(args.size())
+            "Function expected {0} arguments but got {1}",
+            static_cast<uint64_t>(function.parameters.size()), static_cast<uint64_t>(args.size())
         );
     }
 
@@ -8921,9 +9133,8 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
                         // No constructor directly accepts the source type - don't allow chained conversion
                         return checked_result<script_value>(
                             make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot convert " + get_type_name(source_type) +
-                            " to " + target_class_name +
-                            " (no suitable single-argument constructor)");
+                            "Cannot convert {0} to {1} (no suitable single-argument constructor)",
+                            derefed_arg.type_id(), target_type->id);
                     }
                 }
             }
@@ -8949,9 +9160,8 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         // No suitable constructor found
         return checked_result<script_value>(
             make_error_code(runtime_error_code::type_mismatch),
-            "Cannot convert " + get_type_name(source_type) +
-            " to " + target_class_name +
-            " (no suitable single-argument constructor)");
+            "Cannot convert {0} to {1} (no suitable single-argument constructor)",
+            derefed_arg.type_id(), target_type->id);
     }
 
     // Built-in type conversions
@@ -9003,8 +9213,8 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
     // Type mismatch - return error
     return checked_result<script_value>(
         make_error_code(runtime_error_code::type_mismatch),
-        "Type mismatch: expected " + target_type->type_name +
-        " but got " + get_type_name(source_type));
+        "Type mismatch: expected {0} but got {1}",
+        target_type->id, derefed_arg.type_id());
 }
 
 script_value interpreter::make_function(std::shared_ptr<script_defined_function> func) {

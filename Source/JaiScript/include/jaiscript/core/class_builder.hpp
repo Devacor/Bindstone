@@ -176,6 +176,15 @@ public:
     // Deep copy this instance
     std::shared_ptr<class_instance> deep_copy() const;
 
+    // Copy all fields from another instance (for shared_ptr auto-unwrap assignment)
+    // Used when assigning same-type object contents: shared_ptr<T> a; a = T(); copies T's fields into *a
+    void copy_fields_from(const class_instance& other) {
+        for (const auto& [id, value] : other.fields_) {
+            // Clone each field to maintain value semantics within the object
+            fields_.insert_or_assign(id, value.clone());
+        }
+    }
+
     // Helper to get the CPP_OBJECT_FIELD ID (cached for performance)
     // Implemented after class_definition is complete
     uint64_t get_cpp_object_field_id() const;
@@ -281,10 +290,9 @@ public:
             // Create/update dispatcher that selects overload by argument count
             // Use shared_from_this() to safely capture access to the overloads map
             std::weak_ptr<class_definition> class_def_weak = shared_from_this();
-            auto method_name = name;  // Capture for error messages
 
             methods_.insert_or_assign(name_id, script_value::make_function(
-                [class_def_weak, name_id, method_name](const std::vector<script_value>& args) -> checked_result<script_value> {
+                [class_def_weak, name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
                     auto class_def = class_def_weak.lock();
                     if (!class_def) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::class_not_found),
@@ -301,15 +309,10 @@ public:
                         return it->second(args);
                     }
 
-                    // Build error message with available arities
-                    std::string available;
-                    for (const auto& [ar, fn] : overloads_for_name) {
-                        if (!available.empty()) available += ", ";
-                        available += std::to_string(ar);
-                    }
+                    // No matching overload found for this argument count
                     return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                                                        "Method '" + method_name + "' expects " + available +
-                                                        " arguments, got " + std::to_string(script_arg_count));
+                                                        "Method argument count mismatch: no overload accepts this number of arguments",
+                                                        name_id);
                 },
                 engine_ref_
             ));

@@ -176,17 +176,14 @@ var arr2 = arr1;          // Deep copy - including all Points
 arr2[0].x = 99;           // Only affects arr2's first Point
 ```
 
-## Implementation Status
+## Semantics Summary
 
-- [x] Container deep copying (arrays and maps) - **Completed 2025**
-- [x] Deep copy is now default behavior like C++ - **Completed 2025**
-- [x] Reference support with `&` syntax - **Completed 2025**
-- [x] weak_ptr support added - **Completed 2025**
-- [x] shared_ptr support maintained - **Completed 2025**
-- [x] Updated script_value copy constructor - **Completed 2025**
-- [ ] Polymorphic type registry in engine
-- [ ] base_class() method enhancement
-- [ ] Comprehensive test suite for deep copy behavior
+JaiScript implements:
+- Container deep copying (arrays and maps)
+- Deep copy as default behavior, matching C++ semantics
+- Reference support with `&` syntax for explicit aliasing
+- `weak_ptr<T>` support for non-owning references
+- `shared_ptr<T>` for ownership semantics
 
 ## Migration Notes
 

@@ -88,7 +88,7 @@ namespace jai {
         struct ast_literal_tag {};
         script_value(ast_literal_tag, script_int i) : type_info_(nullptr), storage_(i) {}
         script_value(ast_literal_tag, script_float f) : type_info_(nullptr), storage_(f) {}
-        script_value(ast_literal_tag, const script_string& s) : type_info_(nullptr), storage_(s) {}
+        script_value(ast_literal_tag, const script_string& s) : type_info_(nullptr), storage_(std::make_shared<script_string>(s)) {}
         script_value(ast_literal_tag, script_char c) : type_info_(nullptr), storage_(c) {}
         script_value(ast_literal_tag, script_bool b) : type_info_(nullptr), storage_(b) {}
         script_value(ast_literal_tag, std::monostate) : type_info_(nullptr), storage_(std::monostate{}) {}
@@ -356,12 +356,12 @@ namespace jai {
         }
 
         inline const script_string& unchecked_as_string() const noexcept {
-            return *std::get_if<TYPEID_STRING>(&storage_);
+            return **std::get_if<TYPEID_STRING>(&storage_);
         }
 
         // Mutable accessor for in-place modification (avoids make_value() overhead)
         inline script_string& unchecked_as_string_ref() noexcept {
-            return *std::get_if<TYPEID_STRING>(&storage_);
+            return **std::get_if<TYPEID_STRING>(&storage_);
         }
 
         inline script_char unchecked_as_char() const noexcept {
@@ -383,7 +383,7 @@ namespace jai {
 
         // Unchecked function accessor - caller must verify is_function() first
         inline const script_function& unchecked_as_function() const noexcept {
-            return *std::get_if<TYPEID_FUNCTION>(&storage_);
+            return **std::get_if<TYPEID_FUNCTION>(&storage_);
         }
 
         // Unchecked map accessor - caller must verify is_map() first
@@ -469,7 +469,7 @@ namespace jai {
             if (val.type() != script_value_type::jai_string_type) {
                 throw runtime_error("script_value is not a string");
             }
-            return std::get<script_string>(val.storage_);
+            return *std::get<std::shared_ptr<script_string>>(val.storage_);
         }
         
         // Generic extraction with type checking
@@ -556,7 +556,7 @@ namespace jai {
             if (val.cpp_bound_ptr_) {
                 return checked_result<const script_string*>(static_cast<const script_string*>(val.cpp_bound_ptr_));
             }
-            return checked_result<const script_string*>(&std::get<script_string>(val.storage_));
+            return checked_result<const script_string*>(std::get<std::shared_ptr<script_string>>(val.storage_).get());
         }
 
         inline checked_result<const std::vector<script_value>*> checked_as_array() const {
@@ -1332,17 +1332,20 @@ namespace jai {
     private:
 
         // Type-erased storage using variant for efficiency
+        // NOTE: string and function are wrapped in shared_ptr for cheap copies
+        // This shrinks the variant (all complex types are now 16-byte pointers)
+        // and makes copies O(1) instead of O(n) for strings
         using storage = std::variant<
             std::monostate,                               // 0 - Null
             script_int,                                   // 1 - script_int
             script_float,                                 // 2 - script_float
-            script_string,                                // 3 - script_string
+            std::shared_ptr<script_string>,               // 3 - script_string (wrapped for cheap copies)
             script_char,                                  // 4 - script_char
             script_bool,                                  // 5 - script_bool
             std::shared_ptr<std::vector<script_value>>,   // 6 - Array<T>
             std::shared_ptr<std::map<script_value, script_value>>, // 7 - Map<K,V>
             std::shared_ptr<object_holder>,               // 8 - Object<T>
-            script_function,                              // 9 - Function
+            std::shared_ptr<script_function>,             // 9 - Function (wrapped for cheap copies)
             std::shared_ptr<reference_holder>,            // 10 - T&
             std::shared_ptr<script_value>,                // 11 - shared_ptr<T>
             std::weak_ptr<object_holder>,                 // 12 - weak_ptr<T>

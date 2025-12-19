@@ -1043,7 +1043,7 @@ public:
                 eng->execute(R"(
                     auto mixed = [5.0, 5];
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 caught = true;
             }
 

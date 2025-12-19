@@ -306,8 +306,8 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Implementation | JaiScript | ChaiScript | Notes |
 |----------------|-----------|------------|-------|
-| Native Script TreeNode (15 nodes) | 651μs | **SKIPPED** | ChaiScript lacks null support for object fields |
-| C++ Bound TreeNode (15 nodes) | 116μs | 73μs | ChaiScript 1.6x faster with C++ FFI |
+| Native Script TreeNode (15 nodes) | 700μs | **SKIPPED** | ChaiScript lacks null support for object fields |
+| C++ Bound TreeNode (15 nodes) | 115μs | 72μs | ChaiScript 1.6x faster with C++ FFI |
 
 ### Key Insights
 

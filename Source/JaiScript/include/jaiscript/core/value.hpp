@@ -7,6 +7,7 @@
 #include "type_info.hpp"
 #include "conversion_registry.hpp"
 #include "runtime_errors.hpp"
+#include "strong_ptr.hpp"
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <variant>
 #include <memory>
@@ -87,7 +88,7 @@ namespace jai {
         struct ast_literal_tag {};
         script_value(ast_literal_tag, script_int i) : type_info_(nullptr), storage_(i) {}
         script_value(ast_literal_tag, script_float f) : type_info_(nullptr), storage_(f) {}
-        script_value(ast_literal_tag, const script_string& s) : type_info_(nullptr), storage_(std::make_shared<script_string>(s)) {}
+        script_value(ast_literal_tag, const script_string& s) : type_info_(nullptr), storage_(make_strong<script_string>(s)) {}
         script_value(ast_literal_tag, script_char c) : type_info_(nullptr), storage_(c) {}
         script_value(ast_literal_tag, script_bool b) : type_info_(nullptr), storage_(b) {}
         script_value(ast_literal_tag, std::monostate) : type_info_(nullptr), storage_(std::monostate{}) {}
@@ -376,7 +377,7 @@ namespace jai {
         }
 
         // Unchecked mutable array storage accessor - caller must verify is_array() first
-        inline std::shared_ptr<std::vector<script_value>>& unchecked_get_array_storage() noexcept {
+        inline strong_ptr<std::vector<script_value>>& unchecked_get_array_storage() noexcept {
             return *std::get_if<TYPEID_ARRAY>(&storage_);
         }
 
@@ -391,7 +392,7 @@ namespace jai {
         }
 
         // Unchecked mutable map storage accessor - caller must verify is_map() first
-        inline std::shared_ptr<std::map<script_value, script_value>>& unchecked_get_map_storage() noexcept {
+        inline strong_ptr<std::map<script_value, script_value>>& unchecked_get_map_storage() noexcept {
             return *std::get_if<TYPEID_MAP>(&storage_);
         }
 
@@ -409,7 +410,7 @@ namespace jai {
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
-            return *std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
+            return *std::get<strong_ptr<std::vector<script_value>>>(storage_);
         }
         
         inline const std::map<script_value, script_value>& as_map() const {
@@ -424,7 +425,7 @@ namespace jai {
             if (type() != script_value_type::jai_map_type) {
                 throw runtime_error("script_value is not a map");
             }
-            return *std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
+            return *std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
         }
 
         const script_function& as_function() const;
@@ -468,7 +469,7 @@ namespace jai {
             if (val.type() != script_value_type::jai_string_type) {
                 throw runtime_error("script_value is not a string");
             }
-            return *std::get<std::shared_ptr<script_string>>(val.storage_);
+            return *std::get<strong_ptr<script_string>>(val.storage_);
         }
         
         // Generic extraction with type checking
@@ -520,7 +521,7 @@ namespace jai {
                     } else {
                         // For user-defined types stored as objects
                         if (type_info_ && type_info_->is_object()) {
-                            auto holder = std::get<std::shared_ptr<object_holder>>(storage_);
+                            auto holder = std::get<strong_ptr<object_holder>>(storage_);
                             // Get the void* from the holder
                             auto objectPtr = holder->data;
                             // Try to cast to the requested type
@@ -555,7 +556,7 @@ namespace jai {
             if (val.cpp_bound_ptr_) {
                 return checked_result<const script_string*>(static_cast<const script_string*>(val.cpp_bound_ptr_));
             }
-            return checked_result<const script_string*>(std::get<std::shared_ptr<script_string>>(val.storage_).get());
+            return checked_result<const script_string*>(std::get<strong_ptr<script_string>>(val.storage_).get());
         }
 
         inline checked_result<const std::vector<script_value>*> checked_as_array() const {
@@ -565,7 +566,7 @@ namespace jai {
                     "script_value is not an array"
                 );
             }
-            return checked_result<const std::vector<script_value>*>(std::get<std::shared_ptr<std::vector<script_value>>>(storage_).get());
+            return checked_result<const std::vector<script_value>*>(std::get<strong_ptr<std::vector<script_value>>>(storage_).get());
         }
 
         inline checked_result<const std::map<script_value, script_value>*> checked_as_map() const {
@@ -575,7 +576,7 @@ namespace jai {
                     "script_value is not a map"
                 );
             }
-            return checked_result<const std::map<script_value, script_value>*>(std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_).get());
+            return checked_result<const std::map<script_value, script_value>*>(std::get<strong_ptr<std::map<script_value, script_value>>>(storage_).get());
         }
 
         inline checked_result<script_int> checked_as_int() const {
@@ -1080,7 +1081,7 @@ namespace jai {
                         type_id()
                     );
                 }
-                auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
+                auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
                 if (!objHolder->is_class_instance_wrapper) {
                     return checked_result<T>(
                         make_error_code(runtime_error_code::not_a_class),
@@ -1098,7 +1099,7 @@ namespace jai {
                         "script_value is not an object"
                     );
                 }
-                auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
+                auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
                 return checked_result<T>(objHolder->data);
             }
             // Support for other shared_ptr types
@@ -1126,7 +1127,7 @@ namespace jai {
                 // Fall back to default shared_ptr extraction
                 auto t = type();
                 if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                    auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
+                    auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
 
                     // Check if we need to use the custom extractor
                     if (objHolder->is_class_instance_wrapper) {
@@ -1330,23 +1331,24 @@ namespace jai {
     private:
 
         // Type-erased storage using variant for efficiency
-        // NOTE: string and function are wrapped in shared_ptr for cheap copies
+        // NOTE: string and function are wrapped in strong_ptr for cheap non-atomic copies
         // This shrinks the variant (all complex types are now 16-byte pointers)
         // and makes copies O(1) instead of O(n) for strings
+        // strong_ptr uses non-atomic ref counting (fast!) until lock() is called
         using storage = std::variant<
             std::monostate,                               // 0 - Null
             script_int,                                   // 1 - script_int
             script_float,                                 // 2 - script_float
-            std::shared_ptr<script_string>,               // 3 - script_string (wrapped for cheap copies)
+            strong_ptr<script_string>,                    // 3 - script_string (wrapped for cheap copies)
             script_char,                                  // 4 - script_char
             script_bool,                                  // 5 - script_bool
-            std::shared_ptr<std::vector<script_value>>,   // 6 - Array<T>
-            std::shared_ptr<std::map<script_value, script_value>>, // 7 - Map<K,V>
-            std::shared_ptr<object_holder>,               // 8 - Object<T>
-            std::shared_ptr<script_function>,             // 9 - Function (wrapped for cheap copies)
-            std::shared_ptr<reference_holder>,            // 10 - T&
-            std::shared_ptr<script_value>,                // 11 - shared_ptr<T>
-            std::weak_ptr<object_holder>,                 // 12 - weak_ptr<T>
+            strong_ptr<std::vector<script_value>>,        // 6 - Array<T>
+            strong_ptr<std::map<script_value, script_value>>, // 7 - Map<K,V>
+            strong_ptr<object_holder>,                    // 8 - Object<T>
+            strong_ptr<script_function>,                  // 9 - Function (wrapped for cheap copies)
+            strong_ptr<reference_holder>,                 // 10 - T&
+            std::shared_ptr<script_value>,                // 11 - shared_ptr<T> (user-level, keeps std::shared_ptr for thread safety)
+            jai::weaker_ptr<object_holder>,                 // 12 - weak_ptr<T>
             invalid_tag                                   // 13 - Invalid value marker
         >;
         
@@ -1362,53 +1364,53 @@ namespace jai {
         
         // Extract object_holder for class_instance operations
         // Returns nullptr if not actually storing an object (uses current_type, not defined_type)
-        std::shared_ptr<object_holder> get_object_holder() {
+        strong_ptr<object_holder> get_object_holder() {
             auto t = current_type();  // Use actual current type, not declared type
             if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                 // After refactor: both object and shared_ptr store object_holder directly
                 // shared_ptr<T> is just a type marker affecting clone behavior
-                return std::get<std::shared_ptr<object_holder>>(storage_);
+                return std::get<strong_ptr<object_holder>>(storage_);
             }
             return nullptr;
         }
 
-        const std::shared_ptr<object_holder> get_object_holder() const {
+        const strong_ptr<object_holder> get_object_holder() const {
             auto t = current_type();  // Use actual current type, not declared type
             if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                 // After refactor: both object and shared_ptr store object_holder directly
                 // shared_ptr<T> is just a type marker affecting clone behavior
-                return std::get<std::shared_ptr<object_holder>>(storage_);
+                return std::get<strong_ptr<object_holder>>(storage_);
             }
             return nullptr;
         }
 
         // Set object holder directly (used when restoring from weak_ptr.lock())
-        void set_object_holder(std::shared_ptr<object_holder> holder) {
+        void set_object_holder(strong_ptr<object_holder> holder) {
             storage_ = holder;
         }
 
         // Get raw array storage for interpreter operations
-        std::shared_ptr<std::vector<script_value>>& get_array_storage() {
+        strong_ptr<std::vector<script_value>>& get_array_storage() {
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
-            return std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
+            return std::get<strong_ptr<std::vector<script_value>>>(storage_);
         }
-        
+
         // Get raw map storage for interpreter operations
-        std::shared_ptr<std::map<script_value, script_value>>& get_map_storage() {
+        strong_ptr<std::map<script_value, script_value>>& get_map_storage() {
             if (type() != script_value_type::jai_map_type) {
                 throw runtime_error("script_value is not a map");
             }
-            return std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
+            return std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
         }
-        
+
         // Get raw weak_ptr storage for interpreter operations
-        std::weak_ptr<object_holder>& get_weak_ptr_storage() {
+        jai::weaker_ptr<object_holder>& get_weak_ptr_storage() {
             if (type() != script_value_type::jai_weak_ptr_type) {
                 throw runtime_error("script_value is not a weak_ptr");
             }
-            return std::get<std::weak_ptr<object_holder>>(storage_);
+            return std::get<jai::weaker_ptr<object_holder>>(storage_);
         }
         
         // ===== Safe Public APIs for Interpreter Operations =====
@@ -1430,14 +1432,14 @@ namespace jai {
         // Use storage_type() because references may have type_info with different base_type
         reference_holder* get_reference_holder() {
             if (storage_type() == script_value_type::jai_reference_type) {
-                return std::get<std::shared_ptr<reference_holder>>(storage_).get();
+                return std::get<strong_ptr<reference_holder>>(storage_).get();
             }
             return nullptr;
         }
 
         const reference_holder* get_reference_holder() const {
             if (storage_type() == script_value_type::jai_reference_type) {
-                return std::get<std::shared_ptr<reference_holder>>(storage_).get();
+                return std::get<strong_ptr<reference_holder>>(storage_).get();
             }
             return nullptr;
         }
@@ -1446,21 +1448,21 @@ namespace jai {
         // Check if array/map has unique ownership (for COW optimization)
         bool is_unique_reference() const {
             if (type() == script_value_type::jai_array_type) {
-                const auto& ptr = std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
+                const auto& ptr = std::get<strong_ptr<std::vector<script_value>>>(storage_);
                 return ptr.use_count() == 1;
             } else if (type() == script_value_type::jai_map_type) {
-                const auto& ptr = std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
+                const auto& ptr = std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
                 return ptr.use_count() == 1;
             }
             return false;
         }
-        
+
         // Safe weak_ptr access
-        std::weak_ptr<object_holder> get_weak_ptr() const {
+        jai::weaker_ptr<object_holder> get_weak_ptr() const {
             if (type() == script_value_type::jai_weak_ptr_type) {
-                return std::get<std::weak_ptr<object_holder>>(storage_);
+                return std::get<jai::weaker_ptr<object_holder>>(storage_);
             }
-            return std::weak_ptr<object_holder>();
+            return jai::weaker_ptr<object_holder>();
         }
         
         // Safe class_instance extraction from object_holder
@@ -1474,7 +1476,7 @@ namespace jai {
         
         
         // Direct weak_ptr assignment for interpreter use
-        void set_weak_ptr(const std::weak_ptr<object_holder>& weak) {
+        void set_weak_ptr(const jai::weaker_ptr<object_holder>& weak) {
             if (type() == script_value_type::jai_weak_ptr_type) {
                 storage_ = weak;
             } else {

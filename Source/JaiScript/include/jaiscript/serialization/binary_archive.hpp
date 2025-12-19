@@ -571,7 +571,7 @@ public:
                     // Null or expired weak_ptr - create empty weak_ptr
                     script_value v(std::monostate{}, eng);
                     v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
-                    v.storage_ = std::weak_ptr<script_value::object_holder>();
+                    v.storage_ = jai::weaker_ptr<script_value::object_holder>();
                     return v;
                 }
 
@@ -584,7 +584,7 @@ public:
                     if (obj_holder) {
                         script_value weak_val(std::monostate{}, eng);
                         weak_val.set_type_info(eng->get_type_info_weak_ptr(existing_obj.get_type_info()));
-                        weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
+                        weak_val.storage_ = jai::weaker_ptr<script_value::object_holder>(obj_holder);
                         return weak_val;
                     }
                 }
@@ -605,7 +605,7 @@ public:
                 // Create weak_ptr to the object_holder
                 script_value weak_val(std::monostate{}, eng);
                 weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
-                weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
+                weak_val.storage_ = jai::weaker_ptr<script_value::object_holder>(obj_holder);
                 return weak_val;
             }
             

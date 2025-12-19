@@ -49,9 +49,9 @@ namespace jai {
                 val.type_info_ = eng->get_type_info_bool();
                 val.storage_ = script_bool{false};
             } else if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, script_string>) {
-                // string types -> script_string (wrapped in shared_ptr)
+                // string types -> script_string (wrapped in strong_ptr)
                 val.type_info_ = eng->get_type_info_string();
-                val.storage_ = std::make_shared<script_string>();
+                val.storage_ = make_strong<script_string>();
             } else if constexpr (std::is_same_v<T, char>) {
                 // char -> script_char
                 val.type_info_ = eng->get_type_info_char();

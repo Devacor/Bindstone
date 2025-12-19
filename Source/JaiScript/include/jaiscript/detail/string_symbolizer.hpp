@@ -38,7 +38,9 @@ namespace jai {
 		}
 
 		// Intern or fetch an existing ID. No string allocation on hit.
-		[[nodiscard]] id_type intern(std::string_view sv) noexcept {
+		// Marked const because interning doesn't change observable state - it just ensures
+		// a string has an ID. Uses mutable internal storage.
+		[[nodiscard]] id_type intern(std::string_view sv) const noexcept {
 			if (auto it = index_.find(sv); it != index_.end())
 				return it->second;
 
@@ -70,16 +72,17 @@ namespace jai {
 		}
 
 	private:
+		// Mutable to allow const intern() - interning doesn't change observable state
 		// Owning storage with stable addresses (push_back/push_front do not invalidate references)
-		std::deque<std::string> storage_;
+		mutable std::deque<std::string> storage_;
 
 		// Map from string_view (into storage_) to ID (no second copy)
-		std::unordered_map<std::string_view, id_type, sv_hash, sv_equal> index_;
+		mutable std::unordered_map<std::string_view, id_type, sv_hash, sv_equal> index_;
 
 		// ID -> string_view (into storage_) for reverse lookup
-		std::vector<std::string_view> ids_;
+		mutable std::vector<std::string_view> ids_;
 
-		id_type this_id_{ std::numeric_limits<id_type>::max() };
+		mutable id_type this_id_{ std::numeric_limits<id_type>::max() };
 
 		// Tiny helper to allow generic ranges without forcing size()
 		template <class Range>

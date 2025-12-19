@@ -97,10 +97,20 @@ class engine;
         // Specialization for int (convert to script_int/int64_t)
         template<>
         struct value_converter<int> {
-            static int from(const script_value& v, engine* eng) {
-                return v.as<int>();
+            // Non-throwing version - returns checked_result for error propagation
+            static checked_result<int> checked_from(const script_value& v, engine* eng) {
+                return v.checked_as<int>();
             }
-            
+
+            // Throwing version - for backward compatibility with existing bindings
+            static int from(const script_value& v, engine* eng) {
+                auto result = checked_from(v, eng);
+                if (!result) {
+                    throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+                }
+                return result.value();
+            }
+
             static script_value to(const int& t, engine* eng) {
                 if (!eng) {
                     throw runtime_error("Engine reference required for script_value creation");
@@ -108,14 +118,23 @@ class engine;
                 return script_value(static_cast<script_int>(t), get_engine_weak_ptr(eng));
             }
         };
-        
+
         // Specialization for float (convert to script_float/double)
         template<>
         struct value_converter<float> {
-            static float from(const script_value& v, engine* eng) {
-                return v.as<float>();
+            // Non-throwing version
+            static checked_result<float> checked_from(const script_value& v, engine* eng) {
+                return v.checked_as<float>();
             }
-            
+
+            static float from(const script_value& v, engine* eng) {
+                auto result = checked_from(v, eng);
+                if (!result) {
+                    throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+                }
+                return result.value();
+            }
+
             static script_value to(const float& t, engine* eng) {
                 if (!eng) {
                     throw runtime_error("Engine reference required for script_value creation");
@@ -123,15 +142,23 @@ class engine;
                 return script_value(static_cast<script_float>(t), get_engine_weak_ptr(eng));
             }
         };
-        
+
         // Specialization for double - handle int-to-double conversion
         template<>
         struct value_converter<double> {
-            static double from(const script_value& v, engine* eng) {
-                // Use the implicit conversion operator we just added
-                return static_cast<double>(v);
+            // Non-throwing version
+            static checked_result<double> checked_from(const script_value& v, engine* eng) {
+                return v.checked_as<double>();
             }
-            
+
+            static double from(const script_value& v, engine* eng) {
+                auto result = checked_from(v, eng);
+                if (!result) {
+                    throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+                }
+                return result.value();
+            }
+
             static script_value to(const double& t, engine* eng) {
                 if (!eng) {
                     throw runtime_error("Engine reference required for script_value creation");
@@ -496,7 +523,8 @@ class engine;
                     if (args.size() != traits::arity) {
                         return checked_result<script_value>(
                             make_error_code(runtime_error_code::argument_count_mismatch),
-                            "Function expects " + std::to_string(traits::arity) + " arguments, got " + std::to_string(args.size())
+                            "Function expects {0} arguments, got {1}",
+                            static_cast<uint64_t>(traits::arity), static_cast<uint64_t>(args.size())
                         );
                     }
 
@@ -504,9 +532,11 @@ class engine;
                     try {
                         return FunctionBinder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                     } catch (const std::exception& e) {
+                        uint64_t msg_id = eng ? eng->symbolize(e.what()) : 0;
                         return checked_result<script_value>(
                             make_error_code(runtime_error_code::cpp_exception),
-                            std::string(e.what())
+                            "{0}",
+                            msg_id
                         );
                     }
                 };
@@ -521,7 +551,8 @@ class engine;
                     if (args.size() != traits::arity) {
                         return checked_result<script_value>(
                             make_error_code(runtime_error_code::argument_count_mismatch),
-                            "Function expects " + std::to_string(traits::arity) + " arguments, got " + std::to_string(args.size())
+                            "Function expects {0} arguments, got {1}",
+                            static_cast<uint64_t>(traits::arity), static_cast<uint64_t>(args.size())
                         );
                     }
 
@@ -529,9 +560,11 @@ class engine;
                     try {
                         return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                     } catch (const std::exception& e) {
+                        uint64_t msg_id = eng ? eng->symbolize(e.what()) : 0;
                         return checked_result<script_value>(
                             make_error_code(runtime_error_code::cpp_exception),
-                            std::string(e.what())
+                            "{0}",
+                            msg_id
                         );
                     }
                 };

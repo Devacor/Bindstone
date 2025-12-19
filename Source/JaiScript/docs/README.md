@@ -57,23 +57,41 @@ int main() {
 
 ### Variables and Types
 ```javascript
-script_int x = 42;           // 64-bit signed integer
-script_float pi = 3.14159;   // 64-bit double precision  
-script_string name = "Game"; // UTF-8 string
-script_bool active = true;   // Boolean
-auto count = 0;              // Type inference
+int x = 42;              // 64-bit signed integer
+float pi = 3.14159;      // 64-bit double precision
+string name = "Game";    // UTF-8 string
+bool active = true;      // Boolean
+auto count = 0;          // Type inference with locking
+var dynamic = 5;         // Dynamic typing (any type allowed)
+```
+
+### auto vs var
+```javascript
+// auto - type inference, locks to inferred type
+auto x = 5;              // Locked to int
+x = 10;                  // OK
+x = "hello";             // ERROR: type mismatch
+
+// var - dynamic typing, any type allowed
+var y = 5;               // Any type
+y = "hello";             // OK: var allows any type
+
+// Container behavior
+auto nums = [1, 2, 3];           // Homogeneous required
+auto mixed = [1, "two"];         // ERROR: mixed types not allowed
+var flexible = [1, "two", 3.14]; // OK: var allows mixed
 ```
 
 ### Functions
 ```javascript
 // Multiple declaration styles supported
-script_int multiply(script_int a, script_int b) { return a * b; }
-auto divide(script_float a, script_float b) -> script_float { return a / b; }
-function greet(script_string name) { print("Hello, " + name); }
+int multiply(int a, int b) { return a * b; }
+auto divide(float a, float b) -> float { return a / b; }
+function greet(string name) { print("Hello, " + name); }
 
 // Lambda expressions with captures
-script_int multiplier = 10;
-auto scale = [multiplier](script_int x) -> script_int { return x * multiplier; };
+int multiplier = 10;
+auto scale = [multiplier](int x) -> int { return x * multiplier; };
 ```
 
 ### Control Flow
@@ -488,11 +506,15 @@ See `docs/performance.md` for detailed benchmarks.
 - `docs/performance.md` - Performance analysis and benchmarks
 - `JaiScript_FutureDesign.md` - **Roadmap and vision for JaiScript's future**
 
-## Current Limitations
+## Known Limitations
 
 - Exception handling not yet supported in VM backend (works in interpreter)
 
-Script classes, switch/case statements, range-based for loops, and hot reload are all fully implemented.
+## Type Conversion Behavior
+
+JaiScript follows C++ semantics for numeric conversions:
+- `int` to `float`: automatic widening conversion
+- `float` to `int`: automatic truncation (no warning, matches C++ behavior)
 
 See `JaiScript_FutureDesign.md` for planned features including unified serialization and property system enhancements.
 

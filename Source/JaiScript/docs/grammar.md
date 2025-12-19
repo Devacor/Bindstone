@@ -8,9 +8,10 @@ JaiScript uses a C++-like syntax with RAII semantics and built-in support for ho
 
 ### Keywords
 ```
-bool break char class const continue else false float for
-if int map array new null private public return string 
-this true void while auto var super
+auto array bool break case catch char class const continue
+default else fallthrough false float for if int map new null
+private public return string switch this throw true try var
+void while super weak_ptr
 ```
 
 ### Operators
@@ -19,13 +20,16 @@ this true void while auto var super
 + - * / %
 
 // Assignment
-= += -= *= /= %=
+= += -= *= /= %= &= |= ^= <<= >>=
 
 // Comparison
-== != < > <= >=
+== != < > <= >= <=>
 
 // Logical
 && || !
+
+// Bitwise
+& | ^ ~ << >>
 
 // Increment/Decrement
 ++ --
@@ -83,9 +87,10 @@ methodDeclaration = type IDENTIFIER "(" parameterList? ")" blockStatement
 
 fieldDeclaration = type IDENTIFIER ("=" expression)? ";"
 
-// Function declarations  
+// Function declarations
 functionDeclaration = "auto" IDENTIFIER "(" parameterList? ")" "->" type blockStatement
                     | type IDENTIFIER "(" parameterList? ")" blockStatement
+                    | "function" IDENTIFIER "(" parameterList? ")" blockStatement
 
 parameterList = parameter ("," parameter)*
 
@@ -96,12 +101,11 @@ variableDeclaration = type IDENTIFIER ("=" expression)? ";"
 
 type = primitiveType
      | IDENTIFIER                           // User-defined type
-     | "array" "<" type ">"                // Array<T>
-     | "map" "<" type "," type ">"         // Map<K,V>
-     | "SharedPtr" "<" type ">"            // SharedPtr<T>
-     | "WeakPtr" "<" type ">"              // WeakPtr<T>
-     | "auto"                              // Type inference
-     | "var"                               // Type inference (same as auto)
+     | "array" "<" type ">"                // array<T>
+     | "map" "<" type "," type ">"         // map<K,V>
+     | "weak_ptr" "<" type ">"             // weak_ptr<T>
+     | "auto"                              // Type inference with locking
+     | "var"                               // Dynamic typing (any type allowed)
 
 primitiveType = "int" | "float" | "string" | "char" | "bool" | "void"
 
@@ -111,9 +115,13 @@ statement = expressionStatement
           | ifStatement
           | whileStatement
           | forStatement
+          | forRangeStatement
+          | switchStatement
           | returnStatement
           | breakStatement
           | continueStatement
+          | throwStatement
+          | tryStatement
           | variableDeclaration
 
 expressionStatement = expression ";"
@@ -126,34 +134,56 @@ whileStatement = "while" "(" expression ")" statement
 
 forStatement = "for" "(" variableDeclaration? ";" expression? ";" expression? ")" statement
 
+forRangeStatement = "for" "(" variableDeclaration ":" expression ")" statement
+
+switchStatement = "switch" "(" expression ")" "{" caseClause* "}"
+
+caseClause = ("case" expression | "default") ":" statement* fallthroughStatement?
+
+fallthroughStatement = "fallthrough" ";"
+
 returnStatement = "return" expression? ";"
 
 breakStatement = "break" ";"
 
 continueStatement = "continue" ";"
 
+throwStatement = "throw" expression? ";"
+
+tryStatement = "try" blockStatement catchClause
+
+catchClause = "catch" ("(" IDENTIFIER ")")? blockStatement
+
 // Expressions (precedence from lowest to highest)
 expression = assignmentExpression
 
 assignmentExpression = ternaryExpression (assignmentOperator assignmentExpression)?
 
-assignmentOperator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+assignmentOperator = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
 
 ternaryExpression = logicalOrExpression ("?" expression ":" ternaryExpression)?
 
 logicalOrExpression = logicalAndExpression ("||" logicalAndExpression)*
 
-logicalAndExpression = equalityExpression ("&&" equalityExpression)*
+logicalAndExpression = bitwiseOrExpression ("&&" bitwiseOrExpression)*
+
+bitwiseOrExpression = bitwiseXorExpression ("|" bitwiseXorExpression)*
+
+bitwiseXorExpression = bitwiseAndExpression ("^" bitwiseAndExpression)*
+
+bitwiseAndExpression = equalityExpression ("&" equalityExpression)*
 
 equalityExpression = relationalExpression (("==" | "!=") relationalExpression)*
 
-relationalExpression = additiveExpression (("<" | ">" | "<=" | ">=") additiveExpression)*
+relationalExpression = shiftExpression (("<" | ">" | "<=" | ">=" | "<=>") shiftExpression)*
+
+shiftExpression = additiveExpression (("<<" | ">>") additiveExpression)*
 
 additiveExpression = multiplicativeExpression (("+" | "-") multiplicativeExpression)*
 
 multiplicativeExpression = unaryExpression (("*" | "/" | "%") unaryExpression)*
 
-unaryExpression = ("!" | "-" | "++" | "--" | "&") unaryExpression
+unaryExpression = ("!" | "-" | "++" | "--" | "&" | "~") unaryExpression
                 | postfixExpression
 
 postfixExpression = primaryExpression (postfixOperator)*
@@ -213,7 +243,7 @@ CHAR_LITERAL = "'" (escape_sequence | [^'\\]) "'"
 
 BOOLEAN_LITERAL = "true" | "false"
 
-escape_sequence = "\\" [nrt"'\\]
+escape_sequence = "\\" [nrt"'\\0]
 ```
 
 ## Example Programs
@@ -224,55 +254,32 @@ class Creature {
 public:
     string name;
     int health = 100;
-    
+
     Creature(const string& n) : name(n) {}
-    
+
     void takeDamage(int amount) {
         health -= amount;
         if (health <= 0) {
             onDeath();
         }
     }
-    
+
     // All methods are virtual by default
     void onDeath() {
-        print("Creature {} has died\n", name);
+        print("Creature {} has died", name);
     }
-};
+}
 
 // Inheritance - methods automatically override
 class Dragon : Creature {
 public:
     Dragon() : Creature("Dragon") {}
-    
-    // Automatically overrides parent's onDeath
+
     void onDeath() {
-        print("The mighty dragon falls!\n");
+        print("The mighty dragon falls!");
         super::onDeath();  // Call parent implementation
     }
-};
-
-// Multiple inheritance (no diamond problem allowed)
-class Swimmer {
-public:
-    void swim() { print("Swimming\n"); }
-};
-
-class Flyer {
-public:
-    void fly() { print("Flying\n"); }
-};
-
-class Duck : Swimmer, Flyer {
-public:
-    void move() {
-        swim();  // From Swimmer
-        fly();   // From Flyer
-    }
-};
-
-// This would be an error - methods collide:
-// class BadExample : ClassWithFoo, AnotherClassWithFoo { };
+}
 ```
 
 ### Lambda and Function Variables
@@ -289,11 +296,28 @@ int counter = 0;
 auto increment = [&counter]() { counter++; };
 ```
 
+### Variable Types: auto vs var
+```cpp
+// auto - type inference with locking (homogeneous containers)
+auto x = 5;              // Locked to int
+x = 10;                  // OK
+x = "hello";             // ERROR: type mismatch
+
+auto nums = [1, 2, 3];   // All elements must be same type
+auto mixed = [1, "x"];   // ERROR: heterogeneous not allowed
+
+// var - dynamic typing (heterogeneous containers allowed)
+var y = 5;               // Any type
+y = "hello";             // OK: var allows any type
+
+var mixed = [1, "two", 3.14];  // OK: var allows mixed types
+```
+
 ### Generic Containers
 ```cpp
 // Arrays use square brackets []
 array<int> numbers = [1, 2, 3, 4, 5];
-var matrix = [[1, 2], [3, 4], [5, 6]];
+auto matrix = [[1, 2], [3, 4], [5, 6]];
 
 // Maps use curly braces {} with nested entries
 map<string, int> scores = {
@@ -301,17 +325,64 @@ map<string, int> scores = {
     {"Bob", 85}
 };
 
-// Type construction uses Type{args}
-Vec2 position = Vec2{10.5, 20.3};
-var points = [Vec2{0, 0}, Vec2{1, 1}, Vec2{2, 2}];
-
 // Complex nested structures
-array<map<string, Vec2>> locations = [
-    {{"player", Vec2{1, 1}}, {"enemy", Vec2{5, 3}}},
-    {{"boss", Vec2{10, 10}}, {"treasure", Vec2{2, 8}}}
+array<map<string, int>> locations = [
+    {{"x", 10}, {"y", 20}},
+    {{"x", 30}, {"y", 40}}
 ];
 
-SharedPtr<Creature> boss = new Creature("Dragon");
+weak_ptr<Creature> target;
+```
+
+### Control Flow
+```cpp
+// Switch with break-by-default (explicit fallthrough required)
+switch (weapon_type) {
+    case "sword":
+        damage = 10;
+    case "bow":
+        damage = 8;
+    case "magic":
+        damage = 15;
+        fallthrough;  // Explicit fallthrough
+    case "enchanted":
+        damage += 5;
+    default:
+        damage = 5;
+}
+
+// Range-based for
+for (auto item : items) {
+    process(item);
+}
+
+// Traditional for
+for (int i = 0; i < 10; i++) {
+    sum += i;
+}
+```
+
+### Exception Handling
+```cpp
+try {
+    throw "Something went wrong!";
+} catch (e) {
+    print("Caught: {}", e);
+}
+
+// Catch without variable
+try {
+    risky_operation();
+} catch {
+    print("An error occurred");
+}
+
+// Re-throw
+try {
+    throw 42;
+} catch (e) {
+    throw;  // Re-throw same exception
+}
 ```
 
 ### Ternary Operator
@@ -320,31 +391,24 @@ int health = 100;
 string status = health > 0 ? "alive" : "dead";
 
 // Nested ternary
-string healthLevel = health > 75 ? "healthy" : 
+string healthLevel = health > 75 ? "healthy" :
                      health > 25 ? "wounded" : "critical";
-
-// In function calls
-print("Player is {}\n", health > 0 ? "alive" : "dead");
 ```
 
 ## Design Notes
 
-1. **Type Inference**: `auto` and `var` keywords for type inference (equivalent)
-2. **Reference Semantics**: `&` for reference types in parameters and captures
-3. **RAII**: Constructors and destructors called automatically
-4. **Generic Types**: Limited to built-in containers, not full templates
-5. **Lambda Syntax**: C++11-style with explicit captures
-6. **Ternary Operator**: Right-associative conditional expression
-7. **Virtual by Default**: All methods are virtual, no need for `virtual` keyword
-8. **Smart Pointers**: `new` returns `SharedPtr<T>` automatically
-9. **Super Access**: `super::` to call parent class methods
-10. **Multiple Inheritance**: Allowed but no diamond pattern - methods must not collide
-11. **Collection Literals**: 
+1. **Type Inference**: `auto` infers type from initializer and locks it. `var` allows any type dynamically.
+2. **Container Homogeneity**: `auto` containers require homogeneous elements. `var` allows heterogeneous.
+3. **Reference Semantics**: `&` for reference types in parameters and captures
+4. **RAII**: Constructors and destructors called automatically
+5. **Generic Types**: Limited to built-in containers, not full templates
+6. **Lambda Syntax**: C++11-style with explicit captures
+7. **Ternary Operator**: Right-associative conditional expression
+8. **Virtual by Default**: All methods are virtual, no need for `virtual` keyword
+9. **Smart Pointers**: `new` returns `shared_ptr<T>` automatically
+10. **Super Access**: `super::` to call parent class methods
+11. **Switch Semantics**: Break-by-default. Use `fallthrough;` for explicit fall-through.
+12. **Collection Literals**:
     - **Arrays** always use `[...]` syntax
     - **Maps** always use `{...}` syntax with entries as `{key, value}`
-    - **Type construction** uses `Type{args}` for C++ compatibility
-    - This eliminates ambiguity and provides clear, consistent syntax
-12. **Subscript Operations**: Full support for array/map subscripting with both read and write operations
-    - **Array subscript**: `arr[index]` for reading, `arr[index] = value` for writing
-    - **Map subscript**: `map[key]` for reading, `map[key] = value` for writing
-    - **Nested subscripts**: `matrix[i][j]` works as expected
+13. **Subscript Operations**: Full support for array/map subscripting with both read and write operations

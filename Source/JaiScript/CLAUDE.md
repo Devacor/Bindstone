@@ -371,26 +371,26 @@ cd D:\git\Bindstone\Source\JaiScript\out\build\x64-Debug\bin
 
 ### Command Line Build (Claude Code Compatible)
 
-These commands work from PowerShell and properly set up the VS environment:
+These commands work from Claude Code (bash environment calling PowerShell) and properly set up the VS environment:
 
 **Release build:**
-```powershell
-powershell.exe -Command "& cmd /c '`"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake --build out/build/x64-Release --config Release 2>&1'"
+```bash
+powershell.exe -Command "& cmd /c '\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 && cd /d d:\\git\\Bindstone\\Source\\JaiScript && cmake --build out/build/x64-Release --config Release 2>&1'"
 ```
 
 **Debug build:**
-```powershell
-powershell.exe -Command "& cmd /c '`"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake --build out/build/x64-Debug --config Debug 2>&1'"
+```bash
+powershell.exe -Command "& cmd /c '\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 && cd /d d:\\git\\Bindstone\\Source\\JaiScript && cmake --build out/build/x64-Debug --config Debug 2>&1'"
 ```
 
 **Run all tests (Release):**
-```powershell
-powershell.exe -Command "& cmd /c '`"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript\out\build\x64-Release && bin\jaiscript_tests.exe 2>&1'"
+```bash
+powershell.exe -Command "& cmd /c '\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 && cd /d d:\\git\\Bindstone\\Source\\JaiScript\\out\\build\\x64-Release && bin\\jaiscript_tests.exe 2>&1'"
 ```
 
 **Run specific test case:**
-```powershell
-powershell.exe -Command "& cmd /c '`"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript\out\build\x64-Release && bin\jaiscript_tests.exe --test-case=`"test_name`" 2>&1'"
+```bash
+powershell.exe -Command "& cmd /c '\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 && cd /d d:\\git\\Bindstone\\Source\\JaiScript\\out\\build\\x64-Release && bin\\jaiscript_tests.exe --test-case=\"test_name\" 2>&1'"
 ```
 
 **Important:** Do NOT use plain `cmake` commands without the VsDevCmd.bat environment - standard includes like `<iostream>` won't be found.

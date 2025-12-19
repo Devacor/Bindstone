@@ -7,8 +7,15 @@
 #include <type_traits>
 #include <utility>
 #include <string_view>
+#include <string>
+#include <format>
+#include <concepts>
 
 namespace jai {
+
+// Concept to detect std::string (prevents dangling string_view from temporaries)
+template<typename T>
+concept IsStdString = std::same_as<std::decay_t<T>, std::string>;
 
 // Forward declaration
 template<typename T> class checked_result;
@@ -72,8 +79,14 @@ public:
         : error_(ec), has_value_(false) {}
 
     // Error constructor with static message (zero allocation)
+    // IMPORTANT: msg must be a string literal or other static storage - NOT a temporary std::string!
     checked_result(std::error_code ec, std::string_view msg, uint64_t sym_id = 0, uint64_t sym_id2 = 0) noexcept
         : error_(ec), has_value_(false), static_msg_(msg), symbol_id_(sym_id), symbol_id2_(sym_id2) {}
+
+    // Deleted: prevent dangling string_view from temporary std::string
+    // Use static string literals with {} placeholders and pass symbol IDs for dynamic content
+    template<IsStdString S>
+    checked_result(std::error_code, S&&, uint64_t = 0, uint64_t = 0) = delete;
 
     // Copy constructor
     checked_result(const checked_result& other)
@@ -198,6 +211,10 @@ public:
     checked_result(std::error_code ec, std::string_view msg, uint64_t sym_id = 0, uint64_t sym_id2 = 0) noexcept
         : error_(ec), has_value_(false), static_msg_(msg), symbol_id_(sym_id), symbol_id2_(sym_id2) {}
 
+    // Deleted: prevent dangling string_view from temporary std::string
+    template<IsStdString S>
+    checked_result(std::error_code, S&&, uint64_t = 0, uint64_t = 0) = delete;
+
     // Copy constructor
     checked_result(const checked_result& other)
         : has_value_(other.has_value_), static_msg_(other.static_msg_), symbol_id_(other.symbol_id_), symbol_id2_(other.symbol_id2_) {
@@ -310,6 +327,10 @@ public:
     checked_result(std::error_code ec, std::string_view msg, uint64_t sym_id = 0, uint64_t sym_id2 = 0) noexcept
         : error_(ec), static_msg_(msg), symbol_id_(sym_id), symbol_id2_(sym_id2) {}
 
+    // Deleted: prevent dangling string_view from temporary std::string
+    template<IsStdString S>
+    checked_result(std::error_code, S&&, uint64_t = 0, uint64_t = 0) = delete;
+
     // Check if successful (hot path - inline hint)
     [[nodiscard]] inline explicit operator bool() const noexcept {
         return !static_cast<bool>(error_);
@@ -363,6 +384,92 @@ public:
 template<typename T>
 inline error_propagator::operator checked_result<T>() const {
     return checked_result<T>(ec, static_msg, symbol_id, symbol_id2);
+}
+
+/**
+ * Format an error message using std::vformat with resolved symbol strings.
+ *
+ * @param msg The static message with {0}/{1} placeholders (std::format syntax)
+ * @param arg0 First argument string (replaces {0})
+ * @param arg1 Second argument string (replaces {1}, optional)
+ * @return Formatted error message string
+ */
+inline std::string format_error_message(std::string_view msg, std::string_view arg0, std::string_view arg1 = {}) {
+    try {
+        return std::vformat(msg, std::make_format_args(arg0, arg1));
+    } catch (...) {
+        // If formatting fails, return the raw message
+        return std::string(msg);
+    }
+}
+
+// Overload for numeric arguments (when symbol resolution isn't available)
+// Uses simple string replacement instead of std::vformat for MSVC compatibility
+// Note: Outputs numeric type IDs - for human-readable names, use format_error_message with symbolizer
+inline std::string format_error_message_numeric(std::string_view msg, uint64_t id1, uint64_t id2 = 0) {
+    std::string result(msg);
+
+    // Replace {0} with id1
+    if (auto pos = result.find("{0}"); pos != std::string::npos) {
+        result.replace(pos, 3, std::to_string(id1));
+    }
+
+    // Replace {1} with id2
+    if (auto pos = result.find("{1}"); pos != std::string::npos) {
+        result.replace(pos, 3, std::to_string(id2));
+    }
+
+    return result;
+}
+
+/**
+ * Format a checked_result error to a human-readable string using a symbolizer.
+ *
+ * This is the preferred way to get a human-readable error message from a checked_result.
+ * It resolves symbol IDs to their string representations using the provided symbolizer.
+ *
+ * @tparam T The value type of the checked_result
+ * @tparam Symbolizer A type with get_string(uint64_t) -> std::string_view method
+ * @param result The checked_result containing the error
+ * @param symbolizer Object that can resolve symbol IDs to strings
+ * @return Formatted error message string, or empty string if result has no error
+ *
+ * Example usage:
+ *   if (!result) {
+ *       std::string msg = format_error(result, *string_symbolizer_);
+ *       throw std::runtime_error(msg);
+ *   }
+ */
+template<typename T, typename Symbolizer>
+inline std::string format_error(const checked_result<T>& result, Symbolizer& symbolizer) {
+    if (result.has_value()) {
+        return {};  // No error
+    }
+
+    // If there are symbol IDs, resolve them and format
+    if (result.symbol_id() != 0 || result.symbol_id2() != 0) {
+        return format_error_message(
+            result.message(),
+            symbolizer.get_string(result.symbol_id()),
+            symbolizer.get_string(result.symbol_id2()));
+    }
+
+    // No symbol IDs - return raw message
+    return std::string(result.message());
+}
+
+/**
+ * Overload for error_propagator - useful when you have the error value directly.
+ */
+template<typename Symbolizer>
+inline std::string format_error(const error_propagator& err, Symbolizer& symbolizer) {
+    if (err.symbol_id != 0 || err.symbol_id2 != 0) {
+        return format_error_message(
+            err.static_msg,
+            symbolizer.get_string(err.symbol_id),
+            symbolizer.get_string(err.symbol_id2));
+    }
+    return std::string(err.static_msg);
 }
 
 // Convenience macro for propagating errors in visitor methods

@@ -128,7 +128,8 @@ namespace stdlib {
             if (args.size() != 2) {
                 return checked_result<script_value>(
                     make_error_code(runtime_error_code::argument_count_mismatch),
-                    "merge() expects exactly 2 arguments, got " + std::to_string(args.size())
+                    "merge() expects exactly 2 arguments, got {0}",
+                    static_cast<uint64_t>(args.size())
                 );
             }
             return map_merge(args[0], args[1]);
@@ -138,7 +139,8 @@ namespace stdlib {
             if (args.size() < 1) {
                 return checked_result<script_value>(
                     make_error_code(runtime_error_code::argument_count_mismatch),
-                    "concatenate() expects at least 1 argument"
+                    "concatenate() expects at least 1 argument, got {0}",
+                    static_cast<uint64_t>(args.size())
                 );
             }
             return concatenate_impl(args);
@@ -148,7 +150,8 @@ namespace stdlib {
             if (args.size() < 1) {
                 return checked_result<script_value>(
                     make_error_code(runtime_error_code::argument_count_mismatch),
-                    "append() expects at least 1 argument"
+                    "append() expects at least 1 argument, got {0}",
+                    static_cast<uint64_t>(args.size())
                 );
             }
             return concatenate_impl(args);

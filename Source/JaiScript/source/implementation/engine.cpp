@@ -398,17 +398,18 @@ void engine::implementation::updateOverloadedFunction(const std::string& name, e
     // Create a dispatch function that selects the right overload
     // Make a copy of the name to ensure it survives the lambda lifetime
     std::string functionName = name;
-    script_function dispatcher = [this, functionName](const std::vector<script_value>& args) -> checked_result<script_value> {
+    uint64_t name_id = string_symbolizer_.intern(name);
+    script_function dispatcher = [this, functionName, name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
         auto it = overloadedFunctions.find(functionName);
         if (it == overloadedFunctions.end()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
-                "Overloaded function '" + functionName + "' not found");
+                "Overloaded function '{0}' not found", name_id);
         }
 
         script_value bestMatch = it->second.findBestMatch(args);
         if (bestMatch.is_null()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                "No matching overload found for function '" + functionName + "' with " + std::to_string(args.size()) + " arguments");
+                "No matching overload found for '{0}' with {1} arguments", name_id, static_cast<uint64_t>(args.size()));
         }
 
         const script_function& func = bestMatch.as_function();
@@ -432,7 +433,8 @@ engine::engine() : impl(std::make_unique<implementation>()) {
         script_value bestMatch = it->second.findBestMatch(args);
         if (bestMatch.is_null()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                "No matching overload found for '[]' with {0} arguments",
+                static_cast<uint64_t>(args.size()));
         }
 
         const script_function& func = bestMatch.as_function();
@@ -743,7 +745,8 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
                     script_value bestMatch = it->second.findBestMatch(args);
                     if (bestMatch.is_null()) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                            "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                            "No matching overload found for '[]' with {0} arguments",
+                static_cast<uint64_t>(args.size()));
                     }
 
                     const script_function& func = bestMatch.as_function();
@@ -773,7 +776,8 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
                     script_value bestMatch = it->second.findBestMatch(args);
                     if (bestMatch.is_null()) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                            "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                            "No matching overload found for '[]' with {0} arguments",
+                static_cast<uint64_t>(args.size()));
                     }
 
                     const script_function& func = bestMatch.as_function();
@@ -1032,7 +1036,7 @@ string_symbolizer* engine::get_symbolizer() {
     return &impl->string_symbolizer_;
 }
 
-uint64_t engine::symbolize(const std::string& str) {
+uint64_t engine::symbolize(const std::string& str) const {
     return impl->string_symbolizer_.intern(str);
 }
 
@@ -1105,24 +1109,26 @@ script_value engine::get_variable(const std::string& name) const {
         // Create a dispatch function that selects the right overload
         // Make a copy of the name to ensure it survives the lambda lifetime
         std::string functionName = name;
-        script_function dispatcher = [this, functionName](const std::vector<script_value>& args) -> checked_result<script_value> {
+        uint64_t name_id = symbolize(name);
+        script_function dispatcher = [this, functionName, name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
             auto it = impl->overloadedFunctions.find(functionName);
             if (it == impl->overloadedFunctions.end()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
-                    "Overloaded function '" + functionName + "' not found");
+                    "Overloaded function '{0}' not found", name_id);
             }
 
             script_value bestMatch = it->second.findBestMatch(args);
             if (bestMatch.is_null()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                    "No matching overload found for function '" + functionName + "' with " + std::to_string(args.size()) + " arguments");
+                    "No matching overload for '{0}' with {1} arguments",
+                    name_id, static_cast<uint64_t>(args.size()));
             }
 
             // Call the selected overload
             const script_function& func = bestMatch.as_function();
             return func(args);
         };
-        
+
         return script_value::make_function(dispatcher, std::const_pointer_cast<engine>(shared_from_this()));
     }
     
@@ -1299,7 +1305,8 @@ void engine::set_backend(backend_type type) {
         script_value bestMatch = it->second.findBestMatch(args);
         if (bestMatch.is_null()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                "No matching overload found for '[]' with {0} arguments",
+                static_cast<uint64_t>(args.size()));
         }
 
         const script_function& func = bestMatch.as_function();
@@ -1326,7 +1333,8 @@ void engine::set_backend(std::unique_ptr<execution_backend> backend) {
         script_value bestMatch = it->second.findBestMatch(args);
         if (bestMatch.is_null()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                "No matching overload found for '[]' with {0} arguments",
+                static_cast<uint64_t>(args.size()));
         }
 
         const script_function& func = bestMatch.as_function();
@@ -1499,6 +1507,24 @@ type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
 
     // Cache miss - construct full type_info and insert
     type_info temp = type_info::make_weak_ptr(impl->string_symbolizer_, pointee_type);
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {
+    // Use composite key for fast lookup - no string construction needed on cache hit
+    implementation::type_key key{script_value_type::jai_shared_ptr_type, pointee_type ? pointee_type->id : 0, 0};
+
+    // Check if we already have this type interned
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    // Cache miss - construct full type_info and insert
+    type_info temp = type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type);
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;

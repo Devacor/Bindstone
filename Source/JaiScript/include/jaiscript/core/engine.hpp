@@ -411,8 +411,15 @@ namespace jai {
         // Get string symbolizer for interning identifiers
         string_symbolizer* get_symbolizer();
 
-        // Intern a string and return its unique ID
-        uint64_t symbolize(const std::string& str);
+        // Intern a string and return its unique ID (const-safe)
+        uint64_t symbolize(const std::string& str) const;
+
+        // Format a checked_result error to a human-readable string
+        // Resolves symbol IDs to their string representations
+        template<typename T>
+        std::string format_error(const checked_result<T>& result) {
+            return jai::format_error(result, *get_symbolizer());
+        }
 
         // Register C++ type converters for custom types
         template<typename T>
@@ -461,6 +468,7 @@ namespace jai {
         type_info* get_type_info_array(type_info* element_type);
         type_info* get_type_info_map(type_info* key_type, type_info* value_type);
         type_info* get_type_info_weak_ptr(type_info* pointee_type);
+        type_info* get_type_info_shared_ptr(type_info* pointee_type);
         type_info* get_type_info_reference(type_info* referenced_type);
         type_info* get_type_info_function(type_info* return_type, const std::vector<type_info*>& arg_types);
 

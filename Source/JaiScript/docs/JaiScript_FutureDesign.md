@@ -11,28 +11,35 @@ JaiScript aims to become the definitive scripting solution for high-performance 
 - **C++ semantics**: Familiar syntax, zero-copy integration, snake_case naming conventions
 - **Unified system**: One solution for scripting AND serialization
 
-## Recent Accomplishments (2025)
+## Implemented Features (2025)
 
 - **Deep Copy by Default**: Full C++ value semantics with container deep copying
-- **Reference Support**: Added `&` reference types and weak_ptr support
-- **Operator Overloading**: Fixed fast path optimizations to respect custom operators
-- **Type Conversions**: Seamless int↔double conversions in constructors and methods
-- **Clean Codebase**: Removed all debug output for production-ready deployment
+- **Reference Support**: `&` reference types and weak_ptr support
+- **Operator Overloading**: Fast path optimizations respect custom operators
+- **Type Conversions**: Seamless int↔float conversions in constructors and methods
+- **Strong Type System**: `auto` locks type at inference, `var` allows dynamic typing
+- **Container Homogeneity**: `auto` containers enforce homogeneous types, `var` allows heterogeneous
+- **Recursive Validation**: Nested containers validated to arbitrary depth
+- **Script-Defined Classes**: Full support with constructors, methods, inheritance
+- **Hot Reload**: Class redefinition with automatic instance migration
+- **Switch Statements**: Break-by-default with explicit `fallthrough` keyword
+- **Range-Based For**: `for (auto x : container)` syntax
+- **Exception Handling**: try/catch/throw with re-throw support
+- **Bitwise Operators**: Full set including `&`, `|`, `^`, `~`, `<<`, `>>`
+- **Ternary Operator**: `condition ? true_val : false_val`
 
-## Planned Features
+## Script-Defined Classes
 
-### 1. Script-Defined Classes (Next Priority)
 ```javascript
 class Character {
-    script_string name = "Hero";
-    script_float health = 100.0;
-    Vec3 position;
-    
-    Character(script_string n) {
+    string name = "Hero";
+    float health = 100.0;
+
+    Character(string n) {
         name = n;
     }
-    
-    void takeDamage(script_float amount) {
+
+    void takeDamage(float amount) {
         health -= amount;
         if (health <= 0) {
             onDeath();
@@ -41,7 +48,9 @@ class Character {
 }
 ```
 
-### 2. Unified Serialization System
+## Planned Features
+
+### 1. Unified Serialization System
 
 **Pointer Deduplication**
 - Track shared_ptr instances across serialization
@@ -68,47 +77,15 @@ function quest_update() {
 - Versioning support for schema evolution
 - Zero-copy deserialization where possible
 
-### 3. Advanced Hot Reload (✅ Core Functionality Implemented)
+### 2. State-Preserving Hot Reload
 
-**Already Implemented:**
-- ✅ Class redefinition with automatic instance migration
-- ✅ Field preservation (same-named fields keep values)
-- ✅ Method replacement (all methods updated)
-- ✅ Custom migration via `hot_reload_migrate()`
-- ✅ Instance tracking (including clones)
-- ✅ Performance optimized (<10ms for 100 instances)
-
-**Still Planned - State-Preserving Reload:**
+Building on existing class hot reload, extend to functions:
 - Maintain local variables in functions
 - Preserve call stack during reload
 - Keep closure captures
 - Update function bodies in-place
 
-**Development Workflow**
-```javascript
-// Already works for classes:
-class Character {
-    auto health = 100;
-    void on_damage(amount) {
-        health -= amount;
-        // Hot reload here updates method instantly!
-        if (health < 20) {
-            start_limp_animation(); // Add this line
-        }
-    }
-}
-
-// Still planned for standalone functions:
-character.on_damage = function(amount) {
-    health -= amount;
-    if (health < 20) {
-        start_limp_animation(); // Add this line
-    }
-}
-// Hot reload - character keeps current health!
-```
-
-### 4. Property System Integration
+### 3. Property System Integration
 
 **Automatic Binding**
 ```cpp
@@ -133,7 +110,7 @@ class property_provider {
 engine.add_property_provider(std::make_unique<mv_property_provider>());
 ```
 
-### 5. Performance Optimizations
+### 4. Performance Optimizations
 
 **JIT Compilation Path**
 - Optional JIT backend for hot paths
@@ -145,25 +122,15 @@ engine.add_property_provider(std::make_unique<mv_property_provider>());
 - Custom allocators for script objects
 - Pool allocation for temporary values
 
-### 6. Language Features
+### 5. Language Features
 
-**Missing Operators**
-- Bitwise OR `|` and XOR `^`
-- Ternary operator `? :`
+**Still Planned**
 - Null coalescing `??`
-
-**Control Flow**
-- ✅ Break and continue statements (completed)
-- ✅ Switch/case statements with break-by-default safety (completed 2025-07-15)
-- ✅ Range-based for loops (completed 2025-07-15)
-- Exception handling (try/catch)
-
-**Advanced Features**
 - Template/generic functions
 - Async/await for coroutines
 - Pattern matching
 
-### 7. Tooling and Ecosystem
+### 6. Tooling and Ecosystem
 
 **Development Tools**
 - Language server protocol (LSP) implementation
@@ -177,7 +144,7 @@ engine.add_property_provider(std::make_unique<mv_property_provider>());
 - Math utilities
 - Container algorithms
 
-### 8. Distribution Model
+### 7. Distribution Model
 
 ```
 jaiscript.hpp              // Core engine (~100KB)
@@ -219,28 +186,13 @@ extend Character {
 }
 ```
 
-## Timeline Estimate
+## Priority Roadmap
 
-**Months 1-3: Core Features**
-- Script-defined classes
-- Unified serialization with pointer dedup
-- State-preserving hot reload
-
-**Months 4-6: Integration**
-- Property system bindings
-- Binary serialization format
-- Initial tooling (syntax highlighting)
-
-**Months 7-9: Optimization**
-- Performance improvements
-- Memory optimizations
-- Platform-specific tuning
-
-**Months 10-12: Ecosystem**
-- Documentation
-- Tutorial content
-- Example projects
-- Community building
+1. **Unified Serialization** - Pointer deduplication, circular references, binary format
+2. **Property System** - MV_PROPERTY integration, generic property interface
+3. **Performance** - JIT compilation, memory optimizations
+4. **Tooling** - LSP, syntax highlighting, debugger
+5. **Ecosystem** - Standard library expansion, documentation
 
 ## Competitive Advantages
 

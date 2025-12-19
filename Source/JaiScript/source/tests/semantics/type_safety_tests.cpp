@@ -1605,7 +1605,7 @@ public:
             )");
 
             auto result = eng->execute(R"(
-                auto n = shared_ptr<Node>(Node());
+                auto n = shared_ptr<Node>();
                 n.value = 42;
                 n.value
             )");
@@ -1620,7 +1620,7 @@ public:
             )");
 
             auto result = eng->execute(R"(
-                auto d = shared_ptr<Data>(Data());
+                auto d = shared_ptr<Data>();
                 d.x = 99;
                 process(d)
             )");
@@ -1653,7 +1653,7 @@ public:
             eng->execute("class Obj { int x = 0; }");
 
             auto result = eng->execute(R"(
-                auto o = shared_ptr<Obj>(Obj());
+                auto o = shared_ptr<Obj>();
                 o.x = 42;
                 auto w = weak_ptr<Obj>(o);
                 auto locked = w.lock();
@@ -2464,7 +2464,7 @@ public:
                     SmartEntity(string n, int i) : super(n, i) {}
                 }
 
-                auto ptr = shared_ptr<SmartEntity>(SmartEntity("PtrTest", 777));
+                auto ptr = shared_ptr<SmartEntity>("PtrTest", 777);
                 ptr.get_id()
             )");
             check_eq(result.as<int>(), 777);

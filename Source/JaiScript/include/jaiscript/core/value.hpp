@@ -185,6 +185,11 @@ namespace jai {
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
 
+        // Get interned type ID for error messages (falls back to enum value if type_info not set)
+        uint64_t type_id() const {
+            return type_info_ ? type_info_->id : static_cast<uint64_t>(current_type());
+        }
+
         // current_type() - What type is ACTUALLY stored in the variant right now
         // Use this for runtime type checks (is_null, is_object, etc.)
         script_value_type current_type() const {
@@ -275,7 +280,7 @@ namespace jai {
         inline script_int as_int() const {
             auto result = checked_as_int();
             if (!result) {
-                throw runtime_error(std::string(result.message()));
+                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
             }
             return result.value();
         }
@@ -283,7 +288,7 @@ namespace jai {
         inline script_float as_float() const {
             auto result = checked_as_float();
             if (!result) {
-                throw runtime_error(std::string(result.message()));
+                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
             }
             return result.value();
         }
@@ -291,7 +296,7 @@ namespace jai {
         inline const script_string& as_string() const {
             auto result = checked_as_string();
             if (!result) {
-                throw runtime_error(std::string(result.message()));
+                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
             }
             return *result.value();
         }
@@ -299,7 +304,7 @@ namespace jai {
         inline script_bool as_bool() const {
             auto result = checked_as_bool();
             if (!result) {
-                throw runtime_error(std::string(result.message()));
+                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
             }
             return result.value();
         }
@@ -307,7 +312,7 @@ namespace jai {
         inline script_char as_char() const {
             auto result = checked_as_char();
             if (!result) {
-                throw runtime_error(std::string(result.message()));
+                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
             }
             return result.value();
         }
@@ -469,11 +474,17 @@ namespace jai {
         
         // Generic extraction with type checking
         // Thin wrapper around checked_as<T>() that throws on error
+        // NOTE: This throws for compatibility with C++ bindings (class_builder, function_binder)
+        // Internal interpreter code should use checked_as<T>() directly
         template<typename T>
         T as() const {
             auto result = checked_as<T>();
             if (!result) {
-                throw runtime_error(result.message().empty() ? std::string("Type conversion failed") : std::string(result.message()));
+                if (result.message().empty()) {
+                    throw runtime_error("Type conversion failed");
+                }
+                // Format the error message with symbol IDs
+                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
             }
             return std::move(result.value());
         }
@@ -654,8 +665,8 @@ namespace jai {
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not an integer or float. Actual type: " +
-                    std::to_string(static_cast<int>(val.type()))
+                    "script_value is not an integer or float. Actual type: {0}",
+                    val.type_id()
                 );
             }
             else if constexpr (std::is_same_v<T, script_float> || std::is_same_v<T, double>) {
@@ -670,7 +681,8 @@ namespace jai {
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a float or integer"
+                    "script_value is not a float or integer. Actual type: {0}",
+                    val.type_id()
                 );
             }
             else if constexpr (std::is_same_v<T, script_bool>) {
@@ -683,7 +695,8 @@ namespace jai {
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a boolean"
+                    "script_value is not a boolean. Actual type: {0}",
+                    val.type_id()
                 );
             }
             else if constexpr (std::is_same_v<T, script_char>) {
@@ -696,14 +709,15 @@ namespace jai {
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a character"
+                    "script_value is not a character. Actual type: {0}",
+                    val.type_id()
                 );
             }
             // MEDIUM PATH: Common integral conversions
             else if constexpr (std::is_same_v<T, int>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < std::numeric_limits<int>::min() || val > std::numeric_limits<int>::max()) {
@@ -717,7 +731,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, int64_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 return checked_result<T>(static_cast<int64_t>(val_result.value()));
             }
@@ -743,7 +757,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, script_string> || std::is_same_v<T, std::string>) {
                 auto str_result = checked_as_string();
                 if (!str_result) {
-                    return checked_result<T>(str_result.error(), str_result.message());
+                    return str_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 return checked_result<T>(*str_result.value());
             }
@@ -787,13 +801,13 @@ namespace jai {
                     } else if constexpr (std::is_same_v<base_type, script_string> || std::is_same_v<base_type, std::string>) {
                         auto str_result = checked_as_string();
                         if (!str_result) {
-                            return checked_result<T>(str_result.error(), str_result.message());
+                            return str_result.error_value();  // Preserves symbol IDs for formatting
                         }
                         return checked_result<T>(*str_result.value());
                     } else if constexpr (std::is_same_v<base_type, std::vector<script_value>>) {
                         auto arr_result = checked_as_array();
                         if (!arr_result) {
-                            return checked_result<T>(arr_result.error(), arr_result.message());
+                            return arr_result.error_value();  // Preserves symbol IDs for formatting
                         }
                         return checked_result<T>(*arr_result.value());
                     } else if constexpr (std::is_same_v<base_type, std::map<script_value, script_value>>) {
@@ -807,7 +821,7 @@ namespace jai {
                         if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                             auto ptr_result = checked_as<std::shared_ptr<base_type>>();
                             if (!ptr_result) {
-                                return checked_result<T>(ptr_result.error(), ptr_result.message());
+                                return ptr_result.error_value();  // Preserves symbol IDs for formatting
                             }
                             return checked_result<T>(*ptr_result.value());
                         }
@@ -827,7 +841,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, int8_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < std::numeric_limits<int8_t>::min() || val > std::numeric_limits<int8_t>::max()) {
@@ -841,7 +855,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, int16_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < std::numeric_limits<int16_t>::min() || val > std::numeric_limits<int16_t>::max()) {
@@ -855,7 +869,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, int32_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < std::numeric_limits<int32_t>::min() || val > std::numeric_limits<int32_t>::max()) {
@@ -870,7 +884,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, uint8_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < 0 || val > std::numeric_limits<uint8_t>::max()) {
@@ -884,7 +898,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, uint16_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < 0 || val > std::numeric_limits<uint16_t>::max()) {
@@ -898,7 +912,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, uint32_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < 0 || val > std::numeric_limits<uint32_t>::max()) {
@@ -912,7 +926,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, uint64_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < 0) {
@@ -926,7 +940,7 @@ namespace jai {
             else if constexpr (std::is_same_v<T, size_t>) {
                 auto val_result = checked_as<script_int>();
                 if (!val_result) {
-                    return checked_result<T>(val_result.error(), val_result.message());
+                    return val_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 script_int val = val_result.value();
                 if (val < 0) {
@@ -971,7 +985,7 @@ namespace jai {
                 T result;
                 auto arr_result = checked_as_array();
                 if (!arr_result) {
-                    return checked_result<T>(arr_result.error(), arr_result.message());
+                    return arr_result.error_value();  // Preserves symbol IDs for formatting
                 }
                 const auto& arr = *arr_result.value();
                 result.reserve(arr.size());
@@ -1063,14 +1077,16 @@ namespace jai {
                 if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) {
                     return checked_result<T>(
                         make_error_code(runtime_error_code::not_an_object),
-                        "script_value is not an object (type=" + std::to_string(static_cast<int>(type())) + ")"
+                        "script_value is not an object. Actual type: {0}",
+                        type_id()
                     );
                 }
                 auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
                 if (!objHolder->is_class_instance_wrapper) {
                     return checked_result<T>(
                         make_error_code(runtime_error_code::not_a_class),
-                        "Object is not a class_instance (type_name=" + objHolder->type_name + ")"
+                        "Object is not a class_instance. Actual type: {0}",
+                        type_id()
                     );
                 }
                 return checked_result<T>(std::static_pointer_cast<class_instance>(objHolder->data));
@@ -1165,7 +1181,7 @@ namespace jai {
                 if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                     auto ptr_result = checked_as<std::shared_ptr<T>>();
                     if (!ptr_result) {
-                        return checked_result<T>(ptr_result.error(), ptr_result.message());
+                        return ptr_result.error_value();  // Preserves symbol IDs for formatting
                     }
                     return checked_result<T>(*ptr_result.value());
                 }

@@ -41,9 +41,12 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
 
     // If there were parse errors, return error with first error message
     if (!errors_.empty()) {
+        // Intern the first error message so it can be retrieved via symbol_id
+        uint64_t error_id = symbolizer_->intern(errors_[0]);
         return checked_result<std::vector<declaration_ptr>>(
             make_error_code(parse_error_code::invalid_expression),
-            errors_[0]
+            "Parse error: {0}",
+            error_id
         );
     }
 
@@ -177,9 +180,12 @@ checked_result<token> parser::consume(token_type type, const std::string& messag
     errors_.push_back(ss.str());
 
     // Return error as checked_result<token>
+    // Intern the message so we can pass it as a symbol ID
+    uint64_t msg_id = symbolizer_->intern(message);
     return checked_result<token>(
         make_error_code(parse_error_code::expected_token),
-        message
+        "Expected token: {0}",
+        msg_id
     );
 }
 

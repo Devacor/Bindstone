@@ -420,7 +420,7 @@ void engine::implementation::updateOverloadedFunction(const std::string& name, e
     };
     
     // Update in global environment
-    script_value dispatcherValue = script_value::make_function(dispatcher, engine_ptr->weak_from_this());
+    script_value dispatcherValue = script_value::make_function(dispatcher, engine_ptr);
     global_environment_->define(name, dispatcherValue);
 }
 
@@ -465,10 +465,10 @@ engine& engine::operator=(engine&&) noexcept = default;
 
 void engine::initialize_engine_reference() {
     // Pass the engine reference to the backend
-    impl->backend->set_engine_reference(weak_from_this());
+    impl->backend->set_engine_reference(this);
     
     // Pass the engine reference to the conversion registry
-    impl->conversions->set_engine(weak_from_this());
+    impl->conversions->set_engine(this);
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     impl->op_plus_id_ = impl->string_symbolizer_.intern("+");
@@ -490,7 +490,7 @@ void engine::initialize_engine_reference() {
     impl->op_right_shift_id_ = impl->string_symbolizer_.intern(">>");
 
     // Now that we have a proper engine reference, add conversions and functions that create script_value
-    auto engine_weak = weak_from_this();
+    auto engine_weak = this;
     
     // Set up custom extractor for class_instance objects in the conversion registry
     impl->conversions->set_custom_extractor([this](const std::string& type_name, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
@@ -926,16 +926,16 @@ void engine::add_functionWithArity(const std::string& name, script_function func
         }
         
         // Now add the new function as an overload
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()));
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this));
         impl->updateOverloadedFunction(name, this);
     } else if (overloadIt != impl->overloadedFunctions.end()) {
         // Already have overloaded functions, just add this one
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()));
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this));
         impl->updateOverloadedFunction(name, this);
     } else {
         // No existing function, just add normally
         // Store arity info for future use
-        script_value funcValue = script_value::make_function(func, weak_from_this());
+        script_value funcValue = script_value::make_function(func, this);
         impl->global_environment_->define(name, funcValue);
         impl->functionArities[name] = arity;
     }
@@ -966,7 +966,7 @@ void engine::add_overloaded_function(const std::string& name, size_t argCount, s
     }
     
     // Now add the new overload
-    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func, weak_from_this()));
+    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func, this));
     impl->updateOverloadedFunction(name, this);
 }
 
@@ -988,7 +988,7 @@ void engine::add_overloaded_functionWithTypes(const std::string& name, size_t ar
     }
     
     // Now add the new overload with type information
-    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func, weak_from_this()), paramTypes);
+    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func, this), paramTypes);
     impl->updateOverloadedFunction(name, this);
 }
 
@@ -1014,21 +1014,21 @@ void engine::add_functionWithArityAndTypes(const std::string& name, script_funct
         }
         
         // Now add the new function as an overload with type info
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()), paramTypes);
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this), paramTypes);
         impl->updateOverloadedFunction(name, this);
     } else if (overloadIt != impl->overloadedFunctions.end()) {
         // Already have overloaded functions, just add this one with type info
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()), paramTypes);
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this), paramTypes);
         impl->updateOverloadedFunction(name, this);
     } else {
         // No existing function, check if we have type info
         if (!paramTypes.empty()) {
             // Have type info, create overload set immediately
-            impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()), paramTypes);
+            impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this), paramTypes);
             impl->updateOverloadedFunction(name, this);
         } else {
             // No type info, add normally
-            script_value funcValue = script_value::make_function(func, weak_from_this());
+            script_value funcValue = script_value::make_function(func, this);
             impl->global_environment_->define(name, funcValue);
             impl->functionArities[name] = arity;
         }
@@ -1055,7 +1055,7 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     // Store the class definition in the global environment with __class_ prefix
     // This allows static member access (ClassName::static_field) to work for C++ classes
     // Use optimized make_object with cached type_id for fast type checking
-    impl->global_environment_->define("__class_" + name, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, weak_from_this()));
+    impl->global_environment_->define("__class_" + name, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, this));
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {
@@ -1132,7 +1132,7 @@ script_value engine::get_variable(const std::string& name) const {
             return func(args);
         };
 
-        return script_value::make_function(dispatcher, std::const_pointer_cast<engine>(shared_from_this()));
+        return script_value::make_function(dispatcher, const_cast<engine*>(this));
     }
     
     throw runtime_error("Variable '" + name + "' not found");
@@ -1816,18 +1816,10 @@ script_value engine::execute_import(const std::string& resolved_path) {
 }
 
 
-} // namespace jai
-
-// Helper function for conversion_registry_impl.hpp to avoid circular dependency
-namespace jai {
-std::weak_ptr<engine> get_engine_weak_ptr(engine* eng) {
-    if (!eng) {
-        throw runtime_error("Engine reference required for script_value creation");
-    }
-    return eng->weak_from_this();
-}
+// Note: get_engine_weak_ptr() function removed - no longer needed since script_value uses engine* directly
 
 std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng) {
     return eng ? eng->get_conversion_registry() : nullptr;
 }
+
 } // namespace jai

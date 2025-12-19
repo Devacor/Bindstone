@@ -192,19 +192,19 @@ namespace stdlib {
     inline const skip_flush_t skip_flush{};
 
     // Register standard I/O functions with an engine
-    inline void register_io_functions(engine& engine) {
-        auto engine_weak = engine.weak_from_this();
+    inline void register_io_functions(engine& eng_ref) {
+        engine* eng = &eng_ref;
         // Register the special control types
-        class_builder<skip_newline_t>(engine, "skip_newline_t").build();
-        class_builder<skip_flush_t>(engine, "skip_flush_t").build();
+        class_builder<skip_newline_t>(eng_ref, "skip_newline_t").build();
+        class_builder<skip_flush_t>(eng_ref, "skip_flush_t").build();
         
         // Create shared instances that can be used as singletons
         auto skip_newline_ptr = std::make_shared<skip_newline_t>();
         auto skip_flush_ptr = std::make_shared<skip_flush_t>();
 
-        // Register global instances (use engine::make_object which automatically uses weak_from_this)
-        engine.add_global("skip_newline", engine.make_object(skip_newline_ptr));
-        engine.add_global("skip_flush", engine.make_object(skip_flush_ptr));
+        // Register global instances
+        eng_ref.add_global("skip_newline", eng_ref.make_object(skip_newline_ptr));
+        eng_ref.add_global("skip_flush", eng_ref.make_object(skip_flush_ptr));
         // print function - formatted output to stdout
         // 
         // Usage:
@@ -229,14 +229,13 @@ namespace stdlib {
         //   print("Line 1", skip_newline)             // Output: Line 1 (no newline)
         //   print("Debug: ", value, skip_flush)       // Output: Debug: <value> (no newline/flush)
         //
-        engine.add_variadic_function("print", [engine_weak](const std::vector<script_value>& args) -> script_value {
-            // Get the output stream from the engine (or std::cout if engine expired)
-            auto eng = engine_weak.lock();
+        eng_ref.add_variadic_function("print", [eng](const std::vector<script_value>& args) -> script_value {
+            // Get the output stream from the engine
             std::ostream& out = eng ? eng->get_output_stream() : std::cout;
 
             if (args.empty()) {
                 out << std::endl;
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, eng);
             }
 
             // Check if last argument is a control type
@@ -266,7 +265,7 @@ namespace stdlib {
                 } else if (should_flush) {
                     out << std::flush;
                 }
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, eng);
             }
 
             if (effective_args == 1) {
@@ -277,7 +276,7 @@ namespace stdlib {
                 } else if (should_flush) {
                     out << std::flush;
                 }
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, eng);
             }
 
             // Multiple arguments - check if first arg contains format placeholders
@@ -294,7 +293,7 @@ namespace stdlib {
                 } else if (should_flush) {
                     out << std::flush;
                 }
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, eng);
             }
 
             // Has format specifiers - use format string logic
@@ -308,7 +307,7 @@ namespace stdlib {
             } else if (should_flush) {
                 out << std::flush;
             }
-            return script_value(std::monostate{}, engine_weak); // void return
+            return script_value(std::monostate{}, eng); // void return
         });
         
         // format function - builds formatted strings
@@ -323,60 +322,60 @@ namespace stdlib {
         //   format("Hello", " ", "World")      // Returns: "Hello World"
         //   format("{} + {} = {}", 2, 3, 5)    // Returns: "2 + 3 = 5"
         //
-        engine.add_variadic_function("format", [engine_weak](const std::vector<script_value>& args) -> script_value {
+        eng_ref.add_variadic_function("format", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
-                return script_value("", engine_weak);
+                return script_value("", eng);
             }
-            
+
             // Filter out control types (they don't make sense for format)
             std::vector<script_value> filtered_args;
             for (const auto& arg : args) {
                 auto type_info = arg.get_type_info();
-                if (!type_info || (type_info->type_name != "skip_newline_t" && 
+                if (!type_info || (type_info->type_name != "skip_newline_t" &&
                                    type_info->type_name != "skip_flush_t")) {
                     filtered_args.push_back(arg);
                 }
             }
-            
+
             if (filtered_args.empty()) {
-                return script_value("", engine_weak);
+                return script_value("", eng);
             }
-            
+
             if (filtered_args.size() == 1) {
                 // Single argument - return as-is, no format processing
-                return script_value(filtered_args[0].to_string(), engine_weak);
+                return script_value(filtered_args[0].to_string(), eng);
             }
-            
+
             // Multiple arguments - check if first arg contains format placeholders
             std::string first_str = filtered_args[0].to_string();
             bool has_format_specs = has_format_placeholders(first_str);
-            
+
             if (!has_format_specs) {
                 // No format specifiers - concatenate all arguments
                 std::string result;
                 for (const auto& arg : filtered_args) {
                     result += arg.to_string();
                 }
-                return script_value(result, engine_weak);
+                return script_value(result, eng);
             }
-            
+
             // Has format specifiers - use format string logic
             std::string result = process_format_string(first_str, filtered_args, 1);
-            
-            return script_value(result, engine_weak);
+
+            return script_value(result, eng);
         });
         
         // to_string function - converts value to string
         // Register as variadic to bypass type matching issues
-        engine.add_variadic_function("to_string", [engine_weak](const std::vector<script_value>& args) -> script_value {
+        eng_ref.add_variadic_function("to_string", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("to_string expects exactly 1 argument, got " + std::to_string(args.size()));
             }
-            return script_value(args[0].to_string(), engine_weak);
+            return script_value(args[0].to_string(), eng);
         });
-        
+
         // type_of function - returns the type name of a value
-        engine.add_function("type_of", [engine_weak](const script_value& val) -> std::string {
+        eng_ref.add_function("type_of", [](const script_value& val) -> std::string {
             switch (val.type()) {
                 case script_value_type::jai_null_type: return "null";
                 case script_value_type::jai_bool_type: return "bool";

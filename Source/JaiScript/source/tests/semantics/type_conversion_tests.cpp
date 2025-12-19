@@ -134,10 +134,10 @@ public:
             )");
             
             auto m = map.as_map();
-            check_eq(m[script_value("int", engine->weak_from_this())].as<int>(), 42);
-            check_near(m[script_value("float", engine->weak_from_this())].as<double>(), 3.14, 0.01);
-            check_eq(m[script_value("string", engine->weak_from_this())].as_string(), "hello");
-            check_eq(m[script_value("bool", engine->weak_from_this())].as<bool>(), true);
+            check_eq(m[script_value("int", engine.get())].as<int>(), 42);
+            check_near(m[script_value("float", engine.get())].as<double>(), 3.14, 0.01);
+            check_eq(m[script_value("string", engine.get())].as_string(), "hello");
+            check_eq(m[script_value("bool", engine.get())].as<bool>(), true);
         });
         
         test("null_conversions", [this]() {

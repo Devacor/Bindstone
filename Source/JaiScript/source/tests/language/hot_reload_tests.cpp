@@ -33,13 +33,13 @@ public:
                     std::cout << arg.to_string() << " ";
                 }
                 std::cout << std::endl;
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // First definition
@@ -107,13 +107,13 @@ public:
                     std::cout << arg.to_string() << " ";
                 }
                 std::cout << std::endl;
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // Create base and derived classes
@@ -187,13 +187,13 @@ public:
                     std::cout << arg.to_string() << " ";
                 }
                 std::cout << std::endl;
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // Create three-level hierarchy
@@ -266,7 +266,7 @@ public:
             std::vector<std::string> method_calls;
             engine->add_function("record", [&method_calls, engine](const std::string& msg) {
                 method_calls.push_back(msg);
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             engine->add_function("to_string", [](jai::script_float val) {
@@ -352,7 +352,7 @@ public:
                     std::cout << arg.to_string() << " ";
                 }
                 std::cout << std::endl;
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // Class with constructor
@@ -407,7 +407,7 @@ public:
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // Test with various field types
@@ -490,7 +490,7 @@ public:
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // Create multiple instances of same class
@@ -568,13 +568,13 @@ public:
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             auto migration_log = std::make_shared<std::vector<std::string>>();
             engine->add_function("log_migration", [migration_log, engine](const std::string& msg) {
                 migration_log->push_back(msg);
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // First definition - no migration
@@ -692,7 +692,7 @@ public:
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // Create many instances
@@ -773,13 +773,13 @@ public:
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             auto migration_log = std::make_shared<std::vector<std::string>>();
             engine->add_function("log_migration", [migration_log, engine](const std::string& msg) {
                 migration_log->push_back(msg);
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // Create class with migration method
@@ -1018,13 +1018,13 @@ public:
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             std::vector<std::string> log_messages;
             engine->add_function("log_action", [&log_messages, engine](const std::string& msg) {
                 log_messages.push_back(msg);
-                return jai::script_value(std::monostate{}, engine->weak_from_this());
+                return jai::script_value(std::monostate{}, engine.get());
             });
             
             // Create initial class

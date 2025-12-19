@@ -45,14 +45,14 @@ namespace jai {
         // Standard environment constructor
         environment(string_symbolizer* symbolizer)
             : symbolizer_(symbolizer), kind_(env_kind::standard),
-              this_object_(std::monostate{}, std::weak_ptr<engine>{}),
-              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {}
+              this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
+              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {}
 
         // Standard environment with parent
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer)
             : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::standard),
-              this_object_(std::monostate{}, std::weak_ptr<engine>{}),
-              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
+              this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
+              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
             validate_parent_chain(parent);
         }
 
@@ -60,7 +60,7 @@ namespace jai {
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, script_value this_obj)
             : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::method),
               this_object_(std::move(this_obj)),
-              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
+              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
             validate_parent_chain(parent);
         }
 
@@ -68,8 +68,8 @@ namespace jai {
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, std::shared_ptr<class_definition> class_def)
             : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::static_method),
               class_def_(class_def),
-              this_object_(std::monostate{}, std::weak_ptr<engine>{}),
-              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
+              this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
+              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
             validate_parent_chain(parent);
         }
 
@@ -141,8 +141,8 @@ namespace jai {
         // Clear just the this_object without clearing local values
         // Called when a method/constructor returns to ensure timely destruction
         void clear_this_reference() {
-            this_object_ = script_value::make_null(std::weak_ptr<engine>{});
-            bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+            this_object_ = script_value::make_null(static_cast<engine*>(nullptr));
+            bound_method_storage_ = script_value::make_null(static_cast<engine*>(nullptr));
         }
 
         // Static method environment accessors (only valid when kind == static_method)
@@ -335,91 +335,91 @@ namespace jai {
             class_lookup_callback_ = std::move(callback);
         }
         
-        // Set engine reference for script_value creation
-        void set_engine_reference(std::weak_ptr<engine> engine_ref) {
-            engine_ref_ = std::move(engine_ref);
+        // Set engine pointer for script_value creation
+        void set_engine_reference(engine* eng) {
+            engine_ = eng;
 
             // Initialize cached common values to avoid repeated allocations
-            cached_null_ = script_value(std::monostate{}, engine_ref_);
-            cached_true_ = script_value(true, engine_ref_);
-            cached_false_ = script_value(false, engine_ref_);
-            cached_zero_int_ = script_value(static_cast<script_int>(0), engine_ref_);
-            cached_one_int_ = script_value(static_cast<script_int>(1), engine_ref_);
-            cached_zero_float_ = script_value(0.0, engine_ref_);
-            cached_one_float_ = script_value(1.0, engine_ref_);
+            cached_null_ = script_value(std::monostate{}, engine_);
+            cached_true_ = script_value(true, engine_);
+            cached_false_ = script_value(false, engine_);
+            cached_zero_int_ = script_value(static_cast<script_int>(0), engine_);
+            cached_one_int_ = script_value(static_cast<script_int>(1), engine_);
+            cached_zero_float_ = script_value(0.0, engine_);
+            cached_one_float_ = script_value(1.0, engine_);
         }
 
-        // Get engine reference (for internal use in lambdas)
-        std::weak_ptr<engine> get_engine_ref() const {
-            return engine_ref_;
+        // Get engine pointer (for internal use in lambdas)
+        engine* get_engine() const {
+            return engine_;
         }
-        
+
         // Helper to create script_value with engine context
         script_value make_value(script_int i) const {
-            if (!engine_ref_.expired()) {
+            if (engine_) {
                 // Return cached common values to avoid allocations
                 if (i == 0 && cached_zero_int_.has_value()) return *cached_zero_int_;
                 if (i == 1 && cached_one_int_.has_value()) return *cached_one_int_;
-                return script_value(i, engine_ref_);
+                return script_value(i, engine_);
             }
-            throw runtime_error("Engine reference expired - cannot create script_value");
+            throw runtime_error("Engine pointer is null - cannot create script_value");
         }
 
         script_value make_value(script_float f) const {
-            if (!engine_ref_.expired()) {
+            if (engine_) {
                 // Return cached common values to avoid allocations
                 if (f == 0.0 && cached_zero_float_.has_value()) return *cached_zero_float_;
                 if (f == 1.0 && cached_one_float_.has_value()) return *cached_one_float_;
-                return script_value(f, engine_ref_);
+                return script_value(f, engine_);
             }
-            throw runtime_error("Engine reference expired - cannot create script_value");
+            throw runtime_error("Engine pointer is null - cannot create script_value");
         }
-        
+
         script_value make_value(const script_string& s) const {
-            if (!engine_ref_.expired()) {
-                return script_value(s, engine_ref_);
+            if (engine_) {
+                return script_value(s, engine_);
             }
-            throw runtime_error("Engine reference expired - cannot create script_value");
+            throw runtime_error("Engine pointer is null - cannot create script_value");
         }
 
         // Move overload for string temporaries (avoids copy)
         script_value make_value(script_string&& s) const {
-            if (!engine_ref_.expired()) {
-                return script_value(std::move(s), engine_ref_);
+            if (engine_) {
+                return script_value(std::move(s), engine_);
             }
-            throw runtime_error("Engine reference expired - cannot create script_value");
+            throw runtime_error("Engine pointer is null - cannot create script_value");
         }
-        
+
         script_value make_value(script_bool b) const {
-            if (!engine_ref_.expired()) {
+            if (engine_) {
                 // Return cached common values to avoid allocations
                 if (b && cached_true_.has_value()) return *cached_true_;
                 if (!b && cached_false_.has_value()) return *cached_false_;
-                return script_value(b, engine_ref_);
+                return script_value(b, engine_);
             }
-            throw runtime_error("Engine reference expired - cannot create script_value");
+            throw runtime_error("Engine pointer is null - cannot create script_value");
         }
 
         script_value make_value(script_char c) const {
-            if (!engine_ref_.expired()) {
-                return script_value(c, engine_ref_);
+            if (engine_) {
+                return script_value(c, engine_);
             }
-            throw runtime_error("Engine reference expired - cannot create script_value");
+            throw runtime_error("Engine pointer is null - cannot create script_value");
         }
 
         script_value make_value() const {
-            if (!engine_ref_.expired()) {
+            if (engine_) {
                 // Return cached null value
                 if (cached_null_.has_value()) return *cached_null_;
-                return script_value(std::monostate{}, engine_ref_);
+                return script_value(std::monostate{}, engine_);
             }
-            throw runtime_error("Engine reference expired - cannot create script_value");
+            throw runtime_error("Engine pointer is null - cannot create script_value");
         }
 
         // Helper to create namespace-related objects with both type_name and type_id for fast comparison
         template<typename T>
         script_value make_namespace_object(uint64_t type_id, const char* type_name, std::shared_ptr<T> data) const {
-            return script_value::make_object(type_name, type_id, std::static_pointer_cast<void>(data), engine_ref_);
+            return script_value::make_object(type_name, type_id, std::static_pointer_cast<void>(data), engine_);
         }
 
         // Execute a list of declarations and return the last value
@@ -786,8 +786,9 @@ namespace jai {
 		uint64_t getValue_id_;
 		uint64_t cpp_object_field_id_;  // "_cpp_object"
 
-        // Engine reference for script_value creation (weak reference to avoid circular dependency)
-        std::weak_ptr<engine> engine_ref_;
+        // Engine pointer for script_value creation (raw pointer - no atomic ops on copy)
+        // Interpreter lifetime is managed by engine, so engine will always outlive interpreter
+        engine* engine_ = nullptr;
 
         // Cached common values to avoid repeated allocations (initialized in set_engine_reference)
         std::optional<script_value> cached_null_;

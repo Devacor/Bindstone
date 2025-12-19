@@ -16,8 +16,8 @@ public:
     explicit binary_archive_writer(std::vector<uint8_t>& buffer) : archive_writer(), buffer_(&buffer) {
         buffer_->clear();
     }
-    explicit binary_archive_writer(std::weak_ptr<engine> eng) : archive_writer(eng) {}
-    binary_archive_writer(std::vector<uint8_t>& buffer, std::weak_ptr<engine> eng) : archive_writer(eng), buffer_(&buffer) {
+    explicit binary_archive_writer(engine* eng) : archive_writer(eng) {}
+    binary_archive_writer(std::vector<uint8_t>& buffer, engine* eng) : archive_writer(eng), buffer_(&buffer) {
         buffer_->clear();
     }
 
@@ -238,7 +238,7 @@ public:
 
                 // Look up version from serialization metadata
                 uint32_t version = 1;  // Default version
-                if (auto eng = engine_ref_.lock()) {
+                if (auto eng = engine_ref_) {
                     const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
                     if (metadata) {
                         version = metadata->current_version;
@@ -262,7 +262,7 @@ public:
                     if (instance) {
                         auto class_def = instance->get_class_definition();
                         if (class_def) {
-                            auto eng = class_def->get_engine_ref().lock();
+                            auto eng = class_def->get_engine();
                             if (eng) {
                                 for (const auto& prop_name : class_def->get_property_names()) {
                                     uint64_t getter_id = eng->symbolize("_get_" + prop_name);
@@ -339,16 +339,16 @@ private:
 class binary_archive_reader : public archive_reader {
 public:
     // Engine is REQUIRED for binary reading since we need to create script_values
-    explicit binary_archive_reader(const std::vector<uint8_t>& data, std::weak_ptr<engine> eng)
+    explicit binary_archive_reader(const std::vector<uint8_t>& data, engine* eng)
         : archive_reader(eng), data_(data), pos_(0) {
-        if (eng.expired()) {
+        if (!eng) {
             throw serialization_error("binary_archive_reader requires a valid engine reference");
         }
     }
 
-    explicit binary_archive_reader(const void* data, size_t size, std::weak_ptr<engine> eng)
+    explicit binary_archive_reader(const void* data, size_t size, engine* eng)
         : archive_reader(eng), data_(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size), pos_(0) {
-        if (eng.expired()) {
+        if (!eng) {
             throw serialization_error("binary_archive_reader requires a valid engine reference");
         }
     }
@@ -511,51 +511,50 @@ public:
         depth_guard guard(current_depth_);
 
         // Get engine reference once at the start
-        auto eng = engine_ref_.lock();
+        auto eng = engine_ref_;
         if (!eng) {
             throw serialization_error("Engine reference expired during deserialization");
         }
-        auto eng_weak = eng->weak_from_this();
-        
+
         // Read type tag first
         uint8_t type_tag = read_uint8();
         script_value_type vtype = static_cast<script_value_type>(type_tag);
-        
+
         switch (vtype) {
             case script_value_type::jai_null_type:
-                return script_value(std::monostate{}, eng_weak);
-                
+                return script_value(std::monostate{}, eng);
+
             case script_value_type::jai_bool_type:
-                return script_value(read_bool(), eng_weak);
-                
+                return script_value(read_bool(), eng);
+
             case script_value_type::jai_int_type:
-                return script_value(read_int64(), eng_weak);
-                
+                return script_value(read_int64(), eng);
+
             case script_value_type::jai_float_type:
-                return script_value(read_float64(), eng_weak);
-                
+                return script_value(read_float64(), eng);
+
             case script_value_type::jai_string_type:
-                return script_value(read_string(), eng_weak);
-                
+                return script_value(read_string(), eng);
+
             case script_value_type::jai_char_type:
-                return script_value(static_cast<script_char>(read_uint8()), eng_weak);
-                
+                return script_value(static_cast<script_char>(read_uint8()), eng);
+
             case script_value_type::jai_array_type: {
                 uint32_t size = read_uint32();
-                script_value array_val = script_value::make_array(nullptr, eng_weak);
+                script_value array_val = script_value::make_array(nullptr, eng);
                 auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
-                
+
                 for (uint32_t i = 0; i < size; ++i) {
                     arr.push_back(read_value());  // Recursive deserialization
                 }
                 return array_val;
             }
-            
+
             case script_value_type::jai_map_type: {
                 uint32_t size = read_uint32();
-                script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng_weak);
+                script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
-                
+
                 for (uint32_t i = 0; i < size; ++i) {
                     script_value key = read_value();
                     script_value value = read_value();
@@ -563,14 +562,14 @@ public:
                 }
                 return map_val;
             }
-            
+
             case script_value_type::jai_weak_ptr_type: {
                 // Read the shared_ptr ID this weak_ptr references
                 uint32_t id = read_uint32();
 
                 if (id == 0) {
                     // Null or expired weak_ptr - create empty weak_ptr
-                    script_value v(std::monostate{}, eng_weak);
+                    script_value v(std::monostate{}, eng);
                     v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
                     v.storage_ = std::weak_ptr<script_value::object_holder>();
                     return v;
@@ -583,7 +582,7 @@ public:
                     // Object was already reconstructed, get its object_holder and create weak_ptr
                     auto obj_holder = existing_obj.get_object_holder();
                     if (obj_holder) {
-                        script_value weak_val(std::monostate{}, eng_weak);
+                        script_value weak_val(std::monostate{}, eng);
                         weak_val.set_type_info(eng->get_type_info_weak_ptr(existing_obj.get_type_info()));
                         weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
                         return weak_val;
@@ -604,7 +603,7 @@ public:
                 }
 
                 // Create weak_ptr to the object_holder
-                script_value weak_val(std::monostate{}, eng_weak);
+                script_value weak_val(std::monostate{}, eng);
                 weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
                 weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
                 return weak_val;
@@ -637,80 +636,76 @@ public:
                 }
 
                 // Check if there's a custom factory for this type
-                auto eng = engine_ref_.lock();
-                if (eng) {
-                    const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
-                    if (metadata && metadata->custom_construct) {
-                        // Set pre-read properties so factory can access them via read_property
-                        set_preread_properties(preread_props);
+                // eng is already set at the start of read_value()
+                const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
+                if (metadata && metadata->custom_construct) {
+                    // Set pre-read properties so factory can access them via read_property
+                    set_preread_properties(preread_props);
 
-                        // Use custom factory for construction with proper version
-                        script_value constructed_obj = metadata->custom_construct(*this, version);
+                    // Use custom factory for construction with proper version
+                    script_value constructed_obj = metadata->custom_construct(*this, version);
 
-                        // Clear pre-read properties
-                        clear_preread_properties();
+                    // Clear pre-read properties
+                    clear_preread_properties();
 
-                        // Now hydrate the object's properties (all properties already read above)
-                        auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
-                        if (instance) {
-                            auto class_def = instance->get_class_definition();
-                            if (class_def) {
-                                // Set each property from pre-read values
-                                auto eng = class_def->get_engine_ref().lock();
-                                if (eng) {
-                                    for (uint32_t i = 0; i < property_count; ++i) {
-                                        const auto& prop_name = property_names[i];
-                                        const auto& prop_value = property_values[i];
+                    // Now hydrate the object's properties (all properties already read above)
+                    auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
+                    if (instance) {
+                        auto class_def = instance->get_class_definition();
+                        if (class_def) {
+                            // Set each property from pre-read values
+                            auto class_eng = class_def->get_engine();
+                            if (class_eng) {
+                                for (uint32_t i = 0; i < property_count; ++i) {
+                                    const auto& prop_name = property_names[i];
+                                    const auto& prop_value = property_values[i];
 
-                                        // Try to find setter
-                                        uint64_t setter_id = eng->symbolize("_set_" + prop_name);
-                                        auto setter = class_def->get_method(setter_id);
-                                        if (setter.type() == script_value_type::jai_function_type) {
-                                            try {
-                                                std::vector<script_value> args = {constructed_obj, prop_value};
-                                                (void)setter.as_function()(args);  // Explicitly discard return value
-                                            } catch (...) {
-                                                // Skip properties that fail to set
-                                            }
+                                    // Try to find setter
+                                    uint64_t setter_id = class_eng->symbolize("_set_" + prop_name);
+                                    auto setter = class_def->get_method(setter_id);
+                                    if (setter.type() == script_value_type::jai_function_type) {
+                                        try {
+                                            std::vector<script_value> args = {constructed_obj, prop_value};
+                                            (void)setter.as_function()(args);  // Explicitly discard return value
+                                        } catch (...) {
+                                            // Skip properties that fail to set
                                         }
                                     }
                                 }
 
                                 // Call post_deserialize hook if it exists
                                 // Pass both the object and the version number for migration logic
-                                if (eng) {
-                                    uint64_t post_deserialize_id = eng->symbolize("post_deserialize");
-                                    auto post_deserialize = class_def->get_method(post_deserialize_id, false);  // Don't throw if not found
-                                    if (post_deserialize.type() == script_value_type::jai_function_type) {
-                                        try {
-                                            std::vector<script_value> args = {
-                                                constructed_obj,
-                                                script_value(static_cast<script_int>(version), eng->weak_from_this())
-                                            };
-                                            (void)post_deserialize.as_function()(args);
-                                        } catch (...) {
-                                            // Hook failed, but continue
-                                        }
+                                uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
+                                auto post_deserialize = class_def->get_method(post_deserialize_id, false);  // Don't throw if not found
+                                if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                    try {
+                                        std::vector<script_value> args = {
+                                            constructed_obj,
+                                            script_value(static_cast<script_int>(version), class_eng)
+                                        };
+                                        (void)post_deserialize.as_function()(args);
+                                    } catch (...) {
+                                        // Hook failed, but continue
                                     }
                                 }
                             }
                         }
-
-                        return constructed_obj;
                     }
+
+                    return constructed_obj;
                 }
 
                 // No custom factory - use default deserialization path
                 // Convert to map for reconstruction by from_binary
-                script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng_weak);
+                script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
 
                 // Add type information
-                map.insert_or_assign(script_value("_type_", eng_weak), script_value(type_name, eng_weak));
+                map.insert_or_assign(script_value("_type_", eng), script_value(type_name, eng));
 
                 // Add properties in the order they were serialized
                 for (uint32_t i = 0; i < property_count; ++i) {
-                    map.insert_or_assign(script_value(property_names[i], eng_weak), property_values[i]);
+                    map.insert_or_assign(script_value(property_names[i], eng), property_values[i]);
                 }
 
                 return map_val;  // Return as map for reconstruction by from_binary

@@ -58,7 +58,17 @@ namespace jai {
             eng->initialize_engine_reference();
             return eng;
         }
-        
+
+        // Helper methods for getting engine references
+        // Use these when you need to pass engine references to systems that need weak_ptr or shared_ptr
+        std::weak_ptr<engine> get_weak_engine() {
+            return weak_from_this();
+        }
+
+        std::shared_ptr<engine> get_shared_engine() {
+            return shared_from_this();
+        }
+
         // Non-copyable, moveable
         engine(const engine&) = delete;
         engine& operator=(const engine&) = delete;
@@ -97,7 +107,7 @@ namespace jai {
             if constexpr (std::is_integral_v<T> || std::is_floating_point_v<T> ||
                           std::is_same_v<T, bool> || std::is_same_v<T, std::string> ||
                           std::is_same_v<T, char>) {
-                auto ref = script_value::make_cpp_bound(&value, weak_from_this());
+                auto ref = script_value::make_cpp_bound(&value, this);
                 add_global(name, std::move(ref), is_serializable);
             } else {
                 // For custom types, create a non-owning shared_ptr using aliasing constructor
@@ -135,10 +145,10 @@ namespace jai {
                     // Intern the constant field name to ID
                     uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
                     instance->set_field(cpp_object_field_id,
-                        script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), weak_from_this()));
+                        script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), this));
 
                     // Return the class_instance wrapped in a script_value
-                    return script_value::make_object(type_name, instance, weak_from_this());
+                    return script_value::make_object(type_name, instance, this);
                 }
             } catch (...) {
                 // Class not registered, fall back to raw object storage
@@ -146,34 +156,34 @@ namespace jai {
 
             // Fallback: store as raw C++ object (properties won't work)
             auto type_id = get_symbolizer()->intern(type_name);
-            return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(data), weak_from_this());
+            return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(data), this);
         }
-        
+
         // Convenient script_value creation methods
-        // Usage: engine->make_value(42) instead of script_value(42, engine->weak_from_this())
+        // Usage: engine->make_value(42) instead of script_value(42, engine)
         template<typename T>
         script_value make_value(T&& value) {
-            return script_value(std::forward<T>(value), weak_from_this());
+            return script_value(std::forward<T>(value), this);
         }
-        
+
         // Create null/void value
         script_value make_null() {
-            return script_value(std::monostate{}, weak_from_this());
+            return script_value(std::monostate{}, this);
         }
-        
+
         // Create array value
         script_value make_array() {
-            return script_value::make_array(nullptr, weak_from_this());
+            return script_value::make_array(nullptr, this);
         }
-        
+
         // Create map value
         script_value make_map() {
-            return script_value::make_map(nullptr, nullptr, weak_from_this());
+            return script_value::make_map(nullptr, nullptr, this);
         }
-        
+
         // Create empty weak_ptr value with specified type
         script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type) {
-            return script_value::make_empty_weak_ptr(weak_ptr_type, weak_from_this());
+            return script_value::make_empty_weak_ptr(weak_ptr_type, this);
         }
         
         // === FUNCTION REGISTRATION ===
@@ -425,11 +435,11 @@ namespace jai {
         template<typename T>
         void register_type_converter(const std::string& type_name) {
             // Register a converter that creates a script_value from this type
-            auto engine_weak = weak_from_this();
+            engine* eng = this;
             auto type_id = get_symbolizer()->intern(type_name);
-            auto toValue = [type_name, type_id, engine_weak](const T& obj) -> script_value {
+            auto toValue = [type_name, type_id, eng](const T& obj) -> script_value {
                 auto sharedObj = std::make_shared<T>(obj);
-                return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(sharedObj), engine_weak);
+                return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(sharedObj), eng);
             };
             
             // Store this converter (implementation will handle the storage)

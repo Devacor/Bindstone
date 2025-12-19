@@ -103,12 +103,12 @@ public:
             auto class_def = eng->get_class_definition("ContextRequiredObject");
             auto instance = class_def->create_instance();
             instance->set_field(eng->symbolize(class_constants::CPP_OBJECT_FIELD),
-                script_value::make_cpp_object("ContextRequiredObject", class_def->get_type_id(), original, eng));
-            script_value obj_val = script_value::make_object("ContextRequiredObject", instance, eng);
+                script_value::make_cpp_object("ContextRequiredObject", class_def->get_type_id(), original, eng.get()));
+            script_value obj_val = script_value::make_object("ContextRequiredObject", instance, eng.get());
 
             // Serialize to binary
             std::vector<uint8_t> buffer;
-            serialization::binary_archive_writer writer(buffer, eng);
+            serialization::binary_archive_writer writer(buffer, eng.get());
             writer.write_value(obj_val);
 
             // Deserialize with context
@@ -116,7 +116,7 @@ public:
             ctx.service_name = "DeserializedService";
             ctx.dependency_value = 777;
 
-            serialization::binary_archive_reader reader(buffer, eng);
+            serialization::binary_archive_reader reader(buffer, eng.get());
             reader.set_user_context(&ctx);
 
             script_value loaded_val = reader.read_value();
@@ -159,16 +159,16 @@ public:
             auto class_def = eng->get_class_definition("PropertyPrereadObject");
             auto instance = class_def->create_instance();
             instance->set_field(eng->symbolize(class_constants::CPP_OBJECT_FIELD),
-                script_value::make_cpp_object("PropertyPrereadObject", class_def->get_type_id(), original, eng));
-            script_value obj_val = script_value::make_object("PropertyPrereadObject", instance, eng);
+                script_value::make_cpp_object("PropertyPrereadObject", class_def->get_type_id(), original, eng.get()));
+            script_value obj_val = script_value::make_object("PropertyPrereadObject", instance, eng.get());
 
             // Serialize to binary
             std::vector<uint8_t> buffer;
-            serialization::binary_archive_writer writer(buffer, eng);
+            serialization::binary_archive_writer writer(buffer, eng.get());
             writer.write_value(obj_val);
 
             // Deserialize
-            serialization::binary_archive_reader reader(buffer, eng);
+            serialization::binary_archive_reader reader(buffer, eng.get());
             script_value loaded_val = reader.read_value();
 
             // Verify object was constructed with pre-read values
@@ -208,19 +208,19 @@ public:
             auto class_def = eng->get_class_definition("ComplexObject");
             auto instance = class_def->create_instance();
             instance->set_field(eng->symbolize(class_constants::CPP_OBJECT_FIELD),
-                script_value::make_cpp_object("ComplexObject", class_def->get_type_id(), original, eng));
-            script_value obj_val = script_value::make_object("ComplexObject", instance, eng);
+                script_value::make_cpp_object("ComplexObject", class_def->get_type_id(), original, eng.get()));
+            script_value obj_val = script_value::make_object("ComplexObject", instance, eng.get());
 
             // Serialize to binary
             std::vector<uint8_t> buffer;
-            serialization::binary_archive_writer writer(buffer, eng);
+            serialization::binary_archive_writer writer(buffer, eng.get());
             writer.write_value(obj_val);
 
             // Deserialize with context
             test_deserialization_context ctx;
             ctx.service_name = "NewService";
 
-            serialization::binary_archive_reader reader(buffer, eng);
+            serialization::binary_archive_reader reader(buffer, eng.get());
             reader.set_user_context(&ctx);
 
             script_value loaded_val = reader.read_value();

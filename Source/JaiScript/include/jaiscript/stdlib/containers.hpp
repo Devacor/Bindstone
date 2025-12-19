@@ -12,24 +12,24 @@ namespace stdlib {
         script_value second;
         
         // Engine-aware constructor - will be used as default by class_builder
-        explicit script_pair(std::weak_ptr<engine> eng) 
-            : first(std::monostate{}, eng), 
+        explicit script_pair(engine* eng)
+            : first(std::monostate{}, eng),
               second(std::monostate{}, eng) {}
-        
+
         // Constructor with values - script_values should already have engine references
-        script_pair(const script_value& f, const script_value& s) 
+        script_pair(const script_value& f, const script_value& s)
             : first(f), second(s) {}
-            
+
         // Special constructor that preserves references
-        script_pair(const script_value& f, script_value&& s) 
+        script_pair(const script_value& f, script_value&& s)
             : first(f), second(std::move(s)) {}
-            
+
         // Factory method for creating a pair with a reference to the second value
-        static script_pair make_with_reference(const script_value& key, 
+        static script_pair make_with_reference(const script_value& key,
                                              script_value* value_ptr,
                                              const std::shared_ptr<environment>& env,
-                                             std::weak_ptr<engine> eng) {
-            return script_pair(key.clone(), 
+                                             engine* eng) {
+            return script_pair(key.clone(),
                               script_value::make_reference(value_ptr, env, eng));
         }
     };
@@ -83,7 +83,7 @@ namespace stdlib {
             for (const auto& arg : args) {
                 result += arg.as<std::string>();
             }
-            return script_value(result, args[0].get_engine_ref());
+            return script_value(result, args[0].get_engine());
         }
 
         // Handle array concatenation
@@ -113,8 +113,6 @@ namespace stdlib {
     }
 
     inline void register_container_types(engine& eng) {
-        auto engine_weak = eng.weak_from_this();
-
         // Register the pair type for map iteration
         class_builder<script_pair>(eng, "pair")
             .constructor<>()  // Will automatically use engine-aware constructor
@@ -124,7 +122,7 @@ namespace stdlib {
             .build();
 
         // Register container utility functions using variadic approach
-        eng.add_variadic_function("merge", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+        eng.add_variadic_function("merge", [](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
                 return checked_result<script_value>(
                     make_error_code(runtime_error_code::argument_count_mismatch),
@@ -135,7 +133,7 @@ namespace stdlib {
             return map_merge(args[0], args[1]);
         });
 
-        eng.add_variadic_function("concatenate", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+        eng.add_variadic_function("concatenate", [](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1) {
                 return checked_result<script_value>(
                     make_error_code(runtime_error_code::argument_count_mismatch),
@@ -146,7 +144,7 @@ namespace stdlib {
             return concatenate_impl(args);
         });
 
-        eng.add_variadic_function("append", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+        eng.add_variadic_function("append", [](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1) {
                 return checked_result<script_value>(
                     make_error_code(runtime_error_code::argument_count_mismatch),

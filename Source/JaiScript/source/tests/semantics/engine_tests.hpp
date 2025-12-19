@@ -31,7 +31,7 @@ public:
         
         test("global_variable_persistence", [this]() {
             auto eng = engine::make();
-            eng->add_global("PI", script_value(3.14159, eng->weak_from_this()));
+            eng->add_global("PI", script_value(3.14159, eng.get()));
             auto result = eng->execute("PI * 2");
             check_near(result.as<double>(), 6.28318, 0.00001);
         });

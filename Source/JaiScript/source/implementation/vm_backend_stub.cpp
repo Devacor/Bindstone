@@ -59,7 +59,7 @@ public:
         // Stub
     }
     
-    void set_engine_reference(std::weak_ptr<engine> engine_ref) override {
+    void set_engine_reference(engine* engine_ref) override {
         // Stub
     }
     

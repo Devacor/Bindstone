@@ -512,7 +512,7 @@ void interpreter::init_builtin_methods() {
 
         if (start > end) start = end;
 
-        script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
+        script_value result = script_value::make_array(nullptr, interp->get_engine());
         auto& resultPtr = result.unchecked_get_array_storage();
         for (script_int i = start; i < end; ++i) {
             resultPtr->push_back(arr[i].clone());
@@ -530,7 +530,7 @@ void interpreter::init_builtin_methods() {
 
         const auto& arr = self.unchecked_as_array();
         const auto& func = args[0].unchecked_as_function();
-        script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
+        script_value result = script_value::make_array(nullptr, interp->get_engine());
         auto& resultPtr = result.unchecked_get_array_storage();
 
         for (const auto& elem : arr) {
@@ -725,7 +725,7 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "keys() takes no arguments");
         }
         const auto& map = self.unchecked_as_map();
-        script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
+        script_value result = script_value::make_array(nullptr, interp->get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
@@ -739,7 +739,7 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "values() takes no arguments");
         }
         const auto& map = self.unchecked_as_map();
-        script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
+        script_value result = script_value::make_array(nullptr, interp->get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
@@ -826,7 +826,7 @@ void interpreter::init_builtin_methods() {
 
         const auto& map = self.unchecked_as_map();
         const auto& predicate = args[0].unchecked_as_function();
-        script_value result = script_value::make_map(nullptr, nullptr, interp->get_engine_ref());
+        script_value result = script_value::make_map(nullptr, nullptr, interp->get_engine());
         auto& resultPtr = result.unchecked_get_map_storage();
 
         for (const auto& [key, value] : map) {
@@ -847,13 +847,13 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_array() takes no arguments");
         }
         const auto& map = self.unchecked_as_map();
-        script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
+        script_value result = script_value::make_array(nullptr, interp->get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
 
         // Return array of [key, value] pairs
         for (const auto& [key, value] : map) {
-            script_value pair = script_value::make_array(nullptr, interp->get_engine_ref());
+            script_value pair = script_value::make_array(nullptr, interp->get_engine());
             auto& pairPtr = pair.unchecked_get_array_storage();
             pairPtr->push_back(key.clone());
             pairPtr->push_back(value.clone());
@@ -1220,7 +1220,7 @@ void interpreter::init_builtin_methods() {
 
         {string_symbolizer_->intern("to_int"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             // to_int(default=null, base=10)
-            script_value default_val(std::monostate{}, interp->get_engine_ref());
+            script_value default_val(std::monostate{}, interp->get_engine());
             int base = 10;
 
             if (args.size() > 0) {
@@ -1256,7 +1256,7 @@ void interpreter::init_builtin_methods() {
 
         {string_symbolizer_->intern("to_float"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             // to_float(default=null)
-            script_value default_val(std::monostate{}, interp->get_engine_ref());
+            script_value default_val(std::monostate{}, interp->get_engine());
 
             if (args.size() > 0) {
                 default_val = args[0];
@@ -1688,13 +1688,12 @@ void interpreter::init_builtin_methods() {
             const auto& str = self.unchecked_as_string();
 
             // Create array with string element type
-            auto engine_ref = interp->get_engine_ref();
-            auto eng = engine_ref.lock();
+            auto eng = interp->get_engine();
             if (!eng) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Engine reference expired");
             }
 
-            script_value array_val = script_value::make_array(eng->get_type_info_string(), engine_ref);
+            script_value array_val = script_value::make_array(eng->get_type_info_string(), eng);
             auto& result = array_val.as_array();
 
             if (delim.empty()) {
@@ -1731,7 +1730,7 @@ void interpreter::init_builtin_methods() {
         if (auto locked = weak_ptr.lock()) {
             // Reconstruct a script_value from the locked object_holder
             // IMPORTANT: Reuse the same std::shared_ptr<object_holder> to maintain reference semantics
-            script_value result(std::monostate{}, interp->get_engine_ref());
+            script_value result(std::monostate{}, interp->get_engine());
 
             // Preserve the original type info (including shared_ptr marker if present)
             auto weak_type_info = self.get_type_info();
@@ -1739,7 +1738,7 @@ void interpreter::init_builtin_methods() {
                 result.set_type_info(weak_type_info->element_type());
             } else {
                 // Fallback: use the object type
-                if (auto eng = interp->get_engine_ref().lock()) {
+                if (auto eng = interp->get_engine()) {
                     result.set_type_info(eng->get_type_info_object(locked->type_name));
                 }
             }
@@ -2390,9 +2389,9 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
 
     // Reset to standard kind and clear kind-specific fields
     kind_ = env_kind::standard;
-    this_object_ = script_value::make_null(std::weak_ptr<engine>{});
+    this_object_ = script_value::make_null(nullptr);
     class_def_.reset();
-    bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+    bound_method_storage_ = script_value::make_null(nullptr);
 
     // With lazy caching, we start with empty flat_lookup_ (no copy needed)
     // Variables will be cached on first access
@@ -2412,7 +2411,7 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
     kind_ = env_kind::method;
     this_object_ = std::move(this_obj);
     class_def_.reset();
-    bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+    bound_method_storage_ = script_value::make_null(nullptr);
 
     // With lazy caching, we start with empty flat_lookup_
     flat_lookup_.clear();
@@ -2429,9 +2428,9 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
 
     // Set to static_method kind with class definition
     kind_ = env_kind::static_method;
-    this_object_ = script_value::make_null(std::weak_ptr<engine>{});
+    this_object_ = script_value::make_null(nullptr);
     class_def_ = class_def;
-    bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+    bound_method_storage_ = script_value::make_null(nullptr);
 
     // With lazy caching, we start with empty flat_lookup_
     flat_lookup_.clear();
@@ -2519,7 +2518,7 @@ script_value* environment::get_value_ptr(uint64_t id) {
 // interpreter implementation
 
 // Helper to resolve include/import paths
-checked_result<std::string> resolve_include_path(const std::string& path, std::shared_ptr<engine> engine_ptr) {
+checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr) {
     // First, try the path as-is (for absolute paths)
     if (std::filesystem::exists(path)) {
         return std::filesystem::canonical(path).string();
@@ -2545,7 +2544,7 @@ checked_result<std::string> resolve_include_path(const std::string& path, std::s
 
 // Helper to create a bound method - binds 'this' as the first argument
 script_value interpreter::create_bound_method(const script_value& this_obj, const script_value& method) {
-    auto engine_weak = this_obj.get_engine_ref();
+    auto eng = this_obj.get_engine();
     return script_value::make_function([this_obj, method](const std::vector<script_value>& args) -> checked_result<script_value> {
         // Create a new argument list with 'this' as the first argument
         std::vector<script_value> method_args;
@@ -2556,7 +2555,7 @@ script_value interpreter::create_bound_method(const script_value& this_obj, cons
         // Call the method with 'this' included
         const auto& method_func = method.as_function();
         return method_func(method_args);
-    }, engine_weak);
+    }, eng);
 }
 
 // Helper to check if an expression is an lvalue (existing object that should be cloned)
@@ -2705,7 +2704,7 @@ interpreter::interpreter()
       string_symbolizer_(ownedSymbolizer_.get()),
       environment_(std::make_shared<environment>(string_symbolizer_)),
       hasReturnValue_(false),
-      current_method_this_(std::monostate{}, std::weak_ptr<engine>{}) {
+      current_method_this_(std::monostate{}, nullptr) {
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -2766,7 +2765,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
       string_symbolizer_(external_symbolizer),
       environment_(std::make_shared<environment>(string_symbolizer_)),
       hasReturnValue_(false),
-      current_method_this_(std::monostate{}, std::weak_ptr<engine>{}) {
+      current_method_this_(std::monostate{}, nullptr) {
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -2827,7 +2826,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
       string_symbolizer_(external_symbolizer),
       environment_(global_env),
       hasReturnValue_(false),
-      current_method_this_(std::monostate{}, std::weak_ptr<engine>{}) {
+      current_method_this_(std::monostate{}, nullptr) {
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -2886,7 +2885,7 @@ std::shared_ptr<environment> interpreter::get_global_environment() const {
     // Get the global environment directly from the engine
     // This avoids issues with closures/methods capturing stale environment references
     // from different execute() calls that don't chain to the same root
-    if (auto eng = engine_ref_.lock()) {
+    if (auto eng = engine_) {
         return eng->get_global_environment();
     }
     // Fallback: walk up the parent chain (shouldn't happen if engine is alive)
@@ -3079,7 +3078,7 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
             break;
         default:
             // For other types, try to set engine ref (though this shouldn't happen with literals)
-            expr->value.set_engine_ref(engine_ref_);
+            expr->value.set_engine(engine_);
             push_value(expr->value);
             break;
     }
@@ -3630,7 +3629,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 // Get element type constraint from the array's type_info for validation on assignment
                 auto array_type_info = left.get_type_info();
                 type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
-                script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_ref_, element_type);
+                script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_, element_type);
                 push_value(ref_value);
             } else {
                 // True temporary (e.g., function return), read-only access
@@ -3653,19 +3652,19 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     script_value& value_ref = map[right];
 
                     // If this created a new entry with default constructor, it has invalid engine reference
-                    if (!value_ref.has_valid_engine_ref()) {
-                        if (!left.has_valid_engine_ref()) {
+                    if (!value_ref.has_valid_engine()) {
+                        if (!left.has_valid_engine()) {
                             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
                                 "Invalid script_value: both map and new entry missing engine reference");
                         }
-                        value_ref.set_engine_ref(left.get_engine_ref());
+                        value_ref.set_engine(left.get_engine());
                     }
 
                     script_value* element_ptr = &value_ref;
                     // Get value type constraint from the map's type_info for validation on assignment
                     auto map_type_info = left.get_type_info();
                     type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-                    script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_ref_, value_type);
+                    script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_, value_type);
                     push_value(ref_value);
                 } else {
                     // This is a true temporary (e.g., function return), read-only access
@@ -3673,12 +3672,12 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     if (it != map.end()) {
                         // Ensure the value has an engine ref before pushing
                         script_value val = it->second;
-                        if (!val.has_valid_engine_ref()) {
-                            val.set_engine_ref(engine_ref_);
+                        if (!val.has_valid_engine()) {
+                            val.set_engine(engine_);
                         }
                         push_value(val);
                     } else {
-                        push_value(script_value(std::monostate{}, engine_ref_));
+                        push_value(script_value(std::monostate{}, engine_));
                     }
                 }
             } catch (...) {
@@ -3688,12 +3687,12 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 if (it != map.end()) {
                     // Ensure the value has an engine ref before pushing
                     script_value val = it->second;
-                    if (!val.has_valid_engine_ref()) {
-                        val.set_engine_ref(engine_ref_);
+                    if (!val.has_valid_engine()) {
+                        val.set_engine(engine_);
                     }
                     push_value(val);
                 } else {
-                    push_value(script_value(std::monostate{}, engine_ref_));
+                    push_value(script_value(std::monostate{}, engine_));
                 }
             }
         } else {
@@ -4572,7 +4571,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (value.is_null()) {
                         // Assign null - create empty weak_ptr
                         auto type_info = currentVal->get_type_info();
-                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, script_value::make_empty_weak_ptr(type_info, engine_ref_)));
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, script_value::make_empty_weak_ptr(type_info, engine_)));
                     } else if (value.is_weak_ptr()) {
                         // Assign another weak_ptr
                         JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
@@ -4589,7 +4588,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 : value_type_info->type_name;
 
                             if (expected_class != actual_class) {
-                                auto eng = engine_ref_.lock();
+                                auto eng = engine_;
                                 if (eng) {
                                     auto actual_def = eng->get_class_definition(actual_class);
                                     if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
@@ -4607,7 +4606,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         }
 
                         // Convert shared_ptr to weak_ptr
-                        auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
+                        auto weak_result = script_value::make_weak_ptr(value, engine_);
                         if (!weak_result) {
                             return weak_result.error_value();
                         }
@@ -4654,7 +4653,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // Check type compatibility (same type or derived)
                         bool compatible = (actual_type_name == expected_type_name);
                         if (!compatible && !actual_type_name.empty()) {
-                            if (auto eng = engine_ref_.lock()) {
+                            if (auto eng = engine_) {
                                 auto actual_class = eng->get_class_definition(actual_type_name);
                                 if (actual_class && actual_class->is_subtype_of(expected_type_name)) {
                                     compatible = true;
@@ -5168,7 +5167,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         // weak_ptr<T> variable - handle initialization
         if (!decl->initializer) {
             // No initializer - create empty weak_ptr
-            script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_ref_);
+            script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_);
             environment_->define(decl->name_id, std::move(weak));
         } else {
             // Evaluate initializer
@@ -5178,7 +5177,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // Handle different initialization cases
             if (value.is_null()) {
                 // Initialize with null - create empty weak_ptr
-                script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_ref_);
+                script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_);
                 environment_->define(decl->name_id, std::move(weak));
             } else if (value.is_weak_ptr()) {
                 // Initialize with another weak_ptr - copy it
@@ -5195,7 +5194,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                         : value_type_info->type_name;
 
                     if (expected_class != actual_class) {
-                        auto eng = engine_ref_.lock();
+                        auto eng = engine_;
                         if (eng) {
                             auto actual_def = eng->get_class_definition(actual_class);
                             if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
@@ -5213,7 +5212,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 }
 
                 // Initialize with shared_ptr - create weak_ptr from it
-                auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
+                auto weak_result = script_value::make_weak_ptr(value, engine_);
                 if (!weak_result) {
                     return weak_result.error_value();
                 }
@@ -5918,7 +5917,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
 
             if (ident_expr->symbol_id == weak_from_this_id_) {
                 // Create a weak_ptr from the 'this' object
-                auto weak_result = script_value::make_weak_ptr(this_val, engine_ref_);
+                auto weak_result = script_value::make_weak_ptr(this_val, engine_);
                 if (!weak_result) {
                     return weak_result.error_value();
                 }
@@ -6199,7 +6198,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                         namespace_id, static_cast<uint64_t>(args.size()));
                 };
 
-                push_value(script_value::make_function(namespace_func, engine_ref_));
+                push_value(script_value::make_function(namespace_func, engine_));
                 return {};
             }
 
@@ -6358,7 +6357,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 return method(this, capturedValue, args);
             };
 
-            push_value(script_value::make_function(boundMethod, engine_ref_));
+            push_value(script_value::make_function(boundMethod, engine_));
             return {};
         }
         else {
@@ -6383,7 +6382,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 return method(this, capturedValue, args);
             };
 
-            push_value(script_value::make_function(boundMethod, engine_ref_));
+            push_value(script_value::make_function(boundMethod, engine_));
             return {};
         }
         else {
@@ -6408,7 +6407,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 return method(this, capturedValue, args);
             };
 
-            push_value(script_value::make_function(boundMethod, engine_ref_));
+            push_value(script_value::make_function(boundMethod, engine_));
             return {};
         }
         else {
@@ -6430,7 +6429,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 return method(this, capturedValue, args);
             };
 
-            push_value(script_value::make_function(boundMethod, engine_ref_));
+            push_value(script_value::make_function(boundMethod, engine_));
             return {};
         }
         else {
@@ -6455,7 +6454,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 return method(this, capturedValue, args);
             };
 
-            push_value(script_value::make_function(boundMethod, engine_ref_));
+            push_value(script_value::make_function(boundMethod, engine_));
             return {};
         }
         // Method not found in shared_ptr built-ins - forward to the underlying object
@@ -6528,7 +6527,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             return make_value(same);
         };
 
-        push_value(script_value::make_function(same_as_method, engine_ref_));
+        push_value(script_value::make_function(same_as_method, engine_));
         return {};
     }
 
@@ -6892,7 +6891,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     };
 
     // Push the lambda as a function value
-    push_value(script_value::make_function(funcWrapper, engine_ref_));
+    push_value(script_value::make_function(funcWrapper, engine_));
     return {};
 }
 
@@ -6918,11 +6917,11 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
         // Create empty array with the specified element type
         auto element_type = expr->type->element_type();
         if (!element_type) {
-            if (auto eng = engine_ref_.lock()) {
+            if (auto eng = engine_) {
                 element_type = eng->get_type_info_int(); // Default to int if no type specified
             }
         }
-        push_value(script_value::make_array(element_type, engine_ref_));
+        push_value(script_value::make_array(element_type, engine_));
         return {};
     }
 
@@ -6936,11 +6935,11 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
         // Create empty map with the specified key/value types
         auto key_type = expr->type->key_type();
         auto value_type = expr->type->value_type();
-        if (auto eng = engine_ref_.lock()) {
+        if (auto eng = engine_) {
             if (!key_type) key_type = eng->get_type_info_string();
             if (!value_type) value_type = eng->get_type_info_int();
         }
-        push_value(script_value::make_map(key_type, value_type, engine_ref_));
+        push_value(script_value::make_map(key_type, value_type, engine_));
         return {};
     }
     
@@ -6948,7 +6947,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
         // weak_ptr<T>() or weak_ptr<T>(obj) constructor
         if (expr->arguments.empty()) {
             // No arguments - create empty weak_ptr
-            push_value(script_value::make_empty_weak_ptr(expr->type, engine_ref_));
+            push_value(script_value::make_empty_weak_ptr(expr->type, engine_));
         } else if (expr->arguments.size() == 1) {
             // One argument - create weak_ptr from object
             JAISCRIPT_TRY(dispatch_expr(expr->arguments[0].get()));
@@ -6956,7 +6955,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
             // Handle null objects
             if (obj.is_null()) {
-                push_value(script_value::make_empty_weak_ptr(expr->type, engine_ref_));
+                push_value(script_value::make_empty_weak_ptr(expr->type, engine_));
                 return {};
             }
 
@@ -7007,7 +7006,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
                 // Check if types match or if actual is a subclass of expected
                 if (expected_class != actual_class) {
-                    auto eng = engine_ref_.lock();
+                    auto eng = engine_;
                     if (eng) {
                         auto actual_def = eng->get_class_definition(actual_class);
                         if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
@@ -7025,7 +7024,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
             }
 
             // Create weak_ptr from the shared_ptr
-            auto weak_result = script_value::make_weak_ptr(obj, engine_ref_);
+            auto weak_result = script_value::make_weak_ptr(obj, engine_);
             if (!weak_result) {
                 return weak_result.error_value();
             }
@@ -7169,7 +7168,7 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
     // Untyped array literals (e.g., [1, 2, 3]) allow any element type
     // The type will be set by the variable declaration if one exists (e.g., array<int> arr = [...])
     type_info_ptr element_type = nullptr;  // No constraint - allows any type
-    script_value arrayValue = script_value::make_array(element_type, engine_ref_);
+    script_value arrayValue = script_value::make_array(element_type, engine_);
 
     // Get the internal vector to populate
     auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
@@ -7193,7 +7192,7 @@ checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr)
     // The type will be set by the variable declaration if one exists (e.g., map<string,int> m = {...})
     type_info_ptr keyType = nullptr;    // No constraint - allows any key type
     type_info_ptr valueType = nullptr;  // No constraint - allows any value type
-    script_value mapValue = script_value::make_map(keyType, valueType, engine_ref_);
+    script_value mapValue = script_value::make_map(keyType, valueType, engine_);
 
     // Get the internal map to populate
     auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
@@ -7795,7 +7794,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             for (size_t i = 0; i < array_size; ++i) {
                 if (stmt->is_reference) {
                     // Create a reference to the actual array element
-                    *loop_var_ptr = script_value::make_reference(&(*array_storage)[i], environment_, engine_ref_);
+                    *loop_var_ptr = script_value::make_reference(&(*array_storage)[i], environment_, engine_);
                 } else {
                     // Make a copy of the element - assign directly to pointer
                     *loop_var_ptr = (*array_storage)[i].clone();
@@ -7858,7 +7857,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     // For references, create a pair with a reference to the map value
                     script_value* value_ptr = const_cast<script_value*>(&it->second);
                     args.push_back(it->first);  // Don't clone - just pass the key
-                    args.push_back(script_value::make_reference(value_ptr, environment_, engine_ref_));
+                    args.push_back(script_value::make_reference(value_ptr, environment_, engine_));
                 } else {
                     // For copies, clone key and value
                     args.push_back(it->first.clone());
@@ -7968,7 +7967,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         is_unwinding_ = false;
 
         // Set the current catch variable ID so identifier lookup can find it (symbolize once here)
-        if (auto eng = engine_ref_.lock()) {
+        if (auto eng = engine_) {
             current_catch_var_id_ = eng->symbolize(stmt->catch_var);
         }
 
@@ -8164,7 +8163,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     // Create wrapper function
     script_value functionValue = script_value::make_function([this, scriptFunc](const std::vector<script_value>& args) -> checked_result<script_value> {
         return call_function(*scriptFunc, args);
-    }, engine_ref_);
+    }, engine_);
 
     // Define the function in current environment
     environment_->define(decl->name_id, functionValue);
@@ -8224,7 +8223,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // Create a new script class definition
         // Use cached name_id if available, otherwise intern the name
         uint64_t type_id = (decl->name_id != UINT64_MAX) ? decl->name_id : string_symbolizer_->intern(decl->name);
-        class_def = std::make_shared<script_class_definition>(decl->name, type_id, engine_ref_);
+        class_def = std::make_shared<script_class_definition>(decl->name, type_id, engine_);
     } else if (is_redefinition) {
         // Clear old ASTs for hot reload
         class_def->clear_asts();
@@ -8377,7 +8376,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
         if (var_decl) {
             // Field declaration
-            script_value default_val(std::monostate{}, engine_ref_);  // Ensure engine reference
+            script_value default_val(std::monostate{}, engine_);  // Ensure engine reference
             std::string field_name = var_decl->name;
             // Use pre-computed ID from parser (already interned during parsing)
             uint64_t field_id = var_decl->name_id;
@@ -8411,8 +8410,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     default_val = pop_value();
 
                     // Ensure the default value has an engine reference
-                    if (default_val.get_engine_ref().expired() && !engine_ref_.expired()) {
-                        default_val.set_engine_ref(engine_ref_);
+                    if (!default_val.has_valid_engine() && engine_) {
+                        default_val.set_engine(engine_);
                     }
                 }
 
@@ -8534,7 +8533,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                             return self->execute_method_ast(method_ast, static_env, args);
                         };
 
-                        new_static_methods[method_id] = script_value::make_function(static_method_func, engine_ref_);
+                        new_static_methods[method_id] = script_value::make_function(static_method_func, engine_);
                     } else {
                         // Instance method - has 'this' parameter
                         auto method_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()),
@@ -8570,7 +8569,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                             return self->execute_method_ast(method_ast, method_env.get(), method_args);
                         };
 
-                        new_methods[method_id] = script_value::make_function(method_func, engine_ref_);
+                        new_methods[method_id] = script_value::make_function(method_func, engine_);
                     }
                 } else {
                     // For new classes, add method normally
@@ -8714,7 +8713,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // Create 'this' value using the class_def's registered name and type_id
             // This ensures we use the exact name/id that was registered (e.g., with namespace)
             // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
-            auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, self->engine_ref_, true);
+            auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, self->engine_, true);
 
             // Create a regular environment for field initializers and constructor initializer arguments
             // Use the captured definition environment as the parent
@@ -9045,7 +9044,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         };
 
         // Register the dispatcher in global environment (constructors are always global)
-        get_global_environment()->define(decl->name_id, script_value::make_function(ctor_dispatcher, engine_ref_));
+        get_global_environment()->define(decl->name_id, script_value::make_function(ctor_dispatcher, engine_));
     }
 
     // If no constructor was found, create a default constructor
@@ -9072,7 +9071,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // Create 'this' value for field initializer evaluation
             // Use class_def's registered name and type_id to handle namespaces correctly
             // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
-            auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, self->engine_ref_, true);
+            auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, self->engine_, true);
 
             // Find the root (global) environment with cycle detection
             std::unordered_set<environment*> visited;
@@ -9101,7 +9100,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         };
 
         // Register default constructor in global environment (constructors are always global)
-        get_global_environment()->define(decl->name_id, script_value::make_function(default_ctor_func, engine_ref_));
+        get_global_environment()->define(decl->name_id, script_value::make_function(default_ctor_func, engine_));
         // std::cerr << "DEBUG: Registered default constructor for class: " << decl->name << std::endl;
     }
     
@@ -9127,8 +9126,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             }
 
             // Ensure the value has an engine reference
-            if (evaluated_value.get_engine_ref().expired() && !engine_ref_.expired()) {
-                evaluated_value.set_engine_ref(engine_ref_);
+            if (!evaluated_value.has_valid_engine() && engine_) {
+                evaluated_value.set_engine(engine_);
             }
 
             field_defaults_with_engine[field_id] = evaluated_value;
@@ -9141,7 +9140,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             std::string field_name = std::string(string_symbolizer_->get_string(field_id));
 
             // Add getter method
-            auto getter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> checked_result<script_value> {
+            auto getter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.empty()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
                         "Property getter requires 'this' object");
@@ -9154,10 +9153,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 return instance->get_field(field_id);
             };
             uint64_t getter_id = string_symbolizer_->intern("_get_" + field_name);
-            new_methods[getter_id] = script_value::make_function(getter, engine_ref_);
+            new_methods[getter_id] = script_value::make_function(getter, engine_);
 
             // Add setter method
-            auto setter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> checked_result<script_value> {
+            auto setter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.size() != 2) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
                         "Property setter requires 'this' and value");
@@ -9173,13 +9172,13 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 return args[1];
             };
             uint64_t setter_id = string_symbolizer_->intern("_set_" + field_name);
-            new_methods[setter_id] = script_value::make_function(setter, engine_ref_);
+            new_methods[setter_id] = script_value::make_function(setter, engine_);
         }
         
         
         // Call redefine_class with the new field defaults and methods
         // Call redefine_class to migrate existing instances
-        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_ref_);
+        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_);
 
         // Invalidate cached field pointers - they may point to stale storage after migration
         environment_->clear_all_parent_caches();
@@ -9194,7 +9193,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // This enables property-style access (obj.field) to work properly
 
             // Add getter method - capture field_id for performance
-            auto getter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> checked_result<script_value> {
+            auto getter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.empty()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
                         "Property getter requires 'this' object");
@@ -9209,7 +9208,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             class_def->add_method("_get_" + field_name, getter);
 
             // Add setter method - capture field_id for performance
-            auto setter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> checked_result<script_value> {
+            auto setter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.size() != 2) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
                         "Property setter requires 'this' and value");
@@ -9266,7 +9265,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
     // CRITICAL: Register the script class in the class registry
     // This makes it available for type lookups and prevents "unregistered class" errors
-    auto eng = engine_ref_.lock();
+    auto eng = engine_;
     if (!eng) {
         return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
     }
@@ -9278,7 +9277,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // Store the class definition in a special variable for later retrieval
     // This allows inheritance and other features to work
     // IMPORTANT: Define in GLOBAL environment so it's visible across execute() calls (hot reload)
-    global_env->define(class_var_name, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_ref_, false));
+    global_env->define(class_var_name, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_, false));
 
     // The constructor function is already registered in the environment
     // which allows "new ClassName()" syntax to work
@@ -9412,7 +9411,7 @@ checked_result<void> interpreter::visit_expression_decl(expression_decl* decl) {
 
 checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
     // Get the engine reference
-    auto engine_ptr = engine_ref_.lock();
+    auto engine_ptr = engine_;
     if (!engine_ptr) {
         // [ErrorText] Engine reference expired during include processing
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -9465,7 +9464,7 @@ checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
 
 checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     // Get the engine reference
-    auto engine_ptr = engine_ref_.lock();
+    auto engine_ptr = engine_;
     if (!engine_ptr) {
         // [ErrorText] Engine reference expired during import processing
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -9559,8 +9558,8 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
             script_value field_value = pop_value();
 
             // Ensure the field value has an engine reference
-            if (field_value.get_engine_ref().expired() && !engine_ref_.expired()) {
-                field_value.set_engine_ref(engine_ref_);
+            if (!field_value.has_valid_engine() && engine_) {
+                field_value.set_engine(engine_);
             }
 
             // Set the field on the instance (intern the name to ID)
@@ -9939,7 +9938,7 @@ bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr 
     // For object target types, check if constructor conversion is available
     if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty()) {
         // Look up the class definition
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (eng) {
             auto class_def = eng->get_class_definition(target_type->type_name);
             if (class_def) {
@@ -10075,7 +10074,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
 
         // First, check if there's a constructor that directly accepts the source type
         // This prevents chained conversions (A->B->C)
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (eng) {
             auto class_def = eng->get_class_definition(target_class_name);
             if (class_def) {
@@ -10169,11 +10168,11 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
     // Int <-> Float implicit conversions
     if (source_type == script_value_type::jai_int_type &&
         target_base_type == script_value_type::jai_float_type) {
-        return script_value(static_cast<script_float>(derefed_arg.unchecked_as_int()), engine_ref_);
+        return script_value(static_cast<script_float>(derefed_arg.unchecked_as_int()), engine_);
     }
     if (source_type == script_value_type::jai_float_type &&
         target_base_type == script_value_type::jai_int_type) {
-        return script_value(static_cast<script_int>(derefed_arg.unchecked_as_float()), engine_ref_);
+        return script_value(static_cast<script_int>(derefed_arg.unchecked_as_float()), engine_);
     }
 
     // Object -> primitive via to_X() methods
@@ -10239,7 +10238,7 @@ script_value interpreter::make_function(std::shared_ptr<script_defined_function>
         // For now, just call normally - we'll implement proper reference handling later
         return call_function(*func, args);
     };
-    return script_value::make_function(wrapper, engine_ref_);
+    return script_value::make_function(wrapper, engine_);
 }
 
 // Function call optimization helpers

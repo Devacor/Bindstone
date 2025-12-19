@@ -12,8 +12,8 @@ namespace serialization {
 class json_archive_writer : public archive_writer {
 public:
     json_archive_writer(int indent = 2) : archive_writer(), indent_(indent), current_depth_(0) {}
-    json_archive_writer(int indent, std::weak_ptr<engine> eng) : archive_writer(eng), indent_(indent), current_depth_(0) {}
-    explicit json_archive_writer(std::weak_ptr<engine> eng) : archive_writer(eng), indent_(2), current_depth_(0) {}
+    json_archive_writer(int indent, engine* eng) : archive_writer(eng), indent_(indent), current_depth_(0) {}
+    explicit json_archive_writer(engine* eng) : archive_writer(eng), indent_(2), current_depth_(0) {}
 
     // JSON doesn't need explicit property keys array (object keys are self-describing)
     bool needs_property_keys() const override { return false; }
@@ -228,7 +228,7 @@ public:
                 auto type_info = value.get_type_info();
                 std::string type_name = type_info ? type_info->type_name : "unknown";
 
-                auto eng = engine_ref_.lock();
+                auto eng = engine_ref_;
                 if (!eng) {
                     oss_ << "null";
                     break;
@@ -471,9 +471,9 @@ private:
 class json_archive_reader : public archive_reader {
 public:
     // Engine is REQUIRED for JSON reading since we need to create script_values
-    json_archive_reader(const std::string& json_string, std::weak_ptr<engine> eng)
+    json_archive_reader(const std::string& json_string, engine* eng)
         : archive_reader(eng), json_(json_string), pos_(0) {
-        if (eng.expired()) {
+        if (!eng) {
             throw serialization_error("json_archive_reader requires a valid engine reference");
         }
         root_value_ = parse_json();
@@ -537,24 +537,23 @@ public:
         }
 
         const auto& map = value_to_check->as_map();
-        
+
         // Get engine reference for creating script_values
-        auto eng = engine_ref_.lock();
+        auto eng = engine_ref_;
         if (!eng) {
             throw serialization_error("Engine reference expired during JSON deserialization");
         }
-        auto eng_weak = eng->weak_from_this();
-        
+
         // Read _type_ field
-        auto type_it = map.find(script_value("_type_", eng_weak));
+        auto type_it = map.find(script_value("_type_", eng));
         if (type_it != map.end() && type_it->second.is_string()) {
             type_name = type_it->second.as_string();
         } else {
             type_name = "";
         }
-        
+
         // Read _version_ field (default to 1)
-        auto version_it = map.find(script_value("_version_", eng_weak));
+        auto version_it = map.find(script_value("_version_", eng));
         if (version_it != map.end() && version_it->second.is_int()) {
             version = static_cast<uint32_t>(version_it->second.as_int());
         } else {
@@ -697,16 +696,15 @@ public:
         if (object_stack_.empty()) {
             return false;
         }
-        
+
         // Get engine reference for creating script_values
-        auto eng = engine_ref_.lock();
+        auto eng = engine_ref_;
         if (!eng) {
             throw serialization_error("Engine reference expired during JSON deserialization");
         }
-        auto eng_weak = eng->weak_from_this();
-        
+
         const auto& obj_state = object_stack_.top();
-        return obj_state.map.find(script_value(name, eng_weak)) != obj_state.map.end();
+        return obj_state.map.find(script_value(name, eng)) != obj_state.map.end();
     }
     
     script_value read_value() override {
@@ -732,23 +730,21 @@ public:
         // Check for shared_ptr reconstruction
         if (result.is_map()) {
             const auto& map = result.as_map();
-            
-            
+
             // Get engine reference for creating script_values
-            auto eng = engine_ref_.lock();
+            auto eng = engine_ref_;
             if (!eng) {
                 throw serialization_error("Engine reference expired during JSON deserialization");
             }
-            auto eng_weak = eng->weak_from_this();
-            
+
             // Check for weak_ptr serialization format: {"$weak_ptr_id": id, "$weak_ptr_data": <optional>}
-            auto weak_id_it = map.find(script_value("$weak_ptr_id", eng_weak));
+            auto weak_id_it = map.find(script_value("$weak_ptr_id", eng));
             if (weak_id_it != map.end() && weak_id_it->second.type() == script_value_type::jai_int_type) {
                 uint32_t id = static_cast<uint32_t>(weak_id_it->second.as<script_int>());
 
                 if (id == 0) {
                     // Null or expired weak_ptr
-                    script_value v(std::monostate{}, eng_weak);
+                    script_value v(std::monostate{}, eng);
                     v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
                     v.storage_ = std::weak_ptr<script_value::object_holder>();
                     return v;
@@ -761,7 +757,7 @@ public:
                     // Object was already reconstructed, get its object_holder and create weak_ptr
                     auto obj_holder = existing_obj.get_object_holder();
                     if (obj_holder) {
-                        script_value weak_val(std::monostate{}, eng_weak);
+                        script_value weak_val(std::monostate{}, eng);
                         weak_val.set_type_info(eng->get_type_info_weak_ptr(existing_obj.get_type_info()));
                         weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
                         return weak_val;
@@ -769,7 +765,7 @@ public:
                 }
 
                 // First time seeing this ID - check for inline data
-                auto weak_data_it = map.find(script_value("$weak_ptr_data", eng_weak));
+                auto weak_data_it = map.find(script_value("$weak_ptr_data", eng));
                 if (weak_data_it != map.end()) {
                     script_value obj_val = weak_data_it->second;  // Already properly wrapped
 
@@ -784,13 +780,13 @@ public:
                     }
 
                     // Create weak_ptr to the object_holder
-                    script_value weak_val(std::monostate{}, eng_weak);
+                    script_value weak_val(std::monostate{}, eng);
                     weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
                     weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
                     return weak_val;
                 } else {
                     // No data found - return null weak_ptr (object was never serialized)
-                    script_value v(std::monostate{}, eng_weak);
+                    script_value v(std::monostate{}, eng);
                     v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
                     v.storage_ = std::weak_ptr<script_value::object_holder>();
                     return v;
@@ -818,32 +814,31 @@ private:
     
     script_value parse_value() {
         skip_whitespace();
-        
+
         if (pos_ >= json_.length()) {
             throw serialization_error("Unexpected end of JSON");
         }
-        
+
         // Get engine reference for creating script_values
-        auto eng = engine_ref_.lock();
+        auto eng = engine_ref_;
         if (!eng) {
             throw serialization_error("Engine reference expired during JSON deserialization");
         }
-        auto eng_weak = eng->weak_from_this();
-        
+
         char c = json_[pos_];
-        
+
         if (c == '"') {
-            return script_value(parse_string(), eng_weak);
+            return script_value(parse_string(), eng);
         } else if (c == '{') {
-            return parse_object(eng_weak);
+            return parse_object(eng);
         } else if (c == '[') {
-            return parse_array(eng_weak);
+            return parse_array(eng);
         } else if (c == 't' || c == 'f') {
-            return parse_bool(eng_weak);
+            return parse_bool(eng);
         } else if (c == 'n') {
-            return parse_null(eng_weak);
+            return parse_null(eng);
         } else if (c == '-' || std::isdigit(c)) {
-            return parse_number(eng_weak);
+            return parse_number(eng);
         } else {
             throw serialization_error("Unexpected character in JSON: " + std::string(1, c));
         }
@@ -917,29 +912,24 @@ private:
         return result;
     }
     
-    script_value parse_object(std::weak_ptr<engine> eng_weak) {
+    script_value parse_object(engine* eng) {
         expect('{');
 
-        auto eng = eng_weak.lock();
-        if (!eng) {
-            throw serialization_error("Engine reference expired during JSON deserialization");
-        }
-
-        script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng_weak);
+        script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
         auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
-        
+
         if (peek() == '}') {
             advance();
             return map_val;
         }
-        
+
         while (true) {
             std::string key = parse_string();
             expect(':');
             script_value value = parse_value();
-            
-            map[script_value(key, eng_weak)] = value;
-            
+
+            map[script_value(key, eng)] = value;
+
             char c = peek();
             if (c == '}') {
                 advance();
@@ -950,24 +940,24 @@ private:
                 throw serialization_error("Expected ',' or '}' in JSON object");
             }
         }
-        
+
         return map_val;
     }
-    
-    script_value parse_array(std::weak_ptr<engine> eng_weak) {
+
+    script_value parse_array(engine* eng) {
         expect('[');
-        
-        script_value array_val = script_value::make_array(nullptr, eng_weak);
+
+        script_value array_val = script_value::make_array(nullptr, eng);
         auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
-        
+
         if (peek() == ']') {
             advance();
             return array_val;
         }
-        
+
         while (true) {
             arr.push_back(parse_value());
-            
+
             char c = peek();
             if (c == ']') {
                 advance();
@@ -978,53 +968,53 @@ private:
                 throw serialization_error("Expected ',' or ']' in JSON array");
             }
         }
-        
+
         return array_val;
     }
-    
-    script_value parse_bool(std::weak_ptr<engine> eng_weak) {
+
+    script_value parse_bool(engine* eng) {
         if (json_.substr(pos_, 4) == "true") {
             pos_ += 4;
-            return script_value(true, eng_weak);
+            return script_value(true, eng);
         } else if (json_.substr(pos_, 5) == "false") {
             pos_ += 5;
-            return script_value(false, eng_weak);
+            return script_value(false, eng);
         } else {
             throw serialization_error("Invalid boolean value");
         }
     }
-    
-    script_value parse_null(std::weak_ptr<engine> eng_weak) {
+
+    script_value parse_null(engine* eng) {
         if (json_.substr(pos_, 4) == "null") {
             pos_ += 4;
-            return script_value(std::monostate{}, eng_weak);
+            return script_value(std::monostate{}, eng);
         } else {
             throw serialization_error("Invalid null value");
         }
     }
-    
-    script_value parse_number(std::weak_ptr<engine> eng_weak) {
+
+    script_value parse_number(engine* eng) {
         size_t start = pos_;
         bool has_decimal = false;
         bool has_exponent = false;
-        
+
         if (json_[pos_] == '-') pos_++;
-        
-        while (pos_ < json_.length() && 
-               (std::isdigit(json_[pos_]) || json_[pos_] == '.' || 
-                json_[pos_] == 'e' || json_[pos_] == 'E' || 
+
+        while (pos_ < json_.length() &&
+               (std::isdigit(json_[pos_]) || json_[pos_] == '.' ||
+                json_[pos_] == 'e' || json_[pos_] == 'E' ||
                 json_[pos_] == '+' || json_[pos_] == '-')) {
             if (json_[pos_] == '.') has_decimal = true;
             if (json_[pos_] == 'e' || json_[pos_] == 'E') has_exponent = true;
             pos_++;
         }
-        
+
         std::string num_str = json_.substr(start, pos_ - start);
-        
+
         if (has_decimal || has_exponent) {
-            return script_value(std::stod(num_str), eng_weak);
+            return script_value(std::stod(num_str), eng);
         } else {
-            return script_value(static_cast<script_int>(std::stoll(num_str)), eng_weak);
+            return script_value(static_cast<script_int>(std::stoll(num_str)), eng);
         }
     }
     

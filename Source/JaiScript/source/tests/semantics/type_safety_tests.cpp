@@ -1083,7 +1083,7 @@ public:
                 eng->execute(R"(
                     array<auto> items = [1, "hello"];
                 )");
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 caught = true;
             }
 
@@ -1821,7 +1821,7 @@ public:
 
         test("cpp_int_to_script_preserves_type", [this]() {
             auto eng = engine::make();
-            eng->add_global("cpp_value", script_value(42, eng->weak_from_this()));
+            eng->add_global("cpp_value", script_value(42, eng.get()));
             auto result = eng->execute("cpp_value");
             check_eq(result.type(), script_value_type::jai_int_type);
             check_eq(result.as<int>(), 42);
@@ -1829,7 +1829,7 @@ public:
 
         test("cpp_float_to_script_preserves_type", [this]() {
             auto eng = engine::make();
-            eng->add_global("cpp_value", script_value(3.14, eng->weak_from_this()));
+            eng->add_global("cpp_value", script_value(3.14, eng.get()));
             auto result = eng->execute("cpp_value");
             check_eq(result.type(), script_value_type::jai_float_type);
             check_eq(result.as<double>(), 3.14);
@@ -1837,7 +1837,7 @@ public:
 
         test("cpp_string_to_script_preserves_type", [this]() {
             auto eng = engine::make();
-            eng->add_global("cpp_value", script_value(std::string("hello"), eng->weak_from_this()));
+            eng->add_global("cpp_value", script_value(std::string("hello"), eng.get()));
             auto result = eng->execute("cpp_value");
             check_eq(result.type(), script_value_type::jai_string_type);
             check_eq(result.as<std::string>(), "hello");
@@ -1845,7 +1845,7 @@ public:
 
         test("cpp_bool_to_script_preserves_type", [this]() {
             auto eng = engine::make();
-            eng->add_global("cpp_value", script_value(true, eng->weak_from_this()));
+            eng->add_global("cpp_value", script_value(true, eng.get()));
             auto result = eng->execute("cpp_value");
             check_eq(result.type(), script_value_type::jai_bool_type);
             check_eq(result.as<bool>(), true);

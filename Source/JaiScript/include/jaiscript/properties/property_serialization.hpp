@@ -349,8 +349,8 @@ namespace jai {
 			}
 		}
 
-		// Auto-inject engine from archive_reader if available
-		engine_ref_ = ar.get_engine();
+		// Note: Engine binding must be done explicitly before serialization
+		// via bind_to_engine(eng->get_weak_engine()) - cannot auto-inject from raw pointer
 	}
 
 } // namespace jai

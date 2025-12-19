@@ -68,8 +68,8 @@ class class_instance;
 // Class instance representation in JaiScript
 class class_instance : public std::enable_shared_from_this<class_instance> {
 public:
-    class_instance(const std::string& class_name, std::weak_ptr<engine> eng = {})
-        : class_name_(class_name), engine_ref_(eng), invalid_value_(std::monostate{}, eng) {}
+    class_instance(const std::string& class_name, engine* eng = nullptr)
+        : class_name_(class_name), engine_(eng), invalid_value_(std::monostate{}, eng) {}
     
     ~class_instance();
     
@@ -213,7 +213,7 @@ private:
     std::string class_name_;
     std::unordered_map<uint64_t, script_value> fields_;
     std::weak_ptr<class_definition> class_definition_;
-    std::weak_ptr<engine> engine_ref_;  // Engine reference for creating values
+    engine* engine_ = nullptr;  // Engine pointer (raw - no atomic ops) for creating values
     mutable uint64_t cpp_object_field_id_ = 0;  // Cached field ID
     mutable script_value invalid_value_;  // Used for get_field when field not found and throw_if_missing=false
     mutable std::unordered_map<uint64_t, script_value> bound_method_cache_;  // Cached bound methods
@@ -245,20 +245,20 @@ public:
     virtual ~class_definition() = default;
     
     // Constructor for C++ classes (existing)
-    class_definition(const std::string& name, uint64_t type_id, std::weak_ptr<engine> eng)
-        : name_(name), type_id_(type_id), type_info_(nullptr), engine_ref_(eng),
+    class_definition(const std::string& name, uint64_t type_id, engine* eng)
+        : name_(name), type_id_(type_id), type_info_(nullptr), engine_(eng),
           null_field_value_(std::monostate{}, eng), class_type_(cpp_class) {
-        if (auto e = eng.lock()) {
-            type_info_ = e->get_type_info_object(name);
+        if (eng) {
+            type_info_ = eng->get_type_info_object(name);
         }
     }
 
     // Constructor for script classes
-    class_definition(const std::string& name, uint64_t type_id, class_type type, std::weak_ptr<engine> eng)
-        : name_(name), type_id_(type_id), type_info_(nullptr), engine_ref_(eng),
+    class_definition(const std::string& name, uint64_t type_id, class_type type, engine* eng)
+        : name_(name), type_id_(type_id), type_info_(nullptr), engine_(eng),
           null_field_value_(std::monostate{}, eng), class_type_(type) {
-        if (auto e = eng.lock()) {
-            type_info_ = e->get_type_info_object(name);
+        if (eng) {
+            type_info_ = eng->get_type_info_object(name);
         }
     }
     
@@ -276,7 +276,7 @@ public:
 
     // Add a method to the class (with arity-based overloading support for C++ methods)
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (!eng) return;
 
         uint64_t name_id = eng->symbolize(name);
@@ -314,21 +314,21 @@ public:
                                                         "Method argument count mismatch: no overload accepts this number of arguments",
                                                         name_id);
                 },
-                engine_ref_
+                engine_
             ));
         } else {
             // No arity tracking - just store directly (for lambdas with unknown arity)
-            methods_.insert_or_assign(name_id, script_value::make_function(func, engine_ref_));
+            methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
         }
     }
     
     // Add a static method to the class (with optional arity for C++ methods)
     void add_static_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (!eng) return;
 
         uint64_t name_id = eng->symbolize(name);
-        static_methods_.insert_or_assign(name_id, script_value::make_function(func, engine_ref_));
+        static_methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
 
         // If arity is provided, store it for arity-aware collision detection
         // (arity == SIZE_MAX means arity unknown, typically for generic lambdas)
@@ -340,7 +340,7 @@ public:
 
     // ID-based version to avoid string conversion
     void add_static_method(uint64_t name_id, script_function func, size_t arity = SIZE_MAX) {
-        static_methods_.insert_or_assign(name_id, script_value::make_function(func, engine_ref_));
+        static_methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
 
         // If arity is provided, store it for arity-aware collision detection
         // (arity == SIZE_MAX means arity unknown, typically for generic lambdas)
@@ -359,16 +359,16 @@ public:
     
     // Add a field with default value
     void add_field(const std::string& name, const script_value& default_value) {
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (!eng) return;
 
         uint64_t name_id = eng->symbolize(name);
 
         // Ensure the default value has an engine reference
-        if (default_value.get_engine_ref().expired() && !engine_ref_.expired()) {
+        if (default_value.get_engine() == nullptr && !!engine_) {
             // Create a copy with engine reference
             script_value value_with_engine(default_value);
-            value_with_engine.set_engine_ref(engine_ref_);
+            value_with_engine.set_engine(engine_);
             field_defaults_.insert_or_assign(name_id, value_with_engine);
         } else {
             field_defaults_.insert_or_assign(name_id, default_value);
@@ -378,11 +378,11 @@ public:
 
     // Add a field with null default value
     void add_field(const std::string& name) {
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (!eng) return;
 
         uint64_t name_id = eng->symbolize(name);
-        field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_ref_));
+        field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
         field_defaults_cache_valid_ = false;  // Invalidate cache
     }
     
@@ -391,9 +391,9 @@ public:
         static_fields_.insert(id);
 
         // Ensure the value has an engine reference
-        if (initial_value.get_engine_ref().expired() && !engine_ref_.expired()) {
+        if (initial_value.get_engine() == nullptr && !!engine_) {
             script_value value_with_engine(initial_value);
-            value_with_engine.set_engine_ref(engine_ref_);
+            value_with_engine.set_engine(engine_);
             static_field_values_.insert_or_assign(id, value_with_engine);
         } else {
             static_field_values_.insert_or_assign(id, initial_value);
@@ -431,7 +431,7 @@ public:
         }
         // Fallback - should not be reached if caller checks first
         // Use mutable member to avoid static lifetime issues
-        null_field_value_ = script_value::make_null(engine_ref_);
+        null_field_value_ = script_value::make_null(engine_);
         return null_field_value_;
     }
 
@@ -443,7 +443,7 @@ public:
             return *ptr;
         }
         // Fallback - should not be reached if caller checks first
-        null_field_value_ = script_value::make_null(engine_ref_);
+        null_field_value_ = script_value::make_null(engine_);
         return null_field_value_;
     }
     
@@ -507,7 +507,7 @@ public:
         if (throw_if_missing) {
             // Get the method name from the symbolizer for error message
             std::string name;
-            if (auto eng = engine_ref_.lock()) {
+            if (auto eng = engine_) {
                 name = eng->get_symbolizer()->get_string(id);
             } else {
                 name = std::to_string(id);
@@ -516,7 +516,7 @@ public:
         }
 
         // Return invalid value as sentinel
-        return script_value::make_invalid(engine_ref_);
+        return script_value::make_invalid(engine_);
     }
     
     // Check if this class has a method (does not check parent classes)
@@ -535,14 +535,14 @@ public:
         if (throw_if_missing) {
             // Get the method name from the symbolizer for error message
             std::string name;
-            if (auto eng = engine_ref_.lock()) {
+            if (auto eng = engine_) {
                 name = eng->get_symbolizer()->get_string(id);
             } else {
                 name = std::to_string(id);
             }
             throw runtime_error("Static method '" + name + "' not found in class '" + name_ + "'");
         }
-        return script_value::make_null(engine_ref_);
+        return script_value::make_null(engine_);
     }
 
     // Check if this class has a static method (does NOT check parent classes - C++ semantics)
@@ -558,7 +558,7 @@ public:
     std::vector<std::string_view> get_static_field_names() const {
         std::vector<std::string_view> names;
         names.reserve(static_fields_.size());
-        if (auto eng = engine_ref_.lock()) {
+        if (auto eng = engine_) {
             for (const auto& field_id : static_fields_) {
                 names.push_back(eng->get_symbolizer()->get_string(field_id));
             }
@@ -570,7 +570,7 @@ public:
     std::vector<std::string_view> get_static_method_names() const {
         std::vector<std::string_view> names;
         names.reserve(static_methods_.size());
-        if (auto eng = engine_ref_.lock()) {
+        if (auto eng = engine_) {
             for (const auto& [method_id, _] : static_methods_) {
                 names.push_back(eng->get_symbolizer()->get_string(method_id));
             }
@@ -581,13 +581,13 @@ public:
     // Create an instance of this class
     std::shared_ptr<class_instance> create_instance() {
         // Create raw pointer first with engine reference
-        auto* raw_instance = new class_instance(name_, engine_ref_);
+        auto* raw_instance = new class_instance(name_, engine_);
 
         // Check if this is a script class with a destructor
         std::shared_ptr<class_instance> instance;
         auto destructor_name = "~" + name_;
         uint64_t destructor_id = 0;
-        if (auto eng = engine_ref_.lock()) {
+        if (auto eng = engine_) {
             destructor_id = eng->symbolize(destructor_name);
         }
 
@@ -608,7 +608,7 @@ public:
                             // First call this class's destructor
                             auto current_destructor_name = "~" + current_class->name_;
                             uint64_t destructor_id = 0;
-                            if (auto eng = current_class->get_engine_ref().lock()) {
+                            if (auto eng = current_class->get_engine()) {
                                 destructor_id = eng->symbolize(current_destructor_name);
                             }
                             if (destructor_id == 0) return;
@@ -623,7 +623,7 @@ public:
 
                                     // Call the destructor with 'this' as argument
                                     const script_function& destructor_func = method_it->second.as_function();
-                                    auto result = destructor_func({script_value::make_object(current_class->name_, temp_this, current_class->get_engine_ref())});
+                                    auto result = destructor_func({script_value::make_object(current_class->name_, temp_this, current_class->get_engine())});
                                     // Ignore result in destructor context - errors are swallowed
                                     (void)result;
                                 } catch (...) {
@@ -833,12 +833,12 @@ public:
     void set_type_id(uint64_t type_id) { type_id_ = type_id; }
 
     // Get the engine reference
-    std::weak_ptr<engine> get_engine_ref() const { return engine_ref_; }
+    engine* get_engine() const { return engine_; }
 
     // Helper to get the CPP_OBJECT_FIELD ID (cached for performance)
     uint64_t get_cpp_object_field_id() const {
         if (cpp_object_field_id_ == 0) {
-            if (auto eng = engine_ref_.lock()) {
+            if (auto eng = engine_) {
                 cpp_object_field_id_ = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
             }
         }
@@ -848,7 +848,7 @@ public:
     // Get all registered property names from fieldDefaults_
     std::vector<std::string> get_property_names() const {
         std::vector<std::string> properties;
-        if (auto eng = engine_ref_.lock()) {
+        if (auto eng = engine_) {
             for (const auto& [id, default_value] : field_defaults_) {
                 properties.push_back(std::string(eng->get_symbolizer()->get_string(id)));
             }
@@ -918,7 +918,7 @@ public:
     
     // Set metadata for a method
     void set_method_metadata(const std::string& name, const method_metadata& metadata) {
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (!eng) return;
         uint64_t name_id = eng->symbolize(name);
         method_metadata_[name_id] = metadata;
@@ -926,7 +926,7 @@ public:
 
     // Get metadata for a method
     const method_metadata* get_method_metadata(const std::string& name) const {
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (!eng) return nullptr;
         uint64_t name_id = eng->symbolize(name);
         auto it = method_metadata_.find(name_id);
@@ -935,7 +935,7 @@ public:
 
     // Get mutable metadata for a method (for updating)
     method_metadata* get_method_metadata_mutable(const std::string& name) {
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (!eng) return nullptr;
         uint64_t name_id = eng->symbolize(name);
         auto it = method_metadata_.find(name_id);
@@ -949,7 +949,7 @@ public:
     };
     
     method_info find_method(const std::string& name) {
-        auto eng = engine_ref_.lock();
+        auto eng = engine_;
         if (!eng) return { nullptr, nullptr };
 
         uint64_t name_id = eng->symbolize(name);
@@ -980,7 +980,7 @@ public:
     void redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults,
                         const std::unordered_map<uint64_t, script_value>& new_methods,
                         const std::unordered_map<uint64_t, script_value>& new_static_methods,
-                        std::weak_ptr<engine> engine_ref) {
+                        engine* engine_ref) {
         field_defaults_cache_valid_ = false;  // Invalidate cache on hot reload
         // Compute fingerprint for the new definition
         size_t new_fingerprint = compute_fingerprint(new_field_defaults, new_methods, new_static_methods);
@@ -1037,8 +1037,8 @@ public:
 
         // Check if new class has a hot_reload_migrate method
         uint64_t migrate_method_id = 0;
-        if (auto eng = engine_ref.lock()) {
-            migrate_method_id = eng->symbolize("hot_reload_migrate");
+        if (engine_ref) {
+            migrate_method_id = engine_ref->symbolize("hot_reload_migrate");
         }
         auto migrate_method_it = new_methods.find(migrate_method_id);
 
@@ -1050,10 +1050,10 @@ public:
         // This prevents removed fields from being lazily re-created from old defaults
         field_defaults_.clear();
         for (const auto& [id, value] : new_field_defaults) {
-            if (value.get_engine_ref().expired() && !engine_ref.expired()) {
+            if (value.get_engine() == nullptr && engine_ref) {
                 // Create a copy with engine reference
                 script_value value_with_engine(value);
-                value_with_engine.set_engine_ref(engine_ref);
+                value_with_engine.set_engine(engine_ref);
                 field_defaults_[id] = value_with_engine;
             } else {
                 field_defaults_[id] = value;
@@ -1187,7 +1187,7 @@ private:
     std::string name_;
     uint64_t type_id_;  // Interned type name for fast comparisons
     type_info_ptr type_info_;  // Persistent type_info for this class
-    std::weak_ptr<engine> engine_ref_;  // Engine reference for script_value creation
+    engine* engine_ = nullptr;  // Engine pointer (raw - no atomic ops) for script_value creation
     std::unordered_map<uint64_t, script_value> methods_;
     std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
     std::unordered_map<uint64_t, std::unordered_map<size_t, script_function>> cpp_method_overloads_;  // C++ method overloads by arity for dispatch
@@ -1329,9 +1329,9 @@ inline std::string extract_base_template_name(const std::string& fullTypeName) {
     return fullTypeName; // No template, return as-is
 }
 
-// Type trait to detect if a type has a constructor that takes std::weak_ptr<engine>
+// Type trait to detect if a type has a constructor that takes engine*
 template<typename T>
-concept has_engine_constructor = requires(std::weak_ptr<engine> eng) {
+concept has_engine_constructor = requires(engine* eng) {
     T(eng);
 };
 
@@ -1341,9 +1341,9 @@ namespace class_builder_detail {
 
     // Helper to create wrapped script_value from C++ object
     template<typename T>
-    script_value wrap_cpp_object(std::shared_ptr<T> cpp_obj, const std::string& class_name, std::weak_ptr<engine> engine_weak) {
+    script_value wrap_cpp_object(std::shared_ptr<T> cpp_obj, const std::string& class_name, engine* engine_ptr) {
         // Get engine for wrapping
-        auto eng = engine_weak.lock();
+        auto eng = engine_ptr;
         if (!eng) {
             throw serialization_error("Engine expired during deserialization");
         }
@@ -1369,11 +1369,11 @@ namespace class_builder_detail {
     // Archive-only factory registration (no context needed)
     template<typename T, typename FactoryFunc>
     std::function<script_value(serialization::archive_reader&, uint32_t)>
-    make_archive_only_factory(FactoryFunc&& factory, std::string class_name, std::weak_ptr<engine> engine_weak) {
-        return [factory = std::forward<FactoryFunc>(factory), class_name = std::move(class_name), engine_weak]
+    make_archive_only_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr) {
+        return [factory = std::forward<FactoryFunc>(factory), class_name = std::move(class_name), engine_ptr]
                (serialization::archive_reader& archive, uint32_t version) -> script_value {
             auto cpp_obj = factory(archive);
-            return wrap_cpp_object<T>(cpp_obj, class_name, engine_weak);
+            return wrap_cpp_object<T>(cpp_obj, class_name, engine_ptr);
         };
     }
 
@@ -1383,11 +1383,11 @@ namespace class_builder_detail {
     // included explicitly by code that uses these context-based factories.
     template<typename T, typename ContextType, typename FactoryFunc>
     std::function<script_value(serialization::archive_reader&, uint32_t)>
-    make_context_only_factory(FactoryFunc&& factory, std::string class_name, std::weak_ptr<engine> engine_weak);
+    make_context_only_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr);
 
     template<typename T, typename ContextType, typename FactoryFunc>
     std::function<script_value(serialization::archive_reader&, uint32_t)>
-    make_context_archive_factory(FactoryFunc&& factory, std::string class_name, std::weak_ptr<engine> engine_weak);
+    make_context_archive_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr);
 }
 
 // Tag for opting out of registration-time type dependency validation
@@ -1487,8 +1487,7 @@ public:
         // Intern the class name for fast type comparisons
         uint64_t type_id = engine.get_symbolizer()->intern(class_name);
 
-        auto engine_weak = std::weak_ptr<jai::engine>(engine_.shared_from_this());
-        class_def_ = std::make_shared<class_definition>(class_name, type_id, engine_weak);
+        class_def_ = std::make_shared<class_definition>(class_name, type_id, &engine_);
         
         // Initialize serialization metadata
         serialization_metadata_.class_name = class_name;
@@ -1508,29 +1507,29 @@ public:
         // Register the constructor as an overloaded function
         if constexpr (sizeof...(Args) == 0) {
             // Zero-argument constructor
-            auto engine_ref = engine_.shared_from_this();
-            engine_.add_overloaded_function(class_name_, 0, [class_def = class_def_, class_name = class_name_, engine_ref](const std::vector<script_value>& args) -> script_value {
+            engine* engine_ptr = &engine_;
+            engine_.add_overloaded_function(class_name_, 0, [class_def = class_def_, class_name = class_name_, engine_ptr](const std::vector<script_value>& args) -> script_value {
                 try {
                     // Create the C++ object
                     std::shared_ptr<T> cpp_obj;
-                    
+
                     // Check if T has an engine constructor and use it if available
                     if constexpr (has_engine_constructor<T>) {
                         // Use the engine-aware constructor
-                        cpp_obj = std::make_shared<T>(std::weak_ptr<engine>(engine_ref));
+                        cpp_obj = std::make_shared<T>(engine_ptr);
                     } else {
                         // Use the default constructor
                         cpp_obj = std::make_shared<T>();
                     }
-                    
+
                     // Create a class_instance to hold it
                     auto instance = class_def->create_instance();
 
                     // Store the C++ object in the class_instance as a special field
-                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
+                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
 
                     // Return the class_instance wrapped in a value
-                    return script_value::make_object(class_name, instance, engine_ref);
+                    return script_value::make_object(class_name, instance, engine_ptr);
                 } catch (const std::exception& e) {
                     std::cerr << "Error in zero-arg constructor: " << e.what() << std::endl;
                     throw;
@@ -1538,7 +1537,7 @@ public:
             });
         } else {
             // Multi-argument constructor
-            auto engine_ref = engine_.shared_from_this();
+            engine* engine_ptr = &engine_;
 
             // Helper to avoid template parameter pack in lambda (MSVC workaround)
             using constructor_helper = std::shared_ptr<T>(*)(const std::vector<script_value>&, engine*);
@@ -1546,19 +1545,19 @@ public:
                 return class_builder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, eng);
             };
 
-            engine_.add_overloaded_function(class_name_, sizeof...(Args), [class_def = class_def_, class_name = class_name_, engine_ref, helper](const std::vector<script_value>& args) -> script_value {
+            engine_.add_overloaded_function(class_name_, sizeof...(Args), [class_def = class_def_, class_name = class_name_, engine_ptr, helper](const std::vector<script_value>& args) -> script_value {
                 try {
                     // Extract arguments using index-based unpacking via helper
-                    auto cpp_obj = helper(args, engine_ref.get());
+                    auto cpp_obj = helper(args, engine_ptr);
 
                     // Create a class_instance to hold it
                     auto instance = class_def->create_instance();
 
                     // Store the C++ object in the class_instance as a special field
-                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
+                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
 
                     // Return the class_instance wrapped in a value
-                    return script_value::make_object(class_name, instance, engine_ref);
+                    return script_value::make_object(class_name, instance, engine_ptr);
                 } catch (const std::exception&) {
                     throw;
                 }
@@ -1571,7 +1570,7 @@ public:
     // Add method binding - member function pointer version
     template<typename R, typename... Args>
     class_builder& method(const std::string& name, R(T::*method)(Args...)) {
-        auto method_func = [method, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        auto method_func = [method, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
             }
@@ -1590,8 +1589,8 @@ public:
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
             // Call the method with unpacked arguments
-            if (auto eng = engine_weak.lock()) {
-                return class_builder<T>::callMethodImpl(cpp_obj.get(), method, args, std::index_sequence_for<Args...>{}, eng.get());
+            if (auto eng = engine_ptr) {
+                return class_builder<T>::callMethodImpl(cpp_obj.get(), method, args, std::index_sequence_for<Args...>{}, eng);
             }
             throw runtime_error("Engine no longer exists");
         };
@@ -1606,7 +1605,7 @@ public:
     // Add const method binding
     template<typename R, typename... Args>
     class_builder& method(const std::string& name, R(T::*method)(Args...) const) {
-        auto method_func = [method, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        auto method_func = [method, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
             }
@@ -1625,8 +1624,8 @@ public:
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
             // Call the method with unpacked arguments
-            if (auto eng = engine_weak.lock()) {
-                return class_builder<T>::callConstMethodImpl(cpp_obj.get(), method, args, std::index_sequence_for<Args...>{}, eng.get());
+            if (engine_ptr) {
+                return class_builder<T>::callConstMethodImpl(cpp_obj.get(), method, args, std::index_sequence_for<Args...>{}, engine_ptr);
             }
             throw runtime_error("Engine no longer exists");
         };
@@ -1653,7 +1652,7 @@ public:
             (std::is_same_v<std::tuple_element_t<0, args_tuple>, T&> ||
              std::is_same_v<std::tuple_element_t<0, args_tuple>, const T&>);
         
-        auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (has_self_param) {
                 // Lambda expects T& as first parameter, we need to extract it from args[0]
                 // args[0] is the class_instance, remaining args are the actual parameters
@@ -1673,9 +1672,9 @@ public:
                 auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
                 
                 // Call the lambda with the C++ object as first argument and remaining args
-                if (auto eng = engine_weak.lock()) {
+                if (auto eng = engine_ptr) {
                     return callLambdaWithSelf<typename traits::return_type, args_tuple>(
-                        callable, cpp_obj.get(), args, std::make_index_sequence<traits::arity>{}, eng.get());
+                        callable, cpp_obj.get(), args, std::make_index_sequence<traits::arity>{}, eng);
                 }
                 throw runtime_error("Engine no longer exists");
             } else {
@@ -1686,8 +1685,8 @@ public:
                 }
                 
                 // Call the lambda with unpacked arguments
-                if (auto eng = engine_weak.lock()) {
-                    return callCallableImpl<typename traits::return_type, args_tuple>(callable, args, std::make_index_sequence<traits::arity>{}, eng.get());
+                if (auto eng = engine_ptr) {
+                    return callCallableImpl<typename traits::return_type, args_tuple>(callable, args, std::make_index_sequence<traits::arity>{}, eng);
                 }
                 throw runtime_error("Engine no longer exists");
             }
@@ -1705,7 +1704,7 @@ public:
     // Add static method binding - for regular function pointers
     template<typename R, typename... Args>
     class_builder& static_method(const std::string& name, R(*func)(Args...)) {
-        auto static_method_func = [func, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        auto static_method_func = [func, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             // Validate argument count (no 'this' for static methods)
             if (args.size() != sizeof...(Args)) {
                 throw runtime_error("Static method expects " + std::to_string(sizeof...(Args)) + 
@@ -1716,14 +1715,14 @@ public:
             if constexpr (std::is_void_v<R>) {
                 callStaticFunctionImpl(func, args, std::make_index_sequence<sizeof...(Args)>{});
                 
-                if (auto eng = engine_weak.lock()) {
+                if (auto eng = engine_ptr) {
                     return script_value::make_null(eng);
                 }
                 throw runtime_error("Engine no longer exists");
             } else {
                 auto result = callStaticFunctionImpl(func, args, std::make_index_sequence<sizeof...(Args)>{});
                 
-                if (auto eng = engine_weak.lock()) {
+                if (auto eng = engine_ptr) {
                     return script_value(result, eng);
                 }
                 throw runtime_error("Engine no longer exists");
@@ -1741,7 +1740,7 @@ public:
     class_builder& static_method(const std::string& name, Callable&& callable) {
         using traits = detail::function_traits<std::decay_t<Callable>>;
         
-        auto static_method_func = [callable = std::forward<Callable>(callable), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        auto static_method_func = [callable = std::forward<Callable>(callable), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             // Validate argument count
             if (args.size() != traits::arity) {
                 throw runtime_error("Static method expects " + std::to_string(traits::arity) + 
@@ -1753,14 +1752,14 @@ public:
             if constexpr (std::is_void_v<return_type>) {
                 callStaticCallableImpl(callable, args, std::make_index_sequence<traits::arity>{});
                 
-                if (auto eng = engine_weak.lock()) {
+                if (auto eng = engine_ptr) {
                     return script_value::make_null(eng);
                 }
                 throw runtime_error("Engine no longer exists");
             } else {
                 auto result = callStaticCallableImpl(callable, args, std::make_index_sequence<traits::arity>{});
                 
-                if (auto eng = engine_weak.lock()) {
+                if (auto eng = engine_ptr) {
                     return script_value(result, eng);
                 }
                 throw runtime_error("Engine no longer exists");
@@ -1777,7 +1776,7 @@ public:
     template<typename constructor_func>
     class_builder& serialize_construct(constructor_func&& constructor) {
         // Store the custom constructor in the class definition
-        class_def_->add_method("_serialize_construct", [constructor = std::forward<constructor_func>(constructor), class_def = class_def_, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method("_serialize_construct", [constructor = std::forward<constructor_func>(constructor), class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("Serialization constructor expects exactly one argument (the serialized data)");
             }
@@ -1788,9 +1787,9 @@ public:
             // Create a class_instance to hold it
             auto class_instance = class_def->create_instance();
             class_instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name,
-                class_def->get_type_id(), std::make_shared<T>(std::move(instance)), engine_weak));
+                class_def->get_type_id(), std::make_shared<T>(std::move(instance)), engine_ptr));
 
-            if (auto eng = engine_weak.lock()) {
+            if (auto eng = engine_ptr) {
                 return script_value::make_object(class_name, class_instance, eng);
             }
             throw runtime_error("Engine no longer exists");
@@ -1859,7 +1858,7 @@ private:
 
         // Register the property as a special field that knows how to access the C++ member
         // We'll store a lambda that can get/set the value
-        class_def_->add_field(name, script_value(std::monostate{}, std::weak_ptr<engine>(engine_.shared_from_this()))); // Register field name
+        class_def_->add_field(name, script_value(std::monostate{}, &engine_)); // Register field name
 
         // Register serialization metadata
         serialization::property_metadata prop_meta;
@@ -1869,7 +1868,7 @@ private:
         
         // Add a special method that handles property access
         // The interpreter's visitMemberExpr will need to check for these
-        class_def_->add_method("_get_" + name, [member, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method("_get_" + name, [member, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Property getter called without 'this' object");
             }
@@ -1881,7 +1880,7 @@ private:
             auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
-			if (auto eng = engine_weak.lock()) {
+			if (auto eng = engine_ptr) {
 				// Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
 				if constexpr (is_specialization_v<P, std::vector>) {
 					using element_type = typename P::value_type;
@@ -1891,13 +1890,13 @@ private:
 					return eng->make_object(wrapper);
 				}
 				else {
-					return detail::value_converter<P>::to(cpp_obj.get()->*member, eng.get());
+					return detail::value_converter<P>::to(cpp_obj.get()->*member, eng);
 				}
 			}
             throw runtime_error("Engine no longer exists");
         });
         
-        class_def_->add_method("_set_" + name, [member, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.size() < 2) {
                 throw runtime_error("Property setter requires 'this' and value");
             }
@@ -1916,7 +1915,7 @@ private:
             } else {
                 cpp_obj.get()->*member = args[1].as<P>();
             }
-            return script_value(std::monostate{}, engine_weak); // null
+            return script_value(std::monostate{}, engine_ptr); // null
         });
 
         // Register field_id -> setter_id mapping for fast runtime lookup
@@ -1928,7 +1927,7 @@ private:
         std::string getterName = "get" + name;
         getterName[3] = std::toupper(getterName[3]); // Capitalize first letter
         
-        class_def_->add_method(getterName, [member, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method(getterName, [member, class_name = class_name_, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Getter called without 'this' object");
             }
@@ -1940,8 +1939,8 @@ private:
             auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
-            if (auto eng = engine_weak.lock()) {
-                return detail::value_converter<P>::to(cpp_obj.get()->*member, eng.get());
+            if (auto eng = engine_ptr) {
+                return detail::value_converter<P>::to(cpp_obj.get()->*member, eng);
             }
             throw runtime_error("Engine no longer exists");
         });
@@ -1950,7 +1949,7 @@ private:
         std::string setterName = "set" + name;
         setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
         
-        class_def_->add_method(setterName, [member, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method(setterName, [member, class_name = class_name_, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.size() < 2) {
                 throw runtime_error("Setter requires 'this' and value");
             }
@@ -1969,7 +1968,7 @@ private:
             } else {
                 cpp_obj.get()->*member = args[1].as<P>();
             }
-            return script_value(std::monostate{}, engine_weak); // null
+            return script_value(std::monostate{}, engine_ptr); // null
         });
 
         // Register bound_cpp_vector<T> if this property is a std::vector
@@ -2005,7 +2004,7 @@ public:
     template<typename Getter, typename Setter>
     class_builder& property(const std::string& name, Getter&& getter, Setter&& setter) {
         // Register the property as a field
-        class_def_->add_field(name, script_value(std::monostate{}, std::weak_ptr<engine>(engine_.shared_from_this()))); // Register field name
+        class_def_->add_field(name, script_value(std::monostate{}, &engine_)); // Register field name
 
         // Register serialization metadata
         constexpr bool is_read_only = std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>;
@@ -2028,7 +2027,7 @@ public:
         serialization_metadata_.properties.push_back(prop_meta);
 
         // Add getter method
-        class_def_->add_method("_get_" + name, [getter = std::forward<Getter>(getter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method("_get_" + name, [getter = std::forward<Getter>(getter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Property getter called without 'this' object");
             }
@@ -2043,14 +2042,14 @@ public:
             // Check if getter is a member function pointer
             if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
                 // Call member function pointer: (obj->*getter)()
-                if (auto eng = engine_weak.lock()) {
-                    return detail::value_converter<decltype((cpp_obj.get()->*getter)())>::to((cpp_obj.get()->*getter)(), eng.get());
+                if (auto eng = engine_ptr) {
+                    return detail::value_converter<decltype((cpp_obj.get()->*getter)())>::to((cpp_obj.get()->*getter)(), eng);
                 }
                 throw runtime_error("Engine no longer exists");
             } else {
                 // Call lambda: getter(*cpp_obj)
-                if (auto eng = engine_weak.lock()) {
-                    return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), eng.get());
+                if (auto eng = engine_ptr) {
+                    return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), eng);
                 }
                 throw runtime_error("Engine no longer exists");
             }
@@ -2059,13 +2058,13 @@ public:
         // Add setter method - use different implementations based on setter type
         if constexpr (std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>) {
             // Readonly property - add a no-op setter
-            class_def_->add_method("_set_" + name, [engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method("_set_" + name, [engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
                 // Read-only property, do nothing
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, engine_ptr);
             });
         } else if constexpr (std::is_member_function_pointer_v<std::decay_t<Setter>>) {
             // Member function pointer setter
-            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
                 if (args.size() < 2) {
                     throw runtime_error("Property setter requires 'this' and value");
                 }
@@ -2077,11 +2076,11 @@ public:
                 using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
                 auto value = args[1].as<value_type>();
                 (cpp_obj.get()->*setter)(value);
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, engine_ptr);
             });
         } else {
             // Lambda setter
-            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
                 if (args.size() < 2) {
                     throw runtime_error("Property setter requires 'this' and value");
                 }
@@ -2093,7 +2092,7 @@ public:
                 using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
                 auto value = args[1].as<value_type>();
                 setter(*cpp_obj, value);
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, engine_ptr);
             });
         }
 
@@ -2106,7 +2105,7 @@ public:
         std::string getterName = "get" + name;
         getterName[3] = std::toupper(getterName[3]); // Capitalize first letter
 
-        class_def_->add_method(getterName, [getter = std::forward<Getter>(getter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method(getterName, [getter = std::forward<Getter>(getter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Getter called without 'this' object");
             }
@@ -2117,13 +2116,13 @@ public:
 
             // Check if getter is a member function pointer
             if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
-                if (auto eng = engine_weak.lock()) {
-                    return detail::value_converter<decltype((cpp_obj.get()->*getter)())>::to((cpp_obj.get()->*getter)(), eng.get());
+                if (auto eng = engine_ptr) {
+                    return detail::value_converter<decltype((cpp_obj.get()->*getter)())>::to((cpp_obj.get()->*getter)(), eng);
                 }
                 throw runtime_error("Engine no longer exists");
             } else {
-                if (auto eng = engine_weak.lock()) {
-                    return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), eng.get());
+                if (auto eng = engine_ptr) {
+                    return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), eng);
                 }
                 throw runtime_error("Engine no longer exists");
             }
@@ -2135,13 +2134,13 @@ public:
 
         if constexpr (std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>) {
             // Read-only property - throw error when trying to set
-            class_def_->add_method(setterName, [prop_name = name, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method(setterName, [prop_name = name, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
                 throw runtime_error("Property '" + prop_name + "' is read-only");
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, engine_ptr);
             });
         } else if constexpr (std::is_member_function_pointer_v<std::decay_t<Setter>>) {
             // Member function pointer setter
-            class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
                 if (args.size() < 2) {
                     throw runtime_error("Setter requires 'this' and value");
                 }
@@ -2153,11 +2152,11 @@ public:
                 using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
                 auto value = args[1].as<value_type>();
                 (cpp_obj.get()->*setter)(value);
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, engine_ptr);
             });
         } else {
             // Lambda setter
-            class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
                 if (args.size() < 2) {
                     throw runtime_error("Setter requires 'this' and value");
                 }
@@ -2169,7 +2168,7 @@ public:
                 using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
                 auto value = args[1].as<value_type>();
                 setter(*cpp_obj, value);
-                return script_value(std::monostate{}, engine_weak);
+                return script_value(std::monostate{}, engine_ptr);
             });
         }
         
@@ -2183,13 +2182,13 @@ public:
         uint64_t name_id = engine_.symbolize(name);
 
         // Add static field with getter for the variable
-        class_def_->add_static_field(name_id, script_value(*static_var, engine_.shared_from_this()));
+        class_def_->add_static_field(name_id, script_value(*static_var, &engine_));
 
         // Add getter method for read access
         std::string getter_name = "_get_" + name;
         uint64_t getter_id = engine_.symbolize(getter_name);
-        class_def_->add_static_method(getter_id, [static_var, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
-            if (auto eng = engine_weak.lock()) {
+        class_def_->add_static_method(getter_id, [static_var, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+            if (auto eng = engine_ptr) {
                 return script_value(*static_var, eng);
             }
             throw runtime_error("Engine no longer exists");
@@ -2200,14 +2199,14 @@ public:
         setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
         uint64_t setter_id = engine_.symbolize(setterName);
 
-        class_def_->add_static_method(setter_id, [static_var, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_static_method(setter_id, [static_var, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("Static property setter requires exactly one argument");
             }
             
             *static_var = args[0].as<P>();
             
-            if (auto eng = engine_weak.lock()) {
+            if (auto eng = engine_ptr) {
                 return script_value(std::monostate{}, eng);
             }
             throw runtime_error("Engine no longer exists");
@@ -2222,9 +2221,9 @@ public:
         // Add getter method
         std::string getter_name = "_get_" + name;
         uint64_t getter_id = engine_.symbolize(getter_name);
-        class_def_->add_static_method(getter_id, [getter = std::forward<Getter>(getter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
-            if (auto eng = engine_weak.lock()) {
-                return detail::value_converter<decltype(getter())>::to(getter(), eng.get());
+        class_def_->add_static_method(getter_id, [getter = std::forward<Getter>(getter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+            if (auto eng = engine_ptr) {
+                return detail::value_converter<decltype(getter())>::to(getter(), eng);
             }
             throw runtime_error("Engine no longer exists");
         });
@@ -2234,7 +2233,7 @@ public:
         setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
         uint64_t setter_id = engine_.symbolize(setterName);
 
-        class_def_->add_static_method(setter_id, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_static_method(setter_id, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("Static property setter requires exactly one argument");
             }
@@ -2245,7 +2244,7 @@ public:
             
             setter(value);
             
-            if (auto eng = engine_weak.lock()) {
+            if (auto eng = engine_ptr) {
                 return script_value(std::monostate{}, eng);
             }
             throw runtime_error("Engine no longer exists");
@@ -2311,12 +2310,12 @@ public:
                 // Archive-only factory: [](serialization::archive_reader& archive) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
                     class_builder_detail::make_archive_only_factory<T>(
-                        std::forward<FactoryFunc>(factory), class_name_, engine_.weak_from_this());
+                        std::forward<FactoryFunc>(factory), class_name_, &engine_);
             } else if constexpr (!std::is_void_v<ContextType>) {
                 // Context-only factory: [](ContextType* ctx) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
                     class_builder_detail::make_context_only_factory<T, ContextType>(
-                        std::forward<FactoryFunc>(factory), class_name_, engine_.weak_from_this());
+                        std::forward<FactoryFunc>(factory), class_name_, &engine_);
             } else {
                 // Context-only factory requires ContextType to be specified
                 static_assert(!std::is_void_v<ContextType>,
@@ -2328,7 +2327,7 @@ public:
                 // Context + archive factory: [](ContextType* ctx, serialization::archive_reader& archive) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
                     class_builder_detail::make_context_archive_factory<T, ContextType>(
-                        std::forward<FactoryFunc>(factory), class_name_, engine_.weak_from_this());
+                        std::forward<FactoryFunc>(factory), class_name_, &engine_);
             } else {
                 static_assert(!std::is_void_v<ContextType>,
                     "Context+archive factory requires a non-void ContextType template parameter. "
@@ -2376,14 +2375,14 @@ public:
         if constexpr (!std::is_abstract_v<T> && std::is_default_constructible_v<T>) {
             if (!has_explicit_constructor_) {
                 // Auto-register default constructor
-                auto engine_ref = engine_.shared_from_this();
-                engine_.add_overloaded_function(class_name_, 0, [class_def = class_def_, class_name = class_name_, engine_ref](const std::vector<script_value>& args) -> script_value {
+                engine* engine_ptr = &engine_;
+                engine_.add_overloaded_function(class_name_, 0, [class_def = class_def_, class_name = class_name_, engine_ptr](const std::vector<script_value>& args) -> script_value {
                     // Create the C++ object
                     std::shared_ptr<T> cpp_obj;
 
                     // Check if T has an engine constructor and use it if available
                     if constexpr (has_engine_constructor<T>) {
-                        cpp_obj = std::make_shared<T>(std::weak_ptr<engine>(engine_ref));
+                        cpp_obj = std::make_shared<T>(engine_ptr);
                     } else {
                         cpp_obj = std::make_shared<T>();
                     }
@@ -2392,10 +2391,10 @@ public:
                     auto instance = class_def->create_instance();
 
                     // Store the C++ object in the class_instance as a special field
-                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
+                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
 
                     // Return the class_instance wrapped in a value
-                    return script_value::make_object(class_name, instance, engine_ref);
+                    return script_value::make_object(class_name, instance, engine_ptr);
                 });
             }
         }
@@ -2450,18 +2449,18 @@ public:
                     throw runtime_error("Cannot convert script_value to shared_ptr<" + class_name + ">");
                 },
                 // From shared_ptr<T> to script_value
-                [class_def = class_def_, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::shared_ptr<T>& obj) -> script_value {
+                [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::shared_ptr<T>& obj) -> script_value {
                     if (!obj) {
-                        return script_value(std::monostate{}, engine_weak);
+                        return script_value(std::monostate{}, engine_ptr);
                     }
                     
                     // Create a class_instance to wrap the object
                     auto instance = class_def->create_instance();
                     instance->set_field(instance->get_cpp_object_field_id(),
-                        script_value::make_cpp_object(class_name, class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_weak));
+                        script_value::make_cpp_object(class_name, class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_ptr));
                     
                     // Return wrapped in script_value
-                    return script_value::make_object(class_name, std::static_pointer_cast<void>(instance), engine_weak);
+                    return script_value::make_object(class_name, std::static_pointer_cast<void>(instance), engine_ptr);
                 }
             );
         }
@@ -2471,7 +2470,7 @@ public:
         if constexpr (!std::is_abstract_v<T>) {
             // Register a C++ type converter that creates class_instance objects
             engine_.register_type_converter_impl(typeid(T), 
-                [class_def = class_def_, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const void* obj) -> script_value {
+                [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const void* obj) -> script_value {
                     // Create a class_instance using the class definition
                     // This properly initializes all fields with their defaults
                     auto instance = class_def->create_instance();
@@ -2480,14 +2479,14 @@ public:
                     auto cpp_obj = std::make_shared<T>(*static_cast<const T*>(obj));
 
                     // Store the C++ object in the class_instance
-                    if (auto eng = engine_weak.lock()) {
+                    if (auto eng = engine_ptr) {
                         uint64_t cpp_object_field_id = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
                         instance->set_field(cpp_object_field_id, script_value::make_cpp_object(class_name,
-                            class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
+                            class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
                     }
                     
                     // Return the class_instance wrapped in a value
-                    if (auto eng = engine_weak.lock()) {
+                    if (auto eng = engine_ptr) {
                         return script_value::make_object(class_name, 
                             std::static_pointer_cast<void>(instance), eng);
                     }
@@ -2545,7 +2544,7 @@ public:
                         return *cpp_obj;
                     },
                     // From T to script_value
-                    [class_def = class_def_, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const T& obj) -> script_value {
+                    [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const T& obj) -> script_value {
                         // Create a class_instance using the class definition
                         auto instance = class_def->create_instance();
                         
@@ -2555,10 +2554,10 @@ public:
                         // Store the C++ object in the class_instance
                         instance->set_field(instance->get_cpp_object_field_id(),
                             script_value::make_cpp_object(class_name,
-                                class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
+                                class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
                         
                         // Return the class_instance wrapped in a value
-                        if (auto eng = engine_weak.lock()) {
+                        if (auto eng = engine_ptr) {
                             return script_value::make_object(class_name, 
                                 std::static_pointer_cast<void>(instance), eng);
                         }
@@ -2613,9 +2612,9 @@ public:
                         return std::static_pointer_cast<T>(cpp_objHolder->data);
                     },
                     // From std::shared_ptr<T> to script_value
-                    [class_def = class_def_, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::shared_ptr<T>& obj) -> script_value {
+                    [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::shared_ptr<T>& obj) -> script_value {
                         if (!obj) {
-                            return script_value(std::monostate{}, engine_weak); // null
+                            return script_value(std::monostate{}, engine_ptr); // null
                         }
                         
                         // Create a class_instance using the class definition
@@ -2624,10 +2623,10 @@ public:
                         // Store the shared_ptr directly (no copy needed)
                         instance->set_field(instance->get_cpp_object_field_id(),
                             script_value::make_cpp_object(class_name,
-                                class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_weak));
+                                class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_ptr));
                         
                         // Return the class_instance wrapped in a value
-                        if (auto eng = engine_weak.lock()) {
+                        if (auto eng = engine_ptr) {
                             return script_value::make_object(class_name, 
                                 std::static_pointer_cast<void>(instance), eng);
                         }
@@ -2671,13 +2670,13 @@ private:
                         throw runtime_error("Cannot convert script_value to " + class_name);
                     },
                     // From T to script_value (create a class_instance)
-                    [class_def = class_def_, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const T& obj) -> script_value {
+                    [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const T& obj) -> script_value {
                         auto instance = class_def->create_instance();
                         auto cpp_obj = std::make_shared<T>(obj);
                         instance->set_field(instance->get_cpp_object_field_id(),
                             script_value::make_cpp_object(class_name,
-                                class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
-                        return script_value::make_object(class_name, instance, engine_weak);
+                                class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
+                        return script_value::make_object(class_name, instance, engine_ptr);
                     }
                 );
             }
@@ -2742,7 +2741,7 @@ private:
 
         if constexpr (std::is_void_v<R>) {
             (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
-            return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // null for void
+            return script_value(std::monostate{}, eng); // null for void
         } else {
             R result = (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
             return detail::value_converter<R>::to(result, eng);
@@ -2758,7 +2757,7 @@ private:
 
         if constexpr (std::is_void_v<R>) {
             (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
-            return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // null for void
+            return script_value(std::monostate{}, eng); // null for void
         } else {
             R result = (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
             return detail::value_converter<R>::to(result, eng);
@@ -2799,7 +2798,7 @@ private:
 
         if constexpr (std::is_void_v<R>) {
             callable(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
-            return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // null for void
+            return script_value(std::monostate{}, eng); // null for void
         } else {
             R result = callable(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
             return detail::value_converter<R>::to(result, eng);
@@ -2828,7 +2827,7 @@ private:
         if constexpr (std::is_void_v<R>) {
             // Call with self as first argument, then args[1], args[2], etc.
             callable(*self, detail::value_converter<std::tuple_element_t<Is + 1, ArgsTuple>>::from(args[Is + 1], eng)...);
-            return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // null for void
+            return script_value(std::monostate{}, eng); // null for void
         } else {
             // For return type R&, we need special handling for method chaining
             if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_reference_t<R>, T>) {
@@ -2845,7 +2844,7 @@ private:
 };
 
 // Helper function to create a script class definition
-inline std::shared_ptr<class_definition> make_script_class_definition(const std::string& class_name, std::weak_ptr<engine> eng) {
+inline std::shared_ptr<class_definition> make_script_class_definition(const std::string& class_name, engine* eng) {
     return std::make_shared<class_definition>(class_name, class_definition::script_class, eng);
 }
 
@@ -2881,7 +2880,7 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
 inline uint64_t class_instance::get_cpp_object_field_id() const {
     if (cpp_object_field_id_ == 0) {
         if (auto def = class_definition_.lock()) {
-            if (auto eng = def->get_engine_ref().lock()) {
+            if (auto eng = def->get_engine()) {
                 cpp_object_field_id_ = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
             }
         }
@@ -2890,7 +2889,7 @@ inline uint64_t class_instance::get_cpp_object_field_id() const {
 }
 
 inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
-    auto new_instance = std::make_shared<class_instance>(class_name_, engine_ref_);
+    auto new_instance = std::make_shared<class_instance>(class_name_, engine_);
 
     // Copy all fields
     uint64_t cpp_obj_id = get_cpp_object_field_id();
@@ -2913,7 +2912,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                         }
 
                         // Wrap in a new script_value (use engine ref from the existing value)
-                        auto eng_ref = value.get_engine_ref();
+                        auto eng_ref = value.get_engine();
                         new_instance->set_field(cpp_obj_id,
                             script_value::make_cpp_object(class_name_, class_def->get_type_id(), new_cpp_obj, eng_ref));
                         continue;
@@ -2968,7 +2967,7 @@ inline const script_value& class_instance::get_field(uint64_t id, bool throw_if_
         // Get the field name from the symbolizer for error message
         std::string field_name;
         if (auto def = class_definition_.lock()) {
-            if (auto eng = def->get_engine_ref().lock()) {
+            if (auto eng = def->get_engine()) {
                 field_name = eng->get_symbolizer()->get_string(id);
             } else {
                 field_name = std::to_string(id);
@@ -2981,9 +2980,9 @@ inline const script_value& class_instance::get_field(uint64_t id, bool throw_if_
 
     // For non-throwing case, return reference to instance's invalid_value member
     if (auto def = class_definition_.lock()) {
-        invalid_value_ = script_value::make_invalid(def->get_engine_ref());
+        invalid_value_ = script_value::make_invalid(def->get_engine());
     } else {
-        invalid_value_ = script_value::make_invalid(std::weak_ptr<engine>{});
+        invalid_value_ = script_value::make_invalid(nullptr);
     }
     return invalid_value_;
 }
@@ -3034,7 +3033,7 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
         // Get the field name from the symbolizer for error message
         std::string field_name;
         if (auto def = class_definition_.lock()) {
-            if (auto eng = def->get_engine_ref().lock()) {
+            if (auto eng = def->get_engine()) {
                 field_name = eng->get_symbolizer()->get_string(id);
             } else {
                 field_name = std::to_string(id);
@@ -3047,9 +3046,9 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
 
     // For non-throwing case, return reference to instance's invalid_value member
     if (auto def = class_definition_.lock()) {
-        invalid_value_ = script_value::make_invalid(def->get_engine_ref());
+        invalid_value_ = script_value::make_invalid(def->get_engine());
     } else {
-        invalid_value_ = script_value::make_invalid(std::weak_ptr<engine>{});
+        invalid_value_ = script_value::make_invalid(nullptr);
     }
     return invalid_value_;
 }
@@ -3088,7 +3087,7 @@ inline script_value class_instance::get_method(uint64_t id, bool throw_if_missin
     if (throw_if_missing) {
         throw runtime_error("Class definition not available for method with ID " + std::to_string(id) + " lookup");
     }
-    return script_value::make_invalid(std::weak_ptr<engine>{});
+    return script_value::make_invalid(nullptr);
 }
 
 // Define class_instance destructor after class_definition is complete

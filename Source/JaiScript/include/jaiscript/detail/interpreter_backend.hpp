@@ -59,7 +59,7 @@ public:
         interpreter_->set_class_lookup_callback(callback);
     }
     
-    void set_engine_reference(std::weak_ptr<engine> engine_ref) override {
+    void set_engine_reference(engine* engine_ref) override {
         interpreter_->set_engine_reference(engine_ref);
     }
     

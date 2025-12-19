@@ -89,7 +89,7 @@ class engine;
                     if (!eng) {
                         throw runtime_error("Engine reference required for script_value creation");
                     }
-                    return script_value(t, get_engine_weak_ptr(eng));
+                    return script_value(t, eng);
                 }
             }
         };
@@ -115,7 +115,7 @@ class engine;
                 if (!eng) {
                     throw runtime_error("Engine reference required for script_value creation");
                 }
-                return script_value(static_cast<script_int>(t), get_engine_weak_ptr(eng));
+                return script_value(static_cast<script_int>(t), eng);
             }
         };
 
@@ -139,7 +139,7 @@ class engine;
                 if (!eng) {
                     throw runtime_error("Engine reference required for script_value creation");
                 }
-                return script_value(static_cast<script_float>(t), get_engine_weak_ptr(eng));
+                return script_value(static_cast<script_float>(t), eng);
             }
         };
 
@@ -163,7 +163,7 @@ class engine;
                 if (!eng) {
                     throw runtime_error("Engine reference required for script_value creation");
                 }
-                return script_value(t, get_engine_weak_ptr(eng));  // script_float is double
+                return script_value(t, eng);  // script_float is double
             }
         };
         
@@ -191,7 +191,7 @@ class engine;
                     if (!eng) {
                         throw runtime_error("Engine reference required for null script_value creation");
                     }
-                    return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // Return null for nullptr
+                    return script_value(std::monostate{}, eng); // Return null for nullptr
                 }
                 
                 // Auto-unwrap: dereference the shared_ptr and convert the underlying object
@@ -311,7 +311,7 @@ class engine;
                     if (!eng) {
                         throw runtime_error("Engine reference required for script_value creation");
                     }
-                    return script_value(t, get_engine_weak_ptr(eng));
+                    return script_value(t, eng);
                 }
             }
         };
@@ -324,7 +324,7 @@ class engine;
                     throw runtime_error("Engine reference required for script_value creation");
                 }
                 // Create null/void value with engine reference
-                return script_value(std::monostate{}, get_engine_weak_ptr(eng));
+                return script_value(std::monostate{}, eng);
             }
         };
         
@@ -349,7 +349,7 @@ class engine;
                 if (!eng) {
                     throw runtime_error("Engine reference required for script_value creation");
                 }
-                return script_value(arr.to_vector(), get_engine_weak_ptr(eng));
+                return script_value(arr.to_vector(), eng);
             }
         };
         
@@ -580,7 +580,7 @@ class engine;
             if constexpr (std::is_void_v<R>) {
                 // Void function
                 call_void_impl_static<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
-                return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // Return null for void
+                return script_value(std::monostate{}, eng); // Return null for void
             } else {
                 // Non-void function
                 auto result = call_non_void_impl_static<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
@@ -614,7 +614,7 @@ class engine;
             if constexpr (std::is_void_v<R>) {
                 // Void function with reference support
                 call_with_reference_support_void<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
-                return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // Return null for void
+                return script_value(std::monostate{}, eng); // Return null for void
             } else {
                 // Non-void function with reference support
                 auto result = call_with_reference_support_non_void<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
@@ -710,7 +710,7 @@ class engine;
                     throw runtime_error("Cannot convert non-array to bound_array<T>&");
                 }
                 // Create bound_array object on stack - zero-copy reference to script_array
-                return bound_array<V>(const_cast<script_value&>(arg).as_array(), get_engine_weak_ptr(eng));
+                return bound_array<V>(const_cast<script_value&>(arg).as_array(), eng);
             } else if constexpr (is_bound_map_ref<T>::value) {
                 using K = typename is_bound_map_ref<T>::key_type;
                 using V = typename is_bound_map_ref<T>::value_type;
@@ -719,7 +719,7 @@ class engine;
                     throw runtime_error("Cannot convert non-map to bound_map<K,V>&");
                 }
                 // Create bound_map object on stack - zero-copy reference to script_map
-                return bound_map<K, V>(const_cast<script_value&>(arg).as_map(), get_engine_weak_ptr(eng));
+                return bound_map<K, V>(const_cast<script_value&>(arg).as_map(), eng);
             } else if constexpr (std::is_reference_v<T>) {
                 // For reference parameters, work with the dereferenced value
                 using base_type = std::remove_cv_t<std::remove_reference_t<T>>;

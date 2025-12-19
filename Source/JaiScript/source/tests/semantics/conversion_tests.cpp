@@ -94,8 +94,8 @@ public:
             check_eq(map_ref.size(), 3U);
             
             // Test accessing map values
-            script_value key1 = script_value("key1", engine->weak_from_this());
-            script_value key2 = script_value("key2", engine->weak_from_this());
+            script_value key1 = script_value("key1", engine.get());
+            script_value key2 = script_value("key2", engine.get());
             check_eq(map_ref.at(key1).as<int>(), 1);
             check_eq(map_ref.at(key2).as<int>(), 2);
         });

@@ -33,17 +33,17 @@ private:
     // Either owns the data (for by-value) or references it (for by-reference)
     mutable std::shared_ptr<script_value> owned_value_;
     script_map* map_;
-    std::weak_ptr<engine> engine_ref_;  // Engine reference for creating script_values
-    
+    engine* engine_ref_;  // Engine reference for creating script_values
+
     // Helper to get engine reference
-    std::weak_ptr<engine> get_engine_ref() const {
+    engine* get_engine() const {
         return engine_ref_;
     }
     
 public:
     // Helper to create script_value from K or V (public for nested access)
     template<typename T>
-    static script_value make_script_value(const T& value, std::weak_ptr<engine> eng) {
+    static script_value make_script_value(const T& value, engine* eng) {
         if constexpr (std::is_same_v<T, int>) {
             return script_value(static_cast<script_int>(value), eng);
         } else if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, script_int>) {
@@ -133,13 +133,13 @@ public:
             if (!val.is_array()) {
                 throw runtime_error("Cannot extract bound_array from non-array script_value");
             }
-            return T(const_cast<script_value&>(val).as_array(), val.get_engine_ref());
+            return T(const_cast<script_value&>(val).as_array(), val.get_engine());
         } else if constexpr (is_bound_map_v<T>) {
             // For nested bound_map, create a zero-copy wrapper
             if (!val.is_map()) {
                 throw runtime_error("Cannot extract bound_map from non-map script_value");
             }
-            return T(const_cast<script_value&>(val).as_map(), val.get_engine_ref());
+            return T(const_cast<script_value&>(val).as_map(), val.get_engine());
         } else {
             return val.as<T>();
         }
@@ -150,14 +150,14 @@ private:
     script_map::iterator find_key(const K& key) {
         if (!map_) return script_map::iterator();
         
-        auto key_val = make_script_value(key, get_engine_ref());
+        auto key_val = make_script_value(key, get_engine());
         return map_->find(key_val);
     }
     
     script_map::const_iterator find_key(const K& key) const {
         if (!map_) return script_map::const_iterator();
         
-        auto key_val = make_script_value(key, get_engine_ref());
+        auto key_val = make_script_value(key, get_engine());
         return map_->find(key_val);
     }
     
@@ -174,7 +174,7 @@ public:
      * @param m Reference to existing script map
      * @param eng Engine reference for creating new script_values
      */
-    explicit bound_map(script_map& m, std::weak_ptr<engine> eng) 
+    explicit bound_map(script_map& m, engine* eng)
         : owned_value_(nullptr), map_(&m), engine_ref_(eng) {}
     
     /**
@@ -185,7 +185,7 @@ public:
         if (!val.is_map()) {
             throw runtime_error("Cannot create bound_map from non-map script_value");
         }
-        engine_ref_ = val.get_engine_ref();
+        engine_ref_ = val.get_engine();
         owned_value_ = std::make_shared<script_value>(val.clone());
         map_ = &owned_value_->as_map();
     }
@@ -267,8 +267,8 @@ public:
     std::pair<bool, bool> insert(const K& key, const V& value) {
         if (!map_) throw runtime_error("Cannot insert into null bound_map");
         
-        auto key_val = make_script_value(key, get_engine_ref());
-        auto value_val = make_script_value(value, get_engine_ref());
+        auto key_val = make_script_value(key, get_engine());
+        auto value_val = make_script_value(value, get_engine());
         
         auto result = map_->insert({key_val, value_val});
         return {result.second, result.second};
@@ -284,7 +284,7 @@ public:
     size_type erase(const K& key) {
         if (!map_) return 0;
         
-        auto key_val = make_script_value(key, get_engine_ref());
+        auto key_val = make_script_value(key, get_engine());
         return map_->erase(key_val);
     }
     
@@ -321,8 +321,8 @@ public:
         element_proxy& operator=(const V& value) {
             if (!parent_.map_) throw runtime_error("Cannot assign to null bound_map");
             
-            auto key_val = make_script_value(key_, parent_.get_engine_ref());
-            auto value_val = make_script_value(value, parent_.get_engine_ref());
+            auto key_val = make_script_value(key_, parent_.get_engine());
+            auto value_val = make_script_value(value, parent_.get_engine());
             (*parent_.map_)[key_val] = value_val;
             return *this;
         }
@@ -330,8 +330,8 @@ public:
         element_proxy& operator=(V&& value) {
             if (!parent_.map_) throw runtime_error("Cannot assign to null bound_map");
             
-            auto key_val = make_script_value(key_, parent_.get_engine_ref());
-            auto value_val = make_script_value(std::forward<V>(value), parent_.get_engine_ref());
+            auto key_val = make_script_value(key_, parent_.get_engine());
+            auto value_val = make_script_value(std::forward<V>(value), parent_.get_engine());
             parent_.map_->insert_or_assign(key_val, value_val);
             return *this;
         }
@@ -353,7 +353,7 @@ public:
         template<typename U = V>
         typename std::enable_if<is_bound_map_v<U>, typename U::element_proxy>::type
         operator[](const typename U::key_type& nested_key) {
-            auto key_val = make_script_value(key_, parent_.get_engine_ref());
+            auto key_val = make_script_value(key_, parent_.get_engine());
             auto it = parent_.map_->find(key_val);
             
             if (it == parent_.map_->end()) {
@@ -382,7 +382,7 @@ public:
         template<typename U = V>
         typename std::enable_if<is_bound_array_v<U>, typename U::element_proxy>::type
         operator[](size_type pos) {
-            auto key_val = make_script_value(key_, parent_.get_engine_ref());
+            auto key_val = make_script_value(key_, parent_.get_engine());
             auto it = parent_.map_->find(key_val);
             
             if (it == parent_.map_->end() || !it->second.is_array()) {
@@ -410,7 +410,7 @@ public:
         template<typename U = V>
         typename std::enable_if<is_bound_map_v<U>, typename U::iterator>::type
         begin() {
-            auto key_val = make_script_value(key_, parent_.get_engine_ref());
+            auto key_val = make_script_value(key_, parent_.get_engine());
             auto it = parent_.map_->find(key_val);
             
             if (it == parent_.map_->end() || !it->second.is_map()) {
@@ -424,7 +424,7 @@ public:
         template<typename U = V>
         typename std::enable_if<is_bound_map_v<U>, typename U::iterator>::type
         end() {
-            auto key_val = make_script_value(key_, parent_.get_engine_ref());
+            auto key_val = make_script_value(key_, parent_.get_engine());
             auto it = parent_.map_->find(key_val);
             
             if (it == parent_.map_->end() || !it->second.is_map()) {

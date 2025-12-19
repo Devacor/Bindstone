@@ -4,6 +4,8 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <iostream>
 #include <string>
+#include <chrono>
+#include <sstream>
 
 // Parse filter from command line arguments
 // Supports:
@@ -90,51 +92,63 @@ struct test_filter_config {
 int main(int argc, char** argv) {
     using namespace jai::foundry;
 
-    std::cout << ".________________________________________.\n";
-    std::cout << "|       JaiScript Foundry Tests          |\n";
-    std::cout << "|________________________________________|\n";
-    std::cout << "\n";
-
-    // Get all auto-registered test suites
-    auto suites = test_registry::instance().create_all_suites();
-
-    std::cout << "Discovered " << suites.size() << " test suites\n";
-
-    // Parse filter from command line
+    // Parse command line flags
+    bool verbose = false;
     test_filter_config filter;
+
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
+
+        // Verbose flag
+        if (arg == "--verbose" || arg == "-v") {
+            verbose = true;
+            continue;
+        }
 
         // gtest style: --gtest_filter=pattern
         if (arg.rfind("--gtest_filter=", 0) == 0) {
             filter = test_filter_config::parse(arg.substr(15));
-            std::cout << "Running tests matching filter: '" << arg.substr(15) << "'\n";
-            break;
         }
         // jaitest style (synonym): --jaitest_filter=pattern
         else if (arg.rfind("--jaitest_filter=", 0) == 0) {
             filter = test_filter_config::parse(arg.substr(17));
-            std::cout << "Running tests matching filter: '" << arg.substr(17) << "'\n";
-            break;
         }
         // explicit: --filter=pattern
         else if (arg.rfind("--filter=", 0) == 0) {
             filter = test_filter_config::parse(arg.substr(9));
-            std::cout << "Running tests matching filter: '" << arg.substr(9) << "'\n";
-            break;
         }
-        // positional argument
+        // positional argument (filter)
         else if (arg[0] != '-') {
             filter = test_filter_config::parse(arg);
-            std::cout << "Running tests matching filter: '" << arg << "'\n";
-            break;
         }
     }
-    std::cout << "\n";
 
     // Run all test suites
+    auto suites = test_registry::instance().create_all_suites();
+
+    std::cout << "/*----------------------------*\\\n";
+    std::cout << "| JaiScript Foundry Test Suite |\n";
+    std::cout << "\\*----------------------------*/\n";
+
+    if (!verbose) {
+        std::cout << "Performing Tests, One Moment ..." << std::flush;
+    }
+
+    auto start_time = std::chrono::steady_clock::now();
+
     int total_failures = 0;
+    int total_passed = 0;
     int suites_run = 0;
+    std::vector<failure_info> all_failures;
+
+    // Redirect stdout/stderr when not verbose to suppress test output
+    std::streambuf* original_cout = nullptr;
+    std::streambuf* original_cerr = nullptr;
+    std::ostringstream null_stream;
+    if (!verbose) {
+        original_cout = std::cout.rdbuf(null_stream.rdbuf());
+        original_cerr = std::cerr.rdbuf(null_stream.rdbuf());
+    }
 
     for (auto& suite : suites) {
         // Skip if filter doesn't match suite
@@ -143,17 +157,43 @@ int main(int argc, char** argv) {
         }
 
         suites_run++;
-        // Pass test filter to suite
-        total_failures += suite->quench(filter.test_pattern);
+        auto result = suite->quench(filter.test_pattern, verbose);
+        total_failures += result.failed;
+        total_passed += result.passed;
+
+        // Collect failures
+        for (const auto& f : result.failures) {
+            all_failures.push_back(f);
+        }
+    }
+
+    // Restore stdout/stderr
+    if (original_cout) {
+        std::cout.rdbuf(original_cout);
+        std::cerr.rdbuf(original_cerr);
     }
 
     // Summary
-    std::cout << "\n";
-    std::cout << "-----------------------------------------\n";
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    double seconds = duration.count() / 1000.0;
+
+    int total_tests = total_passed + total_failures;
+
+    // Show failures (always, if any)
+    if (!all_failures.empty()) {
+        std::cout << "\nFailed tests:\n";
+        for (const auto& f : all_failures) {
+            std::cout << "  x " << f.suite_name << " :: " << f.test_name << "\n";
+            std::cout << "      " << f.error_message << "\n";
+        }
+    }
+
+    std::cout << "\n-----------------------------------------\n";
     if (total_failures == 0) {
-        std::cout << "<3 :D All tests passed! (" << suites_run << " suites)\n";
+        std::cout << "<3 :D All tests passed! (" << suites_run << " suites, " << total_tests << " tests, " << seconds << "s)\n";
     } else {
-        std::cout << "x " << total_failures << " test(s) failed\n";
+        std::cout << "x " << total_failures << " of " << total_tests << " test(s) failed (" << seconds << "s)\n";
     }
     std::cout << "-----------------------------------------\n";
 

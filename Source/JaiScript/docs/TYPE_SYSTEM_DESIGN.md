@@ -264,6 +264,30 @@ if (locked != null) {
 }
 ```
 
+### Comparison Semantics
+
+**Equality (`==`)**: Compares contents (delegates to T's `operator==` if defined)
+**Identity (`same_as()`)**: Compares pointer identity (are they the same object?)
+
+```javascript
+auto a = shared_ptr<Counter>(10);
+auto b = a;                          // b shares with a
+auto c = shared_ptr<Counter>(10);    // Different object, same value
+
+// Equality - compares contents
+a == b;                   // true (same underlying object)
+a == c;                   // true (if Counter has operator== that compares value)
+
+// Identity - compares pointers
+a.same_as(b);             // true (same object)
+a.same_as(c);             // false (different objects, even with same contents)
+```
+
+**Works for all pointer types:**
+- `shared_ptr<T>.same_as(other)` - pointer identity
+- `weak_ptr<T>.same_as(other)` - locked pointer identity
+- `object.same_as(other)` - object identity (after dereferencing)
+
 ### Why This Design?
 
 1. **Transparent wrapper**: `shared_ptr<T>` should feel like using T directly

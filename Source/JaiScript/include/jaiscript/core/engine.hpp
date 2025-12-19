@@ -504,6 +504,14 @@ namespace jai {
             register_polymorphic_copier_impl(derived_type, base_type, std::move(copier));
         }
         
+        // Output stream redirection
+        // Set a custom output stream for print() and related functions
+        // Pass nullptr to reset to std::cout
+        void set_output_stream(std::shared_ptr<std::ostream> stream);
+
+        // Get the current output stream (defaults to std::cout)
+        std::ostream& get_output_stream();
+
         // Include/Import path management
         void include_paths(const std::vector<std::string>& paths);
         void add_include_path(const std::string& path);

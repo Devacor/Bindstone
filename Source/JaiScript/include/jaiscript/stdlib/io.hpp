@@ -230,16 +230,20 @@ namespace stdlib {
         //   print("Debug: ", value, skip_flush)       // Output: Debug: <value> (no newline/flush)
         //
         engine.add_variadic_function("print", [engine_weak](const std::vector<script_value>& args) -> script_value {
+            // Get the output stream from the engine (or std::cout if engine expired)
+            auto eng = engine_weak.lock();
+            std::ostream& out = eng ? eng->get_output_stream() : std::cout;
+
             if (args.empty()) {
-                std::cout << std::endl;
+                out << std::endl;
                 return script_value(std::monostate{}, engine_weak);
             }
-            
+
             // Check if last argument is a control type
             bool should_newline = true;
             bool should_flush = true;
             size_t effective_args = args.size();
-            
+
             if (!args.empty()) {
                 const auto& last_arg = args.back();
                 // Check type name to determine if it's a control type
@@ -254,55 +258,55 @@ namespace stdlib {
                     effective_args--;
                 }
             }
-            
+
             if (effective_args == 0) {
                 // Only control argument was passed
                 if (should_newline) {
-                    std::cout << std::endl;
+                    out << std::endl;
                 } else if (should_flush) {
-                    std::cout << std::flush;
+                    out << std::flush;
                 }
                 return script_value(std::monostate{}, engine_weak);
             }
-            
+
             if (effective_args == 1) {
                 // Single argument - just print it directly
-                std::cout << args[0].to_string();
+                out << args[0].to_string();
                 if (should_newline) {
-                    std::cout << std::endl;
+                    out << std::endl;
                 } else if (should_flush) {
-                    std::cout << std::flush;
+                    out << std::flush;
                 }
                 return script_value(std::monostate{}, engine_weak);
             }
-            
+
             // Multiple arguments - check if first arg contains format placeholders
             std::string first_str = args[0].to_string();
             bool has_format_specs = has_format_placeholders(first_str);
-            
+
             if (!has_format_specs) {
                 // No format specifiers - just print all arguments sequentially
                 for (size_t i = 0; i < effective_args; ++i) {
-                    std::cout << args[i].to_string();
+                    out << args[i].to_string();
                 }
                 if (should_newline) {
-                    std::cout << std::endl;
+                    out << std::endl;
                 } else if (should_flush) {
-                    std::cout << std::flush;
+                    out << std::flush;
                 }
                 return script_value(std::monostate{}, engine_weak);
             }
-            
+
             // Has format specifiers - use format string logic
             // Note: for print, we pass effective_args as the vector size, and start at arg 1
             std::vector<script_value> format_args(args.begin(), args.begin() + effective_args);
             std::string result = process_format_string(first_str, format_args, 1);
-            
-            std::cout << result;
+
+            out << result;
             if (should_newline) {
-                std::cout << std::endl;
+                out << std::endl;
             } else if (should_flush) {
-                std::cout << std::flush;
+                out << std::flush;
             }
             return script_value(std::monostate{}, engine_weak); // void return
         });

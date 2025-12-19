@@ -31,6 +31,9 @@ struct engine::implementation {
     // Current parameter storage for function calls (replaces thread_local)
     detail::parameter_storage* current_parameter_storage = nullptr;
 
+    // Custom output stream for print() - nullptr means use std::cout
+    std::shared_ptr<std::ostream> output_stream;
+
     // Serialization registry for class metadata (non-static to ensure test isolation)
     serialization::serialization_registry serialization_registry;
     
@@ -1701,6 +1704,18 @@ detail::parameter_storage* engine::get_current_parameter_storage() const {
 
 void engine::set_current_parameter_storage(detail::parameter_storage* storage) {
     impl->current_parameter_storage = storage;
+}
+
+// Output stream redirection for print()
+void engine::set_output_stream(std::shared_ptr<std::ostream> stream) {
+    impl->output_stream = stream;
+}
+
+std::ostream& engine::get_output_stream() {
+    if (impl->output_stream) {
+        return *impl->output_stream;
+    }
+    return std::cout;
 }
 
 // Non-member accessor for parameter_storage - breaks circular dependency

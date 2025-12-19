@@ -1040,6 +1040,86 @@ public:
             check_true(error_msg.find("operator=") != std::string::npos ||
                       error_msg.find("no operator") != std::string::npos);
         });
+
+        // Test same_as() for shared_ptr - pointer identity comparison
+        test("shared_ptr_same_as", [this]() {
+            auto eng = engine::make();
+            register_lifetime_tracker(*eng);
+
+            // same_as returns true for same underlying object
+            auto result = eng->execute(R"(
+                auto a = shared_ptr<LifetimeTracker>(42);
+                auto b = a;   // b shares with a
+                auto c = shared_ptr<LifetimeTracker>(42);  // Different object, same value
+
+                auto same_ab = a.same_as(b);   // Should be true - same object
+                auto same_ac = a.same_as(c);   // Should be false - different objects
+
+                same_ab && !same_ac
+            )");
+            check_eq(result.as<bool>(), true);
+        });
+
+        // Test same_as() for weak_ptr
+        test("weak_ptr_same_as", [this]() {
+            auto eng = engine::make();
+            register_lifetime_tracker(*eng);
+
+            auto result = eng->execute(R"(
+                auto a = shared_ptr<LifetimeTracker>(10);
+                auto b = a;
+                weak_ptr<LifetimeTracker> weak_a = a;
+                weak_ptr<LifetimeTracker> weak_b = b;
+
+                auto c = shared_ptr<LifetimeTracker>(10);
+                weak_ptr<LifetimeTracker> weak_c = c;
+
+                // weak_a and weak_b reference the same object
+                auto same_ab = weak_a.same_as(weak_b);
+                // weak_a and weak_c reference different objects
+                auto same_ac = weak_a.same_as(weak_c);
+
+                same_ab && !same_ac
+            )");
+            check_eq(result.as<bool>(), true);
+        });
+
+        // Test same_as() for regular objects (value semantics)
+        test("object_same_as", [this]() {
+            auto eng = engine::make();
+
+            auto result = eng->execute(R"(
+                class Obj {
+                    int x = 0;
+                }
+
+                auto a = Obj();
+                auto b = a;   // b is a COPY of a (value semantics)
+                auto c = a;   // c is another COPY
+
+                // Each is a different object due to value semantics
+                auto same_ab = a.same_as(b);   // Should be false - copies are different
+                auto same_aa = a.same_as(a);   // Should be true - same object
+
+                !same_ab && same_aa
+            )");
+            check_eq(result.as<bool>(), true);
+        });
+
+        // Test same_as() comparing shared_ptr with weak_ptr
+        test("shared_weak_same_as", [this]() {
+            auto eng = engine::make();
+            register_lifetime_tracker(*eng);
+
+            auto result = eng->execute(R"(
+                auto shared = shared_ptr<LifetimeTracker>(5);
+                weak_ptr<LifetimeTracker> weak = shared;
+
+                // Cross-type same_as
+                shared.same_as(weak.lock())
+            )");
+            check_eq(result.as<bool>(), true);
+        });
     }
 
 private:

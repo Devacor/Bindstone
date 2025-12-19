@@ -22,6 +22,23 @@ private:
     std::string message_;
 };
 
+// Info about a failed test
+struct failure_info {
+    std::string suite_name;
+    std::string test_name;
+    std::string error_message;
+};
+
+// Test suite results
+struct suite_result {
+    int passed = 0;
+    int failed = 0;
+    int skipped = 0;
+    std::vector<failure_info> failures;
+
+    int total() const { return passed + failed; }
+};
+
 // Base test suite class
 class suite {
 public:
@@ -93,25 +110,27 @@ public:
     }
 
     // Run all tests and benchmarks (with optional test name filter)
-    int quench(const std::string& test_filter = "") {
-        std::cout << "\n╔══ " << suite_name_ << " ══╗\n";
+    suite_result quench(const std::string& test_filter = "", bool verbose = false) {
+        if (verbose) {
+            std::cout << "\n||*** " << suite_name_ << " ***||\n";
+        }
 
         // Let derived class register its tests
         forge_tests();
 
-        int passed = 0;
-        int failed = 0;
-        int skipped = 0;
+        suite_result result;
 
         // Run tests
         for (const auto& [name, func] : tests_) {
             // Skip if filter doesn't match
             if (!test_filter.empty() && !matches_filter(test_filter, name)) {
-                skipped++;
+                result.skipped++;
                 continue;
             }
 
-            std::cout << "  " << name << " ... " << std::flush;
+            if (verbose) {
+                std::cout << "  " << name << " ... " << std::flush;
+            }
 
             auto start = std::chrono::steady_clock::now();
 
@@ -127,34 +146,41 @@ public:
                 auto end = std::chrono::steady_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
-                std::cout << "<3 (" << duration.count() << "us)\n";
-                passed++;
+                if (verbose) {
+                    std::cout << "<3 (" << duration.count() << "us)\n";
+                }
+                result.passed++;
             } catch (const std::exception& e) {
                 post_test();  // Clean up even on error
-                std::cout << "x\n";
-                std::cout << "    Error: " << e.what() << "\n";
-                failed++;
+                if (verbose) {
+                    std::cout << "x\n";
+                    std::cout << "    Error: " << e.what() << "\n";
+                }
+                result.failures.push_back({suite_name_, name, e.what()});
+                result.failed++;
             }
         }
 
         // Run benchmarks if any (and no filter is active or filter matches)
-        if (!benchmarks_.empty() && (test_filter.empty() || test_filter == "*")) {
+        if (verbose && !benchmarks_.empty() && (test_filter.empty() || test_filter == "*")) {
             std::cout << "\n  Benchmarks:\n";
             for (const auto& [name, func, iterations] : benchmarks_) {
                 run_benchmark(name, func, iterations);
             }
         }
 
-        std::cout << "\n  Summary: " << passed << " passed";
-        if (failed > 0) {
-            std::cout << ", " << failed << " failed";
+        if (verbose) {
+            std::cout << "\n  Summary: " << result.passed << " passed";
+            if (result.failed > 0) {
+                std::cout << ", " << result.failed << " failed";
+            }
+            if (result.skipped > 0) {
+                std::cout << " (" << result.skipped << " skipped)";
+            }
+            std::cout << "\n";
         }
-        if (skipped > 0) {
-            std::cout << " (" << skipped << " skipped)";
-        }
-        std::cout << "\n";
 
-        return failed;
+        return result;
     }
     
 private:
@@ -348,9 +374,9 @@ void check_le(const T& value, const U& threshold, const std::string& message = "
             std::cout << "Running isolated test: " #test_class "\n"; \
             std::cout << "=====================================\n"; \
             test_class test_instance; \
-            int result = test_instance.quench(); \
+            auto result = test_instance.quench("", true); \
             std::cout << "=====================================\n"; \
-            return result; \
+            return result.failed > 0 ? 1 : 0; \
         }
 #else
     #define CONDITIONAL_ISOLATED_TEST(test_class) \

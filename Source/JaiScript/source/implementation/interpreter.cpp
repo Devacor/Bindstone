@@ -631,6 +631,50 @@ void interpreter::init_builtin_methods() {
             }
         }
         return interp->make_value(removed_count);
+    }},
+
+        {string_symbolizer_->intern("join"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() > 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "join() takes 0 or 1 argument (separator)");
+        }
+
+        std::string sep = "";
+        if (args.size() > 0) {
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "join() argument must be a string");
+            }
+            sep = args[0].unchecked_as_string();
+        }
+
+        const auto& arr = self.unchecked_as_array();
+        std::string result;
+
+        bool first = true;
+        for (const auto& elem : arr) {
+            if (!first) {
+                result += sep;
+            }
+            first = false;
+
+            // Convert element to string
+            if (elem.is_string()) {
+                result += elem.unchecked_as_string();
+            } else if (elem.is_int()) {
+                result += std::to_string(elem.unchecked_as_int());
+            } else if (elem.is_float()) {
+                result += std::to_string(elem.unchecked_as_float());
+            } else if (elem.is_bool()) {
+                result += elem.unchecked_as_bool() ? "true" : "false";
+            } else if (elem.is_char()) {
+                result += elem.unchecked_as_char();
+            } else if (elem.is_null()) {
+                result += "null";
+            } else {
+                result += "[object]";
+            }
+        }
+
+        return interp->make_value(std::move(result));
     }}
     };
 
@@ -820,83 +864,856 @@ void interpreter::init_builtin_methods() {
     };
 
     // String methods - enable str.length(), str.substr(), etc.
+    // Observer methods return values; mutating methods modify in place and return self
     string_methods_ = {
+        // ============================================================
+        // Observer methods (non-mutating)
+        // ============================================================
+
         {string_symbolizer_->intern("length"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (!args.empty()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
-        }
-        return interp->make_value(static_cast<script_int>(self.unchecked_as_string().size()));
-    }},
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
+            }
+            return interp->make_value(static_cast<script_int>(self.unchecked_as_string().size()));
+        }},
 
         {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (!args.empty()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
-        }
-        return interp->make_value(static_cast<script_int>(self.unchecked_as_string().size()));
-    }},
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
+            }
+            return interp->make_value(static_cast<script_int>(self.unchecked_as_string().size()));
+        }},
 
         {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (!args.empty()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
-        }
-        return interp->make_value(self.unchecked_as_string().empty());
-    }},
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
+            }
+            return interp->make_value(self.unchecked_as_string().empty());
+        }},
+
+        {string_symbolizer_->intern("at"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "at() takes exactly one argument");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "at() argument must be an integer");
+            }
+            const auto& str = self.unchecked_as_string();
+            script_int idx = args[0].unchecked_as_int();
+            script_int len = static_cast<script_int>(str.size());
+
+            // Normalize negative index
+            if (idx < 0) idx += len;
+
+            // Throw if out of bounds
+            if (idx < 0 || idx >= len) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "at() index out of bounds");
+            }
+
+            // Return single character as string
+            return interp->make_value(std::string(1, str[static_cast<size_t>(idx)]));
+        }},
+
+        {string_symbolizer_->intern("front"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "front() takes no arguments");
+            }
+            const auto& str = self.unchecked_as_string();
+            if (str.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "front() called on empty string");
+            }
+            return interp->make_value(std::string(1, str.front()));
+        }},
+
+        {string_symbolizer_->intern("back"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "back() takes no arguments");
+            }
+            const auto& str = self.unchecked_as_string();
+            if (str.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "back() called on empty string");
+            }
+            return interp->make_value(std::string(1, str.back()));
+        }},
 
         {string_symbolizer_->intern("substr"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() < 1 || args.size() > 2) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "substr() takes 1 or 2 arguments (start, [length])");
-        }
-        if (!args[0].is_int()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "substr() start argument must be an integer");
-        }
-        const auto& str = self.unchecked_as_string();
-        script_int start = args[0].unchecked_as_int();
-
-        // Handle negative start index
-        if (start < 0) start = static_cast<script_int>(str.size()) + start;
-        if (start < 0) start = 0;
-        if (start >= static_cast<script_int>(str.size())) {
-            return interp->make_value(std::string(""));
-        }
-
-        if (args.size() == 2) {
-            if (!args[1].is_int()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "substr() length argument must be an integer");
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "substr() takes 1 or 2 arguments (start, [length])");
             }
-            script_int len = args[1].unchecked_as_int();
-            if (len < 0) len = 0;
-            return interp->make_value(str.substr(static_cast<size_t>(start), static_cast<size_t>(len)));
-        }
-        return interp->make_value(str.substr(static_cast<size_t>(start)));
-    }},
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "substr() start argument must be an integer");
+            }
+            const auto& str = self.unchecked_as_string();
+            script_int start = args[0].unchecked_as_int();
+            script_int len = static_cast<script_int>(str.size());
+
+            // Handle negative start index
+            if (start < 0) start += len;
+            if (start < 0) start = 0;
+            if (start >= len) {
+                return interp->make_value(std::string(""));
+            }
+
+            if (args.size() == 2) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "substr() length argument must be an integer");
+                }
+                script_int sub_len = args[1].unchecked_as_int();
+                if (sub_len < 0) sub_len = 0;
+                return interp->make_value(str.substr(static_cast<size_t>(start), static_cast<size_t>(sub_len)));
+            }
+            return interp->make_value(str.substr(static_cast<size_t>(start)));
+        }},
+
+        // ============================================================
+        // Search methods
+        // ============================================================
 
         {string_symbolizer_->intern("find"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find() takes exactly one argument");
-        }
-        if (!args[0].is_string()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find() argument must be a string");
-        }
-        const auto& str = self.unchecked_as_string();
-        const auto& search = args[0].unchecked_as_string();
-        auto pos = str.find(search);
-        if (pos == std::string::npos) {
-            return interp->make_value(static_cast<script_int>(-1));
-        }
-        return interp->make_value(static_cast<script_int>(pos));
-    }},
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find() takes 1 or 2 arguments (substr, [start])");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find() first argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& search = args[0].unchecked_as_string();
+            script_int len = static_cast<script_int>(str.size());
+
+            size_t start_pos = 0;
+            if (args.size() == 2) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find() second argument must be an integer");
+                }
+                script_int start = args[1].unchecked_as_int();
+                if (start < 0) start += len;
+                if (start < 0) start = 0;
+                start_pos = static_cast<size_t>(start);
+            }
+
+            auto pos = str.find(search, start_pos);
+            if (pos == std::string::npos) {
+                return interp->make_value(static_cast<script_int>(-1));
+            }
+            return interp->make_value(static_cast<script_int>(pos));
+        }},
+
+        {string_symbolizer_->intern("rfind"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "rfind() takes 1 or 2 arguments (substr, [start])");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "rfind() first argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& search = args[0].unchecked_as_string();
+            script_int len = static_cast<script_int>(str.size());
+
+            size_t start_pos = std::string::npos;
+            if (args.size() == 2) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "rfind() second argument must be an integer");
+                }
+                script_int start = args[1].unchecked_as_int();
+                if (start < 0) start += len;
+                if (start < 0) {
+                    return interp->make_value(static_cast<script_int>(-1));
+                }
+                start_pos = static_cast<size_t>(start);
+            }
+
+            auto pos = str.rfind(search, start_pos);
+            if (pos == std::string::npos) {
+                return interp->make_value(static_cast<script_int>(-1));
+            }
+            return interp->make_value(static_cast<script_int>(pos));
+        }},
+
+        {string_symbolizer_->intern("find_first_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_first_of() takes 1 or 2 arguments (chars, [start])");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_first_of() first argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& chars = args[0].unchecked_as_string();
+            script_int len = static_cast<script_int>(str.size());
+
+            size_t start_pos = 0;
+            if (args.size() == 2) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_first_of() second argument must be an integer");
+                }
+                script_int start = args[1].unchecked_as_int();
+                if (start < 0) start += len;
+                if (start < 0) start = 0;
+                start_pos = static_cast<size_t>(start);
+            }
+
+            auto pos = str.find_first_of(chars, start_pos);
+            if (pos == std::string::npos) {
+                return interp->make_value(static_cast<script_int>(-1));
+            }
+            return interp->make_value(static_cast<script_int>(pos));
+        }},
+
+        {string_symbolizer_->intern("find_last_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_last_of() takes 1 or 2 arguments (chars, [start])");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_last_of() first argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& chars = args[0].unchecked_as_string();
+            script_int len = static_cast<script_int>(str.size());
+
+            size_t start_pos = std::string::npos;
+            if (args.size() == 2) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_last_of() second argument must be an integer");
+                }
+                script_int start = args[1].unchecked_as_int();
+                if (start < 0) start += len;
+                if (start < 0) {
+                    return interp->make_value(static_cast<script_int>(-1));
+                }
+                start_pos = static_cast<size_t>(start);
+            }
+
+            auto pos = str.find_last_of(chars, start_pos);
+            if (pos == std::string::npos) {
+                return interp->make_value(static_cast<script_int>(-1));
+            }
+            return interp->make_value(static_cast<script_int>(pos));
+        }},
+
+        {string_symbolizer_->intern("find_first_not_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_first_not_of() takes 1 or 2 arguments (chars, [start])");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_first_not_of() first argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& chars = args[0].unchecked_as_string();
+            script_int len = static_cast<script_int>(str.size());
+
+            size_t start_pos = 0;
+            if (args.size() == 2) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_first_not_of() second argument must be an integer");
+                }
+                script_int start = args[1].unchecked_as_int();
+                if (start < 0) start += len;
+                if (start < 0) start = 0;
+                start_pos = static_cast<size_t>(start);
+            }
+
+            auto pos = str.find_first_not_of(chars, start_pos);
+            if (pos == std::string::npos) {
+                return interp->make_value(static_cast<script_int>(-1));
+            }
+            return interp->make_value(static_cast<script_int>(pos));
+        }},
+
+        {string_symbolizer_->intern("find_last_not_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_last_not_of() takes 1 or 2 arguments (chars, [start])");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_last_not_of() first argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& chars = args[0].unchecked_as_string();
+            script_int len = static_cast<script_int>(str.size());
+
+            size_t start_pos = std::string::npos;
+            if (args.size() == 2) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_last_not_of() second argument must be an integer");
+                }
+                script_int start = args[1].unchecked_as_int();
+                if (start < 0) start += len;
+                if (start < 0) {
+                    return interp->make_value(static_cast<script_int>(-1));
+                }
+                start_pos = static_cast<size_t>(start);
+            }
+
+            auto pos = str.find_last_not_of(chars, start_pos);
+            if (pos == std::string::npos) {
+                return interp->make_value(static_cast<script_int>(-1));
+            }
+            return interp->make_value(static_cast<script_int>(pos));
+        }},
 
         {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
-        }
-        if (!args[0].is_string()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "contains() argument must be a string");
-        }
-        const auto& str = self.unchecked_as_string();
-        const auto& search = args[0].unchecked_as_string();
-        return interp->make_value(str.find(search) != std::string::npos);
-    }}
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "contains() argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& search = args[0].unchecked_as_string();
+            return interp->make_value(str.find(search) != std::string::npos);
+        }},
+
+        {string_symbolizer_->intern("starts_with"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "starts_with() takes exactly one argument");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "starts_with() argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& prefix = args[0].unchecked_as_string();
+            if (prefix.size() > str.size()) {
+                return interp->make_value(false);
+            }
+            return interp->make_value(str.compare(0, prefix.size(), prefix) == 0);
+        }},
+
+        {string_symbolizer_->intern("ends_with"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "ends_with() takes exactly one argument");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "ends_with() argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& suffix = args[0].unchecked_as_string();
+            if (suffix.size() > str.size()) {
+                return interp->make_value(false);
+            }
+            return interp->make_value(str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0);
+        }},
+
+        {string_symbolizer_->intern("count"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "count() takes exactly one argument");
+            }
+            if (!args[0].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "count() argument must be a string");
+            }
+            const auto& str = self.unchecked_as_string();
+            const auto& search = args[0].unchecked_as_string();
+
+            if (search.empty()) {
+                return interp->make_value(static_cast<script_int>(0));
+            }
+
+            script_int count = 0;
+            size_t pos = 0;
+            while ((pos = str.find(search, pos)) != std::string::npos) {
+                ++count;
+                pos += search.size();  // Non-overlapping
+            }
+            return interp->make_value(count);
+        }},
+
+        // ============================================================
+        // Parsing methods
+        // ============================================================
+
+        {string_symbolizer_->intern("to_int"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            // to_int(default=null, base=10)
+            script_value default_val(std::monostate{}, interp->get_engine_ref());
+            int base = 10;
+
+            if (args.size() > 0) {
+                default_val = args[0];
+            }
+            if (args.size() > 1) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "to_int() base argument must be an integer");
+                }
+                base = static_cast<int>(args[1].unchecked_as_int());
+                if (base != 0 && (base < 2 || base > 36)) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "to_int() base must be 0 or between 2 and 36");
+                }
+            }
+            if (args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_int() takes at most 2 arguments (default, base)");
+            }
+
+            const auto& str = self.unchecked_as_string();
+            try {
+                size_t pos = 0;
+                long long val = std::stoll(str, &pos, base);
+                // Check if entire string was consumed (ignoring trailing whitespace)
+                while (pos < str.size() && std::isspace(str[pos])) ++pos;
+                if (pos != str.size()) {
+                    return default_val;
+                }
+                return interp->make_value(static_cast<script_int>(val));
+            } catch (...) {
+                return default_val;
+            }
+        }},
+
+        {string_symbolizer_->intern("to_float"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            // to_float(default=null)
+            script_value default_val(std::monostate{}, interp->get_engine_ref());
+
+            if (args.size() > 0) {
+                default_val = args[0];
+            }
+            if (args.size() > 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_float() takes at most 1 argument (default)");
+            }
+
+            const auto& str = self.unchecked_as_string();
+            try {
+                size_t pos = 0;
+                double val = std::stod(str, &pos);
+                // Check if entire string was consumed (ignoring trailing whitespace)
+                while (pos < str.size() && std::isspace(str[pos])) ++pos;
+                if (pos != str.size()) {
+                    return default_val;
+                }
+                return interp->make_value(val);
+            } catch (...) {
+                return default_val;
+            }
+        }},
+
+        // ============================================================
+        // Mutating methods (modify in place, return self for chaining)
+        // ============================================================
+
+        {string_symbolizer_->intern("to_lower"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_lower() takes no arguments");
+            }
+            auto& str = self.unchecked_as_string_ref();
+            for (auto& c : str) {
+                if (c >= 'A' && c <= 'Z') {
+                    c = c + ('a' - 'A');
+                }
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("to_upper"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_upper() takes no arguments");
+            }
+            auto& str = self.unchecked_as_string_ref();
+            for (auto& c : str) {
+                if (c >= 'a' && c <= 'z') {
+                    c = c - ('a' - 'A');
+                }
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("trim"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            std::string chars = " \t\r\n";
+            if (args.size() > 0) {
+                if (!args[0].is_string()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim() argument must be a string");
+                }
+                chars = args[0].unchecked_as_string();
+            }
+            if (args.size() > 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim() takes at most 1 argument");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            size_t start = str.find_first_not_of(chars);
+            if (start == std::string::npos) {
+                str.clear();
+            } else {
+                size_t end = str.find_last_not_of(chars);
+                str = str.substr(start, end - start + 1);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("trim_left"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            std::string chars = " \t\r\n";
+            if (args.size() > 0) {
+                if (!args[0].is_string()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim_left() argument must be a string");
+                }
+                chars = args[0].unchecked_as_string();
+            }
+            if (args.size() > 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim_left() takes at most 1 argument");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            size_t start = str.find_first_not_of(chars);
+            if (start == std::string::npos) {
+                str.clear();
+            } else {
+                str.erase(0, start);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("trim_right"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            std::string chars = " \t\r\n";
+            if (args.size() > 0) {
+                if (!args[0].is_string()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim_right() argument must be a string");
+                }
+                chars = args[0].unchecked_as_string();
+            }
+            if (args.size() > 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim_right() takes at most 1 argument");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            size_t end = str.find_last_not_of(chars);
+            if (end == std::string::npos) {
+                str.clear();
+            } else {
+                str.erase(end + 1);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("pad_left"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_left() takes 1 or 2 arguments (target_len, [char])");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_left() first argument must be an integer");
+            }
+            script_int target_len = args[0].unchecked_as_int();
+
+            char pad_char = ' ';
+            if (args.size() > 1) {
+                if (args[1].is_char()) {
+                    pad_char = args[1].unchecked_as_char();
+                } else if (args[1].is_string()) {
+                    const auto& pad_str = args[1].unchecked_as_string();
+                    if (pad_str.empty()) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_left() padding character cannot be empty");
+                    }
+                    pad_char = pad_str[0];
+                } else {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_left() second argument must be a char or string");
+                }
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            if (target_len > static_cast<script_int>(str.size())) {
+                str.insert(0, static_cast<size_t>(target_len) - str.size(), pad_char);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("pad_right"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_right() takes 1 or 2 arguments (target_len, [char])");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_right() first argument must be an integer");
+            }
+            script_int target_len = args[0].unchecked_as_int();
+
+            char pad_char = ' ';
+            if (args.size() > 1) {
+                if (args[1].is_char()) {
+                    pad_char = args[1].unchecked_as_char();
+                } else if (args[1].is_string()) {
+                    const auto& pad_str = args[1].unchecked_as_string();
+                    if (pad_str.empty()) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_right() padding character cannot be empty");
+                    }
+                    pad_char = pad_str[0];
+                } else {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_right() second argument must be a char or string");
+                }
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            if (target_len > static_cast<script_int>(str.size())) {
+                str.append(static_cast<size_t>(target_len) - str.size(), pad_char);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("pad_center"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_center() takes 1 or 2 arguments (target_len, [char])");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_center() first argument must be an integer");
+            }
+            script_int target_len = args[0].unchecked_as_int();
+
+            char pad_char = ' ';
+            if (args.size() > 1) {
+                if (args[1].is_char()) {
+                    pad_char = args[1].unchecked_as_char();
+                } else if (args[1].is_string()) {
+                    const auto& pad_str = args[1].unchecked_as_string();
+                    if (pad_str.empty()) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_center() padding character cannot be empty");
+                    }
+                    pad_char = pad_str[0];
+                } else {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_center() second argument must be a char or string");
+                }
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            if (target_len > static_cast<script_int>(str.size())) {
+                size_t total_pad = static_cast<size_t>(target_len) - str.size();
+                size_t left_pad = total_pad / 2;
+                size_t right_pad = total_pad - left_pad;
+                str.insert(0, left_pad, pad_char);
+                str.append(right_pad, pad_char);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("replace_first"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_first() takes exactly 2 arguments (old, new)");
+            }
+            if (!args[0].is_string() || !args[1].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "replace_first() arguments must be strings");
+            }
+            const auto& old_str = args[0].unchecked_as_string();
+            const auto& new_str = args[1].unchecked_as_string();
+
+            if (old_str.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_first() search string cannot be empty");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            size_t pos = str.find(old_str);
+            if (pos != std::string::npos) {
+                str.replace(pos, old_str.size(), new_str);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("replace_last"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_last() takes exactly 2 arguments (old, new)");
+            }
+            if (!args[0].is_string() || !args[1].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "replace_last() arguments must be strings");
+            }
+            const auto& old_str = args[0].unchecked_as_string();
+            const auto& new_str = args[1].unchecked_as_string();
+
+            if (old_str.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_last() search string cannot be empty");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            size_t pos = str.rfind(old_str);
+            if (pos != std::string::npos) {
+                str.replace(pos, old_str.size(), new_str);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("replace_all"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_all() takes exactly 2 arguments (old, new)");
+            }
+            if (!args[0].is_string() || !args[1].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "replace_all() arguments must be strings");
+            }
+            const auto& old_str = args[0].unchecked_as_string();
+            const auto& new_str = args[1].unchecked_as_string();
+
+            if (old_str.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_all() search string cannot be empty");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            size_t pos = 0;
+            while ((pos = str.find(old_str, pos)) != std::string::npos) {
+                str.replace(pos, old_str.size(), new_str);
+                pos += new_str.size();  // Move past the replacement to avoid infinite loop
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("insert"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "insert() takes exactly 2 arguments (pos, text)");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "insert() first argument must be an integer");
+            }
+            if (!args[1].is_string()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "insert() second argument must be a string");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            script_int pos = args[0].unchecked_as_int();
+            const auto& text = args[1].unchecked_as_string();
+            script_int len = static_cast<script_int>(str.size());
+
+            // Normalize negative index
+            if (pos < 0) pos += len;
+            // Clamp to valid range
+            if (pos < 0) pos = 0;
+            if (pos > len) pos = len;
+
+            str.insert(static_cast<size_t>(pos), text);
+            return self;
+        }},
+
+        {string_symbolizer_->intern("erase"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() < 1 || args.size() > 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "erase() takes 1 or 2 arguments (pos, [count])");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "erase() first argument must be an integer");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            script_int pos = args[0].unchecked_as_int();
+            script_int len = static_cast<script_int>(str.size());
+
+            // Normalize negative index
+            if (pos < 0) pos += len;
+            if (pos < 0 || pos >= len) {
+                return self;  // Out of bounds, no change
+            }
+
+            size_t count = std::string::npos;
+            if (args.size() > 1) {
+                if (!args[1].is_int()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "erase() second argument must be an integer");
+                }
+                script_int cnt = args[1].unchecked_as_int();
+                if (cnt < 0) cnt = 0;
+                count = static_cast<size_t>(cnt);
+            }
+
+            str.erase(static_cast<size_t>(pos), count);
+            return self;
+        }},
+
+        {string_symbolizer_->intern("remove_prefix"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_prefix() takes exactly one argument");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_prefix() argument must be an integer");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            script_int n = args[0].unchecked_as_int();
+            if (n < 0) n = 0;
+            if (n > 0) {
+                size_t to_remove = std::min(static_cast<size_t>(n), str.size());
+                str.erase(0, to_remove);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("remove_suffix"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_suffix() takes exactly one argument");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_suffix() argument must be an integer");
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            script_int n = args[0].unchecked_as_int();
+            if (n < 0) n = 0;
+            if (n > 0) {
+                size_t to_remove = std::min(static_cast<size_t>(n), str.size());
+                str.erase(str.size() - to_remove);
+            }
+            return self;
+        }},
+
+        {string_symbolizer_->intern("reverse"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
+            }
+            auto& str = self.unchecked_as_string_ref();
+            std::reverse(str.begin(), str.end());
+            return self;
+        }},
+
+        {string_symbolizer_->intern("repeat"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "repeat() takes exactly one argument");
+            }
+            if (!args[0].is_int()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "repeat() argument must be an integer");
+            }
+
+            script_int count = args[0].unchecked_as_int();
+            if (count <= 0) {
+                self.unchecked_as_string_ref().clear();
+                return self;
+            }
+
+            auto& str = self.unchecked_as_string_ref();
+            std::string original = str;
+            str.clear();
+            str.reserve(original.size() * static_cast<size_t>(count));
+            for (script_int i = 0; i < count; ++i) {
+                str += original;
+            }
+            return self;
+        }},
+
+        // ============================================================
+        // Split method (returns array)
+        // ============================================================
+
+        {string_symbolizer_->intern("split"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() > 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "split() takes 0 or 1 argument (delimiter)");
+            }
+
+            std::string delim = "";
+            if (args.size() > 0) {
+                if (!args[0].is_string()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "split() argument must be a string");
+                }
+                delim = args[0].unchecked_as_string();
+            }
+
+            const auto& str = self.unchecked_as_string();
+
+            // Create array with string element type
+            auto engine_ref = interp->get_engine_ref();
+            auto eng = engine_ref.lock();
+            if (!eng) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Engine reference expired");
+            }
+
+            script_value array_val = script_value::make_array(eng->get_type_info_string(), engine_ref);
+            auto& result = array_val.as_array();
+
+            if (delim.empty()) {
+                // Split into individual characters
+                for (char c : str) {
+                    result.push_back(interp->make_value(std::string(1, c)));
+                }
+            } else {
+                size_t start = 0;
+                size_t end;
+                while ((end = str.find(delim, start)) != std::string::npos) {
+                    result.push_back(interp->make_value(str.substr(start, end - start)));
+                    start = end + delim.size();
+                }
+                result.push_back(interp->make_value(str.substr(start)));
+            }
+
+            return array_val;
+        }}
     };
 
     // Weak pointer methods
@@ -965,6 +1782,57 @@ void interpreter::init_builtin_methods() {
         weak_storage.reset();
 
         return self; // Return the reset weak_ptr
+    }},
+
+        {string_symbolizer_->intern("same_as"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        // Pointer identity comparison for weak_ptr: do they reference the same object?
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
+        }
+
+        const script_value& other = args[0];
+
+        // Both expired -> same (both point to nothing)
+        auto self_weak = self.get_weak_ptr();
+        bool self_expired = self_weak.expired();
+
+        // Handle other being weak_ptr
+        if (other.is_weak_ptr()) {
+            auto other_weak = other.get_weak_ptr();
+            bool other_expired = other_weak.expired();
+
+            // Both expired -> same
+            if (self_expired && other_expired) {
+                return interp->make_value(true);
+            }
+            // One expired, one not -> not same
+            if (self_expired || other_expired) {
+                return interp->make_value(false);
+            }
+
+            // Both valid - compare locked pointers
+            auto self_locked = self_weak.lock();
+            auto other_locked = other_weak.lock();
+            return interp->make_value(self_locked.get() == other_locked.get());
+        }
+
+        // Handle other being shared_ptr or null
+        if (other.is_null()) {
+            return interp->make_value(self_expired);
+        }
+
+        if (!other.is_object()) {
+            return interp->make_value(false);
+        }
+
+        // Compare weak_ptr with shared_ptr/object
+        if (self_expired) {
+            return interp->make_value(false);
+        }
+
+        auto self_locked = self_weak.lock();
+        auto other_holder = const_cast<script_value&>(other).get_object_holder();
+        return interp->make_value(self_locked.get() == other_holder.get());
     }}
     };
 
@@ -1018,6 +1886,37 @@ void interpreter::init_builtin_methods() {
 
         // Not a valid shared_ptr
         return interp->make_value(false);
+    }},
+
+        {string_symbolizer_->intern("same_as"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        // Pointer identity comparison: are these the same underlying object?
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
+        }
+
+        const script_value& other = args[0];
+
+        // Both null -> same
+        if (self.is_null() && other.is_null()) {
+            return interp->make_value(true);
+        }
+
+        // One null, one not -> not same
+        if (self.is_null() || other.is_null()) {
+            return interp->make_value(false);
+        }
+
+        // Both must be objects
+        if (!self.is_object() || !other.is_object()) {
+            return interp->make_value(false);
+        }
+
+        auto self_holder = self.get_object_holder();
+        auto other_holder = const_cast<script_value&>(other).get_object_holder();
+
+        // Compare the underlying object_holder pointers (pointer identity)
+        bool same = (self_holder.get() == other_holder.get());
+        return interp->make_value(same);
     }}
     };
 }
@@ -5033,6 +5932,40 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
         }
     }
 
+    // Special handling for string method calls on variables - mutate in place
+    // Pattern: identifier.method() where identifier is a string variable
+    if (expr->callee->get_type() == node_type::member_expr) {
+        auto* member = static_cast<member_expr*>(expr->callee.get());
+        if (!member->is_static && member->object->get_type() == node_type::identifier_expr) {
+            auto* ident = static_cast<identifier_expr*>(member->object.get());
+
+            // Try to get a mutable reference to the variable
+            auto ref_result = environment_->get_ref(ident->symbol_id);
+            if (ref_result && ref_result.value().get().is_string()) {
+                // Found a string variable - check if method exists
+                auto methodIt = string_methods_.find(member->member_id);
+                if (methodIt != string_methods_.end()) {
+                    // Evaluate arguments
+                    std::vector<script_value> arguments;
+                    arguments.reserve(expr->arguments.size());
+                    for (const auto& argExpr : expr->arguments) {
+                        JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+                        arguments.emplace_back(std::move(pop_value()));
+                    }
+
+                    // Call method directly on the variable reference
+                    script_value& var_ref = ref_result.value().get();
+                    auto result = methodIt->second(this, var_ref, arguments);
+                    if (!result) {
+                        return result.error_value();
+                    }
+                    push_value(std::move(result.value()));
+                    return {};
+                }
+            }
+        }
+    }
+
     // Evaluate the callee expression
     JAISCRIPT_TRY(dispatch_expr(expr->callee.get()));
     script_value callee = pop_value();
@@ -5530,6 +6463,74 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
     // After refactor: shared_ptr<T> uses same storage as regular objects
     // No unwrapping needed - just access the object_holder directly
+
+    // Built-in same_as() for all values (identity/equality comparison)
+    static uint64_t same_as_id = 0;
+    if (same_as_id == 0) {
+        same_as_id = string_symbolizer_->intern("same_as");
+    }
+    if (expr->member_id == same_as_id) {
+        // Create a bound same_as method for this value
+        script_function same_as_method = [this, capturedValue = objectValue](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
+            }
+
+            const script_value& other_raw = args[0];
+
+            // Deref both values to follow reference chains to the root object
+            script_value self_val = capturedValue.deref();
+            script_value other_val = const_cast<script_value&>(other_raw).deref();
+
+            // Both null -> same
+            if (self_val.is_null() && other_val.is_null()) {
+                return make_value(true);
+            }
+
+            // One null, one not -> not same
+            if (self_val.is_null() || other_val.is_null()) {
+                return make_value(false);
+            }
+
+            // Fast path: compare raw type indices first
+            auto self_idx = self_val.raw_storage_index();
+            auto other_idx = other_val.raw_storage_index();
+
+            // Different types -> not same
+            if (self_idx != other_idx) {
+                return make_value(false);
+            }
+
+            // Same type: compare values based on type
+            switch (self_idx) {
+                case script_value::TYPEID_INT:
+                    return make_value(self_val.unchecked_as_int() == other_val.unchecked_as_int());
+                case script_value::TYPEID_FLOAT:
+                    return make_value(self_val.unchecked_as_float() == other_val.unchecked_as_float());
+                case script_value::TYPEID_BOOL:
+                    return make_value(self_val.unchecked_as_bool() == other_val.unchecked_as_bool());
+                case script_value::TYPEID_STRING:
+                    return make_value(self_val.unchecked_as_string() == other_val.unchecked_as_string());
+                case script_value::TYPEID_OBJECT:
+                case script_value::TYPEID_SHARED_PTR:
+                    break; // Fall through to pointer comparison below
+                default:
+                    // Other types (arrays, maps, functions, etc.) - not same unless same object
+                    return make_value(false);
+            }
+
+            // For objects: pointer identity comparison
+            auto self_holder = self_val.get_object_holder();
+            auto other_holder = other_val.get_object_holder();
+
+            // Compare the underlying object_holder pointers (pointer identity)
+            bool same = (self_holder.get() == other_holder.get());
+            return make_value(same);
+        };
+
+        push_value(script_value::make_function(same_as_method, engine_ref_));
+        return {};
+    }
 
     // Check if it's an object (only objects have members/methods)
     if (!objectValue.is_object()) {

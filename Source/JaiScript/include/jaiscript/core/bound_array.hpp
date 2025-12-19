@@ -32,16 +32,16 @@ private:
     // Either owns the data (for by-value) or references it (for by-reference)
     mutable std::shared_ptr<script_value> owned_value_;
     script_array* arr_;  // script_array is std::vector<script_value>
-    std::weak_ptr<engine> engine_ref_;  // Engine reference for creating script_values
-    
+    engine* engine_ref_;  // Engine reference for creating script_values
+
     // Helper to get engine reference
-    std::weak_ptr<engine> get_engine_ref() const {
+    engine* get_engine() const {
         return engine_ref_;
     }
-    
+
 public:
     // Helper to create script_value from T (public for nested access)
-    static script_value make_script_value(const T& value, std::weak_ptr<engine> eng) {
+    static script_value make_script_value(const T& value, engine* eng) {
         if constexpr (std::is_same_v<T, int>) {
             return script_value(static_cast<script_int>(value), eng);
         } else if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, script_int>) {
@@ -130,13 +130,13 @@ public:
             if (!val.is_array()) {
                 throw runtime_error("Cannot extract bound_array from non-array script_value");
             }
-            return T(const_cast<script_value&>(val).as_array(), val.get_engine_ref());
+            return T(const_cast<script_value&>(val).as_array(), val.get_engine());
         } else if constexpr (is_bound_map_v<T>) {
             // For nested bound_map, create a zero-copy wrapper
             if (!val.is_map()) {
                 throw runtime_error("Cannot extract bound_map from non-map script_value");
             }
-            return T(const_cast<script_value&>(val).as_map(), val.get_engine_ref());
+            return T(const_cast<script_value&>(val).as_map(), val.get_engine());
         } else {
             // For custom types, use the same logic as script_value::as<T>()
             // which will check conversion registry if engine reference is available
@@ -157,7 +157,7 @@ public:
      * @param arr Reference to existing script array
      * @param eng Engine reference for creating new script_values
      */
-    explicit bound_array(script_array& arr, std::weak_ptr<engine> eng) 
+    explicit bound_array(script_array& arr, engine* eng)
         : owned_value_(nullptr), arr_(&arr), engine_ref_(eng) {}
     
     /**
@@ -168,7 +168,7 @@ public:
         if (!val.is_array()) {
             throw runtime_error("Cannot create bound_array from non-array script_value");
         }
-        engine_ref_ = val.get_engine_ref();
+        engine_ref_ = val.get_engine();
         owned_value_ = std::make_shared<script_value>(val.clone());
         arr_ = &owned_value_->as_array();
     }
@@ -264,12 +264,12 @@ public:
     
     void push_back(const T& value) {
         if (!arr_) throw runtime_error("Cannot push_back to null bound_array");
-        arr_->push_back(make_script_value(value, get_engine_ref()));
+        arr_->push_back(make_script_value(value, get_engine()));
     }
     
     void push_back(T&& value) {
         if (!arr_) throw runtime_error("Cannot push_back to null bound_array");
-        arr_->push_back(make_script_value(std::forward<T>(value), get_engine_ref()));
+        arr_->push_back(make_script_value(std::forward<T>(value), get_engine()));
     }
     
     void pop_back() {
@@ -284,7 +284,7 @@ public:
         if (count > arr_->size()) {
             // Add default-constructed elements
             while (arr_->size() < count) {
-                arr_->push_back(make_script_value(T{}, get_engine_ref()));
+                arr_->push_back(make_script_value(T{}, get_engine()));
             }
         } else {
             arr_->resize(count);
@@ -297,7 +297,7 @@ public:
         if (count > arr_->size()) {
             // Add copies of value
             while (arr_->size() < count) {
-                arr_->push_back(make_script_value(value, get_engine_ref()));
+                arr_->push_back(make_script_value(value, get_engine()));
             }
         } else {
             arr_->resize(count);
@@ -336,21 +336,21 @@ public:
     class element_proxy {
         script_array& arr_;
         size_type idx_;
-        std::weak_ptr<engine> engine_ref_;
+        engine* engine_ref_;
         // Storage for nested bound_map wrappers (no copying, just wrapper objects)
         mutable std::unique_ptr<std::any> nested_wrapper_storage_;
-        
+
     public:
-        element_proxy(script_array& arr, size_type idx, std::weak_ptr<engine> eng) 
+        element_proxy(script_array& arr, size_type idx, engine* eng)
             : arr_(arr), idx_(idx), engine_ref_(eng) {}
-            
+
         // Copy constructor
-        element_proxy(const element_proxy& other) 
+        element_proxy(const element_proxy& other)
             : arr_(other.arr_), idx_(other.idx_), engine_ref_(other.engine_ref_) {}
-            
+
         // Move constructor - efficient for temporary proxies
         element_proxy(element_proxy&& other) noexcept
-            : arr_(other.arr_), idx_(other.idx_), engine_ref_(std::move(other.engine_ref_)), 
+            : arr_(other.arr_), idx_(other.idx_), engine_ref_(other.engine_ref_),
               nested_wrapper_storage_(std::move(other.nested_wrapper_storage_)) {}
         
         element_proxy& operator=(const T& value) {

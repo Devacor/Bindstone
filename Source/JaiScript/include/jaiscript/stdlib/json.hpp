@@ -157,7 +157,7 @@ namespace stdlib {
                     first = false;
                     
                     // Serialize all registered properties
-                    auto eng = classDef->get_engine_ref().lock();
+                    auto eng = classDef->get_engine();
                     if (eng) {
                         for (const auto& propName : classDef->get_property_names()) {
                             // Call the getter method to get property value
@@ -447,54 +447,48 @@ namespace stdlib {
     */
 
     // Register JSON and binary serialization functions with an engine
-    inline void register_json_functions(engine& engine) {
-        auto engine_weak = engine.weak_from_this();
-        
+    inline void register_json_functions(engine& eng_ref) {
+        engine* eng = &eng_ref;
+
         // to_json with optional pretty printing - now with shared_ptr support
-        engine.add_variadic_function("to_json", [engine_weak](const std::vector<script_value>& args) -> script_value {
+        eng_ref.add_variadic_function("to_json", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() == 1) {
                 // Compact mode - use archive for shared_ptr support
-                serialization::json_archive_writer writer(-1, engine_weak); // No indentation, with engine ref
+                serialization::json_archive_writer writer(-1, eng); // No indentation, with engine ref
                 writer.write_value(args[0]);
-                return script_value(writer.str(), engine_weak);
+                return script_value(writer.str(), eng);
             } else if (args.size() == 2) {
                 // Pretty mode with indentation
                 int indent = static_cast<int>(args[1].as_int());
-                serialization::json_archive_writer writer(indent, engine_weak);
+                serialization::json_archive_writer writer(indent, eng);
                 writer.write_value(args[0]);
-                return script_value(writer.str(), engine_weak);
+                return script_value(writer.str(), eng);
             } else {
                 throw runtime_error("to_json expects 1 or 2 arguments, got " + std::to_string(args.size()));
             }
         });
         
         // from_json implementation - now with automatic object reconstruction and shared_ptr support
-        engine.add_function("from_json", [engine_weak](const std::string& json) -> script_value {
+        eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
             // Use JSON archive for shared_ptr reconstruction
-            serialization::json_archive_reader reader(json, engine_weak);
+            serialization::json_archive_reader reader(json, eng);
             script_value data = reader.read_value();
-            
+
             // Helper function to automatically reconstruct objects with _type_
             std::function<script_value(const script_value&)> processValue;
-            processValue = [engine_weak, &processValue](const script_value& val) -> script_value {
+            processValue = [eng, &processValue](const script_value& val) -> script_value {
                 if (val.is_map()) {
                     const auto& map = val.as_map();
-                    
+
                     // Check if this map has a _type_ field
-                    auto typeIt = map.find(script_value("_type_", engine_weak));
+                    auto typeIt = map.find(script_value("_type_", eng));
                     if (typeIt != map.end() && typeIt->second.is_string()) {
                         std::string type_name = typeIt->second.as_string();
-                        
+
                         // Try to reconstruct the bound object
                         try {
-                            // Get strong reference to engine
-                            auto eng = engine_weak.lock();
-                            if (!eng) {
-                                throw runtime_error("Engine no longer exists");
-                            }
-                            
-                            script_value instance(std::monostate{}, engine_weak);
-                            
+                            script_value instance(std::monostate{}, eng);
+
                             // Try to get the class definition to check for custom serialization constructor
                             bool has_custom_constructor = false;
                             try {
@@ -504,26 +498,26 @@ namespace stdlib {
                                 if (temp_class_instance) {
                                     auto class_def = temp_class_instance->get_class_definition();
                                     if (class_def) {
-                                        auto eng = class_def->get_engine_ref().lock();
-                                        if (eng) {
-                                            uint64_t serialize_construct_id = eng->symbolize("_serialize_construct");
+                                        auto class_eng = class_def->get_engine();
+                                        if (class_eng) {
+                                            uint64_t serialize_construct_id = class_eng->symbolize("_serialize_construct");
                                             script_value custom_constructor = class_def->get_method(serialize_construct_id);
-                                        if (custom_constructor.type() == script_value_type::jai_function_type) {
-                                            // Use custom serialization constructor
-                                            std::vector<script_value> args = { val };
-                                            auto result = custom_constructor.as_function()(args);
-                                            if (result) {
-                                                instance = std::move(result.value());
-                                                has_custom_constructor = true;
+                                            if (custom_constructor.type() == script_value_type::jai_function_type) {
+                                                // Use custom serialization constructor
+                                                std::vector<script_value> args = { val };
+                                                auto result = custom_constructor.as_function()(args);
+                                                if (result) {
+                                                    instance = std::move(result.value());
+                                                    has_custom_constructor = true;
+                                                }
                                             }
-                                        }
                                         }
                                     }
                                 }
                             } catch (...) {
                                 // Default constructor failed, continue with fallback
                             }
-                            
+
                             if (!has_custom_constructor) {
                                 // Fallback: Create default instance and set properties
                                 instance = eng->execute(type_name + "()");
@@ -551,12 +545,12 @@ namespace stdlib {
                                         }
 
                                         // Clean up - use add_global instead of execute to avoid type checking
-                                        eng->add_global(tempVar, script_value(std::monostate{}, engine_weak));
+                                        eng->add_global(tempVar, script_value(std::monostate{}, eng));
                                     }
                                 }
 
                                 // Clean up - use add_global instead of execute to avoid type checking
-                                eng->add_global("_json_obj", script_value(std::monostate{}, engine_weak));
+                                eng->add_global("_json_obj", script_value(std::monostate{}, eng));
                             }
 
                             // Call post_deserialize hook if it exists (for both custom and fallback paths)
@@ -566,21 +560,21 @@ namespace stdlib {
                                 if (class_instance_ptr) {
                                     auto class_def = class_instance_ptr->get_class_definition();
                                     if (class_def) {
-                                        auto eng = class_def->get_engine_ref().lock();
-                                        if (!eng) return instance;
-                                        uint64_t post_deserialize_id = eng->symbolize("post_deserialize");
+                                        auto class_eng = class_def->get_engine();
+                                        if (!class_eng) return instance;
+                                        uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
                                         script_value post_deserialize = class_def->get_method(post_deserialize_id, false);  // Don't throw if not found
                                         if (post_deserialize.type() == script_value_type::jai_function_type) {
                                             // Extract version from map (default to 1 if not present)
                                             script_int version = 1;
-                                            auto versionIt = map.find(script_value("_version_", engine_weak));
+                                            auto versionIt = map.find(script_value("_version_", eng));
                                             if (versionIt != map.end() && versionIt->second.is_int()) {
                                                 version = versionIt->second.as<script_int>();
                                             }
 
                                             std::vector<script_value> args = {
                                                 instance,
-                                                script_value(version, engine_weak)
+                                                script_value(version, eng)
                                             };
                                             (void)post_deserialize.as_function()(args);
                                         }
@@ -599,85 +593,75 @@ namespace stdlib {
                     }
 
                     // Process map values recursively
-                    auto eng = engine_weak.lock();
-                    if (!eng) {
-                        throw runtime_error("Engine no longer exists");
-                    }
-                    script_value mapValue = script_value::make_map(eng->get_type_info_string(), nullptr, engine_weak);
+                    script_value mapValue = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
                     auto& resultMap = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
                     for (const auto& [k, v] : map) {
                         resultMap[k] = processValue(v);
                     }
                     return mapValue;
-                    
+
                 } else if (val.is_array()) {
                     // Process arrays recursively
-                    script_value arrayValue = script_value::make_array(nullptr);
+                    script_value arrayValue = script_value::make_array(nullptr, eng);
                     auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
-                    
+
                     for (const auto& elem : val.as_array()) {
                         array.push_back(processValue(elem));
                     }
-                    
+
                     return arrayValue;
                 } else {
                     // Primitive values pass through unchanged
                     return val;
                 }
             };
-            
+
             return processValue(data);
         });
         
         // Binary serialization functions
-        engine.add_variadic_function("to_binary", [engine_weak](const std::vector<script_value>& args) -> script_value {
+        eng_ref.add_variadic_function("to_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("to_binary expects exactly 1 argument, got " + std::to_string(args.size()));
             }
-            
+
             // Create binary archive and serialize
             serialization::binary_archive_writer writer;
-            
+
             // For simple values, use write_value directly
             writer.write_value(args[0]);
-            
+
             // Convert binary data to string for script access
             const auto& data = writer.data();
             script_string binary_str(data.begin(), data.end());
-            return script_value(binary_str, engine_weak);
+            return script_value(binary_str, eng);
         });
-        
-        engine.add_variadic_function("from_binary", [engine_weak](const std::vector<script_value>& args) -> script_value {
+
+        eng_ref.add_variadic_function("from_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("from_binary expects exactly 1 argument, got " + std::to_string(args.size()));
             }
-            
+
             if (!args[0].is_string()) {
                 throw runtime_error("from_binary expects a string argument");
             }
-            
+
             script_string binary_data = args[0].as<script_string>();
             // Convert string back to binary data
             std::vector<uint8_t> data(binary_data.begin(), binary_data.end());
 
             // Create binary archive reader and deserialize
-            serialization::binary_archive_reader reader(data, engine_weak);
-            
+            serialization::binary_archive_reader reader(data, eng);
+
             script_value result = reader.read_value();
-            
+
             // For objects with _type_ field, try to reconstruct like JSON
             if (result.is_map()) {
-                // Get strong reference to engine
-                auto eng = engine_weak.lock();
-                if (!eng) {
-                    throw runtime_error("Engine no longer exists");
-                }
-                
                 const auto& map = result.as_map();
-                auto type_it = map.find(script_value("_type_", engine_weak));
+                auto type_it = map.find(script_value("_type_", eng));
                 if (type_it != map.end() && type_it->second.is_string()) {
                     std::string type_name = type_it->second.as_string();
-                    
+
                     try {
                         script_value instance = eng->execute(type_name + "()");
 
@@ -693,12 +677,12 @@ namespace stdlib {
                                 instance = eng->get_variable("_binary_obj");
 
                                 // Clean up - use add_global instead of execute to avoid type checking
-                                eng->add_global(temp_var, script_value(std::monostate{}, engine_weak));
+                                eng->add_global(temp_var, script_value(std::monostate{}, eng));
                             }
                         }
 
                         // Clean up - use add_global instead of execute to avoid type checking
-                        eng->add_global("_binary_obj", script_value(std::monostate{}, engine_weak));
+                        eng->add_global("_binary_obj", script_value(std::monostate{}, eng));
 
                         // Call post_deserialize hook if it exists
                         try {
@@ -706,21 +690,21 @@ namespace stdlib {
                             if (class_instance_ptr) {
                                 auto class_def = class_instance_ptr->get_class_definition();
                                 if (class_def) {
-                                    auto class_eng = class_def->get_engine_ref().lock();
+                                    auto class_eng = class_def->get_engine();
                                     if (class_eng) {
                                         uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
                                         script_value post_deserialize = class_def->get_method(post_deserialize_id, false);
                                         if (post_deserialize.type() == script_value_type::jai_function_type) {
                                             // Extract version from map (default to 1 if not present)
                                             script_int version = 1;
-                                            auto version_it = map.find(script_value("_version_", engine_weak));
+                                            auto version_it = map.find(script_value("_version_", eng));
                                             if (version_it != map.end() && version_it->second.is_int()) {
                                                 version = version_it->second.as<script_int>();
                                             }
 
                                             std::vector<script_value> args = {
                                                 instance,
-                                                script_value(version, engine_weak)
+                                                script_value(version, eng)
                                             };
                                             (void)post_deserialize.as_function()(args);
                                         }
@@ -737,7 +721,7 @@ namespace stdlib {
                     }
                 }
             }
-            
+
             return result;
         });
     }

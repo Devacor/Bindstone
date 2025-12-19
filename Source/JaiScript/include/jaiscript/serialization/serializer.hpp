@@ -38,7 +38,7 @@ class reader;
 class writer {
 public:
     // Constructor with optional engine for automatic type lookup
-    explicit writer(std::weak_ptr<engine> eng = {}, bool use_binary = false, int indent = 2)
+    explicit writer(engine* eng = nullptr, bool use_binary = false, int indent = 2)
         : engine_ref_(eng)
         , use_binary_(use_binary)
         , indent_(indent)
@@ -47,13 +47,13 @@ public:
 
     // Overload for shared_ptr convenience
     explicit writer(std::shared_ptr<engine> eng, bool use_binary = false, int indent = 2)
-        : writer(eng->weak_from_this(), use_binary, indent)
+        : writer(eng.get(), use_binary, indent)
     {
     }
 
     // Overload for engine reference
     explicit writer(engine& eng, bool use_binary = false, int indent = 2)
-        : writer(eng.weak_from_this(), use_binary, indent)
+        : writer(&eng, use_binary, indent)
     {
     }
 
@@ -65,8 +65,8 @@ public:
         std::string type_name;
         uint32_t version = 1;
 
-        auto eng = engine_ref_.lock();
-        if (eng) {
+        if (engine_ref_) {
+            auto eng = engine_ref_;
             // Get the type name registered with class_builder
             auto type_id = type_info::id<T>();
             auto registered_name = eng->get_type_name(type_id);
@@ -120,8 +120,7 @@ private:
     // Uses class_builder metadata as the single source of truth
     template<typename T>
     void serialize_object(const T& obj, archive_writer& ar) {
-        auto eng = engine_ref_.lock();
-        if (!eng) {
+        if (!engine_ref_) {
             // Fallback for property_owner without engine
             if constexpr (std::is_base_of_v<property_owner, T>) {
                 obj.property_mgr.save(ar);
@@ -130,6 +129,8 @@ private:
                 throw serialization_error("Engine required to serialize class_builder objects");
             }
         }
+
+        auto eng = engine_ref_;
 
         // Get the class metadata from class_builder registry
         auto type_id = type_info::id<T>();
@@ -224,7 +225,7 @@ public:
     }
 
 private:
-    std::weak_ptr<engine> engine_ref_;
+    engine* engine_ref_;
     bool use_binary_;
     int indent_;
     std::vector<std::string> serialized_objects_;
@@ -238,20 +239,26 @@ private:
 class reader {
 public:
     // Constructor takes engine and serialized data
-    reader(std::weak_ptr<engine> engine_weak, const std::string& data, bool is_binary = false)
-        : engine_weak_(engine_weak)
+    reader(engine* eng, const std::string& data, bool is_binary = false)
+        : engine_(eng)
         , is_binary_(is_binary)
     {
         if (is_binary_) {
-            binary_reader_ = std::make_unique<binary_archive_reader>(data, engine_weak_);
+            binary_reader_ = std::make_unique<binary_archive_reader>(data, engine_);
         } else {
-            json_reader_ = std::make_unique<json_archive_reader>(data, engine_weak_);
+            json_reader_ = std::make_unique<json_archive_reader>(data, engine_);
         }
     }
 
     // Overload for shared_ptr convenience
     reader(std::shared_ptr<engine> engine_ptr, const std::string& data, bool is_binary = false)
-        : reader(engine_ptr->weak_from_this(), data, is_binary)
+        : reader(engine_ptr.get(), data, is_binary)
+    {
+    }
+
+    // Overload for engine reference
+    reader(engine& eng, const std::string& data, bool is_binary = false)
+        : reader(&eng, data, is_binary)
     {
     }
 
@@ -304,7 +311,7 @@ public:
     }
 
 private:
-    std::weak_ptr<engine> engine_weak_;
+    engine* engine_;
     bool is_binary_;
     std::unique_ptr<json_archive_reader> json_reader_;
     std::unique_ptr<binary_archive_reader> binary_reader_;
@@ -343,21 +350,23 @@ std::string to_binary(std::shared_ptr<engine> eng, const T& obj) {
 template<typename T>
 std::enable_if_t<std::is_base_of_v<property_owner, T>, std::string>
 to_json(const T& obj, int indent = 2) {
-    auto eng = obj.get_engine();
-    if (eng.expired()) {
+    auto eng_weak = obj.get_engine();
+    auto eng = eng_weak.lock();
+    if (!eng) {
         throw serialization_error("property_owner object must be bound to an engine for serialization. Use to_json(engine, obj) instead.");
     }
-    return to_json(eng, obj, indent);
+    return to_json(*eng, obj, indent);
 }
 
 template<typename T>
 std::enable_if_t<std::is_base_of_v<property_owner, T>, std::string>
 to_binary(const T& obj) {
-    auto eng = obj.get_engine();
-    if (eng.expired()) {
+    auto eng_weak = obj.get_engine();
+    auto eng = eng_weak.lock();
+    if (!eng) {
         throw serialization_error("property_owner object must be bound to an engine for serialization. Use to_binary(engine, obj) instead.");
     }
-    return to_binary(eng, obj);
+    return to_binary(*eng, obj);
 }
 
 // Deserialization
@@ -365,7 +374,7 @@ to_binary(const T& obj) {
 // With engine (recommended)
 template<typename T>
 void from_json(engine& eng, T& obj, const std::string& json) {
-    reader r(eng.weak_from_this(), json, false);
+    reader r(&eng, json, false);
     r(obj);
 }
 
@@ -376,7 +385,7 @@ void from_json(std::shared_ptr<engine> eng, T& obj, const std::string& json) {
 
 template<typename T>
 void from_binary(engine& eng, T& obj, const std::string& data) {
-    reader r(eng.weak_from_this(), data, true);
+    reader r(&eng, data, true);
     r(obj);
 }
 
@@ -389,22 +398,24 @@ void from_binary(std::shared_ptr<engine> eng, T& obj, const std::string& data) {
 template<typename T>
 std::enable_if_t<std::is_base_of_v<property_owner, T>>
 from_json(T& obj, const std::string& json) {
-    auto eng = obj.get_engine();
-    if (eng.expired()) {
+    auto eng_weak = obj.get_engine();
+    auto eng = eng_weak.lock();
+    if (!eng) {
         throw serialization_error("property_owner object must be bound to an engine for deserialization. Use from_json(engine, obj, json) instead.");
     }
-    reader r(eng, json, false);
+    reader r(eng.get(), json, false);
     r(obj);
 }
 
 template<typename T>
 std::enable_if_t<std::is_base_of_v<property_owner, T>>
 from_binary(T& obj, const std::string& data) {
-    auto eng = obj.get_engine();
-    if (eng.expired()) {
+    auto eng_weak = obj.get_engine();
+    auto eng = eng_weak.lock();
+    if (!eng) {
         throw serialization_error("property_owner object must be bound to an engine for deserialization. Use from_binary(engine, obj, data) instead.");
     }
-    reader r(eng, data, true);
+    reader r(eng.get(), data, true);
     r(obj);
 }
 
@@ -414,7 +425,7 @@ from_binary(T& obj, const std::string& data) {
 
 template<typename T, typename Context>
 void from_json(engine& eng, T& obj, const std::string& json, Context& context) {
-    reader r(eng.weak_from_this(), json, false);
+    reader r(&eng, json, false);
     r.set_user_context(&context);
     r(obj);
 }
@@ -426,7 +437,7 @@ void from_json(std::shared_ptr<engine> eng, T& obj, const std::string& json, Con
 
 template<typename T, typename Context>
 void from_binary(engine& eng, T& obj, const std::string& data, Context& context) {
-    reader r(eng.weak_from_this(), data, true);
+    reader r(&eng, data, true);
     r.set_user_context(&context);
     r(obj);
 }
@@ -440,11 +451,12 @@ void from_binary(std::shared_ptr<engine> eng, T& obj, const std::string& data, C
 template<typename T, typename Context>
 std::enable_if_t<std::is_base_of_v<property_owner, T>>
 from_json(T& obj, const std::string& json, Context& context) {
-    auto eng = obj.get_engine();
-    if (eng.expired()) {
+    auto eng_weak = obj.get_engine();
+    auto eng = eng_weak.lock();
+    if (!eng) {
         throw serialization_error("property_owner object must be bound to an engine for deserialization. Use from_json(engine, obj, json, context) instead.");
     }
-    reader r(eng, json, false);
+    reader r(eng.get(), json, false);
     r.set_user_context(&context);
     r(obj);
 }
@@ -452,11 +464,12 @@ from_json(T& obj, const std::string& json, Context& context) {
 template<typename T, typename Context>
 std::enable_if_t<std::is_base_of_v<property_owner, T>>
 from_binary(T& obj, const std::string& data, Context& context) {
-    auto eng = obj.get_engine();
-    if (eng.expired()) {
+    auto eng_weak = obj.get_engine();
+    auto eng = eng_weak.lock();
+    if (!eng) {
         throw serialization_error("property_owner object must be bound to an engine for deserialization. Use from_binary(engine, obj, data, context) instead.");
     }
-    reader r(eng, data, true);
+    reader r(eng.get(), data, true);
     r.set_user_context(&context);
     r(obj);
 }

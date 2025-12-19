@@ -31,10 +31,10 @@ template<typename T>
 class bound_cpp_vector {
 private:
     std::vector<T>* vec_;  // Raw pointer to C++ vector (assumes owner stays alive)
-    std::weak_ptr<engine> engine_ref_;
+    engine* engine_ref_;
 
     // Helper to get engine reference
-    std::weak_ptr<engine> get_engine_ref() const {
+    engine* get_engine_ref() const {
         return engine_ref_;
     }
 
@@ -49,9 +49,9 @@ public:
     /**
      * @brief Construct from C++ vector reference
      * @param vec Reference to existing C++ std::vector<T>
-     * @param eng Engine reference for creating script_values
+     * @param eng Engine pointer for creating script_values
      */
-    explicit bound_cpp_vector(std::vector<T>& vec, std::weak_ptr<engine> eng)
+    explicit bound_cpp_vector(std::vector<T>& vec, engine* eng)
         : vec_(&vec), engine_ref_(eng) {}
 
     /**

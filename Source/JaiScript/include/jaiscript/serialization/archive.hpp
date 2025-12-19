@@ -65,7 +65,7 @@ class json_archive_reader;
 class archive_writer {
 protected:
     // Engine reference for creating script_values during serialization
-    std::weak_ptr<engine> engine_ref_;
+    engine* engine_ref_;
 
     // Shared pointer tracking to prevent duplicate serialization
     std::unordered_map<const void*, uint32_t> shared_ptr_ids_;
@@ -118,18 +118,18 @@ protected:
     }
 
 public:
-    // Constructor that accepts engine reference
-    explicit archive_writer(std::weak_ptr<engine> eng = {}) : engine_ref_(eng) {}
+    // Constructor that accepts engine pointer
+    explicit archive_writer(engine* eng = nullptr) : engine_ref_(eng) {}
 
     virtual ~archive_writer() = default;
 
     // Set engine reference
-    void set_engine(std::weak_ptr<engine> eng) {
+    void set_engine(engine* eng) {
         engine_ref_ = eng;
     }
 
     // Get engine reference
-    std::weak_ptr<engine> get_engine() const {
+    engine* get_engine() const {
         return engine_ref_;
     }
 
@@ -226,7 +226,7 @@ protected:
 class archive_reader {
 protected:
     // Engine reference for creating script_values
-    std::weak_ptr<engine> engine_ref_;
+    engine* engine_ref_;
 
     // Shared pointer tracking for deserialization
     std::unordered_map<uint32_t, script_value> id_to_shared_ptr_;  // ID -> reconstructed shared_ptr
@@ -278,10 +278,10 @@ protected:
     // Get previously deserialized shared_ptr by ID
     script_value get_shared_ptr(uint32_t id) const {
         if (id == 0) {
-            if (auto eng = engine_ref_.lock()) {
-                return script_value(std::monostate{}, eng->weak_from_this());
+            if (engine_ref_) {
+                return script_value(std::monostate{}, engine_ref_);
             }
-            throw serialization_error("Engine reference expired during deserialization");
+            throw serialization_error("Engine pointer is null during deserialization");
         }
         
         auto it = id_to_shared_ptr_.find(id);
@@ -294,17 +294,17 @@ protected:
 public:
     // Constructor that accepts engine reference
     // Engine is REQUIRED for readers since they create script_values during deserialization
-    explicit archive_reader(std::weak_ptr<engine> eng) : engine_ref_(eng) {}
+    explicit archive_reader(engine* eng) : engine_ref_(eng) {}
 
     virtual ~archive_reader() = default;
     
     // Set engine reference (for readers that can't pass it in constructor)
-    void set_engine(std::weak_ptr<engine> eng) {
+    void set_engine(engine* eng) {
         engine_ref_ = eng;
     }
 
     // Get engine reference
-    std::weak_ptr<engine> get_engine() const {
+    engine* get_engine() const {
         return engine_ref_;
     }
 
@@ -430,35 +430,34 @@ public:
             // Fallback to runtime type detection
             return read_value();
         }
-        
-        // Get engine reference for creating script_values
-        auto eng = engine_ref_.lock();
-        if (!eng) {
-            throw serialization_error("Engine reference expired during deserialization");
+
+        // Check engine pointer is valid
+        if (!engine_ref_) {
+            throw serialization_error("Engine pointer is null during deserialization");
         }
-        
+
         // Use type info to read with proper size
         switch (type_info->base_type) {
             case script_value_type::jai_int_type:
                 if (type_info->native_size == 1) {
-                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int8() : read_uint8()), eng->weak_from_this());
+                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int8() : read_uint8()), engine_ref_);
                 } else if (type_info->native_size == 2) {
-                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int16() : read_uint16()), eng->weak_from_this());
+                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int16() : read_uint16()), engine_ref_);
                 } else if (type_info->native_size == 4) {
-                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int32() : read_uint32()), eng->weak_from_this());
+                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int32() : read_uint32()), engine_ref_);
                 } else if (type_info->native_size == 8 && !type_info->is_signed) {
-                    return script_value(static_cast<script_int>(read_uint64()), eng->weak_from_this());
+                    return script_value(static_cast<script_int>(read_uint64()), engine_ref_);
                 } else {
-                    return script_value(read_int64(), eng->weak_from_this());
+                    return script_value(read_int64(), engine_ref_);
                 }
-                
+
             case script_value_type::jai_float_type:
                 if (type_info->native_size == 4) {
-                    return script_value(static_cast<script_float>(read_float32()), eng->weak_from_this());
+                    return script_value(static_cast<script_float>(read_float32()), engine_ref_);
                 } else {
-                    return script_value(read_float64(), eng->weak_from_this());
+                    return script_value(read_float64(), engine_ref_);
                 }
-                
+
             default:
                 return read_value();
         }

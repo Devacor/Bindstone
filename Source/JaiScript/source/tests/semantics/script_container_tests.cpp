@@ -63,7 +63,7 @@ public:
             arr.push_back(eng->make_value(30));
             
             // Create reference wrapper (no copy)
-            bound_array<int> arr_ref(arr_val.as_array(), eng->weak_from_this());
+            bound_array<int> arr_ref(arr_val.as_array(), eng.get());
             check_eq(arr_ref.size(), 3u);
             check(!arr_ref.is_owned());
             
@@ -101,7 +101,7 @@ public:
             arr.push_back(eng->make_value(100));
             
             // Reference wrapper
-            bound_array<int> arr_ref(arr_val.as_array(), eng->weak_from_this());
+            bound_array<int> arr_ref(arr_val.as_array(), eng.get());
             
             // Copy from reference creates owned copy
             bound_array<int> arr_copy(arr_ref);
@@ -121,7 +121,7 @@ public:
             arr.push_back(eng->make_value(2));
             arr.push_back(eng->make_value(3));
             
-            bound_array<int> arr_ref(arr_val.as_array(), eng->weak_from_this());
+            bound_array<int> arr_ref(arr_val.as_array(), eng.get());
             
             // By value - should copy
             auto by_value = [](bound_array<int> arr) {
@@ -164,7 +164,7 @@ public:
             arr.push_back(eng->make_value(10));
             arr.push_back(eng->make_value(20));
             
-            bound_array<int> barr(arr_val.as_array(), eng->weak_from_this());
+            bound_array<int> barr(arr_val.as_array(), eng.get());
             
             // Read access
             check_eq(barr[0], 10);
@@ -185,7 +185,7 @@ public:
             arr.push_back(eng->make_value(2));
             arr.push_back(eng->make_value(3));
             
-            bound_array<int> barr(arr_val.as_array(), eng->weak_from_this());
+            bound_array<int> barr(arr_val.as_array(), eng.get());
             
             // Range-based for
             int sum = 0;
@@ -222,7 +222,7 @@ public:
             check_eq(TestWidget::copy_count, 0);
             
             // Reference wrapper - no copies
-            bound_array<TestWidget> widgets_ref(arr_val.as_array(), eng->weak_from_this());
+            bound_array<TestWidget> widgets_ref(arr_val.as_array(), eng.get());
             check_eq(TestWidget::copy_count, 0);
             
             // By value parameter - should trigger copies
@@ -246,7 +246,7 @@ public:
             map.insert_or_assign(eng->make_value("two"), eng->make_value(2));
             
             // Reference wrapper
-            bound_map<std::string, int> map_ref(map_val.as_map(), eng->weak_from_this());
+            bound_map<std::string, int> map_ref(map_val.as_map(), eng.get());
             check_eq(map_ref.size(), 2u);
             check(!map_ref.is_owned());
             
@@ -283,7 +283,7 @@ public:
             jmap.insert_or_assign(eng->make_value("x"), eng->make_value(100));
             jmap.insert_or_assign(eng->make_value("y"), eng->make_value(200));
             
-            bound_map<std::string, int> map(map_val.as_map(), eng->weak_from_this());
+            bound_map<std::string, int> map(map_val.as_map(), eng.get());
             
             // Read access
             check_eq(map.at("x"), 100);
@@ -310,7 +310,7 @@ public:
             jmap.insert_or_assign(eng->make_value("b"), eng->make_value(2));
             jmap.insert_or_assign(eng->make_value("c"), eng->make_value(3));
             
-            bound_map<std::string, int> map(map_val.as_map(), eng->weak_from_this());
+            bound_map<std::string, int> map(map_val.as_map(), eng.get());
             
             // Range-based for
             int sum = 0;
@@ -382,7 +382,7 @@ public:
             
             // Reference wrapper should be instant
             auto start = std::chrono::high_resolution_clock::now();
-            bound_array<int> arr_ref(arr_val.as_array(), eng->weak_from_this());
+            bound_array<int> arr_ref(arr_val.as_array(), eng.get());
             auto ref_time = std::chrono::high_resolution_clock::now() - start;
             
             // Iteration should be fast (no copying)

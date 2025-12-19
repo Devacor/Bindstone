@@ -27,10 +27,9 @@ namespace jai {
     namespace conversions {
         class conversion_registry;
     }
-    
+
     // Forward declarations for helper functions
     std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng);
-    std::weak_ptr<engine> get_engine_weak_ptr(engine* eng);  // Helper to get weak_ptr from engine
     
     // Forward declaration for friend access
     namespace detail {
@@ -80,7 +79,7 @@ namespace jai {
         
         // ALL constructors require engine context - no exceptions!
         // Special constructor for null/void values
-        explicit script_value(std::monostate, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(std::monostate{}) {}
+        explicit script_value(std::monostate, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::monostate{}) {}
         
         // AST literal constructor - ONLY for parser to create placeholder values in AST nodes
         // These values should NEVER be used directly, only as templates for interpreter
@@ -92,13 +91,13 @@ namespace jai {
         script_value(ast_literal_tag, script_char c) : type_info_(nullptr), storage_(c) {}
         script_value(ast_literal_tag, script_bool b) : type_info_(nullptr), storage_(b) {}
         script_value(ast_literal_tag, std::monostate) : type_info_(nullptr), storage_(std::monostate{}) {}
-        script_value(script_int i, std::weak_ptr<engine> eng);
-        script_value(script_float f, std::weak_ptr<engine> eng);
-        script_value(const script_string& s, std::weak_ptr<engine> eng);
-        script_value(script_string&& s, std::weak_ptr<engine> eng);
-        script_value(const char* s, std::weak_ptr<engine> eng);
-        script_value(script_char c, std::weak_ptr<engine> eng);
-        script_value(script_bool b, std::weak_ptr<engine> eng);
+        script_value(script_int i, engine* eng);
+        script_value(script_float f, engine* eng);
+        script_value(const script_string& s, engine* eng);
+        script_value(script_string&& s, engine* eng);
+        script_value(const char* s, engine* eng);
+        script_value(script_char c, engine* eng);
+        script_value(script_bool b, engine* eng);
         
         // Template constructors for all numeric types - ALL require engine references
         // NOTE: Implementations are in value_impl.hpp (include after engine.hpp)
@@ -106,36 +105,36 @@ namespace jai {
         // Engine-aware template constructors for integral types (preferred)
         template<typename T>
         requires (std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char> && !std::is_same_v<T, script_int>)
-        script_value(T i, std::weak_ptr<engine> eng);
+        script_value(T i, engine* eng);
 
         // Engine-aware template constructors for floating point types (preferred)
         template<typename T>
         requires (std::is_floating_point_v<T> && !std::is_same_v<T, script_float>)
-        script_value(T f, std::weak_ptr<engine> eng);
+        script_value(T f, engine* eng);
 
         // Delete pointer constructors - use add_global_ref instead
         template<typename T>
-        script_value(T* ptr, std::weak_ptr<engine> eng) = delete;
+        script_value(T* ptr, engine* eng) = delete;
 
-        script_value(script_value&& other) noexcept 
-            : type_info_(std::move(other.type_info_)), 
-              engine_ref_(std::move(other.engine_ref_)), 
+        script_value(script_value&& other) noexcept
+            : type_info_(std::move(other.type_info_)),
+              engine_(other.engine_),
               storage_(std::move(other.storage_)),
               cpp_bound_ptr_(other.cpp_bound_ptr_) {
             other.type_info_ = nullptr;
-            other.engine_ref_.reset();
+            other.engine_ = nullptr;
             other.storage_ = std::monostate{};
             other.cpp_bound_ptr_ = nullptr;
         }
-        
+
         script_value& operator=(script_value&& other) noexcept {
             if (this != &other) {
                 type_info_ = std::move(other.type_info_);
-                engine_ref_ = std::move(other.engine_ref_);
+                engine_ = other.engine_;
                 storage_ = std::move(other.storage_);
                 cpp_bound_ptr_ = other.cpp_bound_ptr_;
                 other.type_info_ = nullptr;
-                other.engine_ref_.reset();
+                other.engine_ = nullptr;
                 other.storage_ = std::monostate{};
                 other.cpp_bound_ptr_ = nullptr;
             }
@@ -156,23 +155,23 @@ namespace jai {
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env);
 
         // Engine-aware factory methods (preferred - ALWAYS use these)
-        static script_value make_array(type_info_ptr element_type, std::weak_ptr<engine> eng);
-        static script_value make_map(type_info_ptr keyType, type_info_ptr valueType, std::weak_ptr<engine> eng);
-        static script_value make_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
+        static script_value make_array(type_info_ptr element_type, engine* eng);
+        static script_value make_map(type_info_ptr keyType, type_info_ptr valueType, engine* eng);
+        static script_value make_object(const std::string& type_name, std::shared_ptr<void> data, engine* eng);
         // Optimized version with cached type_id
-        static script_value make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng, bool is_cpp_class = true);
+        static script_value make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class = true);
         // Internal factory method for raw C++ objects - always requires type_id to avoid re-interning
-        static script_value make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
+        static script_value make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng);
     public:
-        static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, std::weak_ptr<engine> eng);
+        static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, engine* eng);
         // Overload for container subscript references with element type constraint
-        static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, std::weak_ptr<engine> eng, type_info_ptr container_element_type);
-        static script_value make_function(const script_function& func, std::weak_ptr<engine> eng);
+        static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, engine* eng, type_info_ptr container_element_type);
+        static script_value make_function(const script_function& func, engine* eng);
         
         // Factory method for C++ bound values
         // NOTE: Implementation is in value_impl.hpp (include after engine.hpp)
         template<typename T>
-        static script_value make_cpp_bound(T* target, std::weak_ptr<engine> eng);
+        static script_value make_cpp_bound(T* target, engine* eng);
         
         // Template factory methods removed - use engine->make_object instead
         // This ensures proper type name registration
@@ -954,8 +953,8 @@ namespace jai {
             // Vector types
             else if constexpr (is_specialization_v<T, std::vector>) {
                 // Use engine's conversion registry first
-                if (auto eng = engine_ref_.lock()) {
-                    auto registry = get_engine_conversion_registry(eng.get());
+                if (engine_) {
+                    auto registry = get_engine_conversion_registry(engine_);
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
@@ -1006,8 +1005,8 @@ namespace jai {
             // Map types
             else if constexpr (is_specialization_v<T, std::map>) {
                 // Use engine's conversion registry first
-                if (auto eng = engine_ref_.lock()) {
-                    auto registry = get_engine_conversion_registry(eng.get());
+                if (engine_) {
+                    auto registry = get_engine_conversion_registry(engine_);
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
@@ -1105,8 +1104,8 @@ namespace jai {
             // Support for other shared_ptr types
             else if constexpr (is_specialization_v<T, std::shared_ptr>) {
                 // First check if there's a registered conversion
-                if (auto eng = engine_ref_.lock()) {
-                    auto registry = get_engine_conversion_registry(eng.get());
+                if (engine_) {
+                    auto registry = get_engine_conversion_registry(engine_);
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
@@ -1131,8 +1130,8 @@ namespace jai {
 
                     // Check if we need to use the custom extractor
                     if (objHolder->is_class_instance_wrapper) {
-                        if (auto eng = engine_ref_.lock()) {
-                            auto registry = get_engine_conversion_registry(eng.get());
+                        if (engine_) {
+                            auto registry = get_engine_conversion_registry(engine_);
                             if (registry) {
                                 auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->data);
                                 if (extracted) {
@@ -1157,8 +1156,8 @@ namespace jai {
                              !is_specialization_v<T, std::vector> &&
                              !is_specialization_v<T, std::map>) {
                 // Check custom converter first
-                if (auto eng = engine_ref_.lock()) {
-                    auto registry = get_engine_conversion_registry(eng.get());
+                if (engine_) {
+                    auto registry = get_engine_conversion_registry(engine_);
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
@@ -1219,10 +1218,9 @@ namespace jai {
         // Custom conversion checker function type
         using conversion_func = std::function<script_value(const script_value&, const std::type_info&)>;
         
-        // Get engine reference for creating new script_values
-        std::weak_ptr<engine> get_engine_ref() const { return engine_ref_; }
-        
-        
+        // Get engine pointer for creating new script_values
+        engine* get_engine() const { return engine_; }
+
         // Implicit conversion operators for common C++ types
         // These enable natural overload resolution in C++ function calls
         operator int() const {
@@ -1269,7 +1267,7 @@ namespace jai {
         
     private:
         type_info_ptr type_info_;  // Complete type information
-        std::weak_ptr<engine> engine_ref_;  // Reference to creating engine for conversions
+        engine* engine_ = nullptr;  // Raw pointer to engine (no atomic ops on copy)
         
         // For object storage - external serialization will handle this
         struct object_holder {
@@ -1356,8 +1354,8 @@ namespace jai {
         void* cpp_bound_ptr_ = nullptr;  // If non-null, this value is bound to a C++ variable
         
     public:
-        // Method to set engine reference after construction
-        void set_engine_ref(std::weak_ptr<engine> eng) { engine_ref_ = eng; }
+        // Method to set engine pointer after construction
+        void set_engine(engine* eng) { engine_ = eng; }
 
         // Access raw storage for AST literals (bypasses type checking)
         const storage& get_storage() const { return storage_; }
@@ -1415,20 +1413,19 @@ namespace jai {
         
         // ===== Safe Public APIs for Interpreter Operations =====
         
-        // Factory method for null values with engine reference
-        static script_value make_null(std::weak_ptr<engine> eng) {
+        // Factory method for null values with engine pointer
+        static script_value make_null(engine* eng) {
             return script_value(std::monostate{}, eng);
         }
-        
+
         // Factory method for invalid values (used as sentinel for non-existent fields/methods)
-        static script_value make_invalid(std::weak_ptr<engine> eng);
+        static script_value make_invalid(engine* eng);
         
-        // Check if this value has a valid engine reference
-        bool has_valid_engine_ref() const {
-            return !engine_ref_.expired();
+        // Check if this value has a valid engine pointer
+        bool has_valid_engine() const {
+            return engine_ != nullptr;
         }
-        
-        
+
         // Safe access to reference holder for reference types
         // Use storage_type() because references may have type_info with different base_type
         reference_holder* get_reference_holder() {
@@ -1506,12 +1503,12 @@ namespace jai {
         }
         
         // Create an empty weak_ptr value
-        static script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type, std::weak_ptr<engine> eng);
-        
+        static script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type, engine* eng);
+
         // Create a weak_ptr from an object
         // Create a weak_ptr from an object (implemented in value.cpp)
         // Returns checked_result to avoid throwing exceptions
-        static checked_result<script_value> make_weak_ptr(const script_value& obj, std::weak_ptr<engine> eng);
+        static checked_result<script_value> make_weak_ptr(const script_value& obj, engine* eng);
         
         // Set type info for special cases (like weak_ptr creation)
         void set_type_info(type_info_ptr type) {

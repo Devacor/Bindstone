@@ -59,7 +59,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
         element_type = eng->get_type_info_for_cpp_type<T>();
     }
 
-    auto script_array = script_value::make_array(element_type, get_engine_weak_ptr(eng));
+    auto script_array = script_value::make_array(element_type, eng);
     auto& arr = const_cast<std::vector<script_value>&>(script_array.as_array());
     
     for (const auto& item : vec) {
@@ -70,7 +70,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                            std::is_same_v<T, bool> || std::is_same_v<T, char> ||
                            std::is_same_v<T, std::string>) {
             // For basic types that script_value supports directly
-            arr.push_back(script_value(item, get_engine_weak_ptr(eng)));
+            arr.push_back(script_value(item, eng));
         } else {
             // For custom types, use the conversion registry if available
             if (eng) {
@@ -116,12 +116,12 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
         value_type = eng->get_type_info_for_cpp_type<V>();
     }
 
-    auto script_map = script_value::make_map(key_type, value_type, get_engine_weak_ptr(eng));
+    auto script_map = script_value::make_map(key_type, value_type, eng);
     auto& map = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
     
     for (const auto& [key, value] : stdmap) {
-        script_value converted_key = script_value(std::monostate{}, get_engine_weak_ptr(eng));
-        script_value converted_value = script_value(std::monostate{}, get_engine_weak_ptr(eng));
+        script_value converted_key = script_value(std::monostate{}, eng);
+        script_value converted_value = script_value(std::monostate{}, eng);
         
         // Convert key
         if constexpr (std::is_same_v<K, script_value>) {
@@ -130,7 +130,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                            std::is_same_v<K, float> || std::is_same_v<K, double> ||
                            std::is_same_v<K, bool> || std::is_same_v<K, char> ||
                            std::is_same_v<K, std::string>) {
-            converted_key = script_value(key, get_engine_weak_ptr(eng));
+            converted_key = script_value(key, eng);
         } else {
             // For custom key types, use conversion registry if available
             if (eng) {
@@ -156,7 +156,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                            std::is_same_v<V, float> || std::is_same_v<V, double> ||
                            std::is_same_v<V, bool> || std::is_same_v<V, char> ||
                            std::is_same_v<V, std::string>) {
-            converted_value = script_value(value, get_engine_weak_ptr(eng));
+            converted_value = script_value(value, eng);
         } else {
             // For custom value types, use conversion registry if available
             if (eng) {

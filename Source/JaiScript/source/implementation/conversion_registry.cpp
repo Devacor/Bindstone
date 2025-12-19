@@ -280,12 +280,12 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
             }
-            auto eng_weak = eng->weak_from_this();
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_weak);
+            auto eng_ptr = eng;
+            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
             auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
             
             for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_weak), script_value(static_cast<int64_t>(value), eng_weak));
+                sm.insert_or_assign(script_value(key, eng_ptr), script_value(static_cast<int64_t>(value), eng_ptr));
             }
             
             return script_map;
@@ -302,11 +302,11 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
             }
-            auto eng_weak = eng->weak_from_this();
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_weak);
+            auto eng_ptr = eng;
+            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
             auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
             for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_weak), script_value(value, eng_weak));
+                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
             return script_map;
         }
@@ -342,11 +342,11 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
             }
-            auto eng_weak = eng->weak_from_this();
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_weak);
+            auto eng_ptr = eng;
+            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
             auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
             for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_weak), script_value(value, eng_weak));
+                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
             return script_map;
         }
@@ -382,11 +382,11 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
             }
-            auto eng_weak = eng->weak_from_this();
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_weak);
+            auto eng_ptr = eng;
+            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
             auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
             for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_weak), script_value(static_cast<double>(value), eng_weak));
+                sm.insert_or_assign(script_value(key, eng_ptr), script_value(static_cast<double>(value), eng_ptr));
             }
             return script_map;
         }
@@ -402,11 +402,11 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
             }
-            auto eng_weak = eng->weak_from_this();
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_weak);
+            auto eng_ptr = eng;
+            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
             auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
             for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_weak), script_value(value, eng_weak));
+                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
             return script_map;
         }
@@ -442,11 +442,11 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
             }
-            auto eng_weak = eng->weak_from_this();
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_weak);
+            auto eng_ptr = eng;
+            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
             auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
             for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_weak), script_value(value, eng_weak));
+                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
             return script_map;
         }
@@ -484,12 +484,12 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
             }
-            auto eng_weak = eng->weak_from_this();
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_weak);
+            auto eng_ptr = eng;
+            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
             auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
             
             for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(static_cast<int64_t>(key), eng_weak), script_value(value, eng_weak));
+                sm.insert_or_assign(script_value(static_cast<int64_t>(key), eng_ptr), script_value(value, eng_ptr));
             }
             
             return script_map;
@@ -506,11 +506,11 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
             }
-            auto eng_weak = eng->weak_from_this();
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_weak);
+            auto eng_ptr = eng;
+            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
             auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
             for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_weak), script_value(value, eng_weak));
+                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
             return script_map;
         }

@@ -269,7 +269,7 @@ public:
             // Deserialize from JSON (need engine for json_archive_reader internal script_value usage)
             auto eng = engine::make();
             test_object loaded;
-            serialization::json_archive_reader reader(json, eng->weak_from_this());
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -307,7 +307,7 @@ public:
             // Deserialize (need engine for json_archive_reader internal script_value usage)
             auto eng = engine::make();
             container_object loaded;
-            serialization::json_archive_reader reader(json, eng);
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -370,7 +370,7 @@ public:
             // Deserialize from binary (need engine for binary_archive_reader internal script_value usage)
             auto eng = engine::make();
             test_object loaded;
-            serialization::binary_archive_reader reader(buffer, eng);
+            serialization::binary_archive_reader reader(buffer, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -401,7 +401,7 @@ public:
             // Deserialize (need engine for binary_archive_reader internal script_value usage)
             auto eng = engine::make();
             container_object loaded;
-            serialization::binary_archive_reader reader(buffer, eng);
+            serialization::binary_archive_reader reader(buffer, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -475,7 +475,7 @@ public:
             v2.z = 999;  // Set to non-default to check it stays
 
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json, eng);
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -514,7 +514,7 @@ public:
             v3.description = "default_description";  // Set a default value
 
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json, eng);
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -556,7 +556,7 @@ public:
             // No need for explicit deleted_property declarations
 
             auto eng = engine::make();
-            serialization::json_archive_reader reader(old_json, eng);
+            serialization::json_archive_reader reader(old_json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -612,7 +612,7 @@ public:
             obj.health = 999;  // Set to different value
 
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json_with_extra_field, eng);
+            serialization::json_archive_reader reader(json_with_extra_field, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -651,7 +651,7 @@ public:
             loaded.health = 999;  // Set to different value
 
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json, eng);
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -685,7 +685,7 @@ public:
             // Load from JSON
             test_object intermediate;
             auto eng2 = engine::make();
-            serialization::json_archive_reader json_reader(json, eng2);
+            serialization::json_archive_reader json_reader(json, eng2.get());
 
             std::string type_name;
             uint32_t version;
@@ -702,7 +702,7 @@ public:
 
             // Load from Binary
             test_object final_obj;
-            serialization::binary_archive_reader binary_reader(binary_buffer, eng2);
+            serialization::binary_archive_reader binary_reader(binary_buffer, eng2.get());
             binary_reader.begin_object(type_name, version);
             final_obj.property_mgr.load(binary_reader);
             binary_reader.end_object();
@@ -747,7 +747,7 @@ public:
             // Load from manually created JSON with different order
             test_object loaded;
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json_different_order, eng);
+            serialization::json_archive_reader reader(json_different_order, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -782,7 +782,7 @@ public:
             // Load into new object (property_manager will read properties in whatever order they appear)
             test_object loaded;
             auto eng = engine::make();
-            serialization::binary_archive_reader reader(binary_buffer, eng);
+            serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -811,7 +811,7 @@ public:
             loaded.active = true;
 
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json_partial, eng);
+            serialization::json_archive_reader reader(json_partial, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -854,7 +854,7 @@ public:
             loaded.active = false;
 
             auto eng = engine::make();
-            serialization::binary_archive_reader reader(binary_buffer, eng);
+            serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -891,7 +891,7 @@ public:
             // Load using the hook method
             computed_object loaded;
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json, eng);
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -923,7 +923,7 @@ public:
             // Load using the hook method
             computed_object loaded;
             auto eng = engine::make();
-            serialization::binary_archive_reader reader(binary_buffer, eng);
+            serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -950,7 +950,7 @@ public:
 
             validated_object loaded;
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json, eng);
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -979,7 +979,7 @@ public:
 
             validated_object loaded;
             auto eng = engine::make();
-            serialization::binary_archive_reader reader(binary_buffer, eng);
+            serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -1005,7 +1005,7 @@ public:
 
             migrated_object_v2 loaded;
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json, eng);
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -1039,7 +1039,7 @@ public:
 
             migrated_object_v2 loaded;
             auto eng = engine::make();
-            serialization::binary_archive_reader reader(binary_buffer, eng);
+            serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -1065,7 +1065,7 @@ public:
 
             computed_object loaded;
             auto eng = engine::make();
-            serialization::json_archive_reader reader(json, eng);
+            serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
             uint32_t version;
@@ -1182,7 +1182,7 @@ public:
             std::string json_v1 = R"({"_type_":"GameCharacter","_version_":1,"health":80})";
 
             // Store JSON as a variable to avoid string escaping issues
-            eng->add_global("json_str", script_value(json_v1, eng->weak_from_this()));
+            eng->add_global("json_str", script_value(json_v1, eng.get()));
 
             std::cerr << "[TEST] Step 3: Call from_json..." << std::endl;
             // Load from JSON and check migration
@@ -1327,7 +1327,7 @@ public:
             // Deserialize using context-based construction
             // Note: This demonstrates how context injection would work with class_builder
             // For property_manager, we deserialize and then manually inject dependencies
-            serialization::json_archive_reader json_reader(json, eng->weak_from_this());
+            serialization::json_archive_reader json_reader(json, eng.get());
 
             // Set user context in archive
             json_reader.set_user_context(&new_mgr);
@@ -1372,7 +1372,7 @@ public:
             // Deserialize with archive-aware construction
             resource_manager new_mgr("assets/complex", 75);
 
-            serialization::json_archive_reader json_reader(json, eng->weak_from_this());
+            serialization::json_archive_reader json_reader(json, eng.get());
             json_reader.set_user_context(&new_mgr);
 
             std::string type_name;
@@ -1398,7 +1398,7 @@ public:
             resource_manager mgr("test_path", 100);
 
             std::string json = "{}";
-            serialization::json_archive_reader reader(json, eng->weak_from_this());
+            serialization::json_archive_reader reader(json, eng.get());
 
             // Set context
             reader.set_user_context(&mgr);

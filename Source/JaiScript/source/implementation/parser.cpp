@@ -985,7 +985,7 @@ expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, e
         }
 
         // Create a folded literal with the computed value
-        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine_ref()));
+        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine()));
     }
 
     // Fold float arithmetic
@@ -1024,13 +1024,13 @@ expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, e
         }
 
         // Create a folded literal with the computed value
-        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine_ref()));
+        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine()));
     }
 
     // Fold string concatenation
     if (op.type == token_type::plus && leftVal.is_string() && rightVal.is_string()) {
         script_string result = leftVal.as_string() + rightVal.as_string();
-        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine_ref()));
+        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine()));
     }
 
     // Can't fold this operation

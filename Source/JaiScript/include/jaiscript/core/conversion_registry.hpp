@@ -34,29 +34,26 @@ using to_script_func = std::function<script_value(const void*)>;
 // Registry for custom conversions
 class conversion_registry {
 private:
-    // Weak reference to the owning engine
-    std::weak_ptr<engine> engine_ref_;
-    
+    // Raw pointer to the owning engine
+    engine* engine_ref_ = nullptr;
+
 public:
     conversion_registry() = default;
-    explicit conversion_registry(std::weak_ptr<engine> eng) : engine_ref_(eng) {}
+    explicit conversion_registry(engine* eng) : engine_ref_(eng) {}
     ~conversion_registry() = default;
-    
+
     // Non-copyable but moveable
     conversion_registry(const conversion_registry&) = delete;
     conversion_registry& operator=(const conversion_registry&) = delete;
     conversion_registry(conversion_registry&&) = default;
     conversion_registry& operator=(conversion_registry&&) = default;
-    
+
     // Set engine reference (for registries created before engine)
-    void set_engine(std::weak_ptr<engine> eng) { engine_ref_ = eng; }
-    
+    void set_engine(engine* eng) { engine_ref_ = eng; }
+
     // Get engine pointer for conversions
     engine* get_engine() const {
-        if (auto eng = engine_ref_.lock()) {
-            return eng.get();
-        }
-        return nullptr;
+        return engine_ref_;
     }
     
     // === Built-in Type Conversions (from engine's type_conversion_registry) ===

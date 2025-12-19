@@ -405,10 +405,10 @@ public:
             engine->add_function("create_mixed_vector", [engine]() -> std::vector<script_value> {
                 std::vector<script_value> result;
                 // TODO: These should use engine references when lambda captures are available
-                result.push_back(script_value(script_int(42), engine->weak_from_this()));
-                result.push_back(script_value(script_string("hello"), engine->weak_from_this()));
-                result.push_back(script_value(script_float(3.14), engine->weak_from_this()));
-                result.push_back(script_value(script_bool(true), engine->weak_from_this()));
+                result.push_back(script_value(script_int(42), engine.get()));
+                result.push_back(script_value(script_string("hello"), engine.get()));
+                result.push_back(script_value(script_float(3.14), engine.get()));
+                result.push_back(script_value(script_bool(true), engine.get()));
                 return result;
             });
             

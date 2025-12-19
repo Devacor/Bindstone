@@ -518,7 +518,6 @@ public:
             // Test function that returns map<script_value, script_value>
             engine->add_function("create_mixed_map", [engine]() -> std::map<script_value, script_value> {
                 std::map<script_value, script_value> result;
-                auto eng_weak = engine->weak_from_this();
                 result.insert_or_assign(engine->make_value("int"), engine->make_value(42));
                 result.insert_or_assign(engine->make_value("string"), engine->make_value("hello"));
                 result.insert_or_assign(engine->make_value("float"), engine->make_value(3.14));

@@ -371,9 +371,9 @@ namespace stdlib {
     };
 
     // Register vector types with an engine
-    inline void register_vector_types(engine& engine) {
+    inline void register_vector_types(engine& eng_ref) {
         // Vec2
-        class_builder<Vec2>(engine, "Vec2")
+        class_builder<Vec2>(eng_ref, "Vec2")
             .constructor<>()
             .constructor<double, double>()
             .property("x", &Vec2::x)
@@ -429,7 +429,7 @@ namespace stdlib {
             .build();
 
         // Vec3
-        class_builder<Vec3>(engine, "Vec3")
+        class_builder<Vec3>(eng_ref, "Vec3")
             .constructor<>()
             .constructor<double, double, double>()
             .property("x", &Vec3::x)
@@ -482,43 +482,43 @@ namespace stdlib {
             .build();
 
         // Global helper functions
-        auto engine_weak = engine.weak_from_this();
+        engine* eng = &eng_ref;
 
         // vec2(x, y) - shorthand constructor
-        engine.add_function("vec2", [](double x, double y) -> Vec2 {
+        eng_ref.add_function("vec2", [](double x, double y) -> Vec2 {
             return Vec2(x, y);
         });
 
         // vec3(x, y, z) - shorthand constructor
-        engine.add_function("vec3", [](double x, double y, double z) -> Vec3 {
+        eng_ref.add_function("vec3", [](double x, double y, double z) -> Vec3 {
             return Vec3(x, y, z);
         });
 
         // Global move_towards that works with Vec2, Vec3, or scalars
-        engine.add_variadic_function("move_towards", [engine_weak](const std::vector<script_value>& args) -> script_value {
+        eng_ref.add_variadic_function("move_towards", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() == 3) {
                 // Check if first arg is Vec2
                 if (auto* v2 = args[0].get_if<std::shared_ptr<Vec2>>()) {
                     auto* target = args[1].get_if<std::shared_ptr<Vec2>>();
                     if (!target) throw runtime_error("move_towards: target must be Vec2 when start is Vec2");
                     double max_delta = args[2].as<double>();
-                    return script_value(std::make_shared<Vec2>((*v2)->move_towards(**target, max_delta)), engine_weak);
+                    return script_value(std::make_shared<Vec2>((*v2)->move_towards(**target, max_delta)), eng);
                 }
                 // Check if first arg is Vec3
                 if (auto* v3 = args[0].get_if<std::shared_ptr<Vec3>>()) {
                     auto* target = args[1].get_if<std::shared_ptr<Vec3>>();
                     if (!target) throw runtime_error("move_towards: target must be Vec3 when start is Vec3");
                     double max_delta = args[2].as<double>();
-                    return script_value(std::make_shared<Vec3>((*v3)->move_towards(**target, max_delta)), engine_weak);
+                    return script_value(std::make_shared<Vec3>((*v3)->move_towards(**target, max_delta)), eng);
                 }
                 // Scalar fallback
                 double current = args[0].as<double>();
                 double target = args[1].as<double>();
                 double max_delta = args[2].as<double>();
                 if (std::abs(target - current) <= max_delta) {
-                    return script_value(target, engine_weak);
+                    return script_value(target, eng);
                 }
-                return script_value(current + std::copysign(max_delta, target - current), engine_weak);
+                return script_value(current + std::copysign(max_delta, target - current), eng);
             }
             throw runtime_error("move_towards expects 3 arguments (start, target, max_delta), got " + std::to_string(args.size()));
         });

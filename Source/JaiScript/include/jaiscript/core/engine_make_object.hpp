@@ -28,7 +28,7 @@ script_value script_value::make_registered_object(engine* eng, Args&&... args) {
     // Create script_values from the arguments
     std::vector<script_value> script_args;
     if constexpr (sizeof...(args) > 0) {
-        (script_args.push_back(script_value(std::forward<Args>(args), eng->weak_from_this())), ...);
+        (script_args.push_back(script_value(std::forward<Args>(args), eng)), ...);
     }
     
     // Get the constructor function from the engine's global environment

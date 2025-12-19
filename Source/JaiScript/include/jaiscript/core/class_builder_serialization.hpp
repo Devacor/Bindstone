@@ -47,13 +47,13 @@ namespace class_builder_detail {
     // Factory implementation that uses type-erased context extraction (context-only version)
     template<typename T, typename ContextType, typename FactoryFunc>
     std::function<script_value(serialization::archive_reader&, uint32_t)>
-    make_context_only_factory(FactoryFunc&& factory, std::string class_name, std::weak_ptr<engine> engine_weak) {
+    make_context_only_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr) {
         auto extractor = make_context_extractor<ContextType>();
         std::string context_type_name = typeid(ContextType).name();
 
         return [factory = std::forward<FactoryFunc>(factory),
                 class_name = std::move(class_name),
-                engine_weak,
+                engine_ptr,
                 extractor = std::move(extractor),
                 context_type_name = std::move(context_type_name)]
                (serialization::archive_reader& archive, uint32_t version) -> script_value {
@@ -62,20 +62,20 @@ namespace class_builder_detail {
             auto* user_context = static_cast<ContextType*>(raw_context);
 
             auto cpp_obj = factory(user_context);
-            return wrap_cpp_object<T>(cpp_obj, class_name, engine_weak);
+            return wrap_cpp_object<T>(cpp_obj, class_name, engine_ptr);
         };
     }
 
     // Factory implementation that uses type-erased context extraction (context + archive version)
     template<typename T, typename ContextType, typename FactoryFunc>
     std::function<script_value(serialization::archive_reader&, uint32_t)>
-    make_context_archive_factory(FactoryFunc&& factory, std::string class_name, std::weak_ptr<engine> engine_weak) {
+    make_context_archive_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr) {
         auto extractor = make_context_extractor<ContextType>();
         std::string context_type_name = typeid(ContextType).name();
 
         return [factory = std::forward<FactoryFunc>(factory),
                 class_name = std::move(class_name),
-                engine_weak,
+                engine_ptr,
                 extractor = std::move(extractor),
                 context_type_name = std::move(context_type_name)]
                (serialization::archive_reader& archive, uint32_t version) -> script_value {
@@ -84,7 +84,7 @@ namespace class_builder_detail {
             auto* user_context = static_cast<ContextType*>(raw_context);
 
             auto cpp_obj = factory(user_context, archive);
-            return wrap_cpp_object<T>(cpp_obj, class_name, engine_weak);
+            return wrap_cpp_object<T>(cpp_obj, class_name, engine_ptr);
         };
     }
 

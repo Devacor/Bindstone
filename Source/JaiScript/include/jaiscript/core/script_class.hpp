@@ -24,7 +24,7 @@ class function_decl;
 class script_class_definition : public class_definition {
 public:
     // Constructor - takes pre-interned type_id from parser or runtime
-    script_class_definition(const std::string& name, uint64_t type_id, std::weak_ptr<engine> eng)
+    script_class_definition(const std::string& name, uint64_t type_id, engine* eng)
         : class_definition(name, type_id, class_type::script_class, eng) {
         // That's it! Everything else is inherited from class_definition
     }
@@ -35,7 +35,7 @@ public:
                             interpreter* interp,
                             bool is_hot_reload = false) {
         // Intern the name for fast lookups
-        auto eng = get_engine_ref().lock();
+        auto eng = get_engine();
         if (!eng) return;
         uint64_t name_id = eng->symbolize(name);
 
@@ -176,7 +176,7 @@ using script_class_instance = class_instance;
 
 // Implementation of add_script_method (needs full interpreter definition)
 inline void class_definition::add_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
-    auto eng = engine_ref_.lock();
+    auto eng = get_engine();
     if (!eng) return;
 
     uint64_t name_id = eng->symbolize(name);
@@ -349,13 +349,13 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
 
             return result;  // checked_result<script_value> propagates automatically
         },
-        engine_ref_  // Pass engine reference for proper function value creation
+        get_engine()  // Pass engine reference for proper function value creation
     ));
 }
 
 // Implementation of add_static_script_method (needs full interpreter definition)
 inline void class_definition::add_static_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
-    auto eng = engine_ref_.lock();
+    auto eng = get_engine();
     if (!eng) return;
 
     uint64_t name_id = eng->symbolize(name);
@@ -377,7 +377,7 @@ inline void class_definition::add_static_script_method(const std::string& name, 
             // Call the interpreter method directly without 'this'
             return interp->execute_method_ast(ast, static_env, args);
         },
-        engine_ref_  // Pass engine reference for proper function value creation
+        get_engine()  // Pass engine reference for proper function value creation
     ));
 
     // Also store in overloads map for arity-aware lookup

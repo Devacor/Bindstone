@@ -186,7 +186,7 @@ numbers.push(6);
 int first = numbers[0];
 int size = numbers.size();
 
-// Map literals and operations  
+// Map literals and operations
 auto scores = {
     {"player1", 100},
     {"player2", 85}
@@ -199,6 +199,35 @@ bool has_player = scores.contains("player1");
 auto all_keys = scores.keys();
 scores.erase("player2");
 ```
+
+### Reference Types (shared_ptr / weak_ptr)
+```javascript
+// By default, objects use VALUE semantics (copy on assign)
+auto a = Enemy();
+auto b = a;           // b is a deep copy
+b.health = 50;        // Only b changes
+
+// Use shared_ptr for REFERENCE semantics (shared mutation)
+auto a = shared_ptr<Enemy>();
+auto b = a;           // b shares with a
+b.health = 50;        // Both a and b see the change!
+
+// weak_ptr for non-owning references (breaks cycles)
+class Node {
+    weak_ptr<Node> parent;  // Won't prevent parent from being deleted
+    auto children = [];
+}
+
+// Auto-unwrap assignment: shared_ptr<T> delegates to T's operator=
+class Counter {
+    int value = 0;
+    auto operator=(int v) { value = v; }
+}
+auto ptr = shared_ptr<Counter>();
+ptr = 42;             // Calls Counter::operator=(42), not pointer reassign
+```
+
+See `docs/TYPE_SYSTEM_DESIGN.md` for complete reference semantics documentation.
 
 ## Hot Reload Support (Script Classes)
 
@@ -499,12 +528,25 @@ See `docs/performance.md` for detailed benchmarks.
 
 ## Documentation
 
-- `docs/why-jaiscript.md` - **Motivation and real-world pain points that led to JaiScript**
-- `docs/syntax.md` - Complete language syntax reference
-- `docs/cpp-integration.md` - Detailed C++ binding guide
-- `docs/architecture.md` - Internal architecture and design
-- `docs/performance.md` - Performance analysis and benchmarks
-- `JaiScript_FutureDesign.md` - **Roadmap and vision for JaiScript's future**
+### Core Documentation
+- `ROADMAP.md` - Feature roadmap and priorities
+- `TYPE_SYSTEM_DESIGN.md` - Type system, shared_ptr/weak_ptr, auto-unwrap semantics
+- `STRONG_TYPES.md` - Strong typing implementation details
+- `grammar.md` - Complete language grammar reference
+
+### Design Documents
+- `JaiScript_FutureDesign.md` - Roadmap and vision for JaiScript's future
+- `JaiScript_DeepCopyDesign.md` - Deep copy semantics design
+- `EXCEPTION_DESIGN.md` - Exception handling design
+- `VM_REFERENCE_SEMANTICS_DESIGN.md` - VM reference semantics
+- `PERSISTENT_INTERPRETER_DESIGN.md` - Persistent interpreter design
+
+### Reference
+- `BUILD.md` - Build instructions and options
+- `PERFORMANCE.md` - Performance analysis and benchmarks
+- `NAMING_CONVENTIONS.md` - Code naming conventions
+- `JaiScriptTesting.md` / `JaiScriptVMTesting.md` - Testing guides
+- `JaiScript_BinarySerialization.md` - Binary serialization format
 
 ## Known Limitations
 

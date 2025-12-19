@@ -281,6 +281,39 @@ public:
                 ];
             )");
         });
+
+        // === String Performance Benchmarks ===
+        // These measure the shared_ptr string optimization effectiveness
+
+        benchmark("String Copy (Long String)", [this]() {
+            test_engine->execute(R"(
+                auto original = "This is a longer string that would be expensive to copy without shared_ptr optimization";
+                auto copy1 = original;
+                auto copy2 = original;
+                auto copy3 = original;
+                auto copy4 = original;
+                auto copy5 = original;
+            )");
+        });
+
+        benchmark("String Passing to Function", [this]() {
+            test_engine->execute(R"(
+                function processString(string s) -> int {
+                    return s.length();
+                }
+                auto longStr = "This is a test string that gets passed to a function multiple times";
+                processString(longStr);
+                processString(longStr);
+                processString(longStr);
+            )");
+        });
+
+        benchmark("String Method Chaining", [this]() {
+            test_engine->execute(R"(
+                auto s = "  HELLO WORLD  ";
+                s.trim().to_lower().replace_all(" ", "_");
+            )");
+        });
     }
 };
 

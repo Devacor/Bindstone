@@ -195,7 +195,16 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "\n-----------------------------------------\n";
-    if (total_failures == 0) {
+    if (suites_run == 0 && filter.suite_pattern != "*") {
+        // No suites matched the filter - list available suites
+        std::cout << "No suites matched filter: \"" << filter.suite_pattern << "\"\n\n";
+        std::cout << "Available suites:\n";
+        for (const auto& suite : suites) {
+            std::cout << "  - " << suite->get_name() << "\n";
+        }
+        std::cout << "-----------------------------------------\n";
+        return 1;
+    } else if (total_failures == 0) {
         std::cout << "<3 :D All tests passed! (" << suites_run << " suites, " << total_tests << " tests, " << seconds << "s)\n";
     } else {
         std::cout << "x " << total_failures << " of " << total_tests << " test(s) failed (" << seconds << "s)\n";

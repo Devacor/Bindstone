@@ -16,19 +16,19 @@ script_value::script_value(script_float f, std::weak_ptr<engine> eng) : type_inf
     }
 }
 
-script_value::script_value(const script_string& s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(s) {
+script_value::script_value(const script_string& s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(std::make_shared<script_string>(s)) {
     if (auto e = eng.lock()) {
         type_info_ = e->get_type_info_string();
     }
 }
 
-script_value::script_value(script_string&& s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(std::move(s)) {
+script_value::script_value(script_string&& s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(std::make_shared<script_string>(std::move(s))) {
     if (auto e = eng.lock()) {
         type_info_ = e->get_type_info_string();
     }
 }
 
-script_value::script_value(const char* s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(script_string(s)) {
+script_value::script_value(const char* s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(std::make_shared<script_string>(s)) {
     if (auto e = eng.lock()) {
         type_info_ = e->get_type_info_string();
     }
@@ -296,7 +296,7 @@ script_value script_value::make_function(const script_function& func, std::weak_
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = locked_engine->get_type_info_function(locked_engine->get_type_info_void(), {}); // TODO: Proper type info
-    v.storage_ = func;
+    v.storage_ = std::make_shared<script_function>(func);
     return v;
 }
 
@@ -445,7 +445,7 @@ script_value script_value::clone() const {
                     result.storage_ = as_char();
                     result.cpp_bound_ptr_ = nullptr;
                 } else if (is_string()) {
-                    result.storage_ = as_string();
+                    result.storage_ = std::make_shared<script_string>(as_string());
                     result.cpp_bound_ptr_ = nullptr;
                 } else {
                     // For other cpp_bound types, fall back to shallow copy
@@ -466,7 +466,7 @@ const script_function& script_value::as_function() const {
     if (val.current_type() != script_value_type::jai_function_type) {
         throw runtime_error("script_value is not a function");
     }
-    return std::get<script_function>(val.storage_);
+    return *std::get<std::shared_ptr<script_function>>(val.storage_);
 }
 
 std::string script_value::to_string() const {

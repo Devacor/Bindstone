@@ -93,7 +93,12 @@ int main(int argc, char** argv) {
     using namespace jai::foundry;
 
     // Parse command line flags
+    // FOUNDRY_VERBOSE can be set at compile time (e.g., for benchmark builds)
+#ifdef FOUNDRY_VERBOSE
+    bool verbose = true;
+#else
     bool verbose = false;
+#endif
     test_filter_config filter;
 
     for (int i = 1; i < argc; i++) {

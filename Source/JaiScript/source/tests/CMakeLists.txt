@@ -148,3 +148,10 @@ if(MSVC AND (JAISCRIPT_ENABLE_PROFILING OR CMAKE_BUILD_TYPE STREQUAL "RelWithDeb
     target_compile_options(jaiscript_tests PRIVATE /Zi /Oi)
     target_link_options(jaiscript_tests PRIVATE /PROFILE /DEBUG:FULL)
 endif()
+
+# When benchmarks are enabled, also enable verbose output
+if(JAISCRIPT_ENABLE_BENCHMARKS)
+    target_compile_definitions(jaiscript_tests PRIVATE FOUNDRY_VERBOSE=1)
+    # Add verbose benchmark test target
+    add_test(NAME BenchmarkTests COMMAND jaiscript_tests "-verbose")
+endif()

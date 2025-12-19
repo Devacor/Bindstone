@@ -938,11 +938,11 @@ namespace jai {
         void init_builtin_methods();
         
         // Helper to access value's private storage (since interpreter is a friend)
-        static std::shared_ptr<std::vector<script_value>>& get_array_storage(const script_value& value) {
+        static strong_ptr<std::vector<script_value>>& get_array_storage(const script_value& value) {
             return const_cast<script_value&>(value).get_array_storage();
         }
-        
-        static std::shared_ptr<std::map<script_value, script_value>>& get_map_storage(const script_value& value) {
+
+        static strong_ptr<std::map<script_value, script_value>>& get_map_storage(const script_value& value) {
             return const_cast<script_value&>(value).get_map_storage();
         }
         

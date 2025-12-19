@@ -16,19 +16,19 @@ script_value::script_value(script_float f, engine* eng) : type_info_(nullptr), e
     }
 }
 
-script_value::script_value(const script_string& s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::make_shared<script_string>(s)) {
+script_value::script_value(const script_string& s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(make_strong<script_string>(s)) {
     if (eng) {
         type_info_ = eng->get_type_info_string();
     }
 }
 
-script_value::script_value(script_string&& s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::make_shared<script_string>(std::move(s))) {
+script_value::script_value(script_string&& s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(make_strong<script_string>(std::move(s))) {
     if (eng) {
         type_info_ = eng->get_type_info_string();
     }
 }
 
-script_value::script_value(const char* s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::make_shared<script_string>(s)) {
+script_value::script_value(const char* s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(make_strong<script_string>(s)) {
     if (eng) {
         type_info_ = eng->get_type_info_string();
     }
@@ -76,7 +76,7 @@ script_value script_value::make_reference(script_value* target, const std::share
     }
     script_value v(std::monostate{}, eng);  // Use engine reference from target
     v.type_info_ = eng->get_type_info_reference(target->get_type_info());
-    auto ref = std::make_shared<reference_holder>();
+    auto ref = make_strong<reference_holder>();
     ref->target = target;
     ref->sourceEnv = env;  // Store weak reference to environment
     v.storage_ = ref;
@@ -92,7 +92,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     v.type_info_ = eng->get_type_info_array(element_type);
 
     // Create vector with small default capacity to avoid first few reallocations
-    auto vec = std::make_shared<std::vector<script_value>>();
+    auto vec = make_strong<std::vector<script_value>>();
     vec->reserve(16);  // Reserve space for 16 elements (common small array size)
     v.storage_ = vec;
     return v;
@@ -104,7 +104,7 @@ script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueTy
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_map(keyType, valueType);
-    v.storage_ = std::make_shared<std::map<script_value, script_value>>();
+    v.storage_ = make_strong<std::map<script_value, script_value>>();
     return v;
 }
 
@@ -137,7 +137,7 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
     script_value v(std::monostate{}, eng);
     v.type_info_ = class_def->get_type_info();
 
-    auto obj = std::make_shared<object_holder>();
+    auto obj = make_strong<object_holder>();
     obj->type_name = type_name;
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
     obj->data = data;
@@ -163,7 +163,7 @@ script_value script_value::make_cpp_object(const std::string& type_name, uint64_
     script_value v(std::monostate{}, eng);
     v.type_info_ = class_def->get_type_info();
 
-    auto obj = std::make_shared<object_holder>();
+    auto obj = make_strong<object_holder>();
     obj->type_name = type_name;
     obj->type_id = type_id;  // Use the provided type_id directly (no re-interning)
     obj->data = data;
@@ -179,7 +179,7 @@ script_value script_value::make_empty_weak_ptr(type_info_ptr weak_ptr_type, engi
     } else if (eng) {
         v.type_info_ = eng->get_type_info_weak_ptr(nullptr);
     }
-    v.storage_ = std::weak_ptr<object_holder>();
+    v.storage_ = jai::weaker_ptr<object_holder>();
     return v;
 }
 
@@ -205,7 +205,7 @@ checked_result<script_value> script_value::make_weak_ptr(const script_value& val
     // Regular objects have value semantics and get cloned when passed as parameters,
     // so creating a weak_ptr from them doesn't work correctly
     if (value.type() == script_value_type::jai_shared_ptr_type) {
-        // Get the shared_ptr<object_holder> from the value
+        // Get the strong_ptr<object_holder> from the value
         auto holder = value.get_object_holder();
         if (!holder) {
             return checked_result<script_value>(
@@ -213,8 +213,8 @@ checked_result<script_value> script_value::make_weak_ptr(const script_value& val
                 "Failed to get object_holder from script_value");
         }
 
-        // Create a weak_ptr from the shared_ptr
-        std::weak_ptr<object_holder> weak = holder;
+        // Create a weak_ptr from the strong_ptr
+        jai::weaker_ptr<object_holder> weak = holder;
 
         // Store the weak_ptr directly in the variant
         v.storage_ = weak;
@@ -247,7 +247,7 @@ script_value script_value::make_reference(script_value* target, const std::share
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_reference(target->get_type_info());
-    auto ref = std::make_shared<reference_holder>();
+    auto ref = make_strong<reference_holder>();
     ref->target = target;
     ref->sourceEnv = env;
     ref->container_element_type = container_element_type;  // Store the container's element type constraint
@@ -261,7 +261,7 @@ script_value script_value::make_function(const script_function& func, engine* en
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_function(eng->get_type_info_void(), {}); // TODO: Proper type info
-    v.storage_ = std::make_shared<script_function>(func);
+    v.storage_ = make_strong<script_function>(func);
     return v;
 }
 
@@ -309,8 +309,8 @@ script_value script_value::clone() const {
     switch (current_type()) {
         case script_value_type::jai_array_type: {
             // Deep copy the array - each element is also cloned
-            auto& other_array = *std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
-            auto new_array = std::make_shared<std::vector<script_value>>();
+            auto& other_array = *std::get<strong_ptr<std::vector<script_value>>>(storage_);
+            auto new_array = make_strong<std::vector<script_value>>();
             new_array->reserve(other_array.size());
             for (const auto& elem : other_array) {
                 new_array->push_back(elem.clone());
@@ -320,8 +320,8 @@ script_value script_value::clone() const {
         }
         case script_value_type::jai_map_type: {
             // Deep copy the map - keys and values are cloned
-            auto& other_map = *std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
-            auto new_map = std::make_shared<std::map<script_value, script_value>>();
+            auto& other_map = *std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
+            auto new_map = make_strong<std::map<script_value, script_value>>();
             for (const auto& [key, value] : other_map) {
                 new_map->emplace(key.clone(), value.clone());
             }
@@ -331,7 +331,7 @@ script_value script_value::clone() const {
         case script_value_type::jai_object_type: {
             // Regular objects have VALUE semantics by default (deep copy)
             // Only shared_ptr<T> has reference semantics (handled by early return above)
-            auto obj_holder = std::get<std::shared_ptr<object_holder>>(storage_);
+            auto obj_holder = std::get<strong_ptr<object_holder>>(storage_);
 
             // Check if this is a class_instance that supports deep copy
             if (obj_holder->is_class_instance_wrapper) {
@@ -342,7 +342,7 @@ script_value script_value::clone() const {
                 auto new_instance = instance->deep_copy();
 
                 // Create new object_holder
-                auto new_holder = std::make_shared<object_holder>();
+                auto new_holder = make_strong<object_holder>();
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
                 new_holder->data = new_instance;
@@ -357,7 +357,7 @@ script_value script_value::clone() const {
                     if (class_def && class_def->has_copy_function()) {
                         auto new_cpp_obj = class_def->copy_object(obj_holder->data.get());
                         if (new_cpp_obj) {
-                            auto new_holder = std::make_shared<object_holder>();
+                            auto new_holder = make_strong<object_holder>();
                             new_holder->type_name = obj_holder->type_name;
                             new_holder->type_id = obj_holder->type_id;
                             new_holder->data = new_cpp_obj;
@@ -411,7 +411,7 @@ script_value script_value::clone() const {
                     result.storage_ = as_char();
                     result.cpp_bound_ptr_ = nullptr;
                 } else if (is_string()) {
-                    result.storage_ = std::make_shared<script_string>(as_string());
+                    result.storage_ = make_strong<script_string>(as_string());
                     result.cpp_bound_ptr_ = nullptr;
                 } else {
                     // For other cpp_bound types, fall back to shallow copy
@@ -432,7 +432,7 @@ const script_function& script_value::as_function() const {
     if (val.current_type() != script_value_type::jai_function_type) {
         throw runtime_error("script_value is not a function");
     }
-    return *std::get<std::shared_ptr<script_function>>(val.storage_);
+    return *std::get<strong_ptr<script_function>>(val.storage_);
 }
 
 std::string script_value::to_string() const {
@@ -471,7 +471,7 @@ std::string script_value::to_string() const {
 const script_value& script_value::deref() const {
     // Use current_type() not defined_type() - references may have type_info with different base_type
     if (current_type() == script_value_type::jai_reference_type) {
-        auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
+        auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference");
         }
@@ -489,7 +489,7 @@ const script_value& script_value::deref() const {
 script_value& script_value::deref() {
     // Use current_type() not defined_type() - references may have type_info with different base_type
     if (current_type() == script_value_type::jai_reference_type) {
-        auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
+        auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference");
         }
@@ -504,7 +504,7 @@ script_value& script_value::deref() {
 
 void script_value::assign_through(const script_value& value) {
     if (type() == script_value_type::jai_reference_type) {
-        auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
+        auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference in assign_through");
         }
@@ -545,7 +545,7 @@ void script_value::assign_through(const script_value& value) {
 
 void script_value::assign_through(script_value&& value) {
     if (type() == script_value_type::jai_reference_type) {
-        auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
+        auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference in assign_through");
         }

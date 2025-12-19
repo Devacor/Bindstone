@@ -4,6 +4,8 @@
 set(TEST_SOURCES_GLOB
     containers/*.cpp
     containers/*.hpp
+    core/*.cpp
+    core/*.hpp
     foundry/*.cpp
     foundry/*.hpp
     integration/*.cpp

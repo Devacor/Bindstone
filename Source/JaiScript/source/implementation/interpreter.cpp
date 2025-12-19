@@ -3064,8 +3064,8 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
         case 2:  // script_float
             push_value(make_value(std::get<script_float>(storage)));
             break;
-        case 3:  // script_string (wrapped in shared_ptr)
-            push_value(make_value(*std::get<std::shared_ptr<script_string>>(storage)));
+        case 3:  // script_string (wrapped in strong_ptr)
+            push_value(make_value(*std::get<strong_ptr<script_string>>(storage)));
             break;
         case 4:  // script_char
             push_value(make_value(std::get<script_char>(storage)));

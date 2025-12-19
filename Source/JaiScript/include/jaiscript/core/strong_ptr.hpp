@@ -4,6 +4,7 @@
 #define __JAISCRIPT_CORE_STRONG_PTR_HPP__
 
 #include <memory>
+#include <new>
 #include <type_traits>
 #include <utility>
 
@@ -16,12 +17,10 @@ template<typename T> class weaker_ptr;
 namespace detail {
 
 /**
- * @brief Control block for strong_ptr/weaker_ptr reference counting
+ * @brief Base control block with reference counts only
  *
  * Purely non-atomic for maximum single-threaded performance.
  * Thread safety is handled at a higher level (critical sections, partitioning, etc.)
- *
- * For cross-thread object sharing, extract std::shared_ptr<T> from script_value.
  */
 struct control_block_base {
     size_t strong_count = 1;
@@ -46,16 +45,22 @@ struct control_block_base {
 };
 
 /**
- * @brief Typed control block that includes the destructor function
+ * @brief Control block with embedded object storage (combined allocation)
+ *
+ * Like std::make_shared, object and control block are allocated together.
+ * Benefits:
+ * - Single allocation instead of two
+ * - Better cache locality (refcounts adjacent to object)
+ * - Smaller control block (no destructor pointer needed)
+ *
+ * Trade-off: Memory not freed until all weaker_ptrs are gone (same as make_shared).
  */
 template<typename T>
 struct control_block : control_block_base {
-    using destructor_fn = void(*)(void*);
-    destructor_fn destructor = nullptr;
+    alignas(T) unsigned char storage[sizeof(T)];
 
-    static void default_destructor(void* ptr) {
-        delete static_cast<T*>(ptr);
-    }
+    T* ptr() noexcept { return std::launder(reinterpret_cast<T*>(storage)); }
+    const T* ptr() const noexcept { return std::launder(reinterpret_cast<const T*>(storage)); }
 };
 
 } // namespace detail
@@ -65,6 +70,9 @@ struct control_block : control_block_base {
  *
  * strong_ptr provides shared ownership semantics like std::shared_ptr but uses
  * non-atomic reference counting for maximum performance.
+ *
+ * Objects are created via make_strong<T>() which uses combined allocation
+ * (object + control block in single allocation) for optimal cache locality.
  *
  * Thread safety is the caller's responsibility (critical sections, partitioning, etc.)
  * For cross-thread object sharing, extract std::shared_ptr<T> from script_value instead.
@@ -82,13 +90,10 @@ public:
     // ===== Constructors =====
 
     /// Default constructor - creates empty strong_ptr
-    constexpr strong_ptr() noexcept : ptr_(nullptr), cb_(nullptr) {}
+    constexpr strong_ptr() noexcept = default;
 
     /// Nullptr constructor
-    constexpr strong_ptr(std::nullptr_t) noexcept : ptr_(nullptr), cb_(nullptr) {}
-
-    /// Construct from raw pointer (takes ownership)
-    /// Private - use make_strong<T>() instead
+    constexpr strong_ptr(std::nullptr_t) noexcept {}
 
     /// Copy constructor
     strong_ptr(const strong_ptr& other) noexcept
@@ -127,9 +132,8 @@ public:
     // ===== Destructor =====
 
     ~strong_ptr() {
-        // CRITICAL: Save cb_ to a local before any operations that might
-        // trigger re-entrant destruction (e.g., deleting an object whose
-        // destructor modifies this strong_ptr via variant storage reuse).
+        // CRITICAL: Save to locals before any operations that might
+        // trigger re-entrant destruction via variant storage reuse.
         auto* local_cb = cb_;
         auto* local_ptr = ptr_;
 
@@ -138,17 +142,11 @@ public:
         ptr_ = nullptr;
 
         if (local_cb && local_cb->release_strong()) {
-            // Last strong reference - delete the object
-            if (local_cb->destructor) {
-                local_cb->destructor(local_ptr);
-            } else {
-                delete local_ptr;
-            }
+            // Last strong reference - destroy object (but don't free memory yet)
+            local_ptr->~T();
 
             // Release the strong family's collective weak reference.
-            // This was initialized to 1 in make_strong(). Even if weaker_ptrs are
-            // destroyed during object destruction, they can't delete the control
-            // block because this weak reference is still held.
+            // Memory is only freed when all weaker_ptrs are also gone.
             if (local_cb->release_weak()) {
                 delete local_cb;
             }
@@ -191,17 +189,17 @@ public:
 
     // ===== Observers =====
 
-    T* get() const noexcept { return ptr_; }
-    T& operator*() const noexcept { return *ptr_; }
-    T* operator->() const noexcept { return ptr_; }
+    [[nodiscard]] T* get() const noexcept { return ptr_; }
+    [[nodiscard]] T& operator*() const noexcept { return *ptr_; }
+    [[nodiscard]] T* operator->() const noexcept { return ptr_; }
 
-    explicit operator bool() const noexcept { return ptr_ != nullptr; }
+    [[nodiscard]] explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
-    size_t use_count() const noexcept {
+    [[nodiscard]] size_t use_count() const noexcept {
         return cb_ ? cb_->get_strong_count() : 0;
     }
 
-    bool unique() const noexcept {
+    [[nodiscard]] bool unique() const noexcept {
         return use_count() == 1;
     }
 
@@ -218,8 +216,8 @@ public:
     bool operator!=(std::nullptr_t) const noexcept { return ptr_ != nullptr; }
 
 private:
-    T* ptr_;
-    control_block_type* cb_;
+    T* ptr_ = nullptr;
+    control_block_type* cb_ = nullptr;
 
     // Private constructor for make_strong
     strong_ptr(T* ptr, control_block_type* cb) noexcept : ptr_(ptr), cb_(cb) {}
@@ -231,10 +229,14 @@ private:
 };
 
 /**
- * @brief Weak reference to an object managed by strong_ptr, weaker than an std::weaker_ptr hence the cute name.
+ * @brief Weak reference to an object managed by strong_ptr
  *
  * weaker_ptr does not prevent the object from being destroyed.
  * Call lock() to get a strong_ptr if the object is still alive.
+ *
+ * Note: With combined allocation, the memory (including destroyed object's storage)
+ * remains allocated until all weaker_ptrs are gone. This is the same behavior as
+ * std::weak_ptr with std::make_shared.
  */
 template<typename T>
 class weaker_ptr {
@@ -244,7 +246,7 @@ public:
 
     // ===== Constructors =====
 
-    constexpr weaker_ptr() noexcept : ptr_(nullptr), cb_(nullptr) {}
+    constexpr weaker_ptr() noexcept = default;
 
     weaker_ptr(const weaker_ptr& other) noexcept
         : ptr_(other.ptr_), cb_(other.cb_) {
@@ -314,11 +316,11 @@ public:
 
     // ===== Observers =====
 
-    size_t use_count() const noexcept {
+    [[nodiscard]] size_t use_count() const noexcept {
         return cb_ ? cb_->get_strong_count() : 0;
     }
 
-    bool expired() const noexcept {
+    [[nodiscard]] bool expired() const noexcept {
         return use_count() == 0;
     }
 
@@ -326,7 +328,7 @@ public:
      * @brief Attempt to get a strong_ptr to the managed object
      * @return strong_ptr<T> if object is still alive, empty strong_ptr otherwise
      */
-    strong_ptr<T> lock() const noexcept {
+    [[nodiscard]] strong_ptr<T> lock() const noexcept {
         if (cb_ && cb_->try_add_strong()) {
             strong_ptr<T> result;
             result.ptr_ = ptr_;
@@ -337,14 +339,18 @@ public:
     }
 
 private:
-    T* ptr_;
-    control_block_type* cb_;
+    T* ptr_ = nullptr;
+    control_block_type* cb_ = nullptr;
 };
 
 /**
- * @brief Create a strong_ptr managing a new object
+ * @brief Create a strong_ptr managing a new object (combined allocation)
  *
- * Similar to std::make_shared, this creates the object and control block.
+ * Object and control block are allocated together in a single allocation.
+ * This provides:
+ * - Better cache locality (object adjacent to refcounts)
+ * - Single allocation instead of two
+ * - Reduced memory fragmentation
  *
  * @tparam T The type of object to create
  * @tparam Args Constructor argument types
@@ -352,10 +358,13 @@ private:
  * @return strong_ptr<T> owning the new object
  */
 template<typename T, typename... Args>
-strong_ptr<T> make_strong(Args&&... args) {
-    auto* ptr = new T(std::forward<Args>(args)...);
+[[nodiscard]] strong_ptr<T> make_strong(Args&&... args) {
+    // Single allocation for control block + object storage
     auto* cb = new detail::control_block<T>();
-    cb->destructor = detail::control_block<T>::default_destructor;
+
+    // Construct object in-place using placement new
+    T* ptr = new (cb->storage) T(std::forward<Args>(args)...);
+
     return strong_ptr<T>(ptr, cb);
 }
 

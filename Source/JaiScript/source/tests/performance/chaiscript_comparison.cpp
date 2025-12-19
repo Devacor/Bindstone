@@ -230,6 +230,19 @@ public:
         jai_engine->execute("var sum = 0;");
         jai_engine->execute("var height = 0;");
 
+        // Pre-declare string benchmark variables (for fair comparison with ChaiScript)
+        jai_engine->execute("var original = \"\";");
+        jai_engine->execute("var copy1 = \"\";");
+        jai_engine->execute("var copy2 = \"\";");
+        jai_engine->execute("var copy3 = \"\";");
+        jai_engine->execute("var copy4 = \"\";");
+        jai_engine->execute("var copy5 = \"\";");
+        jai_engine->execute("var s = \"\";");
+        jai_engine->execute("var len = 0;");
+        jai_engine->execute("var pos = 0;");
+        jai_engine->execute("var sub = \"\";");
+        jai_engine->execute("var str_result = \"\";");
+
         // Pre-declare arrays and benchmark functions for range-for benchmarks
         jai_engine->execute(R"(
             auto benchArr100 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
@@ -285,6 +298,19 @@ public:
             chai_engine->eval("var unsorted = []");
             chai_engine->eval("var root");
             chai_engine->eval("var height = 0");
+
+            // String benchmark variables
+            chai_engine->eval("var original = \"\"");
+            chai_engine->eval("var copy1 = \"\"");
+            chai_engine->eval("var copy2 = \"\"");
+            chai_engine->eval("var copy3 = \"\"");
+            chai_engine->eval("var copy4 = \"\"");
+            chai_engine->eval("var copy5 = \"\"");
+            chai_engine->eval("var s = \"\"");
+            chai_engine->eval("var len = 0");
+            chai_engine->eval("var pos = 0");
+            chai_engine->eval("var sub = \"\"");
+            chai_engine->eval("var str_result = \"\"");
 
             // Declare add function for Function Calls benchmark
             chai_engine->eval("def add(a, b) { return a + b; }");
@@ -990,6 +1016,73 @@ public:
             // This makes tree structures with optional child pointers impractical.
             // JaiScript handles this cleanly with proper null support.
             std::cout << "ChaiScript - BST (15 nodes): SKIPPED (ChaiScript lacks null support for object fields)\n";
+        });
+
+        // ===== String Operations =====
+        test("JaiScript vs ChaiScript: String Copy (Long String)", [this]() {
+            // Tests the shared_ptr string optimization in JaiScript
+            // Variables pre-declared in constructor for fair comparison
+            benchmark("JaiScript - String Copy (5 copies)", [this]() {
+                jai_engine->execute(R"(
+                    original = "This is a longer string that would be expensive to copy without shared_ptr optimization";
+                    copy1 = original;
+                    copy2 = original;
+                    copy3 = original;
+                    copy4 = original;
+                    copy5 = original;
+                )");
+            });
+
+            benchmark("ChaiScript - String Copy (5 copies)", [this]() {
+                chai_engine->eval(R"(
+                    original = "This is a longer string that would be expensive to copy without shared_ptr optimization";
+                    copy1 = original;
+                    copy2 = original;
+                    copy3 = original;
+                    copy4 = original;
+                    copy5 = original;
+                )");
+            });
+        });
+
+        test("JaiScript vs ChaiScript: String Concatenation Loop", [this]() {
+            benchmark("JaiScript - String Concat (20 iterations)", [this]() {
+                jai_engine->execute(R"(
+                    str_result = "";
+                    for (var i = 0; i < 20; ++i) {
+                        str_result = str_result + "x";
+                    }
+                )");
+            });
+
+            benchmark("ChaiScript - String Concat (20 iterations)", [this]() {
+                chai_engine->eval(R"(
+                    str_result = "";
+                    for (var i = 0; i < 20; ++i) {
+                        str_result = str_result + "x";
+                    }
+                )");
+            });
+        });
+
+        test("JaiScript vs ChaiScript: String Methods", [this]() {
+            benchmark("JaiScript - String find/substr/size", [this]() {
+                jai_engine->execute(R"(
+                    s = "Hello World, Hello Universe";
+                    len = s.length();
+                    pos = s.find("World");
+                    sub = s.substr(0, 5);
+                )");
+            });
+
+            benchmark("ChaiScript - String find/substr/size", [this]() {
+                chai_engine->eval(R"(
+                    s = "Hello World, Hello Universe";
+                    len = s.size();
+                    pos = s.find("World");
+                    sub = s.substr(0, 5);
+                )");
+            });
         });
 
         // ===== Binary Search Tree Operations (C++ Bound - Fair Comparison) =====

@@ -95,6 +95,10 @@ public:
     /// Nullptr constructor
     constexpr strong_ptr(std::nullptr_t) noexcept {}
 
+    /// Deleted: use make_strong<T>() instead (enforces combined allocation)
+    strong_ptr(T*) = delete;
+    strong_ptr(T*, detail::control_block_base*) = delete;
+
     /// Copy constructor
     strong_ptr(const strong_ptr& other) noexcept
         : ptr_(other.ptr_), cb_(other.cb_) {

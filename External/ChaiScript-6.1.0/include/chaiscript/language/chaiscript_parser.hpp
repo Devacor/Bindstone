@@ -926,6 +926,9 @@ namespace chaiscript
             case utility::fnv1a_32("false"): {
               m_match_stack.push_back(make_node<eval::Constant_AST_Node<Tracer>>(std::move(text), start.line, start.col, const_var(false)));
             } break;
+            case utility::fnv1a_32("null"): {
+              m_match_stack.push_back(make_node<eval::Constant_AST_Node<Tracer>>(std::move(text), start.line, start.col, null_var()));
+            } break;
             case utility::fnv1a_32("Infinity"): {
               m_match_stack.push_back(make_node<eval::Constant_AST_Node<Tracer>>(std::move(text), start.line, start.col,
                 const_var(std::numeric_limits<double>::infinity())));

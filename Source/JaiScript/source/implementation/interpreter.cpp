@@ -116,6 +116,12 @@ static script_value convert_array_element(
     // Dereference if element is a reference to get the actual value
     const script_value& actual_element = element.is_reference() ? element.deref() : element;
 
+    // shared_ptr types should NOT be cloned - they have reference semantics
+    auto actual_type_info = actual_element.get_type_info();
+    if (actual_type_info && actual_type_info->base_type == script_value_type::jai_shared_ptr_type) {
+        return actual_element;  // Share reference, don't clone
+    }
+
     if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
         return actual_element.clone();
     }
@@ -134,6 +140,16 @@ static script_value convert_array_element(
     }
 
     return actual_element.clone();
+}
+
+// Helper to clone a value for field assignment - respects shared_ptr reference semantics
+static script_value clone_for_assignment(const script_value& value) {
+    // shared_ptr types should NOT be cloned - they have reference semantics
+    auto type_info = value.get_type_info();
+    if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
+        return value;  // Share reference, don't clone
+    }
+    return value.clone();
 }
 
 // Helper function to convert script_value_type to a human-readable string
@@ -2231,7 +2247,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
                             }
                         }
                     }
-                    instance->set_field(id, value.clone());
+                    instance->set_field(id, clone_for_assignment(value));
                     return {};
                 }
             }
@@ -4190,7 +4206,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (op_symbol_id != 0) {
                         auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
                         if (custom_result.has_value()) {
-                            instance->set_field(identifier->symbol_id, custom_result.value().clone());
+                            instance->set_field(identifier->symbol_id, clone_for_assignment(custom_result.value()));
                             push_value(std::move(custom_result.value()));
                             return {};
                         }
@@ -4259,7 +4275,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
 
                 // Set the field and push result
-                instance->set_field(identifier->symbol_id, resultValue.clone());
+                instance->set_field(identifier->symbol_id, clone_for_assignment(resultValue));
                 push_value(std::move(resultValue));
             }
         } else if (expr->target->get_type() == node_type::member_expr) {
@@ -4295,7 +4311,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             if (objHolder) {
                                 auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
                                 uint64_t member_id = string_symbolizer_->intern(memberExpr->member);
-                                instance->set_field(member_id, custom_result.value().clone());
+                                instance->set_field(member_id, clone_for_assignment(custom_result.value()));
                                 push_value(std::move(custom_result.value()));
                                 return {};
                             }
@@ -4420,8 +4436,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     return result.error_value();
                 }
             } else if (instance->has_field(member_id)) {
-                // Direct field assignment (deep copy)
-                instance->set_field(member_id, std::move(resultValue.clone()));
+                // Direct field assignment (deep copy for value types, share for shared_ptr)
+                instance->set_field(member_id, clone_for_assignment(resultValue));
             } else {
                 // Set exception state instead of throwing
                 active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
@@ -4874,7 +4890,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 // Not a C++ property or no setter - use regular field assignment
                                 if (!assigned_to_member) {
                                     if (is_lvalue_read) {
-                                        instance->set_field(identifier->symbol_id, value.clone());
+                                        instance->set_field(identifier->symbol_id, clone_for_assignment(value));
                                     } else {
                                         instance->set_field(identifier->symbol_id, std::move(value));
                                         value = instance->get_field(identifier->symbol_id);  // Shallow copy for return
@@ -5013,8 +5029,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     return result.error_value();
                 }
             } else if (instance->has_field(member_id)) {
-                // Direct field assignment (deep copy)
-                instance->set_field(member_id, std::move(value.clone()));
+                // Direct field assignment (deep copy for value types, share for shared_ptr)
+                instance->set_field(member_id, clone_for_assignment(value));
             } else {
                 // Set exception state instead of throwing
                 active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
@@ -5330,11 +5346,13 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
 
             // Only clone if initializing from an lvalue (existing object)
             // Temporaries (constructor calls, expressions) should use move semantics
-            if (is_lvalue_expression(decl->initializer.get())) {
-                // Initializing from an existing object - deep copy
+            // EXCEPTION: shared_ptr types should NOT be cloned - they have reference semantics
+            if (is_lvalue_expression(decl->initializer.get()) &&
+                (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
+                // Initializing from an existing object - deep copy (except shared_ptr)
                 value = value.clone();
             }
-            // else: Initializing from a temporary - use move semantics (no clone)
+            // else: Initializing from a temporary or shared_ptr - use move/share semantics (no clone)
 
             // === HOMOGENEOUS CONTAINER VALIDATION ===
             // For auto x = [...] and array<auto> x = [...], all elements must be the same type
@@ -6556,27 +6574,31 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     uint64_t member_id = expr->member_id;
 
     // Check for property getter method (C++ properties and inherited properties)
-    // OPTIMIZATION: Cache getter_id on AST node to avoid repeated string allocation + interning
-    try {
-        uint64_t getter_id = expr->getter_id;
-        if (getter_id == UINT64_MAX) {
-            getter_id = string_symbolizer_->intern("_get_" + expr->member);
-            expr->getter_id = getter_id;
-        }
-        script_value getter = instance->get_method(getter_id, false);
-        if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
-            // Call the getter with 'this' as argument
-            const script_function& func = getter.as_function();
-            std::vector<script_value> args = {objectValue};
-            auto result = func(args);
-            if (!result) {
-                return result.error_value();
+    // OPTIMIZATION 1: Skip getter lookup entirely if class has no property getters
+    // OPTIMIZATION 2: Cache getter_id on AST node to avoid repeated string allocation + interning
+    auto class_def = instance->get_class_definition();
+    if (class_def && class_def->has_property_getters()) {
+        try {
+            uint64_t getter_id = expr->getter_id;
+            if (getter_id == UINT64_MAX) {
+                getter_id = string_symbolizer_->intern("_get_" + expr->member);
+                expr->getter_id = getter_id;
             }
-            push_value(std::move(result.value()));
-            return {};
+            script_value getter = instance->get_method(getter_id, false);
+            if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
+                // Call the getter with 'this' as argument
+                const script_function& func = getter.as_function();
+                std::vector<script_value> args = {objectValue};
+                auto result = func(args);
+                if (!result) {
+                    return result.error_value();
+                }
+                push_value(std::move(result.value()));
+                return {};
+            }
+        } catch (const std::exception&) {
+            // If get_method fails (e.g., class definition expired), fall back to field access
         }
-    } catch (const std::exception&) {
-        // If get_method fails (e.g., class definition expired), fall back to field access
     }
 
     // Check if it's a field (script class fields without getters, or C++ fields)

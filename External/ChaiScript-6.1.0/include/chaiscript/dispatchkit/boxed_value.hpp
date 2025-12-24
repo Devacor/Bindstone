@@ -32,6 +32,11 @@ namespace chaiscript
       {
       };
 
+      /// used for explicitly creating a "null" object
+      struct Null_Type
+      {
+      };
+
     private:
       /// structure which holds the internal state of a Boxed_Value
       /// \todo Get rid of Any and merge it with this, reducing an allocation in the process
@@ -85,9 +90,23 @@ namespace chaiscript
         {
           return std::make_shared<Data>(
                 detail::Get_Type_Info<void>::get(),
-                chaiscript::detail::Any(), 
+                chaiscript::detail::Any(),
                 false,
                 nullptr,
+                t_return_value)
+              ;
+        }
+
+        static auto get(Boxed_Value::Null_Type, bool t_return_value)
+        {
+          // Use a static nullptr instance so we have a valid pointer to store
+          // This prevents "dereference null Boxed_Value" errors during dispatch
+          static std::nullptr_t null_instance = nullptr;
+          return std::make_shared<Data>(
+                detail::Get_Type_Info<std::nullptr_t>::get(),
+                chaiscript::detail::Any(std::ref(null_instance)),
+                false,
+                &null_instance,
                 t_return_value)
               ;
         }
@@ -280,7 +299,9 @@ namespace chaiscript
 
       bool is_null() const noexcept
       {
-        return (m_data->m_data_ptr == nullptr && m_data->m_const_data_ptr == nullptr);
+        // Check for our explicit Null_Type (nullptr_t type info) OR original null pointer check
+        return m_data->m_type_info == detail::Get_Type_Info<std::nullptr_t>::get()
+            || (m_data->m_data_ptr == nullptr && m_data->m_const_data_ptr == nullptr);
       }
 
       const chaiscript::detail::Any & get() const noexcept
@@ -466,6 +487,16 @@ namespace chaiscript
   inline Boxed_Value void_var() {
     static const auto v = Boxed_Value(Boxed_Value::Void_Type());
     return v;
+  }
+
+  inline Boxed_Value null_var() {
+    static const auto n = Boxed_Value(Boxed_Value::Null_Type());
+    return n;
+  }
+
+  /// Returns true if the Boxed_Value contains a null value (our Null_Type or null pointers)
+  inline bool is_null(const Boxed_Value &bv) {
+    return bv.is_null();
   }
 
   inline Boxed_Value const_var(bool b) {

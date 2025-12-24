@@ -425,6 +425,17 @@ namespace chaiscript
 
         m.add(fun(&Boxed_Value::is_undef), "is_var_undef");
         m.add(fun(&Boxed_Value::is_null), "is_var_null");
+
+        // Add null support - allows "x = null" and cloning null values
+        m.add(fun([](Boxed_Value &lhs, std::nullptr_t) -> Boxed_Value & {
+            lhs = null_var();
+            return lhs;
+          }), "=");
+
+        // Clone function for null - called by clone_if_necessary
+        m.add(fun([](std::nullptr_t) -> Boxed_Value {
+            return null_var();
+          }), "clone");
         m.add(fun(&Boxed_Value::is_const), "is_var_const");
         m.add(fun(&Boxed_Value::is_ref), "is_var_reference");
         m.add(fun(&Boxed_Value::is_pointer), "is_var_pointer");

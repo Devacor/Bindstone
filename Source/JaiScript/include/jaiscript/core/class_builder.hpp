@@ -268,6 +268,10 @@ public:
     bool is_cpp_class() const { return class_type_ == cpp_class; }
     bool is_vm_class() const { return class_type_ == vm_class; }
 
+    // Fast path check: does this class have any property getters (_get_* methods)?
+    // If false, member access can skip the getter lookup entirely
+    bool has_property_getters() const { return has_property_getters_; }
+
     // Get the persistent type_info for this class
     type_info_ptr get_type_info() const { return type_info_; }
 
@@ -279,6 +283,11 @@ public:
         auto eng = engine_;
         if (!eng) return;
 
+        // Track if this is a property getter for fast-path optimization
+        if (name.size() > 5 && name.substr(0, 5) == "_get_") {
+            has_property_getters_ = true;
+        }
+
         uint64_t name_id = eng->symbolize(name);
 
         // If arity is provided, store in overloads map for arity-based dispatch
@@ -288,22 +297,24 @@ public:
             method_arities_[name_id].push_back(arity);
 
             // Create/update dispatcher that selects overload by argument count
-            // Use shared_from_this() to safely capture access to the overloads map
-            std::weak_ptr<class_definition> class_def_weak = shared_from_this();
+            // Use raw pointer - engine lifetime guarantees class_definition lifetime
+            // Safety: check args[0].get_engine() - if null, engine was destroyed (and class_def with it)
+            class_definition* class_def_ptr = this;
 
             methods_.insert_or_assign(name_id, script_value::make_function(
-                [class_def_weak, name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
-                    auto class_def = class_def_weak.lock();
-                    if (!class_def) {
+                [class_def_ptr, name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+                    // Safety check: if 'this' arg's engine is null, the engine was destroyed
+                    // which means the class_definition is also destroyed (owned by engine)
+                    if (args.empty() || args[0].get_engine() == nullptr) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::class_not_found),
                                                             "Class definition no longer exists");
                     }
 
                     // For instance methods, first arg is 'this', so script-visible arg count is args.size() - 1
                     // This matches the arity stored during registration (number of parameters excluding this)
-                    size_t script_arg_count = args.empty() ? 0 : args.size() - 1;
+                    size_t script_arg_count = args.size() - 1;
 
-                    auto& overloads_for_name = class_def->cpp_method_overloads_[name_id];
+                    auto& overloads_for_name = class_def_ptr->cpp_method_overloads_[name_id];
                     auto it = overloads_for_name.find(script_arg_count);
                     if (it != overloads_for_name.end()) {
                         return it->second(args);
@@ -326,6 +337,11 @@ public:
     void add_static_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
         auto eng = engine_;
         if (!eng) return;
+
+        // Track if this is a property getter for fast-path optimization
+        if (name.size() > 5 && name.substr(0, 5) == "_get_") {
+            has_property_getters_ = true;
+        }
 
         uint64_t name_id = eng->symbolize(name);
         static_methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
@@ -1214,6 +1230,10 @@ private:
     // Property setter ID cache - maps field_id to _set_<field> method ID
     // Pre-computed during property registration for fast runtime lookup
     std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
+
+    // Fast path optimization: skip getter lookup if class has no property getters
+    // Set to true when any _get_* method is registered (via add_property or script properties)
+    bool has_property_getters_ = false;
 
     // Copy function for deep copying objects
     copy_function copy_function_;

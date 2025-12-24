@@ -179,6 +179,11 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
     auto eng = get_engine();
     if (!eng) return;
 
+    // Track if this is a property getter for fast-path optimization
+    if (name.size() > 5 && name.substr(0, 5) == "_get_") {
+        has_property_getters_ = true;
+    }
+
     uint64_t name_id = eng->symbolize(name);
 
     // Store the AST in method_overloads_ for type-based resolution
@@ -357,6 +362,11 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
 inline void class_definition::add_static_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
     auto eng = get_engine();
     if (!eng) return;
+
+    // Track if this is a property getter for fast-path optimization
+    if (name.size() > 5 && name.substr(0, 5) == "_get_") {
+        has_property_getters_ = true;
+    }
 
     uint64_t name_id = eng->symbolize(name);
 

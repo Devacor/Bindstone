@@ -1359,6 +1359,9 @@ namespace jai {
         // Method to set engine pointer after construction
         void set_engine(engine* eng) { engine_ = eng; }
 
+        // Clear engine pointer (called when engine is destroyed to prevent dangling pointers)
+        void clear_engine() { engine_ = nullptr; }
+
         // Access raw storage for AST literals (bypasses type checking)
         const storage& get_storage() const { return storage_; }
         

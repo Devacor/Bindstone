@@ -276,7 +276,9 @@ script_value::script_value(const script_value& other)
     // NOTE: Raw engine* is much faster to copy than weak_ptr (no atomic ops)
 }
 
-// Copy assignment operator (shallow copy for reference semantics)
+// Copy assignment operator (shallow copy for C++ internals)
+// NOTE: This is intentionally a shallow copy for performance in C++ code.
+// The interpreter handles cloning based on JaiScript value/reference semantics.
 script_value& script_value::operator=(const script_value& other) {
     if (this != &other) {
         type_info_ = other.type_info_;
@@ -293,11 +295,56 @@ script_value script_value::clone() const {
         throw runtime_error("Cannot clone script_value: missing engine pointer");
     }
 
-    // Check if this is a shared_ptr type - don't clone, just share
-    // shared_ptr<T> is a TYPE MARKER that indicates reference semantics
+    // Check if this is a shared_ptr type - perform deep copy using registered copy constructor
+    // shared_ptr<T> is a TYPE MARKER that indicates reference semantics for normal operations,
+    // but clone() should perform a deep copy to create an independent instance
     if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
-        // Just return a shallow copy (shares the underlying object_holder)
-        return *this;
+        // Get the object_holder from storage
+        auto obj_holder = std::get<strong_ptr<object_holder>>(storage_);
+        if (!obj_holder) {
+            throw runtime_error("Cannot clone shared_ptr: null object_holder");
+        }
+
+        // Check if this is a class_instance (script class) that supports deep copy
+        if (obj_holder->is_class_instance_wrapper) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+            auto new_instance = instance->deep_copy();
+
+            auto new_holder = make_strong<object_holder>();
+            new_holder->type_name = obj_holder->type_name;
+            new_holder->type_id = obj_holder->type_id;
+            new_holder->data = new_instance;
+            new_holder->is_class_instance_wrapper = true;
+
+            script_value result(std::monostate{}, engine_);
+            result.type_info_ = type_info_;
+            result.storage_ = new_holder;
+            return result;
+        }
+
+        // For C++ objects wrapped in shared_ptr, use the registered copy function
+        auto class_def = engine_->get_class_definition(obj_holder->type_id);
+        if (class_def && class_def->has_copy_function()) {
+            auto new_cpp_obj = class_def->copy_object(obj_holder->data.get());
+            if (new_cpp_obj) {
+                auto new_holder = make_strong<object_holder>();
+                new_holder->type_name = obj_holder->type_name;
+                new_holder->type_id = obj_holder->type_id;
+                new_holder->data = new_cpp_obj;
+                new_holder->is_class_instance_wrapper = false;
+
+                script_value result(std::monostate{}, engine_);
+                result.type_info_ = type_info_;
+                result.storage_ = new_holder;
+                return result;
+            }
+        }
+
+        // No copy function registered - type is non-copyable
+        throw runtime_error(
+            "Cannot clone shared_ptr<" + obj_holder->type_name + ">: type is non-copyable. "
+            "Register a copy constructor with class_builder<" + obj_holder->type_name + ">::copy_constructor() "
+            "to enable deep copying.");
     }
 
     script_value result(std::monostate{}, engine_);  // Preserve engine pointer!

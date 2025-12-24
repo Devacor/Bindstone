@@ -304,7 +304,11 @@ struct engine::implementation {
         std::filesystem::file_time_type last_modified;
     };
     std::unordered_map<std::string, import_record> import_cache;
-    
+
+    // Escaped values registry - tracks script_values that have left the interpreter
+    // When engine dies, we null out their engine_ pointers to prevent dangling access
+    std::unordered_set<script_value*> escaped_values_;
+
     implementation();
     ~implementation();
     
@@ -458,7 +462,26 @@ engine::engine() : impl(std::make_unique<implementation>()) {
     // Built-in functions that create script_value will be added in initialize_engine_reference()
 }
 
-engine::~engine() = default;
+engine::~engine() {
+    // Null out engine pointers in all escaped values before destroying impl
+    // This prevents dangling pointer access after engine death
+    for (script_value* val : impl->escaped_values_) {
+        val->clear_engine();
+    }
+    // impl destructor runs after this, cleaning up everything else
+}
+
+void engine::register_escaped(script_value* val) {
+    if (val && impl) {
+        impl->escaped_values_.insert(val);
+    }
+}
+
+void engine::unregister_escaped(script_value* val) {
+    if (val && impl) {
+        impl->escaped_values_.erase(val);
+    }
+}
 
 engine::engine(engine&&) noexcept = default;
 engine& engine::operator=(engine&&) noexcept = default;

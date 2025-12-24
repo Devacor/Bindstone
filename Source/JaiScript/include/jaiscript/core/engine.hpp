@@ -551,6 +551,11 @@ namespace jai {
         detail::parameter_storage* get_current_parameter_storage() const;
         void set_current_parameter_storage(detail::parameter_storage* storage);
 
+        // Escaped value registry - tracks script_values that have left the interpreter
+        // When engine dies, we null out their engine_ pointers to prevent dangling access
+        void register_escaped(script_value* val);
+        void unregister_escaped(script_value* val);
+
     private:
         struct implementation;
         std::unique_ptr<implementation> impl;

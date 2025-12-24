@@ -2,7 +2,7 @@
 
 ## Current JaiScript Performance (Release Build)
 
-Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-19):
+Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-24):
 
 | Benchmark                      | Time (μs) | Notes                                    |
 |--------------------------------|-----------|------------------------------------------|
@@ -19,7 +19,7 @@ Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (
 | Complex Expression             | 6         | Multi-operator expression evaluation     |
 | Class Inheritance              | 109       | Base + derived class + instantiation     |
 | Variable Lookup Heavy          | 15        | 10 variable lookups in expression        |
-| Hot Loop (1000 iterations)     | 49        | 0.049μs per iteration                    |
+| Hot Loop (1000 iterations)     | 49        | 0.049μs per iteration (~49ns)            |
 | Simple Compound Assignment     | 55        | 100 compound assignments (+=, -=, etc.)  |
 
 ## Performance Optimizations
@@ -291,6 +291,7 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 | **Function Calls** | 4μs | 162μs | **40x faster** |
 | **Factorial(10)** | 9μs | 1560μs | **173x faster** |
 | **Fibonacci(6)** | 17μs | 3879μs | **228x faster** |
+| **BST (15 nodes)** | 563μs | 52,698μs | **94x faster** |
 | **Method Invocation** | 9μs | 170μs | **19x faster** |
 | **Range-For (100 elem)** | 23μs | 165μs | **7x faster** |
 | **Binary Search** | 20μs | 317μs | **16x faster** |
@@ -340,8 +341,10 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Implementation | JaiScript | ChaiScript | Notes |
 |----------------|-----------|------------|-------|
-| Native Script TreeNode (15 nodes) | 596μs | **SKIPPED** | ChaiScript lacks null support for object fields |
+| Native Script TreeNode (15 nodes) | 563μs | 52,698μs* | **JaiScript 94x faster** |
 | C++ Bound TreeNode (15 nodes) | 111μs | 72μs | ChaiScript 1.5x faster with C++ FFI |
+
+*ChaiScript BST benchmark skipped in test suite due to poor performance (~52ms/iteration). Result from isolated run.
 
 ### String Operations Comparison
 
@@ -359,6 +362,7 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
    - ID-based lookups and optimized call stack give JaiScript **40-228x advantage** in function-heavy code
    - Recursive algorithms (factorial, fibonacci) show the biggest wins
    - Method invocation is **19x faster** than ChaiScript
+   - Native script BST is **94x faster** (563μs vs 52.7ms)
 
 2. **ChaiScript's Strength: Tight Loops & Simple Ops**
    - ChaiScript's for-loop is only **1.25x faster** now (gap closed from 8.4x)
@@ -522,13 +526,14 @@ Track performance improvements over time (git-verified):
 
 | Date       | Commit   | For Loop (100) | Hot Loop (1000) | vs ChaiScript | Notes                           |
 |------------|----------|----------------|-----------------|---------------|---------------------------------|
-| 2025-12-18 | HEAD     | 17μs           | 76μs            | 1.4x slower   | + dynamic_cast removal (90 calls) + throw cleanup |
+| 2025-12-24 | HEAD     | 15μs           | 49μs            | 1.25x slower  | strong_ptr + shared string storage |
+| 2025-12-18 | 9878fe2d | 17μs           | 76μs            | 1.4x slower   | + dynamic_cast removal (90 calls) + throw cleanup |
 | 2025-12-15 | 9310a48f | 28μs           | 197μs           | 2.3x slower   | Switch-based AST dispatch |
 | 2025-12-04 | bb2b900a | 42μs           | ~400μs          | 3.5x slower   | "only 2x loop perf of ChaiScript" |
 | 2025-11-07 | bf50a1a6 | 67-79μs        | 715μs           | ~6x slower    | Aggressive string interning |
 | 2025-11-04 | 47b8a6aa | 101μs          | 1136μs          | 8.4x slower   | Initial PERFORMANCE.md |
 
-**Progress: 8.4x slower → 1.4x slower = 83% of the gap eliminated**
+**Progress: 8.4x slower → 1.25x slower = 85% of the gap eliminated**
 
 ChaiScript For Loop baseline: 12μs
 

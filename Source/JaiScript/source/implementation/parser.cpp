@@ -122,23 +122,24 @@ void parser::synchronize() {
     }
 }
 
-// token management
-token parser::peek() const {
+// token management (return by reference to avoid copying strings - major perf win)
+const token& parser::peek() const {
     if (pushed_back_token_.has_value()) {
         return pushed_back_token_.value();
     }
     return tokens_[current_];
 }
 
-token parser::previous() const {
+const token& parser::previous() const {
     return tokens_[current_ - 1];
 }
 
-token parser::advance() {
+const token& parser::advance() {
     if (pushed_back_token_.has_value()) {
-        token token = pushed_back_token_.value();
+        // Move pushed_back token to last_advanced_ so we can return a reference
+        last_advanced_ = std::move(pushed_back_token_.value());
         pushed_back_token_.reset();
-        return token;
+        return last_advanced_;
     }
     if (!is_at_end()) current_++;
     return previous();
@@ -243,7 +244,7 @@ checked_result<expression_ptr> parser::primary() {
 
         // Create a member access on super
         auto superExpr = std::make_shared<super_expr>(superToken.location);
-        uint64_t member_id = symbolizer_->intern(methodName.lexeme);
+        uint64_t member_id = get_symbol_id(methodName);
         return std::make_shared<member_expr>(methodName.location, superExpr, methodName.lexeme, member_id, false);
     }
 
@@ -255,7 +256,7 @@ checked_result<expression_ptr> parser::primary() {
         if (lookAhead < tokens_.size() && tokens_[lookAhead].type == token_type::colon_colon) {
             // This is a keyword being used as a namespace name
             token nameToken = advance();
-            return std::make_shared<identifier_expr>(nameToken.location, nameToken.lexeme, symbolizer_->intern(nameToken.lexeme));
+            return std::make_shared<identifier_expr>(nameToken.location, nameToken.lexeme, get_symbol_id(nameToken));
         }
     }
 
@@ -309,9 +310,9 @@ checked_result<expression_ptr> parser::primary() {
             current_ = savedPos + 1;
         }
         
-        return std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, symbolizer_->intern(identToken.lexeme));
+        return std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
     }
-    
+
     // Grouped expression
     if (match(token_type::left_paren)) {
         JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
@@ -425,7 +426,7 @@ checked_result<expression_ptr> parser::primary() {
                 // that will be handled by postfix() for () or {} initialization
                 current_ = savedPos;
                 token typeToken = advance();
-                std::string type_name = typeToken.lexeme;
+                std::string type_name(typeToken.lexeme);
 
                 // For template types, we need to parse the full type
                 if (check(token_type::less)) {
@@ -527,7 +528,7 @@ checked_result<expression_ptr> parser::primary() {
     // Regular identifier (variable name)
     if (match(token_type::identifier)) {
         token name = previous();
-        return std::make_shared<identifier_expr>(name.location, name.lexeme, symbolizer_->intern(name.lexeme));
+        return std::make_shared<identifier_expr>(name.location, name.lexeme, get_symbol_id(name));
     }
 
     report_error("Expected expression", peek());
@@ -621,7 +622,7 @@ checked_result<type_info_ptr> parser::parse_type() {
 
     // User-defined type (potentially templated)
     if (match({token_type::identifier, token_type::user_template_type})) {
-        std::string type_name = previous().lexeme;
+        std::string type_name(previous().lexeme);
         token_type typeToken = previous().type;
 
         // If it's a user_template_type token, we know it's safe to parse template syntax
@@ -794,7 +795,7 @@ checked_result<expression_ptr> parser::parse_map_literal() {
                 token keyToken = advance();
                 // Convert bare identifier to string literal for JSON-style syntax
                 // e.g., {x: 10} becomes {"x": 10}
-                const script_string& keyStr = keyToken.lexeme;
+                script_string keyStr(keyToken.lexeme);
                 script_value keyValue(script_value::ast_literal_tag{}, keyStr);
                 key = std::make_shared<literal_expr>(keyToken.location, keyValue);
             } else {
@@ -1128,7 +1129,7 @@ checked_result<expression_ptr> parser::postfix() {
                 (name.type != token_type::eof && name.type != token_type::left_paren &&
                  name.type != token_type::right_paren && name.type != token_type::semicolon)) {
                 advance();
-                uint64_t member_id = symbolizer_->intern(name.lexeme);
+                uint64_t member_id = get_symbol_id(name);
                 expr = std::make_shared<member_expr>(name.location, expr, name.lexeme, member_id, false, true);
             } else {
                 report_error("Expected member name after '::'", name);
@@ -1241,7 +1242,7 @@ checked_result<declaration_ptr> parser::declaration() {
 
         // Save current position
         size_t savedPos = current_;
-        std::string firstIdentifier = peek().lexeme;
+        std::string firstIdentifier(peek().lexeme);
 
         // Look ahead to see if this is "identifier identifier" pattern
         advance(); // consume first identifier
@@ -1339,7 +1340,7 @@ checked_result<expression_ptr> parser::finish_call(expression_ptr callee) {
 
 checked_result<expression_ptr> parser::finish_member_access(expression_ptr object, bool is_arrow) {
     JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected member name"));
-    uint64_t member_id = symbolizer_->intern(name.lexeme);
+    uint64_t member_id = get_symbol_id(name);
     return std::make_shared<member_expr>(name.location, object, name.lexeme, member_id, is_arrow);
 }
 
@@ -1452,13 +1453,16 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
     lambda_expr::capture_default default_mode = lambda_expr::capture_default::none;
 
     // Helper lambda to parse a capture variable name (identifier or 'this')
-    auto parse_capture_name = [this]() -> checked_result<std::string> {
+    // Returns interned string_view to ensure permanent storage
+    auto parse_capture_name = [this]() -> checked_result<std::string_view> {
         if (check(token_type::this_keyword)) {
             advance();  // consume 'this'
-            return std::string("this");
+            // "this" is pre-interned in symbolizer
+            return symbolizer_->get_string(symbolizer_->get_this_id());
         } else {
             JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected capture variable name or 'this'"));
-            return std::string(name_tok.lexeme);
+            // Token lexeme already points to symbolizer storage for identifiers
+            return name_tok.lexeme;
         }
     };
 
@@ -1473,7 +1477,7 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
             if (match(token_type::comma)) {
                 do {
                     bool byRef = match(token_type::ampersand);
-                    JAISCRIPT_TRY_ASSIGN(std::string name, parse_capture_name());
+                    JAISCRIPT_TRY_ASSIGN(std::string_view name, parse_capture_name());
                     captures.emplace_back(name, byRef);
                 } while (match(token_type::comma));
             }
@@ -1492,19 +1496,19 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
                         if (match(token_type::ampersand)) {
                             byRef = true;
                         }
-                        JAISCRIPT_TRY_ASSIGN(std::string name, parse_capture_name());
+                        JAISCRIPT_TRY_ASSIGN(std::string_view name, parse_capture_name());
                         captures.emplace_back(name, byRef);
                     } while (match(token_type::comma));
                 }
             } else {
                 // [&variable] - specific variable by reference
-                JAISCRIPT_TRY_ASSIGN(std::string name, parse_capture_name());
+                JAISCRIPT_TRY_ASSIGN(std::string_view name, parse_capture_name());
                 captures.emplace_back(name, true);
 
                 // Continue parsing other captures
                 while (match(token_type::comma)) {
                     bool byRef = match(token_type::ampersand);
-                    JAISCRIPT_TRY_ASSIGN(std::string varName, parse_capture_name());
+                    JAISCRIPT_TRY_ASSIGN(std::string_view varName, parse_capture_name());
                     captures.emplace_back(varName, byRef);
                 }
             }
@@ -1512,7 +1516,7 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
             // Regular explicit captures: [x, y, &z, this]
             do {
                 bool byRef = match(token_type::ampersand);
-                JAISCRIPT_TRY_ASSIGN(std::string name, parse_capture_name());
+                JAISCRIPT_TRY_ASSIGN(std::string_view name, parse_capture_name());
                 captures.emplace_back(name, byRef);
             } while (match(token_type::comma));
         }
@@ -1641,7 +1645,7 @@ checked_result<statement_ptr> parser::for_statement() {
                 JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
                 return std::make_shared<range_for_stmt>(
-                    forToken.location, element_type, varName.lexeme, symbolizer_->intern(varName.lexeme),
+                    forToken.location, element_type, varName.lexeme, get_symbol_id(varName),
                     is_reference, is_const, container, body
                 );
             }
@@ -1681,7 +1685,7 @@ traditional_for:
             JAISCRIPT_TRY_ASSIGN(initializer, expression());
         }
 
-        init = std::make_shared<variable_decl>(name.location, type, name.lexeme, symbolizer_->intern(name.lexeme), initializer);
+        init = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
         // Note: NOT consuming semicolon here - the for loop will handle it
     } else {
         // expression init - wrap in a variable declaration without a type
@@ -1773,14 +1777,16 @@ checked_result<declaration_ptr> parser::class_declaration() {
     if (match(token_type::colon)) {
         do {
             JAISCRIPT_TRY_ASSIGN(token base_class_tok, consume(token_type::identifier, "Expected base class name"));
-            base_classes.push_back(base_class_tok.lexeme);
+            base_classes.emplace_back(base_class_tok.lexeme);
         } while (match(token_type::comma));
     }
 
     JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' before class body"));
 
     // Intern the class name at parse time for fast comparisons later
-    auto classDecl = std::make_shared<class_decl>(className.location, className.lexeme, symbolizer_->intern(className.lexeme));
+    // Use intern_with_view to ensure we get a string_view pointing to symbolizer storage
+    auto [class_name_id, class_name_view] = symbolizer_->intern_with_view(className.lexeme);
+    auto classDecl = std::make_shared<class_decl>(className.location, class_name_view, class_name_id);
     classDecl->base_classes = std::move(base_classes);
 
     // Parse class members
@@ -1817,9 +1823,10 @@ checked_result<declaration_ptr> parser::class_declaration() {
             // Look ahead to see if this is followed by '(' (constructor) or identifier (field)
             size_t lookAhead = current_ + 1;
             if (lookAhead < tokens_.size() && tokens_[lookAhead].type == token_type::left_paren) {
-                // This is a constructor
+                // This is a constructor - use class name's pre-interned symbol
                 advance(); // consume class name
-                auto body_result = parse_function_body(className.lexeme, nullptr);
+                auto [ctor_name_id, ctor_name_view] = symbolizer_->intern_with_view(className.lexeme);
+                auto body_result = parse_function_body(ctor_name_view, ctor_name_id, nullptr);
                 if (!body_result) {
                     synchronize();
                     continue;
@@ -1846,7 +1853,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         // Function
                         current_--;
                         auto func = std::make_shared<function_decl>(previous().location, name.lexeme);
-                        func->name_id = symbolizer_->intern(name.lexeme);
+                        func->name_id = get_symbol_id(name);
                         func->is_static = is_static;
                         func->is_override = is_override;
 
@@ -1996,7 +2003,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                             continue;
                         }
 
-                        auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, symbolizer_->intern(name.lexeme), init);
+                        auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
                         var_decl->is_static = is_static;
                         member = var_decl;
                     }
@@ -2012,7 +2019,10 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 synchronize();
                 continue;
             }
-            auto body_result = parse_function_body("~" + className.lexeme, nullptr);
+            // Intern destructor name (e.g., "~ClassName")
+            std::string dtor_name_str = "~" + std::string(className.lexeme);
+            auto [dtor_name_id, dtor_name_view] = symbolizer_->intern_with_view(dtor_name_str);
+            auto body_result = parse_function_body(dtor_name_view, dtor_name_id, nullptr);
             if (!body_result) {
                 synchronize();
                 continue;
@@ -2088,15 +2098,16 @@ checked_result<declaration_ptr> parser::class_declaration() {
             } else if (check(token_type::identifier)) {
                 // Regular method name
                 token name_tok = advance();
-                method_name = name_tok.lexeme;
+                method_name = std::string(name_tok.lexeme);
             } else {
                 report_error("Expected method name or 'operator' after 'function'", peek());
                 synchronize();
                 continue;
             }
 
-            // Parse the function body using existing helper
-            auto body_result = parse_function_body(method_name, nullptr);
+            // Intern method name and parse function body
+            auto [method_name_id, method_name_view] = symbolizer_->intern_with_view(method_name);
+            auto body_result = parse_function_body(method_name_view, method_name_id, nullptr);
             if (!body_result) {
                 synchronize();
                 continue;
@@ -2121,7 +2132,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
             if (check(token_type::identifier)) {
                 token name = advance();
-                std::string method_name = name.lexeme;
+                std::string method_name(name.lexeme);
 
                 // Check for operator overload: function operator=(Type arg) or function operator+(...)
                 if (method_name == "operator") {
@@ -2178,9 +2189,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     // Function - we need to parse parameters and check for override before body
                     current_--; // Back up to before '('
 
-                    // Create function declaration
-                    auto func = std::make_shared<function_decl>(name.location, method_name);
-                    func->name_id = symbolizer_->intern(method_name);
+                    // Intern method name FIRST to get permanent storage for string_view
+                    auto [method_name_id, method_name_view] = symbolizer_->intern_with_view(method_name);
+
+                    // Create function declaration with interned name
+                    auto func = std::make_shared<function_decl>(name.location, method_name_view);
+                    func->name_id = method_name_id;
                     func->is_static = is_static;
                     func->is_override = is_override; // Set from earlier check
 
@@ -2330,7 +2344,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         continue;
                     }
 
-                    auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, symbolizer_->intern(name.lexeme), init);
+                    auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
                     var_decl->is_static = is_static;
                     member = var_decl;
                 }
@@ -2367,7 +2381,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         report_error("Expected namespace name", first_name);
     return make_error_code(parse_error_code::unexpected_token);
     }
-    namespace_path.push_back(first_name.lexeme);
+    namespace_path.emplace_back(first_name.lexeme);
 
     // Check for :: (nested namespace syntax like C++17)
     while (match(token_type::colon_colon)) {
@@ -2382,7 +2396,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             report_error("Expected namespace name after '::'", next_name);
     return make_error_code(parse_error_code::unexpected_token);
         }
-        namespace_path.push_back(next_name.lexeme);
+        namespace_path.emplace_back(next_name.lexeme);
     }
 
     JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' before namespace body"));
@@ -2456,7 +2470,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             if (match(token_type::left_paren)) {
                 // Function declaration
                 auto func = std::make_shared<function_decl>(member_name.location, member_name.lexeme);
-                func->name_id = symbolizer_->intern(member_name.lexeme);
+                func->name_id = get_symbol_id(member_name);
                 func->return_type = type;
 
                 // Parse parameters
@@ -2522,7 +2536,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                     continue;
                 }
 
-                auto var_decl = std::make_shared<variable_decl>(member_name.location, type, member_name.lexeme, symbolizer_->intern(member_name.lexeme), init);
+                auto var_decl = std::make_shared<variable_decl>(member_name.location, type, member_name.lexeme, get_symbol_id(member_name), init);
                 member_decl = var_decl;
             }
         }
@@ -2626,12 +2640,12 @@ checked_result<declaration_ptr> parser::function_declaration() {
     }
 
     JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected function name"));
-    return parse_function_body(name.lexeme, return_type);
+    auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
+    return parse_function_body(name_view, name_id, return_type);
 }
 
-checked_result<declaration_ptr> parser::parse_function_body(const std::string& name, type_info_ptr return_type) {
-    auto func = std::make_shared<function_decl>(previous().location, name);
-    func->name_id = symbolizer_->intern(name);
+checked_result<declaration_ptr> parser::parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type) {
+    auto func = std::make_shared<function_decl>(previous().location, name, name_id);
 
     JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after function name"));
     JAISCRIPT_TRY_ASSIGN(func->parameters, parse_parameter_list());
@@ -2744,7 +2758,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
 
     JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));
 
-    auto decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, symbolizer_->intern(name.lexeme), initializer);
+    auto decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
     return decl;
 }
 
@@ -2891,6 +2905,16 @@ checked_result<statement_ptr> parser::switch_statement() {
     JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after switch body"));
 
     return switchStmt;
+}
+
+// Helper to get symbol ID from token - uses pre-interned symbol_id if available
+uint64_t parser::get_symbol_id(const token& tok) const {
+    // If lexer already interned this token (identifiers), use that
+    if (tok.symbol_id != 0) {
+        return tok.symbol_id;
+    }
+    // Otherwise intern now (for keywords used as identifiers, etc.)
+    return symbolizer_->intern(tok.lexeme);
 }
 
 } // namespace jai

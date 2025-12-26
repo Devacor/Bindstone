@@ -174,10 +174,10 @@ namespace jai {
     // identifier expression
     class identifier_expr : public expression {
     public:
-        std::string name;
+        std::string_view name;  // Points to symbolizer storage (permanent)
         uint64_t symbol_id;  // Interned symbol ID - must be set by parser
 
-        identifier_expr(const source_location& loc, const std::string& n, uint64_t sym_id)
+        identifier_expr(const source_location& loc, std::string_view n, uint64_t sym_id)
             : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id) {}    };
     
     // Binary expression
@@ -248,16 +248,16 @@ namespace jai {
     class member_expr : public expression {
     public:
         expression_ptr object;
-        std::string member;
+        std::string_view member;  // Points to symbolizer storage (permanent)
         uint64_t member_id = UINT64_MAX;  // Cached interned ID for the member name
         mutable uint64_t getter_id = UINT64_MAX;  // Cached interned ID for "_get_" + member (computed on first use)
         bool is_arrow;  // true for ->, false for .
         bool is_static; // true for ::, false for . or ->
 
-        member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, bool arrow, bool static_access = false)
+        member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
 
-        member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, uint64_t mem_id, bool arrow, bool static_access = false)
+        member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, uint64_t mem_id, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), member_id(mem_id), is_arrow(arrow), is_static(static_access) {}    };
     
     // Lambda expression
@@ -270,12 +270,12 @@ namespace jai {
         };
         
         struct capture {
-            std::string name;           // Variable name
+            std::string_view name;      // Variable name - points to symbolizer storage (permanent)
             bool by_reference;          // True if this specific variable is captured by reference
             mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
 
             // Constructor for explicit variable captures
-            capture(const std::string& n, bool by_ref)
+            capture(std::string_view n, bool by_ref)
                 : name(n), by_reference(by_ref), symbol_id(UINT64_MAX) {}
         };
         
@@ -397,19 +397,19 @@ namespace jai {
     class range_for_stmt : public statement {
     public:
         type_info_ptr element_type;      // Type of loop variable (auto, int, etc.)
-        std::string variable_name;     // Name of loop variable
+        std::string_view variable_name;  // Name of loop variable - points to symbolizer storage (permanent)
         uint64_t variable_name_id = UINT64_MAX;  // Interned ID for fast lookup (UINT64_MAX = not interned)
         bool is_reference;             // true for auto&, false for auto
         bool is_const;                 // true for const auto&
         expression_ptr container;      // The container to iterate over
         statement_ptr body;            // Loop body
 
-        range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName,
+        range_for_stmt(const source_location& loc, type_info_ptr type, std::string_view varName,
                      bool ref, bool constRef, expression_ptr cont, statement_ptr b)
             : statement(loc, node_type::range_for_stmt), element_type(type), variable_name(varName),
               is_reference(ref), is_const(constRef), container(cont), body(b) {}
 
-        range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName, uint64_t varNameId,
+        range_for_stmt(const source_location& loc, type_info_ptr type, std::string_view varName, uint64_t varNameId,
                      bool ref, bool constRef, expression_ptr cont, statement_ptr b)
             : statement(loc, node_type::range_for_stmt), element_type(type), variable_name(varName), variable_name_id(varNameId),
               is_reference(ref), is_const(constRef), container(cont), body(b) {}    };
@@ -486,15 +486,15 @@ namespace jai {
     class variable_decl : public declaration {
     public:
         type_info_ptr type;
-        std::string name;
+        std::string_view name;  // Points to symbolizer storage (permanent)
         uint64_t name_id = UINT64_MAX;  // Interned name for fast lookup (UINT64_MAX = not interned)
         expression_ptr initializer;  // Can be null
         bool is_static = false;      // For static class members
 
-        variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, expression_ptr init = nullptr)
+        variable_decl(const source_location& loc, type_info_ptr t, std::string_view n, expression_ptr init = nullptr)
             : declaration(loc, node_type::variable_decl), type(t), name(n), initializer(init), is_static(false) {}
 
-        variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, uint64_t nid, expression_ptr init = nullptr)
+        variable_decl(const source_location& loc, type_info_ptr t, std::string_view n, uint64_t nid, expression_ptr init = nullptr)
             : declaration(loc, node_type::variable_decl), type(t), name(n), name_id(nid), initializer(init), is_static(false) {}    };
     
     // Constructor initialization entry (for : super(args), : this(args))
@@ -509,8 +509,8 @@ namespace jai {
     // Function declaration
     class function_decl : public declaration {
     public:
-        std::string name;
-        uint64_t name_id = UINT64_MAX;  // Cached interned ID for the function name
+        std::string_view name;  // Points to symbolizer storage (permanent)
+        uint64_t name_id = UINT64_MAX;  // Interned ID for the function name
         std::vector<parameter> parameters;
         type_info_ptr return_type;
         std::shared_ptr<block_stmt> body;
@@ -518,8 +518,8 @@ namespace jai {
         bool is_override = false; // For override keyword in derived classes
         bool is_static = false;   // For static methods
 
-        function_decl(const source_location& loc, const std::string& n)
-            : declaration(loc, node_type::function_decl), name(n), is_override(false), is_static(false) {}    };
+        function_decl(const source_location& loc, std::string_view n, uint64_t id = UINT64_MAX)
+            : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false) {}    };
 
     // Class declaration
     class class_decl : public declaration {
@@ -534,28 +534,22 @@ namespace jai {
             declaration_ptr declaration;
         };
 
-        std::string name;
+        std::string_view name;  // Points to symbolizer storage (permanent)
         uint64_t name_id = UINT64_MAX;  // Interned name for fast comparison (UINT64_MAX = not interned)
-        std::vector<std::string> base_classes;
+        std::vector<std::string> base_classes;  // TODO: Also change to string_view
         std::vector<member> members;
 
-        class_decl(const source_location& loc, const std::string& n)
-            : declaration(loc, node_type::class_decl), name(n) {}
-
-        class_decl(const source_location& loc, const std::string& n, uint64_t nid)
+        class_decl(const source_location& loc, std::string_view n, uint64_t nid = UINT64_MAX)
             : declaration(loc, node_type::class_decl), name(n), name_id(nid) {}    };
 
     // Namespace declaration
     class namespace_decl : public declaration {
     public:
-        std::string name;
+        std::string_view name;  // Points to symbolizer storage (permanent)
         uint64_t name_id = UINT64_MAX;  // Interned name for fast comparison (UINT64_MAX = not interned)
         std::vector<declaration_ptr> declarations;  // Can hold functions, classes, variables
 
-        namespace_decl(const source_location& loc, const std::string& n)
-            : declaration(loc, node_type::namespace_decl), name(n) {}
-
-        namespace_decl(const source_location& loc, const std::string& n, uint64_t nid)
+        namespace_decl(const source_location& loc, std::string_view n, uint64_t nid = UINT64_MAX)
             : declaration(loc, node_type::namespace_decl), name(n), name_id(nid) {}    };
 
     // expression as declaration (for top-level expressions)

@@ -39,6 +39,7 @@ namespace jai {
 
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;
+        mutable token last_advanced_;  // Storage for advance() when consuming pushed_back_token_
 
         // Current namespace context for nested namespace declarations
         std::vector<std::string> current_namespace_path_;
@@ -47,10 +48,10 @@ namespace jai {
         void report_error(const std::string& message, const token& token);  // Logs error to errors_ vector
         void synchronize();  // Error recovery
         
-        // token management
-        token peek() const;
-        token previous() const;
-        token advance();
+        // token management (return by reference to avoid copying strings)
+        const token& peek() const;
+        const token& previous() const;
+        const token& advance();
         bool is_at_end() const;
         bool check(token_type type) const;
         bool match(token_type type);
@@ -117,7 +118,7 @@ namespace jai {
         checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default>> parse_capture_list();
 
         // Helper for parsing function bodies
-        checked_result<declaration_ptr> parse_function_body(const std::string& name, type_info_ptr return_type);
+        checked_result<declaration_ptr> parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type);
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);
@@ -127,6 +128,9 @@ namespace jai {
         
         // Helper to check if a type name is registered for template parsing
         bool is_registered_template_type(const std::string& type_name) const;
+
+        // Helper to get symbol ID from token - uses pre-interned if available
+        uint64_t get_symbol_id(const token& tok) const;
     };
 
 } // namespace jai

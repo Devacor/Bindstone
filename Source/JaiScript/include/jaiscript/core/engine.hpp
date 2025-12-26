@@ -422,7 +422,7 @@ namespace jai {
         string_symbolizer* get_symbolizer();
 
         // Intern a string and return its unique ID (const-safe)
-        uint64_t symbolize(const std::string& str) const;
+        uint64_t symbolize(std::string_view str) const;
 
         // Format a checked_result error to a human-readable string
         // Resolves symbol IDs to their string representations

@@ -608,14 +608,14 @@ namespace jai {
         }
         // Script-defined function storage
         struct script_defined_function {
-            std::string name;
+            std::string_view name;  // Points to symbolizer storage (permanent)
             std::vector<parameter> parameters;
             type_info_ptr return_type;
             std::shared_ptr<block_stmt> body;
             std::shared_ptr<environment> closure_env;  // capture environment for closures
-            
-            script_defined_function(const std::string& n, std::vector<parameter> params,
-                                type_info_ptr retType, std::shared_ptr<block_stmt> b, 
+
+            script_defined_function(std::string_view n, std::vector<parameter> params,
+                                type_info_ptr retType, std::shared_ptr<block_stmt> b,
                                 std::shared_ptr<environment> env = nullptr)
                 : name(n), parameters(std::move(params)), return_type(retType), body(b), closure_env(env) {}
         };
@@ -843,7 +843,7 @@ namespace jai {
         checked_result<script_value> enforce_type_compatibility(
             script_value value,
             type_info_ptr target_type,
-            const std::string& var_name = ""
+            std::string_view var_name = ""
         );
 
         // Type conversion helpers (inlined for performance)

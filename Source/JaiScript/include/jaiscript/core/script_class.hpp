@@ -24,13 +24,13 @@ class function_decl;
 class script_class_definition : public class_definition {
 public:
     // Constructor - takes pre-interned type_id from parser or runtime
-    script_class_definition(const std::string& name, uint64_t type_id, engine* eng)
+    script_class_definition(std::string_view name, uint64_t type_id, engine* eng)
         : class_definition(name, type_id, class_type::script_class, eng) {
         // That's it! Everything else is inherited from class_definition
     }
 
     // Helper to add a script method from AST
-    void add_method_from_ast(const std::string& name,
+    void add_method_from_ast(std::string_view name,
                             std::shared_ptr<function_decl> ast,
                             interpreter* interp,
                             bool is_hot_reload = false) {
@@ -56,7 +56,7 @@ public:
             // }
             
             if (!method_info.owner_class || method_info.owner_class.get() == this) {
-                throw runtime_error("Method '" + name + "' marked as override but no base class method found");
+                throw runtime_error("Method '" + std::string(name) + "' marked as override but no base class method found");
             }
             
             // Promote the entire hierarchy to virtual
@@ -83,16 +83,16 @@ public:
                 // Method exists in parent
                 if (method_info.metadata && method_info.metadata->is_virtual) {
                     // Parent method is virtual, MUST use override
-                    throw runtime_error("Method '" + name + "' overrides virtual method from base class. Must use 'override' keyword");
+                    throw runtime_error("Method '" + std::string(name) + "' overrides virtual method from base class. Must use 'override' keyword");
                 } else {
                     // Parent method exists but isn't virtual - this is shadowing
-                    throw runtime_error("Method '" + name + "' shadows base class method. Use 'override' keyword if this is intentional");
+                    throw runtime_error("Method '" + std::string(name) + "' shadows base class method. Use 'override' keyword if this is intentional");
                 }
             }
         }
         
-        // Store AST for potential VM compilation later
-        method_asts_[name] = ast;
+        // Store AST for potential VM compilation later (keyed by ID)
+        method_asts_[name_id] = ast;
         
         // Use inherited add_script_method - pass current environment as definition environment
         add_script_method(name, ast, interp, interp->get_current_environment());
@@ -124,7 +124,7 @@ public:
     }
     
     // Get ASTs for VM compilation
-    const std::map<std::string, std::shared_ptr<function_decl>>& get_method_asts() const {
+    const std::map<uint64_t, std::shared_ptr<function_decl>>& get_method_asts() const {
         return method_asts_;
     }
     
@@ -137,13 +137,13 @@ public:
     }
     
     // Add field initializer AST (will be evaluated at instance construction time)
-    void add_field_initializer_ast(const std::string& field_name, expression_ptr initializer) {
-        field_initializer_asts_[field_name] = initializer;
+    void add_field_initializer_ast(uint64_t field_id, expression_ptr initializer) {
+        field_initializer_asts_[field_id] = initializer;
     }
 
     // Get field initializer AST (for instance construction)
-    expression_ptr get_field_initializer_ast(const std::string& field_name) const {
-        auto it = field_initializer_asts_.find(field_name);
+    expression_ptr get_field_initializer_ast(uint64_t field_id) const {
+        auto it = field_initializer_asts_.find(field_id);
         if (it != field_initializer_asts_.end()) {
             return it->second;
         }
@@ -151,7 +151,7 @@ public:
     }
 
     // Get all field initializer ASTs
-    const std::map<std::string, expression_ptr>& get_field_initializer_asts() const {
+    const std::map<uint64_t, expression_ptr>& get_field_initializer_asts() const {
         return field_initializer_asts_;
     }
 
@@ -164,18 +164,18 @@ public:
     }
 
 private:
-    // Store ASTs for potential VM compilation
-    std::map<std::string, std::shared_ptr<function_decl>> method_asts_;
+    // Store ASTs for potential VM compilation (keyed by name_id for efficiency)
+    std::map<uint64_t, std::shared_ptr<function_decl>> method_asts_;
     std::vector<std::shared_ptr<function_decl>> constructor_asts_;
     std::shared_ptr<function_decl> destructor_ast_;
-    std::map<std::string, expression_ptr> field_initializer_asts_;
+    std::map<uint64_t, expression_ptr> field_initializer_asts_;
 };
 
 // For backward compatibility during migration
 using script_class_instance = class_instance;
 
 // Implementation of add_script_method (needs full interpreter definition)
-inline void class_definition::add_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
+inline void class_definition::add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
     auto eng = get_engine();
     if (!eng) return;
 
@@ -359,7 +359,7 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
 }
 
 // Implementation of add_static_script_method (needs full interpreter definition)
-inline void class_definition::add_static_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
+inline void class_definition::add_static_script_method(std::string_view name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
     auto eng = get_engine();
     if (!eng) return;
 

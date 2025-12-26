@@ -2,6 +2,7 @@
 
 #include <jaiscript/core/types.hpp>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
@@ -57,12 +58,16 @@ namespace jai {
         error
     };
     
+    // Forward declaration
+    class string_symbolizer;
+
     // token structure
     struct token {
         token_type type;
-        std::string lexeme;
+        std::string_view lexeme;  // Points to symbolizer storage (permanent) or static strings
+        uint64_t symbol_id = 0;   // Pre-interned symbol ID for identifiers (0 = not interned)
         source_location location;
-        
+
         // value for literals
         union {
             script_int int_value;
@@ -71,10 +76,16 @@ namespace jai {
             script_char char_value;
         };
         std::string string_value;  // For string literals (can't be in union)
-        
-        token(token_type t, const std::string& lex, const source_location& loc)
+
+        token() : type(token_type::eof), lexeme(), location() {}  // Default for storage
+
+        token(token_type t, std::string_view lex, const source_location& loc)
             : type(t), lexeme(lex), location(loc) {}
-            
+
+        // Constructor with pre-interned symbol (for identifiers)
+        token(token_type t, std::string_view lex, uint64_t sym_id, const source_location& loc)
+            : type(t), lexeme(lex), symbol_id(sym_id), location(loc) {}
+
         std::string to_string() const;
         bool is_keyword() const;
         bool is_operator() const;
@@ -84,34 +95,36 @@ namespace jai {
     // lexer class
     class lexer {
     public:
-        lexer(const std::string& source, const std::string& filename = "<script>");
-        lexer(const std::string& source, const std::unordered_set<std::string>& registeredTypes, const std::string& filename = "<script>");
-        
+        // Constructors require symbolizer for proper identifier interning
+        lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename = "<script>");
+        lexer(const std::string& source, string_symbolizer* symbolizer, const std::unordered_set<std::string>& registeredTypes, const std::string& filename = "<script>");
+
         // Get all tokens
         std::vector<token> tokenize();
-        
+
         // Get next token
         token next_token();
-        
+
         // Peek at next token without consuming
         token peek_token();
-        
+
         // Check if at end
         bool is_at_end() const { return current_ >= source_.length(); }
-        
+
     private:
         std::string source_;
         std::string filename_;
+        string_symbolizer* symbolizer_;  // Required: for interning identifiers to permanent storage
         size_t current_ = 0;
         size_t line_ = 1;
         size_t column_ = 1;
-        
+
         // Registered user-defined types (including template types)
         std::unordered_set<std::string> registered_types_;
-        
+
         // Keyword map
         static const std::unordered_map<std::string, token_type> keywords_;
-        
+
         // Helper methods
         char advance();
         char peek() const;
@@ -119,10 +132,10 @@ namespace jai {
         bool match(char expected);
         void skip_whitespace();
         void skip_comment();
-        
+
         // token creators
         token make_token(token_type type);
-        token make_token(token_type type, const std::string& lexeme);
+        token make_token(token_type type, std::string_view lexeme);
         token error_token(const std::string& message);
         
         // Scanners for different token types

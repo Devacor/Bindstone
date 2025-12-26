@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/detail/lexer.hpp>
+#include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/jaiscript_fwd.hpp>
 
 using namespace jai::foundry;
@@ -12,23 +13,26 @@ public:
     
     void forge_tests() override {
         test("empty_input", [this]() {
-            lexer lex("", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(1), tokens.size());
             check_eq(token_type::eof, tokens[0].type);
         });
 
         test("single_identifier", [this]() {
-            lexer lex("foo", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("foo", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(2), tokens.size());
             check_eq(token_type::identifier, tokens[0].type);
-            check_eq(std::string("foo"), tokens[0].lexeme);
+            check_eq(std::string("foo"), std::string(tokens[0].lexeme));
             check_eq(token_type::eof, tokens[1].type);
         });
 
         test("keywords", [this]() {
-            lexer lex("int float bool class", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("int float bool class", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(5), tokens.size());
             check_eq(token_type::int_keyword, tokens[0].type);
@@ -38,7 +42,8 @@ public:
         });
 
         test("integer_literals", [this]() {
-            lexer lex("42 0 999", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("42 0 999", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(4), tokens.size());
             check_eq(token_type::integer_literal, tokens[0].type);
@@ -50,7 +55,8 @@ public:
         });
 
         test("float_literals", [this]() {
-            lexer lex("3.14 0.0 42.0", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("3.14 0.0 42.0", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(4), tokens.size());
             check_eq(token_type::float_literal, tokens[0].type);
@@ -62,7 +68,8 @@ public:
         });
 
         test("string_literals", [this]() {
-            lexer lex(R"("hello" "world" "hello\nworld")", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex(R"("hello" "world" "hello\nworld")", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(4), tokens.size());
             check_eq(token_type::string_literal, tokens[0].type);
@@ -74,7 +81,8 @@ public:
         });
 
         test("character_literals", [this]() {
-            lexer lex("'a' '\\n' '0'", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("'a' '\\n' '0'", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(4), tokens.size());
             check_eq(token_type::char_literal, tokens[0].type);
@@ -86,7 +94,8 @@ public:
         });
 
         test("boolean_keywords", [this]() {
-            lexer lex("true false", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("true false", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(3), tokens.size());
             check_eq(token_type::true_keyword, tokens[0].type);
@@ -94,7 +103,8 @@ public:
         });
 
         test("operators", [this]() {
-            lexer lex("+ - * / % == != < > <= >= && || !", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("+ - * / % == != < > <= >= && || !", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             
             // Check that all operator tokens are present (excluding EOF)
@@ -116,7 +126,8 @@ public:
         });
 
         test("compound_assignments", [this]() {
-            lexer lex("+= -= *= /= %=", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("+= -= *= /= %=", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(6), tokens.size());
             check_eq(token_type::plus_equal, tokens[0].type);
@@ -127,7 +138,8 @@ public:
         });
 
         test("delimiters", [this]() {
-            lexer lex("( ) { } [ ] ; ,", "test.jai");
+            string_symbolizer symbolizer;
+            lexer lex("( ) { } [ ] ; ,", &symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             check_eq(std::size_t(9), tokens.size());
             check_eq(token_type::left_paren, tokens[0].type);

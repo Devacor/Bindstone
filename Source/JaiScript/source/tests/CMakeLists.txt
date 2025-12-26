@@ -41,11 +41,24 @@ if(JAISCRIPT_ENABLE_BENCHMARKS)
         message(STATUS "JaiScript: ChaiScript not found at ${CHAISCRIPT_ROOT}")
         set(HAVE_CHAISCRIPT OFF)
     endif()
+
+    # Check if Squirrel is available for comparison benchmarks
+    set(SQUIRREL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../squirrel")
+    if(EXISTS "${SQUIRREL_ROOT}/include/squirrel.h")
+        message(STATUS "JaiScript: Squirrel found - enabling comparison benchmarks")
+        set(HAVE_SQUIRREL ON)
+    else()
+        message(STATUS "JaiScript: Squirrel not found at ${SQUIRREL_ROOT}")
+        set(HAVE_SQUIRREL OFF)
+    endif()
 else()
     message(STATUS "JaiScript: Performance benchmarks DISABLED (use -DJAISCRIPT_ENABLE_BENCHMARKS=ON to enable)")
 endif()
 
 file(GLOB_RECURSE TEST_SOURCES ${TEST_SOURCES_GLOB})
+
+# Exclude standalone profiler from test suite (it has its own main)
+list(FILTER TEST_SOURCES EXCLUDE REGEX "bst_profiler\\.cpp$")
 
 # Create test executable
 add_executable(jaiscript_tests
@@ -78,6 +91,39 @@ if(HAVE_CHAISCRIPT)
     message(STATUS "JaiScript: ChaiScript include path: ${CHAISCRIPT_ROOT}/include")
 endif()
 
+# Add Squirrel support if available
+if(HAVE_SQUIRREL)
+    # Build Squirrel library
+    set(SQUIRREL_SRC_DIR "${SQUIRREL_ROOT}/squirrel")
+    set(SQSTDLIB_SRC_DIR "${SQUIRREL_ROOT}/sqstdlib")
+
+    # Collect Squirrel source files
+    file(GLOB SQUIRREL_SOURCES "${SQUIRREL_SRC_DIR}/*.cpp")
+    file(GLOB SQSTDLIB_SOURCES "${SQSTDLIB_SRC_DIR}/*.cpp")
+
+    # Create Squirrel static library
+    add_library(squirrel_lib STATIC ${SQUIRREL_SOURCES} ${SQSTDLIB_SOURCES})
+    target_include_directories(squirrel_lib PUBLIC
+        "${SQUIRREL_ROOT}/include"
+    )
+    if(MSVC)
+        target_compile_options(squirrel_lib PRIVATE /W2)
+        set_property(TARGET squirrel_lib PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+    endif()
+
+    # Link Squirrel to tests
+    target_include_directories(jaiscript_tests PRIVATE
+        "${SQUIRREL_ROOT}/include"
+    )
+    target_link_libraries(jaiscript_tests PRIVATE squirrel_lib)
+    target_compile_definitions(jaiscript_tests PRIVATE
+        HAVE_SQUIRREL=1
+    )
+    message(STATUS "JaiScript: Squirrel include path: ${SQUIRREL_ROOT}/include")
+endif()
+
 # Platform-specific settings
 if(MSVC)
     target_compile_options(jaiscript_tests PRIVATE
@@ -100,6 +146,30 @@ endif()
 # Add test to CTest
 enable_testing()
 add_test(NAME FoundryTests COMMAND jaiscript_tests)
+
+# ============================================
+# Standalone BST Profiler Target
+# ============================================
+# A minimal executable for profiling C++ FFI performance with Visual Studio Profiler
+# Usage: Run bst_profiler.exe [iterations] with VS Performance Profiler
+if(JAISCRIPT_ENABLE_BENCHMARKS)
+    add_executable(bst_profiler
+        performance/bst_profiler.cpp
+    )
+    target_link_libraries(bst_profiler PRIVATE jaiscript)
+    target_include_directories(bst_profiler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    if(MSVC)
+        target_compile_options(bst_profiler PRIVATE
+            /W3 /EHsc /permissive-
+        )
+        set_property(TARGET bst_profiler PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+    endif()
+
+    message(STATUS "JaiScript: BST Profiler target enabled (bst_profiler)")
+endif()
 
 # Optional: Add filtered test targets
 add_test(NAME LanguageTests COMMAND jaiscript_tests "Language")

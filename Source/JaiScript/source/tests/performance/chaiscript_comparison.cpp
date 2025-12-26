@@ -492,6 +492,11 @@ public:
 
             chai_engine->add(m);
 
+            // Pre-declare variables for C++ BST benchmark (for fair comparison with JaiScript)
+            chai_engine->eval("global root;");
+            chai_engine->eval("global sum = 0;");
+            chai_engine->eval("global height = 0;");
+
             // Pre-declare arrays as globals (no 'var' = global in ChaiScript)
             // and benchmark functions for range-for benchmarks
             chai_engine->eval(R"(
@@ -1142,10 +1147,30 @@ public:
                 )");
             });
 
-            // NOTE: ChaiScript C++ BST benchmark is disabled due to complex type registration
-            // issues with Dynamic_Object = CppTreeNode assignment. The pure script BST
-            // comparison above provides a fair performance comparison.
-            // benchmark("ChaiScript - C++ BST (15 nodes)", [this]() { ... });
+            benchmark("ChaiScript - C++ BST (15 nodes)", [this]() {
+                chai_engine->eval(R"(
+                    root = CppTreeNode(8);
+                    root = cpp_insertNode(root, 4);
+                    root = cpp_insertNode(root, 12);
+                    root = cpp_insertNode(root, 2);
+                    root = cpp_insertNode(root, 6);
+                    root = cpp_insertNode(root, 10);
+                    root = cpp_insertNode(root, 14);
+                    root = cpp_insertNode(root, 1);
+                    root = cpp_insertNode(root, 3);
+                    root = cpp_insertNode(root, 5);
+                    root = cpp_insertNode(root, 7);
+                    root = cpp_insertNode(root, 9);
+                    root = cpp_insertNode(root, 11);
+                    root = cpp_insertNode(root, 13);
+                    root = cpp_insertNode(root, 15);
+
+                    sum = cpp_inorderSum(root);
+                    height = cpp_treeHeight(root);
+                    root = cpp_rotateRight(root);
+                    sum = cpp_inorderSum(root);
+                )");
+            });
         });
 
 #else

@@ -833,7 +833,7 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
         }
         
         // Parse and execute
-        lexer lexer(scriptContent, impl->registeredTemplateTypes);
+        lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
         auto tokens = lexer.tokenize();
         parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
         auto parse_result = parser.parse();
@@ -1062,7 +1062,7 @@ string_symbolizer* engine::get_symbolizer() {
     return &impl->string_symbolizer_;
 }
 
-uint64_t engine::symbolize(const std::string& str) const {
+uint64_t engine::symbolize(std::string_view str) const {
     return impl->string_symbolizer_.intern(str);
 }
 
@@ -1078,7 +1078,9 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     // Store the class definition in the global environment with __class_ prefix
     // This allows static member access (ClassName::static_field) to work for C++ classes
     // Use optimized make_object with cached type_id for fast type checking
-    impl->global_environment_->define("__class_" + name, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, this));
+    uint64_t name_id = impl->string_symbolizer_.intern(name);
+    auto [class_var_id, class_var_name] = impl->string_symbolizer_.get_class_var_id_with_view(name_id);
+    impl->global_environment_->define(class_var_id, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, this));
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {

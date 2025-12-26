@@ -1755,7 +1755,7 @@ void interpreter::init_builtin_methods() {
             } else {
                 // Fallback: use the object type
                 if (auto eng = interp->get_engine()) {
-                    result.set_type_info(eng->get_type_info_object(locked->type_name));
+                    result.set_type_info(eng->get_type_info_object(locked->type_id));
                 }
             }
 
@@ -3115,7 +3115,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         // This is a type constructor being used as a function
         // Extract the base type name (weak_ptr or shared_ptr)
         size_t pos = expr->name.find('<');
-        std::string base_type = expr->name.substr(0, pos);
+        std::string base_type(expr->name.substr(0, pos));
         
         // Look up the constructor function for this type
         auto ctor_result = environment_->get(base_type);
@@ -4420,11 +4420,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
 
-            // Intern the member name to ID
-            uint64_t member_id = string_symbolizer_->intern(memberExpr->member);
+            // Use cached member_id or intern
+            uint64_t member_id = memberExpr->member_id != UINT64_MAX
+                ? memberExpr->member_id
+                : string_symbolizer_->intern(memberExpr->member);
 
             // Check if there's a property setter
-            uint64_t setter_id = string_symbolizer_->intern("_set_" + memberExpr->member);
+            auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
             script_value setter = instance->get_method(setter_id, false);
             if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
@@ -4440,13 +4442,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 instance->set_field(member_id, clone_for_assignment(resultValue));
             } else {
                 // Set exception state instead of throwing
-                active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
-                current_exception_ = script_exception("Cannot assign to non-existent member '" + memberExpr->member + "'", memberExpr->location);
+                std::string member_str(memberExpr->member);
+                active_exception_value_ = make_value("Cannot assign to non-existent member '" + member_str + "'");
+                current_exception_ = script_exception("Cannot assign to non-existent member '" + member_str + "'", memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
                 return {};
             }
-            
+
             push_value(std::move(resultValue));
         } else {
             // General compound assignment for any expression
@@ -4946,11 +4949,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         "Static member assignment requires a class name");
                 }
                 auto* ident_expr = static_cast<identifier_expr*>(memberExpr->object.get());
-                
-                std::string class_name = ident_expr->name;
 
                 uint64_t class_name_id = ident_expr->symbol_id;
-                auto class_result = environment_->get("__class_" + class_name);
+                auto [class_var_id, class_var_name] = string_symbolizer_->get_class_var_id_with_view(class_name_id);
+                auto class_result = environment_->get(class_var_id);
                 if (!class_result) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                         "Class '{0}' not found", class_name_id);
@@ -5013,11 +5015,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
 
-            // Intern the member name to ID
-            uint64_t member_id = string_symbolizer_->intern(memberExpr->member);
+            // Use cached member_id or intern
+            uint64_t member_id = memberExpr->member_id != UINT64_MAX
+                ? memberExpr->member_id
+                : string_symbolizer_->intern(memberExpr->member);
 
             // Check if there's a property setter first (for C++ properties)
-            uint64_t setter_id = string_symbolizer_->intern("_set_" + memberExpr->member);
+            auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
             script_value setter = instance->get_method(setter_id, false);
             if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
@@ -5033,13 +5037,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 instance->set_field(member_id, clone_for_assignment(value));
             } else {
                 // Set exception state instead of throwing
-                active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
-                current_exception_ = script_exception("Cannot assign to non-existent member '" + memberExpr->member + "'", memberExpr->location);
+                std::string member_str(memberExpr->member);
+                active_exception_value_ = make_value("Cannot assign to non-existent member '" + member_str + "'");
+                current_exception_ = script_exception("Cannot assign to non-existent member '" + member_str + "'", memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
                 return {};
             }
-            
+
             push_value(std::move(value));  // Assignment expressions return the assigned value
         }
         // Check if target is a subscript expression (array[index] or map[key])
@@ -5426,7 +5431,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
 checked_result<script_value> interpreter::enforce_type_compatibility(
     script_value value,
     type_info_ptr target_type,
-    const std::string& var_name
+    std::string_view var_name
 ) {
     // Case 1: Uninitialized variable (auto x;) - lock to source type
     if (!target_type) {
@@ -5516,10 +5521,10 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
             try {
                 auto instance = value.as<std::shared_ptr<class_instance>>();
                 if (instance) {
-                    auto class_def = instance->get_class_definition();
+                    class_definition* class_def = instance->get_class_definition();
                     if (class_def) {
                         // Walk up the inheritance chain looking for target class
-                        auto current = class_def;
+                        class_definition* current = class_def;
                         while (current) {
                             for (const auto& parent : current->get_parent_classes()) {
                                 if (parent && parent->get_name() == target_class_name) {
@@ -5528,7 +5533,7 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
                                 }
                             }
                             // Move up to first parent for next iteration (single inheritance path)
-                            current = current->get_parent();
+                            current = current->get_parent().get();
                         }
                     }
                 }
@@ -6083,12 +6088,12 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             // Recursively build the full path
             std::function<std::string(expression*)> build_namespace_path = [&](expression* e) -> std::string {
                 if (e->get_type() == node_type::identifier_expr) {
-                    return static_cast<identifier_expr*>(e)->name;
+                    return std::string(static_cast<identifier_expr*>(e)->name);
                 } else if (e->get_type() == node_type::member_expr) {
                     auto* member = static_cast<member_expr*>(e);
                     if (member->is_static) {
                         // This is a :: access, continue building the path
-                        return build_namespace_path(member->object.get()) + "::" + member->member;
+                        return build_namespace_path(member->object.get()) + "::" + std::string(member->member);
                     }
                 }
                 return "";
@@ -6156,7 +6161,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
                 // Check if there's also a class with the same name (for fallback)
                 std::shared_ptr<class_definition> fallback_class;
-                auto class_var_result = environment_->get("__class_" + name);
+                auto [fallback_class_var_id, fallback_class_var_name] = string_symbolizer_->get_class_var_id_with_view(name_id);
+                auto class_var_result = environment_->get(fallback_class_var_id);
                 if (class_var_result) {
                     script_value class_var = std::move(class_var_result.value());
                     if (class_var.is_object()) {
@@ -6243,8 +6249,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             // Member not found in namespace - fall through to check class static methods
         }
 
-        // PRIORITY 2: Look up the class definition
-        auto class_var_result = environment_->get("__class_" + name);
+        // PRIORITY 2: Look up the class definition (use cached ID)
+        auto [class_var_id, class_var_view] = string_symbolizer_->get_class_var_id_with_view(name_id);
+        auto class_var_result = environment_->get(class_var_id);
         if (!class_var_result) {
             // Class not found
             return class_var_result.error_value();
@@ -6282,8 +6289,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
 
         // Try getter method as fallback (for C++ bound properties)
-        std::string getter_name = "_get_" + expr->member;
-        uint64_t getter_id = string_symbolizer_->intern(getter_name);
+        auto [getter_id, _] = string_symbolizer_->get_getter_id_with_view(expr->member_id);
         // get_static_method with false doesn't throw - returns null if not found
         script_value getter_method = class_def->get_static_method(getter_id, false);
         if (!getter_method.is_null() && getter_method.is_function()) {
@@ -6380,8 +6386,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
         else {
             // Set exception state instead of throwing
-            active_exception_value_ = make_value("String has no method '" + expr->member + "'");
-            current_exception_ = script_exception("String has no method '" + expr->member + "'", expr->location);
+            std::string member_str(expr->member);
+            active_exception_value_ = make_value("String has no method '" + member_str + "'");
+            current_exception_ = script_exception("String has no method '" + member_str + "'", expr->location);
             is_unwinding_ = true;
             push_value(make_value());
             return {};
@@ -6405,8 +6412,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         }
         else {
             // Set exception state instead of throwing
-            active_exception_value_ = make_value("Array has no method '" + expr->member + "'");
-            current_exception_ = script_exception("Array has no method '" + expr->member + "'", expr->location);
+            std::string member_str(expr->member);
+            active_exception_value_ = make_value("Array has no method '" + member_str + "'");
+            current_exception_ = script_exception("Array has no method '" + member_str + "'", expr->location);
             is_unwinding_ = true;
             push_value(make_value());
             return {};
@@ -6581,7 +6589,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         try {
             uint64_t getter_id = expr->getter_id;
             if (getter_id == UINT64_MAX) {
-                getter_id = string_symbolizer_->intern("_get_" + expr->member);
+                auto [id, _] = string_symbolizer_->get_getter_id_with_view(member_id);
+                getter_id = id;
                 expr->getter_id = getter_id;
             }
             script_value getter = instance->get_method(getter_id, false);
@@ -6615,8 +6624,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         return {};
     }
     // Set exception state instead of throwing
-    active_exception_value_ = make_value("Object has no member '" + expr->member + "'");
-    current_exception_ = script_exception("Object has no member '" + expr->member + "'", expr->location);
+    std::string member_str(expr->member);
+    active_exception_value_ = make_value("Object has no member '" + member_str + "'");
+    current_exception_ = script_exception("Object has no member '" + member_str + "'", expr->location);
     is_unwinding_ = true;
     push_value(make_value());  // Push null for failed member access
     return {};
@@ -6649,7 +6659,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     }
                 }
                 if (!is_param) {
-                    used_variables.insert(ident->name);
+                    used_variables.insert(std::string(ident->name));
                 }
             } else if (e->get_type() == node_type::binary_expr) {
                 auto* binary = static_cast<binary_expr*>(e);
@@ -8202,7 +8212,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     }
     
     // Create new context for this class
-    current_class_context_ = class_context{decl->name, {}, false};
+    current_class_context_ = class_context{std::string(decl->name), {}, false};
     
     // Restore previous context on exit
     auto context_guard = std::shared_ptr<void>(nullptr, [this, prev_context, had_context](void*) {
@@ -8217,9 +8227,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     std::shared_ptr<script_class_definition> class_def = nullptr;
     bool is_redefinition = false;
 
-    // Use a static prefix to avoid repeated allocations
-    static const std::string CLASS_PREFIX = "__class_";
-    std::string class_var_name = CLASS_PREFIX + decl->name;
+    // Use cached class variable ID helper (avoids string allocation on repeated access)
+    auto [class_var_id, class_var_name_view] = string_symbolizer_->get_class_var_id_with_view(decl->name_id);
 
     // Look for existing class in GLOBAL environment (hot reload support)
     // get_global_environment() now uses engine's global directly (not parent chain walking)
@@ -8227,7 +8236,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     if (!global_env) {
         return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
     }
-    auto existing_result = global_env->get(class_var_name);
+    auto existing_result = global_env->get(class_var_id);
     if (existing_result) {
         script_value existing = std::move(existing_result.value());
         if (!existing.is_null() && existing.is_object()) {
@@ -8273,9 +8282,11 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
         // Look up each base class definition
         for (const std::string& base_name : decl->base_classes) {
-            // First try to find a script class
+            // First try to find a script class (intern base_name and use cached __class_ lookup)
+            uint64_t base_name_id = string_symbolizer_->intern(base_name);
+            auto [base_class_var_id, base_class_var_name] = string_symbolizer_->get_class_var_id_with_view(base_name_id);
             script_value base_class_var = make_value();
-            auto base_result = environment_->get("__class_" + base_name);
+            auto base_result = environment_->get(base_class_var_id);
             if (base_result) {
                 base_class_var = std::move(base_result.value());
             }
@@ -8399,7 +8410,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         if (var_decl) {
             // Field declaration
             script_value default_val(std::monostate{}, engine_);  // Ensure engine reference
-            std::string field_name = var_decl->name;
+            std::string_view field_name = var_decl->name;
             // Use pre-computed ID from parser (already interned during parsing)
             uint64_t field_id = var_decl->name_id;
             expression_ptr initializer_ast = nullptr;
@@ -8443,10 +8454,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 }
             } else {
                 // Instance field - store initializer AST for evaluation at construction time
-                if (!field_name.empty()) {
+                if (field_id != 0) {
                     if (initializer_ast) {
-                        // Store the initializer AST in the script class definition
-                        class_def->add_field_initializer_ast(field_name, initializer_ast);
+                        // Store the initializer AST in the script class definition (using ID for efficiency)
+                        class_def->add_field_initializer_ast(field_id, initializer_ast);
                     }
                     // Also add a null default value to the field_defaults map (using ID for performance)
                     // This ensures the field exists but will be properly initialized later
@@ -8917,13 +8928,13 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                         const auto& field_initializers = it->script_class->get_field_initializer_asts();
                                         auto old_env = self->environment_;
                                         self->environment_ = level_init_env;
-                                        for (const auto& [field_name, initializer_ast] : field_initializers) {
+                                        for (const auto& [field_id, initializer_ast] : field_initializers) {
                                             if (initializer_ast) {
                                                 auto r = self->dispatch_expr(initializer_ast.get());
                                                 if (r) {
                                                     script_value field_value = self->pop_value();
-                                                    uint64_t field_name_id = self->string_symbolizer_->intern(field_name);
-                                                    instance->set_field(field_name_id, std::move(field_value));
+                                                    // field_id is already the interned ID (map is keyed by ID)
+                                                    instance->set_field(field_id, std::move(field_value));
                                                 }
                                             }
                                         }
@@ -9133,11 +9144,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         field_defaults_with_engine.reserve(new_field_defaults.size());
 
         for (const auto& [field_id, value] : new_field_defaults) {
-            // Convert ID back to string for get_field_initializer_ast (which still uses strings)
-            std::string field_name = std::string(string_symbolizer_->get_string(field_id));
-
-            // Get the field initializer AST from the class definition
-            auto initializer_ast = class_def->get_field_initializer_ast(field_name);
+            // Get the field initializer AST from the class definition (using ID directly)
+            auto initializer_ast = class_def->get_field_initializer_ast(field_id);
             script_value evaluated_value = value;
 
             if (initializer_ast) {
@@ -9158,9 +9166,6 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // Generate getter and setter methods for all fields (including new ones)
         // This is needed for hot reload to work properly with property access
         for (const auto& [field_id, default_val] : field_defaults_with_engine) {
-            // Get field name for getter/setter method names
-            std::string field_name = std::string(string_symbolizer_->get_string(field_id));
-
             // Add getter method
             auto getter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.empty()) {
@@ -9174,7 +9179,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Get the field value using the cached ID
                 return instance->get_field(field_id);
             };
-            uint64_t getter_id = string_symbolizer_->intern("_get_" + field_name);
+            auto [getter_id, _1] = string_symbolizer_->get_getter_id_with_view(field_id);
             new_methods[getter_id] = script_value::make_function(getter, engine_);
 
             // Add setter method
@@ -9193,7 +9198,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Return the value that was set
                 return args[1];
             };
-            uint64_t setter_id = string_symbolizer_->intern("_set_" + field_name);
+            auto [setter_id, _2] = string_symbolizer_->get_setter_id_with_view(field_id);
             new_methods[setter_id] = script_value::make_function(setter, engine_);
         }
         
@@ -9208,7 +9213,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // For new classes, add the fields normally
         for (const auto& [field_id, default_val] : new_field_defaults) {
             // Convert ID back to string for add_field (legacy API)
-            std::string field_name = std::string(string_symbolizer_->get_string(field_id));
+            std::string field_name(string_symbolizer_->get_string(field_id));
             class_def->add_field(field_name, default_val);
 
             // Generate getter and setter methods for script class fields
@@ -9227,7 +9232,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Get the field value using ID
                 return instance->get_field(field_id);
             };
-            class_def->add_method("_get_" + field_name, getter);
+            auto [getter_id, _1] = string_symbolizer_->get_getter_id_with_view(field_id);
+            class_def->add_method_by_id(getter_id, getter, true);  // true = is_property_getter
 
             // Add setter method - capture field_id for performance
             auto setter = [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -9245,7 +9251,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Return the value that was set
                 return args[1];
             };
-            class_def->add_method("_set_" + field_name, setter);
+            auto [setter_id, _2] = string_symbolizer_->get_setter_id_with_view(field_id);
+            class_def->add_method_by_id(setter_id, setter);
         }
         // Initialize fingerprint for future comparisons
         class_def->initialize_fingerprint();
@@ -9299,7 +9306,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // Store the class definition in a special variable for later retrieval
     // This allows inheritance and other features to work
     // IMPORTANT: Define in GLOBAL environment so it's visible across execute() calls (hot reload)
-    global_env->define(class_var_name, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_, false));
+    global_env->define(class_var_id, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_, false));
 
     // The constructor function is already registered in the environment
     // which allows "new ClassName()" syntax to work
@@ -9352,7 +9359,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // Check if this namespace name matches a class name
             // If so, check for collision with class static methods
             if (!func_decl->is_override) {
-                uint64_t class_var_id = string_symbolizer_->intern("__class_" + decl->name);
+                auto [class_var_id, class_var_name] = string_symbolizer_->get_class_var_id_with_view(decl->name_id);
                 auto class_result = environment_->get(class_var_id);
                 if (class_result && class_result.value().is_object()) {
                     script_value class_var = std::move(class_result.value());
@@ -9403,9 +9410,8 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // Then also store reference in namespace
             JAISCRIPT_TRY(dispatch_decl(class_decl_ptr));
 
-            // Look up the registered class definition using __class_ prefix
-            std::string class_var_name = "__class_" + class_decl_ptr->name;
-            uint64_t class_var_id = string_symbolizer_->intern(class_var_name);
+            // Look up the registered class definition using __class_ prefix (cached)
+            auto [class_var_id, class_var_name] = string_symbolizer_->get_class_var_id_with_view(class_decl_ptr->name_id);
             if (auto* class_def_var = environment_->get_value_ptr(class_var_id)) {
                 if (class_def_var->is_object()) {
                     auto obj_holder = class_def_var->get_object_holder();
@@ -9568,14 +9574,14 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
     auto old_env = environment_;
     environment_ = init_env;
 
-    for (const auto& [field_name, initializer_ast] : field_initializers) {
+    for (const auto& [field_id, initializer_ast] : field_initializers) {
         if (initializer_ast) {
             // Evaluate the initializer expression
             auto result = dispatch_expr(initializer_ast.get());
             if (!result) {
                 // Restore environment before throwing
                 environment_ = old_env;
-                throw runtime_error("Failed to evaluate field initializer for '" + field_name + "'");
+                throw runtime_error("Failed to evaluate field initializer for '" + std::string(string_symbolizer_->get_string(field_id)) + "'");
             }
             script_value field_value = pop_value();
 
@@ -9584,8 +9590,7 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
                 field_value.set_engine(engine_);
             }
 
-            // Set the field on the instance (intern the name to ID)
-            uint64_t field_id = string_symbolizer_->intern(field_name);
+            // Set the field on the instance using the field_id directly
             instance->set_field(field_id, field_value);
         }
     }
@@ -10108,7 +10113,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
 
                     // Get source type info (name and class_def for inheritance)
                     std::string source_type_name;
-                    std::shared_ptr<class_definition> source_class_def;
+                    class_definition* source_class_def = nullptr;
                     if (source_type == script_value_type::jai_object_type) {
                         auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
                         if (instance) {

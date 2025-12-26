@@ -1,4 +1,5 @@
 #include "../../include/jaiscript/detail/lexer.hpp"
+#include "../../include/jaiscript/detail/string_symbolizer.hpp"
 #include <cctype>
 #include <sstream>
 
@@ -50,11 +51,11 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"import", token_type::import_keyword},
 };
 
-lexer::lexer(const std::string& source, const std::string& filename)
-    : source_(source), filename_(filename), current_(0), line_(1), column_(1) {}
+lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename)
+    : source_(source), filename_(filename), symbolizer_(symbolizer), current_(0), line_(1), column_(1) {}
 
-lexer::lexer(const std::string& source, const std::unordered_set<std::string>& registeredTypes, const std::string& filename)
-    : source_(source), filename_(filename), current_(0), line_(1), column_(1), registered_types_(registeredTypes) {}
+lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::unordered_set<std::string>& registeredTypes, const std::string& filename)
+    : source_(source), filename_(filename), symbolizer_(symbolizer), current_(0), line_(1), column_(1), registered_types_(registeredTypes) {}
 
 std::vector<token> lexer::tokenize() {
     std::vector<token> tokens;
@@ -272,9 +273,9 @@ void lexer::skip_comment() {
 }
 
 token lexer::make_token(token_type type) {
-    // For single-character tokens, include the character as lexeme
-    std::string lexeme;
-    
+    // Use static string_views for operators (string literals have static storage duration)
+    std::string_view lexeme;
+
     switch (type) {
         case token_type::left_paren: lexeme = "("; break;
         case token_type::right_paren: lexeme = ")"; break;
@@ -300,7 +301,7 @@ token lexer::make_token(token_type type) {
         case token_type::tilde: lexeme = "~"; break;
         case token_type::bang: lexeme = "!"; break;
         case token_type::equal: lexeme = "="; break;
-        
+
         // Multi-character operators
         case token_type::plus_plus: lexeme = "++"; break;
         case token_type::minus_minus: lexeme = "--"; break;
@@ -320,35 +321,37 @@ token lexer::make_token(token_type type) {
         case token_type::spaceship: lexeme = "<=>"; break;
         case token_type::left_shift: lexeme = "<<"; break;
         case token_type::right_shift: lexeme = ">>"; break;
-        
-        default: 
+
+        default:
             // For other tokens like EOF, just leave empty
             break;
     }
-    
+
     return token(type, lexeme, current_location());
 }
 
-token lexer::make_token(token_type type, const std::string& lexeme) {
+token lexer::make_token(token_type type, std::string_view lexeme) {
     return token(type, lexeme, current_location());
 }
 
 token lexer::error_token(const std::string& message) {
-    token token(token_type::error, message, current_location());
+    // Error messages need to be stored - use static for now or intern
+    // For simplicity, we'll point to source_ range where error occurred
+    token token(token_type::error, std::string_view(message), current_location());
     return token;
 }
 
 token lexer::scan_number() {
     size_t start = current_;
     size_t startColumn = column_;
-    
+
     // Integer part
     while (is_digit(peek())) {
         advance();
     }
-    
+
     bool is_float = false;
-    
+
     // Look for decimal part
     if (peek() == '.' && is_digit(peek_next())) {
         is_float = true;
@@ -357,7 +360,7 @@ token lexer::scan_number() {
             advance();
         }
     }
-    
+
     // Look for exponent
     if (peek() == 'e' || peek() == 'E') {
         is_float = true;
@@ -369,53 +372,58 @@ token lexer::scan_number() {
             advance();
         }
     }
-    
-    std::string lexeme = source_.substr(start, current_ - start);
+
+    // Use string_view into source_ (permanent storage)
+    std::string_view lexeme_view(source_.data() + start, current_ - start);
     source_location loc = current_location();
     loc.column = startColumn;
-    
-    token token(is_float ? token_type::float_literal : token_type::integer_literal, lexeme, loc);
-    
+
+    token tok(is_float ? token_type::float_literal : token_type::integer_literal, lexeme_view, loc);
+
+    // Need temporary string for parsing (stod/stoll need null-terminated)
+    std::string lexeme_str(lexeme_view);
+
     if (is_float) {
-        token.float_value = std::stod(lexeme);
+        tok.float_value = std::stod(lexeme_str);
     } else {
         // Handle different integer formats
-        if (lexeme.size() > 2 && lexeme[0] == '0') {
-            if (lexeme[1] == 'x' || lexeme[1] == 'X') {
+        if (lexeme_str.size() > 2 && lexeme_str[0] == '0') {
+            if (lexeme_str[1] == 'x' || lexeme_str[1] == 'X') {
                 // Hexadecimal
-                token.int_value = std::stoll(lexeme.substr(2), nullptr, 16);
-            } else if (lexeme[1] == 'b' || lexeme[1] == 'B') {
+                tok.int_value = std::stoll(lexeme_str.substr(2), nullptr, 16);
+            } else if (lexeme_str[1] == 'b' || lexeme_str[1] == 'B') {
                 // Binary
-                token.int_value = std::stoll(lexeme.substr(2), nullptr, 2);
+                tok.int_value = std::stoll(lexeme_str.substr(2), nullptr, 2);
             } else {
                 // Octal
-                token.int_value = std::stoll(lexeme, nullptr, 8);
+                tok.int_value = std::stoll(lexeme_str, nullptr, 8);
             }
         } else {
             // Decimal
-            token.int_value = std::stoll(lexeme);
+            tok.int_value = std::stoll(lexeme_str);
         }
     }
-    
-    return token;
+
+    return tok;
 }
 
 token lexer::scan_string() {
-    size_t startColumn = column_ - 1; // Account for opening quote
+    size_t start = current_ - 1;  // Include opening quote
+    size_t startColumn = column_ - 1;
     size_t startLine = line_;
     std::string value;
-    
+
     while (!is_at_end() && peek() != '"') {
         if (peek() == '\n') {
             return error_token("Unterminated string literal");
         }
-        
+
         if (peek() == '\\') {
             advance();
             if (is_at_end()) {
                 return error_token("Unterminated string literal");
             }
-            
+
             char escaped = advance();
             switch (escaped) {
                 case 'n': value += '\n'; break;
@@ -431,36 +439,39 @@ token lexer::scan_string() {
             value += advance();
         }
     }
-    
+
     if (is_at_end()) {
         return error_token("Unterminated string literal");
     }
-    
+
     advance(); // Consume closing quote
-    
+
     source_location loc = current_location();
     loc.line = startLine;
     loc.column = startColumn;
-    
-    token token(token_type::string_literal, "\"" + value + "\"", loc);
-    token.string_value = value;
-    return token;
+
+    // Use string_view into source_ for the raw lexeme (includes quotes)
+    std::string_view lexeme_view(source_.data() + start, current_ - start);
+    token tok(token_type::string_literal, lexeme_view, loc);
+    tok.string_value = std::move(value);
+    return tok;
 }
 
 token lexer::scan_char() {
-    size_t startColumn = column_ - 1; // Account for opening quote
-    
+    size_t start = current_ - 1;  // Include opening quote
+    size_t startColumn = column_ - 1;
+
     if (is_at_end()) {
         return error_token("Unterminated character literal");
     }
-    
+
     char value;
     if (peek() == '\\') {
         advance();
         if (is_at_end()) {
             return error_token("Unterminated character literal");
         }
-        
+
         char escaped = advance();
         switch (escaped) {
             case 'n': value = '\n'; break;
@@ -475,62 +486,74 @@ token lexer::scan_char() {
     } else {
         value = advance();
     }
-    
+
     if (is_at_end() || peek() != '\'') {
         return error_token("Unterminated character literal");
     }
-    
+
     advance(); // Consume closing quote
-    
+
     source_location loc = current_location();
     loc.column = startColumn;
-    
-    token token(token_type::char_literal, std::string("'") + value + "'", loc);
-    token.char_value = value;
-    return token;
+
+    // Use string_view into source_ for the raw lexeme (includes quotes)
+    std::string_view lexeme_view(source_.data() + start, current_ - start);
+    token tok(token_type::char_literal, lexeme_view, loc);
+    tok.char_value = value;
+    return tok;
 }
 
 token lexer::scan_identifier() {
     size_t start = current_;
     size_t startColumn = column_;
-    
+
     while (is_alpha_numeric(peek()) || peek() == '_') {
         advance();
     }
-    
-    std::string lexeme = source_.substr(start, current_ - start);
-    
+
+    // Create string_view into source for comparisons (no allocation)
+    std::string_view lexeme_view(source_.data() + start, current_ - start);
+
     source_location loc = current_location();
     loc.column = startColumn;
-    
+
     // Check for 'super::' special case BEFORE keyword lookup
-    if (lexeme == "super" && peek() == ':' && peek_next() == ':') {
+    if (lexeme_view == "super" && peek() == ':' && peek_next() == ':') {
         advance(); // :
         advance(); // :
         return token(token_type::super_keyword, "super::", loc);
     }
-    
-    // Check if it's a keyword
-    auto it = keywords_.find(lexeme);
+
+    // Check if it's a keyword (keywords use static string storage)
+    // Need temporary std::string for map lookup (keyword map uses std::string keys)
+    std::string lexeme_str(lexeme_view);
+    auto it = keywords_.find(lexeme_str);
     if (it != keywords_.end()) {
-        token token(it->second, lexeme, loc);
-        
+        // For keywords, use string_view to the keyword string in the map (permanent storage)
+        token tok(it->second, it->first, loc);
+
         // Handle boolean literals
         if (it->second == token_type::true_keyword) {
-            token.bool_value = true;
+            tok.bool_value = true;
         } else if (it->second == token_type::false_keyword) {
-            token.bool_value = false;
+            tok.bool_value = false;
         }
-        
-        return token;
+
+        return tok;
     }
-    
+
     // Check if it's a registered template type base name (e.g., "Point" for Point<int>)
-    if (registered_types_.find(lexeme) != registered_types_.end()) {
-        return token(token_type::user_template_type, lexeme, loc);
+    auto reg_it = registered_types_.find(lexeme_str);
+    if (reg_it != registered_types_.end()) {
+        // Point to the registered type string (permanent storage in the set)
+        return token(token_type::user_template_type, *reg_it, loc);
     }
-    
-    return token(token_type::identifier, lexeme, loc);
+
+    // For regular identifiers - symbolizer is always required
+    // Intern the identifier so lexeme points to permanent symbolizer storage
+    uint64_t sym_id = symbolizer_->intern(lexeme_view);
+    std::string_view interned = symbolizer_->get_string(sym_id);
+    return token(token_type::identifier, interned, sym_id, loc);
 }
 
 bool lexer::is_digit(char c) const {

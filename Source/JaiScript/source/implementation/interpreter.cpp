@@ -4310,7 +4310,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             auto objHolder = objectValue.get_object_holder();
                             if (objHolder) {
                                 auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
-                                uint64_t member_id = string_symbolizer_->intern(memberExpr->member);
+                                // Use cached member_id or intern
+                                uint64_t member_id = memberExpr->member_id != UINT64_MAX
+                                    ? memberExpr->member_id
+                                    : string_symbolizer_->intern(memberExpr->member);
                                 instance->set_field(member_id, clone_for_assignment(custom_result.value()));
                                 push_value(std::move(custom_result.value()));
                                 return {};

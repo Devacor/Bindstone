@@ -24,35 +24,25 @@ public:
 
     CppBoundObject(const std::string& n) : id(++instance_count), name(n) {
         alive_count++;
-        std::string msg = "CppBoundObject(\"" + name + "\") ctor, id=" + std::to_string(id) + ", alive=" + std::to_string(alive_count);
-        std::cout << msg << std::endl;
-        operation_log.push_back(msg);
+        operation_log.push_back("CppBoundObject(\"" + name + "\") ctor, id=" + std::to_string(id) + ", alive=" + std::to_string(alive_count));
     }
 
     CppBoundObject(const CppBoundObject& other) : id(other.id), name(other.name) {
         alive_count++;  // Copies also increase alive count
-        std::string msg = "CppBoundObject COPY from id=" + std::to_string(other.id) + ", alive=" + std::to_string(alive_count);
-        std::cout << msg << std::endl;
-        operation_log.push_back(msg);
+        operation_log.push_back("CppBoundObject COPY from id=" + std::to_string(other.id) + ", alive=" + std::to_string(alive_count));
     }
 
     ~CppBoundObject() {
         alive_count--;
-        std::string msg = "~CppBoundObject(\"" + name + "\") dtor, id=" + std::to_string(id) + ", alive=" + std::to_string(alive_count);
-        std::cout << msg << std::endl;
-        operation_log.push_back(msg);
+        operation_log.push_back("~CppBoundObject(\"" + name + "\") dtor, id=" + std::to_string(id) + ", alive=" + std::to_string(alive_count));
     }
 
     void instance_method() {
-        std::string msg = "CppBoundObject::instance_method() called on \"" + name + "\"";
-        std::cout << msg << std::endl;
-        operation_log.push_back(msg);
+        operation_log.push_back("CppBoundObject::instance_method() called on \"" + name + "\"");
     }
 
     static void static_method() {
-        std::string msg = "CppBoundObject::static_method() called";
-        std::cout << msg << std::endl;
-        operation_log.push_back(msg);
+        operation_log.push_back("CppBoundObject::static_method() called");
     }
 
     std::string get_name() const { return name; }

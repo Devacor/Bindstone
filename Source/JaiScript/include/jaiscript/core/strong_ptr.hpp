@@ -57,7 +57,7 @@ struct control_block_base {
  */
 template<typename T>
 struct control_block : control_block_base {
-    alignas(T) unsigned char storage[sizeof(T)];
+    alignas(T) unsigned char storage[sizeof(T)] = {};
 
     T* ptr() noexcept { return std::launder(reinterpret_cast<T*>(storage)); }
     const T* ptr() const noexcept { return std::launder(reinterpret_cast<const T*>(storage)); }

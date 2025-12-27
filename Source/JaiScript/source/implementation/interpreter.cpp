@@ -1997,7 +1997,17 @@ checked_result<script_value> environment::get(uint64_t id) const {
         return *(it->second);
     }
 
-    // Cache miss - walk parent chain
+    // FAST PATH: Iterate parent caches without function call overhead
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        auto parent_it = p->flat_lookup_.find(id);
+        if (parent_it != p->flat_lookup_.end()) {
+            // Found in ancestor cache - copy to our cache and return
+            flat_lookup_[id] = parent_it->second;
+            return *(parent_it->second);
+        }
+    }
+
+    // SLOW PATH: No ancestor had it cached - do full lookup
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
@@ -2079,7 +2089,16 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
         return std::cref(*(it->second));
     }
 
-    // Cache miss - walk parent chain
+    // FAST PATH: Iterate parent caches without function call overhead
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        auto parent_it = p->flat_lookup_.find(id);
+        if (parent_it != p->flat_lookup_.end()) {
+            flat_lookup_[id] = parent_it->second;
+            return std::cref(*(parent_it->second));
+        }
+    }
+
+    // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
@@ -2146,7 +2165,16 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
         return std::ref(*(it->second));
     }
 
-    // Cache miss - walk parent chain
+    // FAST PATH: Iterate parent caches without function call overhead
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        auto parent_it = p->flat_lookup_.find(id);
+        if (parent_it != p->flat_lookup_.end()) {
+            flat_lookup_[id] = parent_it->second;
+            return std::ref(*(parent_it->second));
+        }
+    }
+
+    // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
@@ -2209,7 +2237,17 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
         return {};
     }
 
-    // Cache miss - walk parent chain
+    // FAST PATH: Iterate parent caches without function call overhead
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        auto parent_it = p->flat_lookup_.find(id);
+        if (parent_it != p->flat_lookup_.end()) {
+            flat_lookup_[id] = parent_it->second;
+            *(parent_it->second) = value;
+            return {};
+        }
+    }
+
+    // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
@@ -2277,7 +2315,17 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
         return {};
     }
 
-    // Cache miss - walk parent chain
+    // FAST PATH: Iterate parent caches without function call overhead
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        auto parent_it = p->flat_lookup_.find(id);
+        if (parent_it != p->flat_lookup_.end()) {
+            flat_lookup_[id] = parent_it->second;
+            *(parent_it->second) = std::move(value);
+            return {};
+        }
+    }
+
+    // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
@@ -2348,7 +2396,16 @@ bool environment::contains(uint64_t id) const {
         return true;
     }
 
-    // Cache miss - walk parent chain
+    // FAST PATH: Iterate parent caches without function call overhead
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        if (p->flat_lookup_.find(id) != p->flat_lookup_.end()) {
+            // Found in ancestor cache - we know it exists
+            // Note: we don't cache here since contains() is just a check
+            return true;
+        }
+    }
+
+    // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {
@@ -2483,7 +2540,21 @@ script_value* environment::get_value_ptr(uint64_t id) {
         return it->second;
     }
 
-    // Cache miss - walk parent chain
+    // FAST PATH: Iterate parent caches without function call overhead
+    // This is critical for deep recursion (Fibonacci, BST) where the same
+    // function name is looked up repeatedly at each call depth.
+    // Once any ancestor has it cached, all descendants benefit.
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        auto parent_it = p->flat_lookup_.find(id);
+        if (parent_it != p->flat_lookup_.end()) {
+            // Found in ancestor cache - copy to our cache and return
+            flat_lookup_[id] = parent_it->second;
+            return parent_it->second;
+        }
+    }
+
+    // SLOW PATH: No ancestor had it cached - do full lookup
+    // This handles first-time lookups, locals, 'this' fields, static fields, etc.
     if (parent_) {
         script_value* ptr = parent_->get_value_ptr(id);
         if (ptr) {

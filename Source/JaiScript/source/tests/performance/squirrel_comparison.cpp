@@ -155,6 +155,144 @@ float SquirrelVM::eval<float>(const char* script) {
     sq_pop(vm, 3);
     return static_cast<float>(result);
 }
+
+// ===== Squirrel C++ Binding for CppTreeNode =====
+// Type tag for CppTreeNode (unique identifier)
+static SQUserPointer CppTreeNodeTag = (SQUserPointer)"CppTreeNode";
+
+// Release hook - called when Squirrel garbage collects the object
+static SQInteger sq_CppTreeNode_release(SQUserPointer ptr, SQInteger size) {
+    auto* sp = reinterpret_cast<std::shared_ptr<CppTreeNode>*>(ptr);
+    if (sp) {
+        delete sp;
+    }
+    return 0;
+}
+
+// Helper to get the shared_ptr from a Squirrel instance
+static std::shared_ptr<CppTreeNode> sq_getCppTreeNode(HSQUIRRELVM vm, SQInteger idx) {
+    SQUserPointer ptr = nullptr;
+    if (SQ_FAILED(sq_getinstanceup(vm, idx, &ptr, nullptr, SQFalse))) {
+        return nullptr;
+    }
+    if (!ptr) return nullptr;
+    auto* sp = reinterpret_cast<std::shared_ptr<CppTreeNode>*>(ptr);
+    return *sp;
+}
+
+// Helper to push a shared_ptr<CppTreeNode> onto the Squirrel stack
+static void sq_pushCppTreeNode(HSQUIRRELVM vm, std::shared_ptr<CppTreeNode> node) {
+    if (!node) {
+        sq_pushnull(vm);
+        return;
+    }
+    // Get the class from the root table
+    sq_pushroottable(vm);
+    sq_pushstring(vm, "CppTreeNode", -1);
+    sq_get(vm, -2);
+    sq_createinstance(vm, -1);
+
+    // Store the shared_ptr (heap-allocated)
+    auto* sp = new std::shared_ptr<CppTreeNode>(node);
+    sq_setinstanceup(vm, -1, sp);
+    sq_setreleasehook(vm, -1, sq_CppTreeNode_release);
+
+    // Clean up stack: remove class and root table, keep instance
+    sq_remove(vm, -2); // remove class
+    sq_remove(vm, -2); // remove root table
+}
+
+// Constructor: CppTreeNode(value)
+static SQInteger sq_CppTreeNode_constructor(HSQUIRRELVM vm) {
+    SQInteger val;
+    sq_getinteger(vm, 2, &val);
+
+    auto* sp = new std::shared_ptr<CppTreeNode>(std::make_shared<CppTreeNode>(static_cast<int>(val)));
+    sq_setinstanceup(vm, 1, sp);
+    sq_setreleasehook(vm, 1, sq_CppTreeNode_release);
+
+    return 0;
+}
+
+// Global function: sq_cpp_insertNode(root, val)
+static SQInteger sq_cpp_insertNode(HSQUIRRELVM vm) {
+    auto root = sq_getCppTreeNode(vm, 2);
+    SQInteger val;
+    sq_getinteger(vm, 3, &val);
+
+    auto result = cpp_insertNode(root, static_cast<int>(val));
+    sq_pushCppTreeNode(vm, result);
+    return 1;
+}
+
+// Global function: sq_cpp_inorderSum(node)
+static SQInteger sq_cpp_inorderSum(HSQUIRRELVM vm) {
+    auto node = sq_getCppTreeNode(vm, 2);
+    SQInteger sum = cpp_inorderSum(node);
+    sq_pushinteger(vm, sum);
+    return 1;
+}
+
+// Global function: sq_cpp_treeHeight(node)
+static SQInteger sq_cpp_treeHeight(HSQUIRRELVM vm) {
+    auto node = sq_getCppTreeNode(vm, 2);
+    SQInteger height = cpp_treeHeight(node);
+    sq_pushinteger(vm, height);
+    return 1;
+}
+
+// Global function: sq_cpp_rotateRight(node)
+static SQInteger sq_cpp_rotateRight(HSQUIRRELVM vm) {
+    auto node = sq_getCppTreeNode(vm, 2);
+    auto result = cpp_rotateRight(node);
+    sq_pushCppTreeNode(vm, result);
+    return 1;
+}
+
+// Register all CppTreeNode bindings with a Squirrel VM
+static void sq_registerCppTreeNode(HSQUIRRELVM vm) {
+    sq_pushroottable(vm);
+
+    // Create the CppTreeNode class
+    sq_pushstring(vm, "CppTreeNode", -1);
+    sq_newclass(vm, SQFalse); // no base class
+
+    // Set the type tag
+    sq_settypetag(vm, -1, CppTreeNodeTag);
+
+    // Register constructor
+    sq_pushstring(vm, "constructor", -1);
+    sq_newclosure(vm, sq_CppTreeNode_constructor, 0);
+    sq_setparamscheck(vm, 2, ".i"); // this + integer
+    sq_newslot(vm, -3, SQFalse);
+
+    // Add class to root table
+    sq_newslot(vm, -3, SQFalse);
+
+    // Register global functions
+    // Type masks: o=null, x=instance, i=integer, | combines types
+    sq_pushstring(vm, "cpp_insertNode", -1);
+    sq_newclosure(vm, sq_cpp_insertNode, 0);
+    sq_setparamscheck(vm, 3, ".o|xi"); // this + null|instance + integer
+    sq_newslot(vm, -3, SQFalse);
+
+    sq_pushstring(vm, "cpp_inorderSum", -1);
+    sq_newclosure(vm, sq_cpp_inorderSum, 0);
+    sq_setparamscheck(vm, 2, ".o|x"); // this + null|instance
+    sq_newslot(vm, -3, SQFalse);
+
+    sq_pushstring(vm, "cpp_treeHeight", -1);
+    sq_newclosure(vm, sq_cpp_treeHeight, 0);
+    sq_setparamscheck(vm, 2, ".o|x"); // this + null|instance
+    sq_newslot(vm, -3, SQFalse);
+
+    sq_pushstring(vm, "cpp_rotateRight", -1);
+    sq_newclosure(vm, sq_cpp_rotateRight, 0);
+    sq_setparamscheck(vm, 2, ".o|x"); // this + null|instance
+    sq_newslot(vm, -3, SQFalse);
+
+    sq_pop(vm, 1); // pop root table
+}
 #endif
 
 class squirrel_comparison : public suite {
@@ -181,6 +319,10 @@ public:
             if (result != 42) {
                 throw std::runtime_error("Squirrel basic eval test failed");
             }
+
+            // Register C++ TreeNode binding for fair comparison
+            sq_registerCppTreeNode(sq_vm->vm);
+
             std::cout << "Squirrel VM ready.\n";
         } catch (const std::exception& e) {
             std::cerr << "ERROR: Squirrel initialization failed: " << e.what() << "\n";
@@ -661,8 +803,6 @@ public:
         test("JaiScript vs Squirrel: Binary Search Tree (C++ Bound)", [this]() {
             // This benchmark provides a fair comparison by using the same C++ TreeNode class
             // bound to both engines. This isolates pure scripting performance from class implementation.
-            // Note: Squirrel binding of C++ classes is complex, so we only test JaiScript here.
-            // The Squirrel pure-script BST test above provides the comparison.
 
             benchmark("JaiScript - C++ BST (15 nodes)", [this]() {
                 jai_engine->execute(R"(
@@ -689,9 +829,30 @@ public:
                 )");
             });
 
-            // Note: Squirrel C++ class binding requires complex boilerplate via sq_setclass etc.
-            // For this comparison, the pure-script BST test is the relevant benchmark.
-            std::cout << "    (Squirrel C++ binding not implemented - use pure script comparison)\n";
+            benchmark("Squirrel - C++ BST (15 nodes)", [this]() {
+                sq_vm->execute(R"(
+                    local root = CppTreeNode(8);
+                    root = cpp_insertNode(root, 4);
+                    root = cpp_insertNode(root, 12);
+                    root = cpp_insertNode(root, 2);
+                    root = cpp_insertNode(root, 6);
+                    root = cpp_insertNode(root, 10);
+                    root = cpp_insertNode(root, 14);
+                    root = cpp_insertNode(root, 1);
+                    root = cpp_insertNode(root, 3);
+                    root = cpp_insertNode(root, 5);
+                    root = cpp_insertNode(root, 7);
+                    root = cpp_insertNode(root, 9);
+                    root = cpp_insertNode(root, 11);
+                    root = cpp_insertNode(root, 13);
+                    root = cpp_insertNode(root, 15);
+
+                    local sum = cpp_inorderSum(root);
+                    local height = cpp_treeHeight(root);
+                    root = cpp_rotateRight(root);
+                    sum = cpp_inorderSum(root);
+                )");
+            });
         });
 
 #else

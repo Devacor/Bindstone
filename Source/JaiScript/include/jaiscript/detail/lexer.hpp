@@ -77,14 +77,14 @@ namespace jai {
         };
         std::string string_value;  // For string literals (can't be in union)
 
-        token() : type(token_type::eof), lexeme(), location() {}  // Default for storage
+        token() : type(token_type::eof), lexeme(), location(), int_value(0) {}  // Default for storage
 
         token(token_type t, std::string_view lex, const source_location& loc)
-            : type(t), lexeme(lex), location(loc) {}
+            : type(t), lexeme(lex), location(loc), int_value(0) {}
 
         // Constructor with pre-interned symbol (for identifiers)
         token(token_type t, std::string_view lex, uint64_t sym_id, const source_location& loc)
-            : type(t), lexeme(lex), symbol_id(sym_id), location(loc) {}
+            : type(t), lexeme(lex), symbol_id(sym_id), location(loc), int_value(0) {}
 
         std::string to_string() const;
         bool is_keyword() const;

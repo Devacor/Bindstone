@@ -733,6 +733,73 @@ namespace jai {
         // Call depth tracking for recursion limit
         int current_call_depth_ = 0;
 
+        // ============================================================
+        // CALL FRAME OPTIMIZATION
+        // ============================================================
+        // Stack-based call frames for fast function parameter access.
+        // Parameters are stored in a simple vector for O(n) lookup where n is small (typically < 8).
+        // This avoids hash map overhead for the most frequently accessed variables.
+        // Closure/global variables still use environment_ for lookup.
+
+        /// @brief Call frame for stack-based function execution
+        /// Parameters are stored in a simple vector for O(n) lookup where n is small.
+        /// This avoids hash map overhead for the most frequently accessed variables.
+        struct call_frame {
+            /// Environment for closure/global variable access
+            std::shared_ptr<environment> closure_env;
+
+            /// Method 'this' object pointer (for method calls)
+            /// We store a pointer to avoid script_value default construction issues
+            std::unique_ptr<script_value> this_object_ptr;
+            bool is_method = false;
+
+            /// Static method class definition (for static method calls)
+            std::shared_ptr<class_definition> static_class_def;
+            bool is_static_method = false;
+
+            /// Local parameters stored as (symbol_id, value) pairs
+            /// Vector provides good cache locality for small N (typical function has < 8 params)
+            std::vector<std::pair<uint64_t, script_value>> locals;
+
+            /// Find a local variable by symbol ID (linear search, fast for small N)
+            script_value* find_local(uint64_t id) noexcept {
+                for (auto& [local_id, val] : locals) {
+                    if (local_id == id) return &val;
+                }
+                return nullptr;
+            }
+
+            const script_value* find_local(uint64_t id) const noexcept {
+                for (const auto& [local_id, val] : locals) {
+                    if (local_id == id) return &val;
+                }
+                return nullptr;
+            }
+
+            /// Add a local variable to the frame
+            void add_local(uint64_t id, script_value value) {
+                locals.emplace_back(id, std::move(value));
+            }
+
+            /// Set 'this' object for method calls
+            void set_this(script_value this_obj) {
+                this_object_ptr = std::make_unique<script_value>(std::move(this_obj));
+                is_method = true;
+            }
+
+            /// Get 'this' object (only valid if is_method is true)
+            script_value& get_this() {
+                return *this_object_ptr;
+            }
+
+            const script_value& get_this() const {
+                return *this_object_ptr;
+            }
+        };
+
+        /// Call stack for function execution
+        std::vector<call_frame> call_stack_;
+
         // Function call optimization pools
         mutable std::vector<script_value> argument_pool_;  // Reusable argument vector
         std::vector<std::shared_ptr<environment>> environment_pool_;  // Pool of reusable environments (all kinds)

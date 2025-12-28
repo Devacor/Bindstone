@@ -3190,13 +3190,12 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
     }
 
     // ============================================================
-    // CALL FRAME FAST PATH: Check call frame locals first
+    // SLOT-BASED LOCAL ACCESS: O(1) array indexing
     // ============================================================
-    // Parameters stored in the call frame use linear search (fast for small N).
+    // Parser assigns slot indices to local variables and parameters.
     // This avoids hash map lookup overhead for the most common variable accesses.
-    if (!call_stack_.empty()) {
-        call_frame& frame = call_stack_.back();
-        script_value* local = frame.find_local(expr->symbol_id);
+    if (expr->slot_index != SIZE_MAX && !call_stack_.empty()) {
+        script_value* local = call_stack_.back().get_local(expr->slot_index);
         if (local) {
             push_value(local->deref());  // Automatically handles references
             return checked_result<void>();
@@ -3301,11 +3300,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				// Both operands are simple identifiers - direct variable lookup without AST traversal
 
-				// Check call frame first, then environment for left operand
+				// Check slot-based storage first, then environment for left operand
 				script_value leftVal = make_value();  // Use make_value() not default ctor
 				bool leftFromFrame = false;
-				if (!call_stack_.empty()) {
-					script_value* leftLocal = call_stack_.back().find_local(leftId->symbol_id);
+				if (leftId->slot_index != SIZE_MAX && !call_stack_.empty()) {
+					script_value* leftLocal = call_stack_.back().get_local(leftId->slot_index);
 					if (leftLocal) {
 						leftVal = leftLocal->deref();
 						leftFromFrame = true;
@@ -3319,11 +3318,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 					leftVal = std::move(leftResult.value()).deref();
 				}
 
-				// Check call frame first, then environment for right operand
+				// Check slot-based storage first, then environment for right operand
 				script_value rightVal = make_value();  // Use make_value() not default ctor
 				bool rightFromFrame = false;
-				if (!call_stack_.empty()) {
-					script_value* rightLocal = call_stack_.back().find_local(rightId->symbol_id);
+				if (rightId->slot_index != SIZE_MAX && !call_stack_.empty()) {
+					script_value* rightLocal = call_stack_.back().get_local(rightId->slot_index);
 					if (rightLocal) {
 						rightVal = rightLocal->deref();
 						rightFromFrame = true;
@@ -3461,11 +3460,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
 			else if (expr->right->get_type() == node_type::literal_expr) {
 				auto* rightLit = static_cast<literal_expr*>(expr->right.get());
-				// Get left value - check call frame first, then environment
+				// Get left value - check slot-based storage first, then environment
 				script_value leftVal = make_value();
 				bool leftFromFrame = false;
-				if (!call_stack_.empty()) {
-					script_value* leftLocal = call_stack_.back().find_local(leftId->symbol_id);
+				if (leftId->slot_index != SIZE_MAX && !call_stack_.empty()) {
+					script_value* leftLocal = call_stack_.back().get_local(leftId->slot_index);
 					if (leftLocal) {
 						leftVal = leftLocal->deref();
 						leftFromFrame = true;
@@ -3580,11 +3579,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			if (expr->right->get_type() == node_type::identifier_expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				const script_value& leftVal = leftLit->value;  // Direct access!
-				// Get right value - check call frame first, then environment
+				// Get right value - check slot-based storage first, then environment
 				script_value rightVal = make_value();
 				bool rightFromFrame = false;
-				if (!call_stack_.empty()) {
-					script_value* rightLocal = call_stack_.back().find_local(rightId->symbol_id);
+				if (rightId->slot_index != SIZE_MAX && !call_stack_.empty()) {
+					script_value* rightLocal = call_stack_.back().get_local(rightId->slot_index);
 					if (rightLocal) {
 						rightVal = rightLocal->deref();
 						rightFromFrame = true;
@@ -4071,14 +4070,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
 
             // ============================================================
-            // CALL FRAME FAST PATH: Check call frame locals first
+            // SLOT-BASED FAST PATH: O(1) array indexing for locals
             // ============================================================
-            // Parameters in call frame use linear search (fast for small N)
+            // Local variables use slot-based lookup (O(1) array access)
             script_value* varPtr = nullptr;
-            if (!call_stack_.empty()) {
-                varPtr = call_stack_.back().find_local(identifier->symbol_id);
+            if (identifier->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                varPtr = call_stack_.back().get_local(identifier->slot_index);
             }
-            // Fall back to environment if not in call frame
+            // Fall back to environment if not a local (global variable)
             if (!varPtr) {
                 varPtr = environment_->get_value_ptr(identifier->symbol_id);
             }
@@ -4126,10 +4125,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         if (rhs_id->symbol_id == UINT64_MAX) {
                             rhs_id->symbol_id = string_symbolizer_->intern(rhs_id->name);
                         }
-                        // Check call frame first, then environment
+                        // Check slot-based storage first, then environment
                         script_value* rhs_ptr = nullptr;
-                        if (!call_stack_.empty()) {
-                            rhs_ptr = call_stack_.back().find_local(rhs_id->symbol_id);
+                        if (rhs_id->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                            rhs_ptr = call_stack_.back().get_local(rhs_id->slot_index);
                         }
                         if (!rhs_ptr) {
                             rhs_ptr = environment_->get_value_ptr(rhs_id->symbol_id);
@@ -4173,10 +4172,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                     if (left_id->symbol_id == UINT64_MAX) {
                                         left_id->symbol_id = string_symbolizer_->intern(left_id->name);
                                     }
-                                    // Check call frame first, then environment
+                                    // Check slot-based storage first, then environment
                                     script_value* left_ptr = nullptr;
-                                    if (!call_stack_.empty()) {
-                                        left_ptr = call_stack_.back().find_local(left_id->symbol_id);
+                                    if (left_id->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                                        left_ptr = call_stack_.back().get_local(left_id->slot_index);
                                     }
                                     if (!left_ptr) {
                                         left_ptr = environment_->get_value_ptr(left_id->symbol_id);
@@ -4744,11 +4743,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
 
             // ============================================================
-            // CALL FRAME FAST PATH: Check call frame locals first
+            // SLOT-BASED FAST PATH: O(1) array indexing for locals
             // ============================================================
-            // If the variable is a parameter in the call frame, assign directly
-            if (!call_stack_.empty()) {
-                script_value* frameLocal = call_stack_.back().find_local(identifier->symbol_id);
+            // If the variable is a local with a slot, assign directly
+            if (identifier->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                script_value* frameLocal = call_stack_.back().get_local(identifier->slot_index);
                 if (frameLocal) {
                     // Handle reference parameters
                     if (frameLocal->is_reference()) {
@@ -5352,6 +5351,17 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
+    // Helper to store value in slot (local) or environment (global)
+    auto define_variable = [&](script_value value) {
+        if (decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
+            // Local variable with slot - use O(1) slot-based storage
+            call_stack_.back().set_local(decl->slot_index, std::move(value));
+        } else {
+            // Global variable or no slot assigned - use environment
+            environment_->define(decl->name_id, std::move(value));
+        }
+    };
+
     // Check if this is a reference variable declaration
     bool is_reference = false;
     if (decl->type && decl->type->base_type == script_value_type::jai_reference_type) {
@@ -5375,7 +5385,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         if (!decl->initializer) {
             // No initializer - create empty weak_ptr
             script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_);
-            environment_->define(decl->name_id, std::move(weak));
+            define_variable(std::move(weak));
         } else {
             // Evaluate initializer
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
@@ -5385,10 +5395,10 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             if (value.is_null()) {
                 // Initialize with null - create empty weak_ptr
                 script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_);
-                environment_->define(decl->name_id, std::move(weak));
+                define_variable(std::move(weak));
             } else if (value.is_weak_ptr()) {
                 // Initialize with another weak_ptr - copy it
-                environment_->define(decl->name_id, std::move(value));
+                define_variable(std::move(value));
             } else if (value.type() == script_value_type::jai_shared_ptr_type) {
                 // Validate type parameter - weak_ptr<T> should only accept shared_ptr<T> or subclass
                 auto expected_type = decl->type ? decl->type->element_type() : nullptr;
@@ -5423,7 +5433,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 if (!weak_result) {
                     return weak_result.error_value();
                 }
-                environment_->define(decl->name_id, std::move(weak_result.value()));
+                define_variable(std::move(weak_result.value()));
             } else if (value.type() == script_value_type::jai_object_type) {
                 // Helpful error for value-semantic objects
                 auto type_info = decl->type;
@@ -5449,7 +5459,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // No initializer - create null shared_ptr
             script_value null_ptr = make_value();
             null_ptr.set_type_info(decl->type);  // Mark as shared_ptr type
-            environment_->define(decl->name_id, std::move(null_ptr));
+            define_variable(std::move(null_ptr));
         } else {
             // Evaluate initializer
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
@@ -5459,7 +5469,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             if (value.is_null()) {
                 // Initialize with null - that's fine
                 value.set_type_info(decl->type);  // Mark as shared_ptr type
-                environment_->define(decl->name_id, std::move(value));
+                define_variable(std::move(value));
             } else if (value.is_weak_ptr()) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_weak_ptr_conversion), "Cannot initialize shared_ptr directly from weak_ptr");
             } else if (value.type() == script_value_type::jai_object_type ||
@@ -5467,7 +5477,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 // Initialize with object/shared_ptr - that's fine, objects are already shared_ptr
                 // Mark the type as shared_ptr to ensure reference semantics
                 value.set_type_info(decl->type);
-                environment_->define(decl->name_id, std::move(value));
+                define_variable(std::move(value));
             } else {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
             }
@@ -5502,11 +5512,11 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                     return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
                 }
                 script_value refValue = script_value::make_reference(targetPtr, target_env);
-                environment_->define(decl->name_id, std::move(refValue));
+                define_variable(std::move(refValue));
             } else {
                 // Regular reference - use current environment
                 script_value refValue = script_value::make_reference(targetPtr, environment_);
-                environment_->define(decl->name_id, std::move(refValue));
+                define_variable(std::move(refValue));
             }
         } else {
             // For other expressions, evaluate them and check if they return a reference
@@ -5523,7 +5533,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 }
                 // Create a new reference to the same target
                 script_value refValue = script_value::make_reference(targetPtr, target_env);
-                environment_->define(decl->name_id, std::move(refValue));
+                define_variable(std::move(refValue));
             } else {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Cannot take reference of non-lvalue expression");
             }
@@ -5606,8 +5616,8 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         // else: auto without initializer - type_info remains nullptr (uninitialized)
         // First assignment will lock the type
 
-        // Define in the current environment
-        environment_->define(decl->name_id, std::move(value));
+        // Define in slot (local) or environment (global)
+        define_variable(std::move(value));
         // After move, value is in moved-from state, so don't access it
     }
     return {};
@@ -8375,7 +8385,8 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         decl->parameters,
         decl->return_type,
         decl->body,
-        nullptr  // No closure needed - environment stack handles everything
+        nullptr,  // No closure needed - environment stack handles everything
+        decl->local_count  // Slot count for stack allocation
     );
 
     // Create wrapper function
@@ -9881,8 +9892,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     call_stack_.emplace_back();
     const size_t frame_index = call_stack_.size() - 1;
 
-    // Pre-allocate locals for parameters to avoid reallocation
-    call_stack_[frame_index].locals.reserve(function.parameters.size());
+    // Pre-allocate locals for all slots (params + local variables)
+    // Slot indices are assigned by the parser at parse time
+    call_stack_[frame_index].reserve_locals(function.local_count);
 
     // Set up closure environment for non-local lookups
     auto previousEnv = environment_;
@@ -9983,15 +9995,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                                 "Reference target is null"
                             );
                         }
-                        // Create reference to the final target - add to call frame
+                        // Create reference to the final target - add to call frame using slot
                         script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-                        uint64_t param_id = (param.symbol_id != UINT64_MAX) ? param.symbol_id : string_symbolizer_->intern(param.name);
-                        call_stack_[frame_index].add_local(param_id, std::move(refValue));
+                        call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
                     } else {
-                        // Create reference to the argument - add to call frame
+                        // Create reference to the argument - add to call frame using slot
                         script_value refValue = script_value::make_reference(argPtr, env);
-                        uint64_t param_id = (param.symbol_id != UINT64_MAX) ? param.symbol_id : string_symbolizer_->intern(param.name);
-                        call_stack_[frame_index].add_local(param_id, std::move(refValue));
+                        call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
                     }
                 } else {
                     // No metadata - can't create reference
@@ -10027,17 +10037,14 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 should_share = true;
             }
 
-            // Get parameter ID - use cached ID, fallback to intern if not set
-            uint64_t param_id = (param.symbol_id != UINT64_MAX) ? param.symbol_id : string_symbolizer_->intern(param.name);
-
-            // Add parameter to call frame (fast path - no hash map)
+            // Add parameter to call frame using slot index (O(1) access)
             // IMPORTANT: Use call_stack_[frame_index] not a cached reference (vector may have reallocated)
             if (should_share) {
                 // Shallow copy - share ownership (reference semantics)
-                call_stack_[frame_index].add_local(param_id, converted_arg);
+                call_stack_[frame_index].set_local(param.slot_index, converted_arg);
             } else {
                 // Deep copy - value semantics (C++-like default)
-                call_stack_[frame_index].add_local(param_id, converted_arg.clone());
+                call_stack_[frame_index].set_local(param.slot_index, converted_arg.clone());
             }
         }
     }

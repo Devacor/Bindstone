@@ -351,6 +351,30 @@ public:
         jai_engine->execute("function factorial(auto n) -> auto { if (n <= 1) { return 1; } return n * factorial(n - 1); }");
         jai_engine->execute("function fib(auto n) -> auto { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }");
 
+        // Recursive function with 10 local variables - tests local variable lookup performance
+        jai_engine->execute(R"(
+            function recurseWithLocals(int depth) -> int {
+                if (depth <= 0) { return 0; }
+
+                // 10 local variables with computations
+                auto a = depth * 2;
+                auto b = depth + 3;
+                auto c = a + b;
+                auto d = c * 2;
+                auto e = d - a;
+                auto f = e + b;
+                auto g = f * depth;
+                auto h = g - c;
+                auto i = h + d;
+                auto j = i - e;
+
+                // Use all locals to prevent optimization
+                auto sum = a + b + c + d + e + f + g + h + i + j;
+
+                return sum + recurseWithLocals(depth - 1);
+            }
+        )");
+
         // Tree node class and tree operations for BST benchmark
         jai_engine->execute(R"(
             class TreeNode {
@@ -443,6 +467,30 @@ public:
             function fib(n) {
                 if (n <= 1) return n;
                 return fib(n - 1) + fib(n - 2);
+            }
+        )");
+
+        // Recursive function with 10 local variables - tests local variable lookup performance
+        sq_vm->execute(R"(
+            function recurseWithLocals(depth) {
+                if (depth <= 0) return 0;
+
+                // 10 local variables with computations
+                local a = depth * 2;
+                local b = depth + 3;
+                local c = a + b;
+                local d = c * 2;
+                local e = d - a;
+                local f = e + b;
+                local g = f * depth;
+                local h = g - c;
+                local i = h + d;
+                local j = i - e;
+
+                // Use all locals to prevent optimization
+                local sum = a + b + c + d + e + f + g + h + i + j;
+
+                return sum + recurseWithLocals(depth - 1);
             }
         )");
 
@@ -664,6 +712,20 @@ public:
 
             benchmark("Squirrel - Fibonacci(15)", [this]() {
                 sq_vm->execute("fib(15);");
+            });
+        });
+
+        // ===== Recursion with 10 Local Variables =====
+        test("JaiScript vs Squirrel: Recursion with 10 Locals", [this]() {
+            // This tests the cost of local variable access in recursive functions.
+            // Each call creates 10 local variables and uses them all before recursing.
+            // Depth of 15 = 15 stack frames, each with 10+ locals.
+            benchmark("JaiScript - Recurse with Locals (depth=15)", [this]() {
+                jai_engine->execute("recurseWithLocals(15);");
+            });
+
+            benchmark("Squirrel - Recurse with Locals (depth=15)", [this]() {
+                sq_vm->execute("recurseWithLocals(15);");
             });
         });
 

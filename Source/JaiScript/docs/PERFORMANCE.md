@@ -2,7 +2,7 @@
 
 ## Current JaiScript Performance (Release Build)
 
-Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-26):
+Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-28):
 
 | Benchmark                      | Time (μs) | Notes                                    |
 |--------------------------------|-----------|------------------------------------------|
@@ -150,7 +150,40 @@ if (leftType == jai_int_type && rightType == jai_int_type) {
 - **Function calls**: ~60% faster (Function Calls: 10μs → 5μs → 4μs)
 - **Class operations**: ~75% faster (Class Creation: 24μs → 22μs → 7μs → 6μs, Class Inheritance: 139μs → 133μs → 109μs)
 
-### 4. Raw Engine Pointer & Shared String Optimization (v0.1.5)
+### 4. Slot-Based Local Variable Storage (v0.1.6)
+
+Replaced hash map-based local variable lookup with O(1) array indexing like Squirrel's bytecode VM:
+
+**Before:**
+```cpp
+// Hash map lookup per variable access
+std::unordered_map<uint64_t, script_value> locals;
+auto it = locals.find(symbol_id);  // O(1) amortized, but hash + comparison overhead
+```
+
+**After:**
+```cpp
+// Direct array indexing - parser assigns slot indices at parse time
+std::vector<script_value> locals;
+return &locals[slot_index];  // O(1) guaranteed, single array access
+```
+
+**Key Implementation:**
+- Parser assigns numeric slot indices to parameters and local variables during parsing
+- Each function tracks `local_count` for pre-reserving the locals vector
+- `SIZE_MAX` used as invalid slot sentinel (naturally fails bounds check, no casting)
+- Parameters get slots 0, 1, 2..., then local variables in declaration order
+- Function scope tracking in parser handles nested functions/lambdas correctly
+
+**Performance Impact:**
+- **Fibonacci(15)**: 1051μs → 878μs (**16% faster**)
+- **Recurse with 10 Locals (depth=15)**: 36μs (new benchmark)
+- **vs Squirrel on local-heavy code**: 12x gap (better than 16x on Fibonacci)
+- **vs ChaiScript on local-heavy code**: JaiScript is **67x faster**
+
+The slot-based approach eliminates hash computation and bucket traversal on every local variable access, providing consistent O(1) performance.
+
+### 5. Raw Engine Pointer & Shared String Optimization (v0.1.5)
 
 Two key optimizations to reduce `script_value` overhead:
 
@@ -316,7 +349,8 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 | Benchmark | JaiScript | ChaiScript | JaiScript Speedup |
 |-----------|-----------|------------|-------------------|
 | **Factorial(10)** | 6μs | 1308μs | **218x faster** |
-| **Fibonacci(6)** | 14μs | 3058μs | **218x faster** |
+| **Fibonacci(6)** | 12μs | 3142μs | **262x faster** |
+| **Recurse 10 Locals (depth=10)** | 21μs | 1417μs | **67x faster** |
 | **BST (15 nodes)** | 489μs | 52,698μs | **108x faster** |
 | **Function Calls** | 2μs | 164μs | **82x faster** |
 | **Method Invocation** | 4μs | 137μs | **34x faster** |
@@ -418,27 +452,27 @@ Squirrel is a bytecode-compiled VM used in games like Left 4 Dead 2, Portal 2, a
 | **Method Invocation** | 4μs | 2μs | Squirrel 2x faster |
 | **For Loop (100 iter)** | 8μs | 4μs | Squirrel 2x faster |
 | **Factorial(10)** | 6μs | 2μs | Squirrel 3x faster |
-| **Fibonacci(15)** | 1051μs | 55μs | Squirrel 19x faster |
+| **Fibonacci(15)** | 878μs | 54μs | Squirrel 16x faster |
+| **Recurse 10 Locals (depth=15)** | 36μs | 3μs | Squirrel 12x faster |
 | **Foreach (10 elem)** | 4μs | 2μs | Squirrel 2x faster |
 | **String Concat** | 8μs | 3μs | Squirrel 2.7x faster |
 | **Null Check** | 3μs | 2μs | Squirrel 1.5x faster |
-| **Hot Loop (1000 iter)** | 44μs | 11μs | Squirrel 4x faster |
-| **BST (15 nodes)** | 453μs | 15μs | Squirrel 30x faster |
-| **C++ BST (15 nodes)** | 44μs | 12μs | Squirrel 3.7x faster |
+| **Hot Loop (1000 iter)** | 42μs | 10μs | Squirrel 4x faster |
+| **BST (15 nodes)** | 406μs | 15μs | Squirrel 27x faster |
+| **C++ BST (15 nodes)** | 45μs | 11μs | Squirrel 4x faster |
 
 ### Analysis
 
-Squirrel's bytecode VM provides consistent 2-4x performance advantage over JaiScript's tree-walking interpreter for most operations. Deep recursion (Fibonacci, BST) shows larger gaps due to VM call overhead differences.
+Squirrel's bytecode VM provides consistent 2-4x performance advantage over JaiScript's tree-walking interpreter for most operations. Deep recursion shows larger gaps (16x for Fibonacci), but slot-based locals help close the gap on local-heavy code (12x vs 16x).
 
 **Key Takeaways:**
 - Squirrel's bytecode compilation pays off for tight loops and recursion
+- JaiScript's slot-based locals approach Squirrel's efficiency (12x gap vs 16x on Fibonacci)
 - JaiScript remains competitive on simple operations (<1-2μs difference)
-- C++ binding reduces gap significantly: 3.7x (C++ BST) vs 30x (pure script BST)
-- JaiScript's C++ binding overhead is minimal (44μs C++ BST vs 453μs pure script = 10x speedup)
-- Squirrel's C++ binding also fast (12μs C++ BST vs 15μs pure script = minimal overhead)
+- C++ binding reduces gap significantly: 4x (C++ BST) vs 27x (pure script BST)
 - For typical game scripting (event handlers, UI), the 2-4x difference is negligible
 
-**Future Consideration:** JIT compilation or bytecode generation could close the gap with Squirrel.
+**Future Consideration:** Bytecode compilation would close the remaining gap with Squirrel.
 
 ---
 
@@ -585,7 +619,8 @@ Track performance improvements over time (git-verified):
 
 | Date       | Commit   | For Loop (100) | Hot Loop (1000) | vs ChaiScript | Notes                           |
 |------------|----------|----------------|-----------------|---------------|---------------------------------|
-| 2025-12-26 | HEAD     | 8μs            | 44μs            | **1.5x faster** | String interning improvements |
+| 2025-12-28 | HEAD     | 8μs            | 42μs            | **1.5x faster** | Slot-based local variables (Fib: 1051→878μs) |
+| 2025-12-26 | cfc7720c | 8μs            | 44μs            | **1.5x faster** | String interning improvements |
 | 2025-12-24 | 13d54d35 | 15μs           | 49μs            | 1.25x slower  | strong_ptr + shared string storage |
 | 2025-12-18 | 9878fe2d | 17μs           | 76μs            | 1.4x slower   | + dynamic_cast removal (90 calls) + throw cleanup |
 | 2025-12-15 | 9310a48f | 28μs           | 197μs           | 2.3x slower   | Switch-based AST dispatch |

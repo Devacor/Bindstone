@@ -886,12 +886,41 @@ public:
         return cpp_object_field_id_;
     }
 
-    // Get all registered property names from fieldDefaults_
-    std::vector<std::string> get_property_names() const {
+    // Get all registered property names, including inherited properties by default
+    // Set include_inherited=false to get only locally-defined properties
+    std::vector<std::string> get_property_names(bool include_inherited = true) const {
         std::vector<std::string> properties;
+        std::unordered_set<std::string> seen;  // Avoid duplicates if derived re-declares
+
         if (auto eng = engine_) {
+            // First, add parent class properties (if inheriting)
+            if (include_inherited) {
+                // Check parent classes (for C++ inheritance chains)
+                for (const auto& parent : parent_classes_) {
+                    if (parent) {
+                        for (const auto& prop : parent->get_property_names(true)) {
+                            if (seen.insert(prop).second) {
+                                properties.push_back(prop);
+                            }
+                        }
+                    }
+                }
+                // Check C++ base class (for mixed inheritance)
+                if (cpp_base_class_) {
+                    for (const auto& prop : cpp_base_class_->get_property_names(true)) {
+                        if (seen.insert(prop).second) {
+                            properties.push_back(prop);
+                        }
+                    }
+                }
+            }
+
+            // Then add this class's own properties (may override parent names)
             for (const auto& [id, default_value] : field_defaults_) {
-                properties.push_back(std::string(eng->get_symbolizer()->get_string(id)));
+                std::string prop_name(eng->get_symbolizer()->get_string(id));
+                if (seen.insert(prop_name).second) {
+                    properties.push_back(prop_name);
+                }
             }
         }
         return properties;

@@ -125,12 +125,60 @@ namespace jai {
         
         // Context tracking for context-sensitive parsing
         bool in_switch_case_ = false;  // Track if we're inside a switch case
-        
+
         // Helper to check if a type name is registered for template parsing
         bool is_registered_template_type(const std::string& type_name) const;
 
         // Helper to get symbol ID from token - uses pre-interned if available
         uint64_t get_symbol_id(const token& tok) const;
+
+        // ============ Slot-based local variable tracking ============
+        // Tracks local variable slots for the current function being parsed.
+        // Used for O(1) local variable access at runtime.
+        struct function_scope {
+            size_t next_slot = 0;  // Next available slot index
+            std::unordered_map<uint64_t, size_t> symbol_to_slot;  // symbol_id -> slot
+        };
+        std::vector<function_scope> function_scope_stack_;  // Stack for nested functions/lambdas
+
+        // Enter a new function scope (call at start of function/lambda parsing)
+        void enter_function_scope() {
+            function_scope_stack_.emplace_back();
+        }
+
+        // Exit current function scope, returns the total slot count
+        size_t exit_function_scope() {
+            if (function_scope_stack_.empty()) return 0;
+            size_t count = function_scope_stack_.back().next_slot;
+            function_scope_stack_.pop_back();
+            return count;
+        }
+
+        // Allocate a slot for a variable, returns the slot index
+        size_t allocate_slot(uint64_t symbol_id) {
+            if (function_scope_stack_.empty()) return SIZE_MAX;  // Not in a function
+            auto& scope = function_scope_stack_.back();
+            size_t slot = scope.next_slot++;
+            scope.symbol_to_slot[symbol_id] = slot;
+            return slot;
+        }
+
+        // Look up a variable's slot index (SIZE_MAX if not found or not in function scope)
+        size_t lookup_slot(uint64_t symbol_id) const {
+            // Search from innermost to outermost function scope
+            for (auto it = function_scope_stack_.rbegin(); it != function_scope_stack_.rend(); ++it) {
+                auto found = it->symbol_to_slot.find(symbol_id);
+                if (found != it->symbol_to_slot.end()) {
+                    return found->second;
+                }
+            }
+            return SIZE_MAX;  // Not found - must be global or closure capture
+        }
+
+        // Check if we're currently inside a function scope
+        bool in_function_scope() const {
+            return !function_scope_stack_.empty();
+        }
     };
 
 } // namespace jai

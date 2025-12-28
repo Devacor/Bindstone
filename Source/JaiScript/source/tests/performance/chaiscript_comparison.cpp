@@ -153,6 +153,30 @@ public:
         )");
         jai_engine->execute("function fib(auto n) -> auto { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }");
 
+        // Recursive function with 10 local variables - tests local variable lookup performance
+        jai_engine->execute(R"(
+            function recurseWithLocals(int depth) -> int {
+                if (depth <= 0) { return 0; }
+
+                // 10 local variables with computations
+                auto a = depth * 2;
+                auto b = depth + 3;
+                auto c = a + b;
+                auto d = c * 2;
+                auto e = d - a;
+                auto f = e + b;
+                auto g = f * depth;
+                auto h = g - c;
+                auto i = h + d;
+                auto j = i - e;
+
+                // Use all locals to prevent optimization
+                auto sum = a + b + c + d + e + f + g + h + i + j;
+
+                return sum + recurseWithLocals(depth - 1);
+            }
+        )");
+
         // Tree node class and tree operations for BST benchmark
         jai_engine->execute(R"(
             class TreeNode {
@@ -367,6 +391,30 @@ public:
                 }
             )");
             chai_engine->eval("def fib(n) { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }");
+
+            // Recursive function with 10 local variables - tests local variable lookup performance
+            chai_engine->eval(R"(
+                def recurseWithLocals(depth) {
+                    if (depth <= 0) { return 0; }
+
+                    // 10 local variables with computations
+                    var a = depth * 2;
+                    var b = depth + 3;
+                    var c = a + b;
+                    var d = c * 2;
+                    var e = d - a;
+                    var f = e + b;
+                    var g = f * depth;
+                    var h = g - c;
+                    var i = h + d;
+                    var j = i - e;
+
+                    // Use all locals to prevent optimization
+                    var sum = a + b + c + d + e + f + g + h + i + j;
+
+                    return sum + recurseWithLocals(depth - 1);
+                }
+            )");
 
             // Tree node class - use is_var_undef for uninitialized members
             // Note: ChaiScript class member assignment to null is problematic,
@@ -884,6 +932,20 @@ public:
 
             benchmark("ChaiScript - Fibonacci(6)", [this]() {
                 chai_engine->eval("fib(6);");
+            });
+        });
+
+        // ===== Recursion with 10 Local Variables =====
+        test("JaiScript vs ChaiScript: Recursion with 10 Locals", [this]() {
+            // This tests the cost of local variable access in recursive functions.
+            // Each call creates 10 local variables and uses them all before recursing.
+            // Using depth=10 (ChaiScript is slow at recursion)
+            benchmark("JaiScript - Recurse with Locals (depth=10)", [this]() {
+                jai_engine->execute("recurseWithLocals(10);");
+            });
+
+            benchmark("ChaiScript - Recurse with Locals (depth=10)", [this]() {
+                chai_engine->eval("recurseWithLocals(10);");
             });
         });
 

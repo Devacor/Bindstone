@@ -90,9 +90,10 @@ namespace jai {
         bool is_reference = false;
         bool is_const = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
+        mutable size_t slot_index = SIZE_MAX;     // Slot index for fast local access (SIZE_MAX = not assigned)
 
         parameter(type_info_ptr t, const std::string& n, bool ref = false, bool c = false)
-            : type(t), name(n), is_reference(ref), is_const(c), symbol_id(UINT64_MAX) {}
+            : type(t), name(n), is_reference(ref), is_const(c), symbol_id(UINT64_MAX), slot_index(SIZE_MAX) {}
     };
     
     // Visitor pattern for AST traversal
@@ -175,10 +176,12 @@ namespace jai {
     class identifier_expr : public expression {
     public:
         std::string_view name;  // Points to symbolizer storage (permanent)
-        uint64_t symbol_id;  // Interned symbol ID - must be set by parser
+        uint64_t symbol_id;     // Interned symbol ID - must be set by parser
+        size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = use environment)
 
         identifier_expr(const source_location& loc, std::string_view n, uint64_t sym_id)
-            : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id) {}    };
+            : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id), slot_index(SIZE_MAX) {}
+    };
     
     // Binary expression
     class binary_expr : public expression {
@@ -280,13 +283,15 @@ namespace jai {
         };
         
         capture_default default_capture = capture_default::none;
-        
+
         std::vector<capture> captures;
         std::vector<parameter> parameters;
         type_info_ptr return_type;
         statement_ptr body;
+        size_t local_count = 0;  // Total slots needed (params + locals) for stack allocation
 
-        lambda_expr(const source_location& loc) : expression(loc, node_type::lambda_expr) {}    };
+        lambda_expr(const source_location& loc) : expression(loc, node_type::lambda_expr), local_count(0) {}
+    };
 
     // New expression
     class new_expr : public expression {
@@ -490,12 +495,14 @@ namespace jai {
         uint64_t name_id = UINT64_MAX;  // Interned name for fast lookup (UINT64_MAX = not interned)
         expression_ptr initializer;  // Can be null
         bool is_static = false;      // For static class members
+        size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = global/class member)
 
         variable_decl(const source_location& loc, type_info_ptr t, std::string_view n, expression_ptr init = nullptr)
-            : declaration(loc, node_type::variable_decl), type(t), name(n), initializer(init), is_static(false) {}
+            : declaration(loc, node_type::variable_decl), type(t), name(n), initializer(init), is_static(false), slot_index(SIZE_MAX) {}
 
         variable_decl(const source_location& loc, type_info_ptr t, std::string_view n, uint64_t nid, expression_ptr init = nullptr)
-            : declaration(loc, node_type::variable_decl), type(t), name(n), name_id(nid), initializer(init), is_static(false) {}    };
+            : declaration(loc, node_type::variable_decl), type(t), name(n), name_id(nid), initializer(init), is_static(false), slot_index(SIZE_MAX) {}
+    };
     
     // Constructor initialization entry (for : super(args), : this(args))
     struct constructor_initializer {
@@ -517,9 +524,11 @@ namespace jai {
         std::vector<constructor_initializer> initializers; // For constructor initialization lists
         bool is_override = false; // For override keyword in derived classes
         bool is_static = false;   // For static methods
+        size_t local_count = 0;   // Total slots needed (params + locals) for stack allocation
 
         function_decl(const source_location& loc, std::string_view n, uint64_t id = UINT64_MAX)
-            : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false) {}    };
+            : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false), local_count(0) {}
+    };
 
     // Class declaration
     class class_decl : public declaration {

@@ -613,11 +613,12 @@ namespace jai {
             type_info_ptr return_type;
             std::shared_ptr<block_stmt> body;
             std::shared_ptr<environment> closure_env;  // capture environment for closures
+            size_t local_count = 0;  // Total slots needed (params + locals) for stack allocation
 
             script_defined_function(std::string_view n, std::vector<parameter> params,
                                 type_info_ptr retType, std::shared_ptr<block_stmt> b,
-                                std::shared_ptr<environment> env = nullptr)
-                : name(n), parameters(std::move(params)), return_type(retType), body(b), closure_env(env) {}
+                                std::shared_ptr<environment> env = nullptr, size_t slots = 0)
+                : name(n), parameters(std::move(params)), return_type(retType), body(b), closure_env(env), local_count(slots) {}
         };
         
         
@@ -757,28 +758,45 @@ namespace jai {
             std::shared_ptr<class_definition> static_class_def;
             bool is_static_method = false;
 
-            /// Local parameters stored as (symbol_id, value) pairs
-            /// Vector provides good cache locality for small N (typical function has < 8 params)
-            std::vector<std::pair<uint64_t, script_value>> locals;
+            /// Slot-based local storage: params and locals indexed by slot number
+            /// O(1) access by slot index - much faster than hash map or linear search
+            std::vector<script_value> locals;
 
-            /// Find a local variable by symbol ID (linear search, fast for small N)
-            script_value* find_local(uint64_t id) noexcept {
-                for (auto& [local_id, val] : locals) {
-                    if (local_id == id) return &val;
+            /// Invalid slot constant - SIZE_MAX naturally fails bounds check
+            static constexpr size_t INVALID_SLOT = SIZE_MAX;
+
+            /// Get local by slot index (O(1) access)
+            script_value* get_local(size_t slot) noexcept {
+                if (slot < locals.size()) {
+                    return &locals[slot];
                 }
                 return nullptr;
             }
 
-            const script_value* find_local(uint64_t id) const noexcept {
-                for (const auto& [local_id, val] : locals) {
-                    if (local_id == id) return &val;
+            const script_value* get_local(size_t slot) const noexcept {
+                if (slot < locals.size()) {
+                    return &locals[slot];
                 }
                 return nullptr;
             }
 
-            /// Add a local variable to the frame
-            void add_local(uint64_t id, script_value value) {
-                locals.emplace_back(id, std::move(value));
+            /// Set local by slot index - slots are set sequentially (params first, then locals)
+            void set_local(size_t slot, script_value value) {
+                if (slot == locals.size()) {
+                    // Sequential append - most common case
+                    locals.push_back(std::move(value));
+                } else if (slot < locals.size()) {
+                    // Reassignment to existing slot
+                    locals[slot] = std::move(value);
+                }
+                // slot > size shouldn't happen with proper slot assignment
+            }
+
+            /// Reserve capacity for locals (called when entering function)
+            void reserve_locals(size_t count) {
+                if (count > 0) {
+                    locals.reserve(count);
+                }
             }
 
             /// Set 'this' object for method calls

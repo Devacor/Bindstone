@@ -256,7 +256,9 @@ checked_result<expression_ptr> parser::primary() {
         if (lookAhead < tokens_.size() && tokens_[lookAhead].type == token_type::colon_colon) {
             // This is a keyword being used as a namespace name
             token nameToken = advance();
-            return std::make_shared<identifier_expr>(nameToken.location, nameToken.lexeme, get_symbol_id(nameToken));
+            auto id_expr = std::make_shared<identifier_expr>(nameToken.location, nameToken.lexeme, get_symbol_id(nameToken));
+            id_expr->slot_index = lookup_slot(id_expr->symbol_id);
+            return id_expr;
         }
     }
 
@@ -309,8 +311,10 @@ checked_result<expression_ptr> parser::primary() {
             // Not a constructor, restore position and continue
             current_ = savedPos + 1;
         }
-        
-        return std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
+
+        auto id_expr = std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
+        id_expr->slot_index = lookup_slot(id_expr->symbol_id);
+        return id_expr;
     }
 
     // Grouped expression
@@ -528,7 +532,9 @@ checked_result<expression_ptr> parser::primary() {
     // Regular identifier (variable name)
     if (match(token_type::identifier)) {
         token name = previous();
-        return std::make_shared<identifier_expr>(name.location, name.lexeme, get_symbol_id(name));
+        auto id_expr = std::make_shared<identifier_expr>(name.location, name.lexeme, get_symbol_id(name));
+        id_expr->slot_index = lookup_slot(id_expr->symbol_id);
+        return id_expr;
     }
 
     report_error("Expected expression", peek());
@@ -1440,10 +1446,27 @@ checked_result<expression_ptr> parser::lambda_expression() {
         }
     }
 
+    // Enter function scope for slot-based local variable tracking
+    enter_function_scope();
+
+    // Assign slots to parameters (they get slots 0, 1, 2, ...)
+    for (auto& param : lambda->parameters) {
+        if (param.symbol_id != UINT64_MAX) {
+            param.slot_index = allocate_slot(param.symbol_id);
+        }
+    }
+
     // Parse body
-    JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' for lambda body"));
+    if (!match(token_type::left_brace)) {
+        exit_function_scope();  // Clean up on error
+        report_error("Expected '{' for lambda body", peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
     JAISCRIPT_TRY_ASSIGN(auto body_stmt, block_statement());
     lambda->body = std::dynamic_pointer_cast<block_stmt>(body_stmt);
+
+    // Exit function scope and record total slot count
+    lambda->local_count = exit_function_scope();
 
     return lambda;
 }
@@ -1978,12 +2001,25 @@ checked_result<declaration_ptr> parser::class_declaration() {
                             continue;
                         }
 
+                        // Enter function scope for slot-based local variable tracking
+                        enter_function_scope();
+
+                        // Assign slots to parameters
+                        for (auto& param : func->parameters) {
+                            if (param.symbol_id == UINT64_MAX) {
+                                param.symbol_id = symbolizer_->intern(param.name);
+                            }
+                            param.slot_index = allocate_slot(param.symbol_id);
+                        }
+
                         auto body_result = block_statement();
                         if (!body_result) {
+                            exit_function_scope();  // Clean up on error
                             synchronize();
                             continue;
                         }
                         func->body = std::dynamic_pointer_cast<block_stmt>(body_result.value());
+                        func->local_count = exit_function_scope();
                         member = func;
                     } else {
                         // Variable
@@ -2318,12 +2354,25 @@ checked_result<declaration_ptr> parser::class_declaration() {
                         continue;
                     }
 
+                    // Enter function scope for slot-based local variable tracking
+                    enter_function_scope();
+
+                    // Assign slots to parameters
+                    for (auto& param : func->parameters) {
+                        if (param.symbol_id == UINT64_MAX) {
+                            param.symbol_id = symbolizer_->intern(param.name);
+                        }
+                        param.slot_index = allocate_slot(param.symbol_id);
+                    }
+
                     auto body_result = block_statement();
                     if (!body_result) {
+                        exit_function_scope();  // Clean up on error
                         synchronize();
                         continue;
                     }
                     func->body = std::dynamic_pointer_cast<block_stmt>(body_result.value());
+                    func->local_count = exit_function_scope();
 
                     member = func;
                 } else {
@@ -2510,12 +2559,25 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                     continue;
                 }
 
+                // Enter function scope for slot-based local variable tracking
+                enter_function_scope();
+
+                // Assign slots to parameters
+                for (auto& param : func->parameters) {
+                    if (param.symbol_id == UINT64_MAX) {
+                        param.symbol_id = symbolizer_->intern(param.name);
+                    }
+                    param.slot_index = allocate_slot(param.symbol_id);
+                }
+
                 auto body_result = block_statement();
                 if (!body_result) {
+                    exit_function_scope();  // Clean up on error
                     synchronize();
                     continue;
                 }
                 func->body = std::dynamic_pointer_cast<block_stmt>(body_result.value());
+                func->local_count = exit_function_scope();
 
                 member_decl = func;
             } else {
@@ -2701,12 +2763,26 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
         } while (match(token_type::comma));
     }
 
+    // Enter function scope for slot-based local variable tracking
+    enter_function_scope();
+
+    // Assign slots to parameters (they get slots 0, 1, 2, ...)
+    for (auto& param : func->parameters) {
+        if (param.symbol_id != UINT64_MAX) {
+            param.slot_index = allocate_slot(param.symbol_id);
+        }
+    }
+
     if (!match(token_type::left_brace)) {
+        exit_function_scope();  // Clean up on error
         report_error("Expected '{' before function body", peek());
     return make_error_code(parse_error_code::unexpected_token);
     }
     JAISCRIPT_TRY_ASSIGN(auto body, block_statement());
     func->body = std::dynamic_pointer_cast<block_stmt>(body);
+
+    // Exit function scope and record total slot count
+    func->local_count = exit_function_scope();
 
     return func;
 }
@@ -2759,6 +2835,12 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));
 
     auto decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
+
+    // If we're inside a function, assign a slot for this local variable
+    if (in_function_scope() && decl->name_id != UINT64_MAX) {
+        decl->slot_index = allocate_slot(decl->name_id);
+    }
+
     return decl;
 }
 

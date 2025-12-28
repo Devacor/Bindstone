@@ -2458,6 +2458,13 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
     // Validate the parent chain before setting (debug mode only)
     validate_parent_chain(new_parent);
 
+    // Only clear cache if parent actually changed
+    // If same parent, cached pointers to parent chain remain valid
+    // This is critical for recursive functions - avoids re-walking parent chain
+    if (parent_.get() != new_parent.get()) {
+        flat_lookup_.clear();
+    }
+
     parent_ = new_parent;
 
     // Reset to standard kind and clear kind-specific fields
@@ -2465,10 +2472,6 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
     this_object_ = script_value::make_null(nullptr);
     class_def_.reset();
     bound_method_storage_ = script_value::make_null(nullptr);
-
-    // With lazy caching, we start with empty flat_lookup_ (no copy needed)
-    // Variables will be cached on first access
-    flat_lookup_.clear();
 }
 
 void environment::reset_as_method(std::shared_ptr<environment> parent, script_value this_obj) {
@@ -2478,6 +2481,11 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
     // Validate the parent chain before setting (debug mode only)
     validate_parent_chain(parent);
 
+    // Only clear cache if parent actually changed
+    if (parent_.get() != parent.get()) {
+        flat_lookup_.clear();
+    }
+
     parent_ = parent;
 
     // Set to method kind with this object
@@ -2485,9 +2493,6 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
     this_object_ = std::move(this_obj);
     class_def_.reset();
     bound_method_storage_ = script_value::make_null(nullptr);
-
-    // With lazy caching, we start with empty flat_lookup_
-    flat_lookup_.clear();
 }
 
 void environment::reset_as_static_method(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def) {
@@ -2497,6 +2502,11 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
     // Validate the parent chain before setting (debug mode only)
     validate_parent_chain(parent);
 
+    // Only clear cache if parent actually changed
+    if (parent_.get() != parent.get()) {
+        flat_lookup_.clear();
+    }
+
     parent_ = parent;
 
     // Set to static_method kind with class definition
@@ -2504,9 +2514,6 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
     this_object_ = script_value::make_null(nullptr);
     class_def_ = class_def;
     bound_method_storage_ = script_value::make_null(nullptr);
-
-    // With lazy caching, we start with empty flat_lookup_
-    flat_lookup_.clear();
 }
 
 std::unordered_map<std::string_view, script_value> environment::get_all_variables() const {
@@ -2795,7 +2802,8 @@ interpreter::interpreter()
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
-    
+    call_stack_.reserve(128);    // Avoid reallocation during deep recursion (e.g., Fibonacci)
+
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
         environment_pool_.emplace_back(std::make_shared<environment>(nullptr, string_symbolizer_));
@@ -3180,7 +3188,21 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         push_value(active_exception_value_.value());
         return checked_result<void>();
     }
-    
+
+    // ============================================================
+    // CALL FRAME FAST PATH: Check call frame locals first
+    // ============================================================
+    // Parameters stored in the call frame use linear search (fast for small N).
+    // This avoids hash map lookup overhead for the most common variable accesses.
+    if (!call_stack_.empty()) {
+        call_frame& frame = call_stack_.back();
+        script_value* local = frame.find_local(expr->symbol_id);
+        if (local) {
+            push_value(local->deref());  // Automatically handles references
+            return checked_result<void>();
+        }
+    }
+
     // Special handling for type constructors like weak_ptr<T>, shared_ptr<T>
     if (expr->name.find("weak_ptr<") == 0 || expr->name.find("shared_ptr<") == 0) {
         // This is a type constructor being used as a function
@@ -3279,18 +3301,41 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				// Both operands are simple identifiers - direct variable lookup without AST traversal
 
-				// Get both values directly from environment
-				auto leftResult = environment_->get(leftId->symbol_id);
-				if (!leftResult) {
-					return leftResult.error_value();
+				// Check call frame first, then environment for left operand
+				script_value leftVal = make_value();  // Use make_value() not default ctor
+				bool leftFromFrame = false;
+				if (!call_stack_.empty()) {
+					script_value* leftLocal = call_stack_.back().find_local(leftId->symbol_id);
+					if (leftLocal) {
+						leftVal = leftLocal->deref();
+						leftFromFrame = true;
+					}
 				}
-				script_value leftVal = std::move(leftResult.value()).deref();
+				if (!leftFromFrame) {
+					auto leftResult = environment_->get(leftId->symbol_id);
+					if (!leftResult) {
+						return leftResult.error_value();
+					}
+					leftVal = std::move(leftResult.value()).deref();
+				}
 
-				auto rightResult = environment_->get(rightId->symbol_id);
-				if (!rightResult) {
-					return rightResult.error_value();
+				// Check call frame first, then environment for right operand
+				script_value rightVal = make_value();  // Use make_value() not default ctor
+				bool rightFromFrame = false;
+				if (!call_stack_.empty()) {
+					script_value* rightLocal = call_stack_.back().find_local(rightId->symbol_id);
+					if (rightLocal) {
+						rightVal = rightLocal->deref();
+						rightFromFrame = true;
+					}
 				}
-				script_value rightVal = std::move(rightResult.value()).deref();
+				if (!rightFromFrame) {
+					auto rightResult = environment_->get(rightId->symbol_id);
+					if (!rightResult) {
+						return rightResult.error_value();
+					}
+					rightVal = std::move(rightResult.value()).deref();
+				}
 
 				// Fast path for integer arithmetic (most common in loops)
 				if (can_use_fast_path(expr->op.type)) {
@@ -3416,12 +3461,23 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
 			else if (expr->right->get_type() == node_type::literal_expr) {
 				auto* rightLit = static_cast<literal_expr*>(expr->right.get());
-				// Get left value from environment, right value is already in AST
-				auto leftResult = environment_->get(leftId->symbol_id);
-				if (!leftResult) {
-					return leftResult.error_value();
+				// Get left value - check call frame first, then environment
+				script_value leftVal = make_value();
+				bool leftFromFrame = false;
+				if (!call_stack_.empty()) {
+					script_value* leftLocal = call_stack_.back().find_local(leftId->symbol_id);
+					if (leftLocal) {
+						leftVal = leftLocal->deref();
+						leftFromFrame = true;
+					}
 				}
-				script_value leftVal = std::move(leftResult.value()).deref();
+				if (!leftFromFrame) {
+					auto leftResult = environment_->get(leftId->symbol_id);
+					if (!leftResult) {
+						return leftResult.error_value();
+					}
+					leftVal = std::move(leftResult.value()).deref();
+				}
 				const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
 
 				// Ultra-fast integer path (most common for loop conditions)
@@ -3524,11 +3580,23 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			if (expr->right->get_type() == node_type::identifier_expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				const script_value& leftVal = leftLit->value;  // Direct access!
-				auto rightResult = environment_->get(rightId->symbol_id);
-				if (!rightResult) {
-					return rightResult.error_value();
+				// Get right value - check call frame first, then environment
+				script_value rightVal = make_value();
+				bool rightFromFrame = false;
+				if (!call_stack_.empty()) {
+					script_value* rightLocal = call_stack_.back().find_local(rightId->symbol_id);
+					if (rightLocal) {
+						rightVal = rightLocal->deref();
+						rightFromFrame = true;
+					}
 				}
-				script_value rightVal = std::move(rightResult.value()).deref();
+				if (!rightFromFrame) {
+					auto rightResult = environment_->get(rightId->symbol_id);
+					if (!rightResult) {
+						return rightResult.error_value();
+					}
+					rightVal = std::move(rightResult.value()).deref();
+				}
 
 				// Ultra-fast integer path
 				if (can_use_fast_path(expr->op.type)) {
@@ -4002,8 +4070,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
 
-            // Try fast path: direct variable lookup for in-place mutation
-            script_value* varPtr = environment_->get_value_ptr(identifier->symbol_id);
+            // ============================================================
+            // CALL FRAME FAST PATH: Check call frame locals first
+            // ============================================================
+            // Parameters in call frame use linear search (fast for small N)
+            script_value* varPtr = nullptr;
+            if (!call_stack_.empty()) {
+                varPtr = call_stack_.back().find_local(identifier->symbol_id);
+            }
+            // Fall back to environment if not in call frame
+            if (!varPtr) {
+                varPtr = environment_->get_value_ptr(identifier->symbol_id);
+            }
             if (varPtr) {
                 // Fast path: direct in-place mutation for local variables
                 script_value& target = varPtr->deref();
@@ -4048,7 +4126,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         if (rhs_id->symbol_id == UINT64_MAX) {
                             rhs_id->symbol_id = string_symbolizer_->intern(rhs_id->name);
                         }
-                        script_value* rhs_ptr = environment_->get_value_ptr(rhs_id->symbol_id);
+                        // Check call frame first, then environment
+                        script_value* rhs_ptr = nullptr;
+                        if (!call_stack_.empty()) {
+                            rhs_ptr = call_stack_.back().find_local(rhs_id->symbol_id);
+                        }
+                        if (!rhs_ptr) {
+                            rhs_ptr = environment_->get_value_ptr(rhs_id->symbol_id);
+                        }
                         if (rhs_ptr && rhs_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                             script_int rhs_val = rhs_ptr->unchecked_as_int();
                             switch (expr->op.type) {
@@ -4088,7 +4173,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                     if (left_id->symbol_id == UINT64_MAX) {
                                         left_id->symbol_id = string_symbolizer_->intern(left_id->name);
                                     }
-                                    script_value* left_ptr = environment_->get_value_ptr(left_id->symbol_id);
+                                    // Check call frame first, then environment
+                                    script_value* left_ptr = nullptr;
+                                    if (!call_stack_.empty()) {
+                                        left_ptr = call_stack_.back().find_local(left_id->symbol_id);
+                                    }
+                                    if (!left_ptr) {
+                                        left_ptr = environment_->get_value_ptr(left_id->symbol_id);
+                                    }
                                     if (left_ptr && left_ptr->raw_storage_index() == script_value::TYPEID_INT) {
                                         script_int left_val = left_ptr->unchecked_as_int();
                                         script_int right_val = right_lit->value.unchecked_as_int();
@@ -4650,7 +4742,27 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (identifier->symbol_id == UINT64_MAX) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
-            // Get the current value to check if it's a reference
+
+            // ============================================================
+            // CALL FRAME FAST PATH: Check call frame locals first
+            // ============================================================
+            // If the variable is a parameter in the call frame, assign directly
+            if (!call_stack_.empty()) {
+                script_value* frameLocal = call_stack_.back().find_local(identifier->symbol_id);
+                if (frameLocal) {
+                    // Handle reference parameters
+                    if (frameLocal->is_reference()) {
+                        frameLocal->deref() = std::move(value.deref().clone());
+                    } else {
+                        // Direct assignment to call frame local
+                        *frameLocal = std::move(value.clone());
+                    }
+                    push_value(value);
+                    return {};
+                }
+            }
+
+            // Get the current value to check if it's a reference (environment path)
             if (environment_->contains(identifier->symbol_id)) {
                 script_value* currentVal = environment_->get_value_ptr(identifier->symbol_id);
                 if (currentVal && currentVal->is_reference()) {
@@ -9725,6 +9837,7 @@ script_value interpreter::bind_parameter(
 }
 
 // Function call implementation - returns checked_result for consistent error handling
+// Uses stack-based call frames for fast parameter access instead of hash map environments
 checked_result<script_value> interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args) {
     // Check recursion depth limit FIRST
     if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
@@ -9751,34 +9864,58 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         );
     }
 
-    // Create new environment for function execution using pool optimization
-    // Both lambdas and functions need a fresh environment for their parameters
+    // ============================================================
+    // CALL FRAME OPTIMIZATION: Push a call frame for parameters
+    // ============================================================
+    // Parameters are stored in the call frame for O(n) lookup where n is small.
+    // This avoids hash map overhead for the most frequently accessed variables.
+    // The environment is still used for:
+    // - 'this' object in methods
+    // - Static class fields
+    // - Closure captures
+    // - Variables defined in the function body (int x = 0; etc.)
+
+    // Push call frame and remember its index (NOT a reference!)
+    // IMPORTANT: Using index instead of reference to avoid invalidation when
+    // parameter conversion calls constructors that push more frames onto call_stack_
+    call_stack_.emplace_back();
+    const size_t frame_index = call_stack_.size() - 1;
+
+    // Pre-allocate locals for parameters to avoid reallocation
+    call_stack_[frame_index].locals.reserve(function.parameters.size());
+
+    // Set up closure environment for non-local lookups
     auto previousEnv = environment_;
 
-    // For lambdas with closures, the execution environment needs to chain:
-    // [parameter env] -> [closure env] -> [global env]
-    // For regular functions:
-    // [parameter env] -> [current env]
+    // Determine closure environment and method context
+    // NOTE: Re-access call_stack_[frame_index] each time instead of caching reference
     if (function.closure_env) {
-        // Check if the closure is a method environment
         if (function.closure_env->is_method_env()) {
+            // Method call - store 'this' in the call frame
             auto this_obj = function.closure_env->get_this_object();
-            // Create a new method environment that preserves implicit 'this' lookups
+            call_stack_[frame_index].set_this(this_obj);  // Uses set_this which sets is_method = true
+            call_stack_[frame_index].closure_env = function.closure_env->get_parent();
+            // Set environment to a method environment for 'this' field lookups in body
             environment_ = get_pooled_method_environment(function.closure_env->get_parent(), this_obj);
         } else if (function.closure_env->is_static_method_env()) {
-            // Static method - create new static method environment that preserves static field access
-            // Use the closure_env itself as parent to maintain access to class static fields
+            // Static method - store class definition in frame
+            call_stack_[frame_index].static_class_def = function.closure_env->get_class_definition();
+            call_stack_[frame_index].is_static_method = true;
+            call_stack_[frame_index].closure_env = function.closure_env->get_parent();
+            // Create static method environment for static field access
             environment_ = std::make_shared<environment>(
                 function.closure_env->get_parent(),
                 string_symbolizer_,
                 function.closure_env->get_class_definition()
             );
         } else {
-            // Regular closure - create new environment for parameters
+            // Regular closure
+            call_stack_[frame_index].closure_env = function.closure_env;
             environment_ = get_pooled_environment(function.closure_env);
         }
     } else {
-        // Regular function: create fresh environment with current as parent
+        // Regular function - use current environment for closures
+        call_stack_[frame_index].closure_env = previousEnv;
         environment_ = get_pooled_environment(previousEnv);
     }
 
@@ -9789,6 +9926,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     // Helper lambda to cleanup and restore state
     auto cleanup = [&](bool clear_this = true) {
+        // Pop the call frame
+        call_stack_.pop_back();
+
         auto function_env = environment_;
         if (clear_this) {
             if (function_env->is_method_env()) {
@@ -9803,7 +9943,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         returnValue_ = previousReturn;
     };
 
-    // Bind parameters to arguments
+    // ============================================================
+    // BIND PARAMETERS TO CALL FRAME
+    // ============================================================
+    // Parameters go into the call frame for fast lookup.
+    // Reference parameters still need special handling.
+
     for (size_t i = 0; i < function.parameters.size(); ++i) {
         const auto& param = function.parameters[i];
         const auto& arg = args[i];
@@ -9812,6 +9957,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         // Symbol IDs are cached at function definition time in visit_function_decl
         if (param.is_reference) {
             // For reference parameters, create a reference value
+            // References still go into environment since they need special tracking
             if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
                 auto symbol_id = current_arg_metadata_[i].first;
                 auto env = current_arg_metadata_[i].second;
@@ -9837,21 +9983,15 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                                 "Reference target is null"
                             );
                         }
-                        // Create reference to the final target
+                        // Create reference to the final target - add to call frame
                         script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-                        if (param.symbol_id != UINT64_MAX) {
-                            environment_->define(param.symbol_id, std::move(refValue));
-                        } else {
-                            environment_->define(param.name, std::move(refValue));
-                        }
+                        uint64_t param_id = (param.symbol_id != UINT64_MAX) ? param.symbol_id : string_symbolizer_->intern(param.name);
+                        call_stack_[frame_index].add_local(param_id, std::move(refValue));
                     } else {
-                        // Create reference to the argument
+                        // Create reference to the argument - add to call frame
                         script_value refValue = script_value::make_reference(argPtr, env);
-                        if (param.symbol_id != UINT64_MAX) {
-                            environment_->define(param.symbol_id, std::move(refValue));
-                        } else {
-                            environment_->define(param.name, std::move(refValue));
-                        }
+                        uint64_t param_id = (param.symbol_id != UINT64_MAX) ? param.symbol_id : string_symbolizer_->intern(param.name);
+                        call_stack_[frame_index].add_local(param_id, std::move(refValue));
                     }
                 } else {
                     // No metadata - can't create reference
@@ -9875,11 +10015,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             JAISCRIPT_TRY_ASSIGN(converted_arg, try_convert_for_parameter(arg, param.type));
 
             // Decide between value semantics (clone) or reference semantics (share)
-            // Use reference semantics (no clone) if:
-            // 1. Parameter type is declared as shared_ptr<T>, OR
-            // 2. Argument is already shared_ptr<T> (preserve reference semantics)
-            // Otherwise use value semantics (clone for C++-like behavior)
-
             bool should_share = false;
 
             // Check if parameter type is shared_ptr<T>
@@ -9892,22 +10027,17 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 should_share = true;
             }
 
-            if (param.symbol_id != UINT64_MAX) {
-                if (should_share) {
-                    // Shallow copy - share ownership (reference semantics)
-                    environment_->define(param.symbol_id, converted_arg);
-                } else {
-                    // Deep copy - value semantics (C++-like default)
-                    auto cloned = converted_arg.clone();
-                    environment_->define(param.symbol_id, std::move(cloned));
-                }
+            // Get parameter ID - use cached ID, fallback to intern if not set
+            uint64_t param_id = (param.symbol_id != UINT64_MAX) ? param.symbol_id : string_symbolizer_->intern(param.name);
+
+            // Add parameter to call frame (fast path - no hash map)
+            // IMPORTANT: Use call_stack_[frame_index] not a cached reference (vector may have reallocated)
+            if (should_share) {
+                // Shallow copy - share ownership (reference semantics)
+                call_stack_[frame_index].add_local(param_id, converted_arg);
             } else {
-                // Fallback to parameter name if symbol_id not set
-                if (should_share) {
-                    environment_->define(param.name, converted_arg);
-                } else {
-                    environment_->define(param.name, converted_arg.clone());
-                }
+                // Deep copy - value semantics (C++-like default)
+                call_stack_[frame_index].add_local(param_id, converted_arg.clone());
             }
         }
     }
@@ -9934,7 +10064,16 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     script_value result = make_value();
 
     if (hasReturnValue_) {
-        result = std::move(returnValue_.value());
+        // IMPORTANT: Dereference any references before cleanup destroys the call frame.
+        // References to call frame locals (e.g., map[key] on a parameter) would become
+        // dangling after the call frame is popped.
+        if (returnValue_.value().is_reference()) {
+            // Copy the target - can't move since target might be in outer scope
+            result = returnValue_.value().deref();
+        } else {
+            // Not a reference - safe to move directly
+            result = std::move(returnValue_.value());
+        }
 
         // Apply return type conversion if needed
         // Skip conversion for void, auto, or any type (implicit return type accepts any value)
@@ -9945,24 +10084,21 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             JAISCRIPT_TRY_ASSIGN(result, try_convert_for_parameter(result, function.return_type));
         }
     } else {
-        // Check if this is a constructor (method environment with no explicit return)
+        // Check if this is a constructor (method with no explicit return)
         // Constructors implicitly return 'this'
-        // Note: The environment_ at this point is a pooled environment for parameters,
-        // so we need to check the PARENT which could be the method environment
-        auto function_env = environment_;
-        if (function_env->is_method_env()) {
-            result = function_env->get_this_object();
-        } else if (function_env->get_parent()) {
-            // Check parent - the closure_env passed to call_function might be a method environment
-            if (function_env->get_parent()->is_method_env()) {
+        if (call_stack_[frame_index].is_method) {
+            result = call_stack_[frame_index].get_this();
+        } else {
+            // Check environment for method context (for closures inside methods)
+            auto function_env = environment_;
+            if (function_env->is_method_env()) {
+                result = function_env->get_this_object();
+            } else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
                 result = function_env->get_parent()->get_this_object();
             } else {
                 // Regular function with no return statement returns null
                 result = make_value();
             }
-        } else {
-            // Regular function with no return statement returns null
-            result = make_value();
         }
     }
 

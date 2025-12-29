@@ -482,6 +482,36 @@ const script_function& script_value::as_function() const {
     return *std::get<strong_ptr<script_function>>(val.storage_);
 }
 
+script_value script_value::try_unwrap_transparent_wrapper() const {
+    // Only objects can be transparent wrappers
+    if (!is_object() || !engine_) {
+        return *this;  // Return self unchanged
+    }
+
+    auto holder = get_object_holder();
+    if (!holder) {
+        return *this;
+    }
+
+    // Look up the class definition
+    auto class_def = engine_->get_class_definition(holder->type_id);
+    if (!class_def || !class_def->is_transparent_wrapper()) {
+        return *this;  // Not a transparent wrapper
+    }
+
+    // Unwrap the value
+    script_value mutable_self = *this;
+    script_value unwrapped = class_def->unwrap(mutable_self);
+
+    // If unwrap succeeded (returned non-null), return the unwrapped value
+    if (!unwrapped.is_null()) {
+        return unwrapped;
+    }
+
+    // Unwrap failed, return self
+    return *this;
+}
+
 std::string script_value::to_string() const {
     // Special handling for references to show what they point to
     if (current_type() == script_value_type::jai_reference_type) {

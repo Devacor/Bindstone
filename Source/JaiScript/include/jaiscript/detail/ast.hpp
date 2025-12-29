@@ -545,7 +545,7 @@ namespace jai {
 
         std::string_view name;  // Points to symbolizer storage (permanent)
         uint64_t name_id = UINT64_MAX;  // Interned name for fast comparison (UINT64_MAX = not interned)
-        std::vector<std::string> base_classes;  // TODO: Also change to string_view
+        std::vector<std::string_view> base_classes;  // Points to symbolizer storage (permanent)
         std::vector<member> members;
 
         class_decl(const source_location& loc, std::string_view n, uint64_t nid = UINT64_MAX)

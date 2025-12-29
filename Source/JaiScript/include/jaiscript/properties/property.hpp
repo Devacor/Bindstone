@@ -13,7 +13,11 @@ namespace jai {
 	class property_base;
 
 	template<typename T> class property;
+	template<typename T, auto Name> class named_property;
 	template<typename T> class deleted_property;
+
+	// Forward declare fixed_string for NTTP
+	template<size_t N> struct fixed_string;
 
 	namespace serialization {
 		class archive_writer;
@@ -39,6 +43,36 @@ namespace jai {
 	concept boolean_testable = requires(const T & t) {
 		{ static_cast<bool>(t) };  // Can be explicitly converted to bool
 	};
+
+	// ============================================================================
+	// C++20 fixed_string for Non-Type Template Parameters (NTTP)
+	// ============================================================================
+	// Allows compile-time string literals as template parameters:
+	//   jai::property<int, "health"> health{property_mgr, 100};
+	//
+	template<size_t N>
+	struct fixed_string {
+		char data[N]{};
+
+		constexpr fixed_string(const char (&str)[N]) {
+			for (size_t i = 0; i < N; ++i) data[i] = str[i];
+		}
+
+		constexpr operator std::string_view() const { return {data, N - 1}; }
+		constexpr const char* c_str() const { return data; }
+		constexpr size_t size() const { return N - 1; }
+
+		// Comparison for use in template parameters
+		constexpr bool operator==(const fixed_string&) const = default;
+	};
+
+	// Deduction guide
+	template<size_t N>
+	fixed_string(const char (&)[N]) -> fixed_string<N>;
+
+	// ============================================================================
+	// Property base class
+	// ============================================================================
 
 	// property_base - abstract base for all properties
 	class property_base {
@@ -524,6 +558,62 @@ namespace jai {
 		void clone_to_target(property_base&) override {
 			// No-op
 		}
+	};
+
+	// ============================================================================
+	// named_property - Property with compile-time name (C++20 NTTP)
+	// ============================================================================
+	//
+	// Alternative syntax using Non-Type Template Parameters:
+	//
+	//   // Instead of macro:
+	//   JAI_PROPERTY((int), health, 100);
+	//
+	//   // Use NTTP syntax:
+	//   jai::property<int, "health"> health{property_mgr, 100};
+	//
+	// Benefits:
+	// - No macro needed
+	// - Name is compile-time constant (potential for optimizations)
+	// - IDE autocomplete works better
+	// - Cleaner syntax for simple cases
+	//
+	// The macro is still recommended for:
+	// - Types with commas (e.g., std::map<int, int>) - macro handles parentheses
+	// - Schema registration (macro auto-registers to type_registry)
+	//
+	template<typename T, fixed_string Name>
+	class named_property : public property<T> {
+	public:
+		// Compile-time access to property name
+		static constexpr std::string_view property_name = Name;
+
+		// Constructor: property_manager only (default-constructed value)
+		named_property(property_manager& mgr)
+			: property<T>(mgr, std::string(static_cast<std::string_view>(Name))) {}
+
+		// Constructor: property_manager + default value
+		template<typename U>
+			requires std::constructible_from<T, U>
+		named_property(property_manager& mgr, U&& default_val)
+			: property<T>(mgr, std::string(static_cast<std::string_view>(Name)), std::forward<U>(default_val)) {}
+
+		// Constructor: property_manager + default value + clone function
+		template<typename U, typename Fn>
+			requires std::constructible_from<T, U> && std::invocable<Fn, property<T>&, property<T>&>
+		named_property(property_manager& mgr, U&& default_val, Fn&& clone_fn)
+			: property<T>(mgr, std::string(static_cast<std::string_view>(Name)),
+			              std::forward<U>(default_val), std::forward<Fn>(clone_fn)) {}
+
+		// Move operations
+		named_property(named_property&&) = default;
+		named_property& operator=(named_property&&) = default;
+
+		// Copy is deleted (same as property<T>)
+		named_property(const named_property&) = delete;
+
+		// Value assignment (inherited behavior)
+		using property<T>::operator=;
 	};
 
 } // namespace jai

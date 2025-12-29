@@ -15,7 +15,7 @@ using namespace jai::foundry;
 namespace jai::foundry::tests {
 
 // Test fixture class with properties
-class test_object : public property_owner {
+class test_object : public property_owner<test_object> {
 public:
     JAI_PROPERTY((int), health, 100);
     JAI_PROPERTY((float), speed, 5.5f);
@@ -26,7 +26,7 @@ public:
 };
 
 // Version 1 object (original)
-class versioned_object_v1 : public property_owner {
+class versioned_object_v1 : public property_owner<versioned_object_v1> {
 public:
     JAI_PROPERTY((int), x, 0);
     JAI_PROPERTY((int), y, 0);
@@ -36,7 +36,7 @@ public:
 };
 
 // Version 2 object (added field)
-class versioned_object_v2 : public property_owner {
+class versioned_object_v2 : public property_owner<versioned_object_v2> {
 public:
     JAI_PROPERTY((int), x, 0);
     JAI_PROPERTY((int), y, 0);
@@ -47,7 +47,7 @@ public:
 };
 
 // Version 3 object (renamed field)
-class versioned_object_v3 : public property_owner {
+class versioned_object_v3 : public property_owner<versioned_object_v3> {
 public:
     JAI_PROPERTY((int), x, 0);
     JAI_PROPERTY((int), y, 0);
@@ -59,7 +59,7 @@ public:
 };
 
 // Object with containers
-class container_object : public property_owner {
+class container_object : public property_owner<container_object> {
 public:
     JAI_PROPERTY((std::vector<int>), numbers);
     JAI_PROPERTY((std::vector<std::string>), tags);
@@ -79,7 +79,7 @@ struct resource_manager {
 };
 
 // Object that requires a dependency during construction
-class resource_dependent_object : public property_owner {
+class resource_dependent_object : public property_owner<resource_dependent_object> {
 public:
     JAI_PROPERTY((std::string), name, "");
     JAI_PROPERTY((int), resource_ref, 0);
@@ -98,7 +98,7 @@ public:
 };
 
 // Object that needs both context and archive for complex construction
-class archive_aware_object : public property_owner {
+class archive_aware_object : public property_owner<archive_aware_object> {
 public:
     JAI_PROPERTY((std::string), data, "");
     JAI_PROPERTY((int), computed_value, 0);
@@ -116,13 +116,13 @@ public:
 };
 
 // Test class for field renaming migration
-class migrated_object_v1 : public property_owner {
+class migrated_object_v1 : public property_owner<migrated_object_v1> {
 public:
     JAI_PROPERTY((std::string), old_name, "");
     JAI_PROPERTY((int), value, 0);
 };
 
-class migrated_object_v2 : public property_owner {
+class migrated_object_v2 : public property_owner<migrated_object_v2> {
 public:
     JAI_PROPERTY((std::string), new_name, "");  // Renamed from old_name
     JAI_PROPERTY((int), value, 0);
@@ -145,7 +145,7 @@ public:
 };
 
 // Test class for computed values
-class computed_object : public property_owner {
+class computed_object : public property_owner<computed_object> {
 public:
     JAI_PROPERTY((int), width, 0);
     JAI_PROPERTY((int), height, 0);
@@ -160,7 +160,7 @@ public:
 };
 
 // Test class for data validation/correction
-class validated_object : public property_owner {
+class validated_object : public property_owner<validated_object> {
 public:
     JAI_PROPERTY((int), score, 0);
     JAI_PROPERTY((std::string), category, "");

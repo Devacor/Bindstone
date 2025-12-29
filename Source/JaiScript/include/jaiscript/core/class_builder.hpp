@@ -14,6 +14,10 @@
 #include "bound_map.hpp"
 #include "bound_cpp_vector.hpp"
 #include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/properties/property_schema.hpp>
+#include <jaiscript/properties/observable_property.hpp>
+#include <jaiscript/signals/signal_impl.hpp>
+#include <jaiscript/core/property_type_converter.hpp>
 #include <string>
 #include <memory>
 #include <functional>
@@ -63,6 +67,41 @@ enum class delegation_type {
 
 // Forward declarations
 class class_definition;
+
+// ============================================================================
+// observable_property_ref<T> - Script-side reference to an observable property
+// ============================================================================
+//
+// This wrapper class is used to expose observable_property<T> to scripts.
+// It provides:
+//   - get() - returns the current value
+//   - on_change(callback) - connects a callback for value changes
+//   - Transparent wrapper behavior - forwards operations to the underlying value
+//
+// Usage in scripts:
+//   player.score           // Returns observable_property_ref<int>
+//   player.score + 5       // Transparent wrapper forwards + to int (returns 5)
+//   player.score.on_change([&](auto old, auto new) { ... })  // Connects callback
+//
+template<typename T>
+class observable_property_ref {
+public:
+    observable_property_ref(observable_property<T>* prop, property_manager* mgr)
+        : prop_(prop), mgr_(mgr) {}
+
+    // Get the current value
+    T get() const { return prop_ ? prop_->get() : T{}; }
+
+    // Get pointer to the observable_property (for on_change registration)
+    observable_property<T>* property() const { return prop_; }
+
+    // Get the property_manager (for receiver tracking)
+    property_manager* manager() const { return mgr_; }
+
+private:
+    observable_property<T>* prop_;
+    property_manager* mgr_;
+};
 class class_instance;
 
 // Class instance representation in JaiScript
@@ -735,6 +774,7 @@ public:
     }
     
     // Set parent class for inheritance (single inheritance - kept for compatibility)
+    // Note: This clears existing parents. Use add_parent() to append instead.
     void set_parent(std::shared_ptr<class_definition> parent) {
         parent_classes_.clear();
         if (parent) {
@@ -746,6 +786,30 @@ public:
             }
         }
         field_defaults_cache_valid_ = false;  // Invalidate cache when parent changes
+    }
+
+    // Add a parent class (appends to existing parents)
+    // Returns true if successful, false if diamond inheritance would be created
+    [[nodiscard]] bool add_parent(std::shared_ptr<class_definition> parent) {
+        if (!parent) return true;
+
+        // Temporarily add the parent
+        parent_classes_.push_back(parent);
+        field_defaults_cache_valid_ = false;
+
+        // Check for diamond inheritance
+        if (has_diamond_inheritance()) {
+            parent_classes_.pop_back();  // Roll back
+            return false;
+        }
+
+        // Register this as a derived class of the parent
+        parent->add_derived_class(shared_from_this());
+        if (parent->has_property_getters()) {
+            has_property_getters_ = true;
+        }
+
+        return true;
     }
 
     // Set multiple parent classes for multiple inheritance
@@ -865,6 +929,24 @@ public:
     // Check if a field has a registered setter
     bool has_property_setter(uint64_t field_id) const {
         return property_setter_ids_.find(field_id) != property_setter_ids_.end();
+    }
+
+    // Transparent wrapper support - check if this type wraps another and should forward operations
+    bool is_transparent_wrapper() const { return is_transparent_wrapper_; }
+
+    // Get the underlying value from a transparent wrapper
+    // Returns null script_value if not a wrapper or unwrap fails
+    script_value unwrap(script_value& wrapper_value) const {
+        if (!is_transparent_wrapper_ || !unwrap_function_) {
+            return script_value(std::monostate{}, engine_);
+        }
+        return unwrap_function_(wrapper_value, engine_);
+    }
+
+    // Set the unwrap function (called by class_builder::transparent_wrapper)
+    void set_unwrap_function(std::function<script_value(script_value&, engine*)> fn) {
+        is_transparent_wrapper_ = true;
+        unwrap_function_ = std::move(fn);
     }
 
     const std::string& get_name() const { return name_; }
@@ -1313,6 +1395,11 @@ private:
     // Set to true when any _get_* method is registered, OR inherited from parent/base classes
     bool has_property_getters_ = false;
 
+    // Transparent wrapper support - allows types to forward operations to an underlying value
+    // When an operation isn't found on the wrapper, unwrap and retry on the underlying value
+    bool is_transparent_wrapper_ = false;
+    std::function<script_value(script_value&, engine*)> unwrap_function_;
+
     // Copy function for deep copying objects
     copy_function copy_function_;
     
@@ -1568,6 +1655,60 @@ namespace class_builder_validation {
     }
 }
 
+// ============================================================================
+// Bind Mode for auto_build()
+// ============================================================================
+
+enum class bind_mode {
+    all,        // Base classes + properties + auto-detected methods/constructors
+    properties, // Base classes + properties only (no auto methods/constructors)
+    hierarchy   // Base classes only (no properties or auto methods)
+};
+
+// ============================================================================
+// Concepts for auto-detection (used by auto_build)
+// ============================================================================
+
+namespace auto_bind_concepts {
+
+// Detect if T has to_string() method
+template<typename T>
+concept has_to_string = requires(const T& t) {
+    { t.to_string() } -> std::convertible_to<std::string>;
+};
+
+// Detect if T has size() method
+template<typename T>
+concept has_size = requires(const T& t) {
+    { t.size() } -> std::convertible_to<size_t>;
+};
+
+// Detect if T has empty() method
+template<typename T>
+concept has_empty = requires(const T& t) {
+    { t.empty() } -> std::convertible_to<bool>;
+};
+
+// Detect if T has operator==
+template<typename T>
+concept has_equality = requires(const T& a, const T& b) {
+    { a == b } -> std::convertible_to<bool>;
+};
+
+// Detect if T uses property_owner CRTP (has _jai_owner_type)
+template<typename T>
+concept is_property_owner = requires {
+    typename T::_jai_owner_type;
+};
+
+// Detect if T has base types defined
+template<typename T>
+concept has_base_types = requires {
+    typename T::_jai_base_types;
+};
+
+} // namespace auto_bind_concepts
+
 // Builder pattern for registering C++ classes to JaiScript
 template<typename T>
 class class_builder {
@@ -1593,10 +1734,37 @@ public:
     }
     
     // Constructor that accepts a shared_ptr<engine>
-    class_builder(std::shared_ptr<engine>& engine_ptr, const std::string& class_name) 
+    class_builder(std::shared_ptr<engine>& engine_ptr, const std::string& class_name)
         : class_builder(*engine_ptr, class_name) {
     }
-    
+
+    // Destructor - automatically call build() if not already called
+    // This ensures the class is registered even if the user forgets to call build()
+    ~class_builder() {
+        if (!built_) {
+            build();
+        }
+    }
+
+    // Disable copy (would cause double-build issues)
+    class_builder(const class_builder&) = delete;
+    class_builder& operator=(const class_builder&) = delete;
+
+    // Enable move
+    class_builder(class_builder&& other) noexcept
+        : engine_(other.engine_)
+        , class_name_(std::move(other.class_name_))
+        , class_def_(std::move(other.class_def_))
+        , serialization_metadata_(std::move(other.serialization_metadata_))
+        , has_base_class_(other.has_base_class_)
+        , base_type_index_(other.base_type_index_)
+        , has_explicit_constructor_(other.has_explicit_constructor_)
+        , built_(other.built_)
+    {
+        // Mark the moved-from object as built to prevent double-registration
+        other.built_ = true;
+    }
+
     // Add constructor
     template<typename... Args>
     class_builder& constructor() {
@@ -2351,10 +2519,11 @@ public:
         return *this;
     }
     
-    // Set base class - establishes inheritance relationship
+    // Add base class - establishes inheritance relationship (appends, doesn't clear)
     // This enables:
     // 1. Method inheritance (derived can call base methods)
     // 2. Polymorphic copy support
+    // Can be chained: .base_class<A>().base_class<B>() for multiple inheritance
     template<typename Base>
     class_builder& base_class() {
         static_assert(std::is_base_of_v<Base, T>,
@@ -2363,12 +2532,19 @@ public:
         // Set up inheritance relationship - use type_index lookup instead of typeid name
         auto base_def = engine_.get_class_definition_by_type(std::type_index(typeid(Base)));
         if (base_def) {
-            class_def_->set_parent(base_def);
+            // Use add_parent to append (validates for diamond inheritance)
+            if (!class_def_->add_parent(base_def)) {
+                throw std::runtime_error("Diamond inheritance detected: class '" + class_name_ +
+                    "' would have multiple paths to the same base class");
+            }
         }
 
         // Store base type info for polymorphic copy registration
+        // For multiple inheritance, this stores the last base (first base is used for primary polymorphism)
+        if (!has_base_class_) {
+            base_type_index_ = std::type_index(typeid(Base));
+        }
         has_base_class_ = true;
-        base_type_index_ = std::type_index(typeid(Base));
 
         return *this;
     }
@@ -2464,8 +2640,403 @@ public:
         return method("post_deserialize", std::forward<Callable>(callable));
     }
 
+    // ============================================================================
+    // transparent_wrapper() - Mark this type as a transparent wrapper
+    // ============================================================================
+    //
+    // When an operation (method call, operator, etc.) is not found on the wrapper,
+    // the interpreter will call the unwrap function and retry the operation on
+    // the underlying value.
+    //
+    // This enables patterns like:
+    //   player.score + 5        // score is observable_property<int>, forwards + to int
+    //   player.score.on_change  // on_change is on the wrapper itself
+    //   player.cat.meow()       // cat is observable_property<Cat>, forwards meow() to Cat
+    //
+    // The unwrap function receives a reference to the wrapper object and returns
+    // a script_value containing the underlying value.
+    //
+    // Usage:
+    //   class_builder<observable_property<int>>(eng, "observable_int")
+    //       .transparent_wrapper([](observable_property<int>& self) { return self.get(); })
+    //       .method("on_change", ...)
+    //       .build();
+    //
+    template<typename UnwrapFn>
+    class_builder& transparent_wrapper(UnwrapFn&& unwrap_fn) {
+        engine* eng = &engine_;
+
+        // Create the unwrap function that works with script_value
+        auto wrapped_fn = [unwrap_fn = std::forward<UnwrapFn>(unwrap_fn), eng](script_value& wrapper_sv, engine* e) -> script_value {
+            // Extract the C++ object from the script_value
+            if (!wrapper_sv.is_object()) {
+                return script_value(std::monostate{}, e);
+            }
+
+            auto holder = wrapper_sv.get_object_holder();
+            if (!holder) {
+                return script_value(std::monostate{}, e);
+            }
+
+            // Get the typed pointer - check if it's a class_instance wrapper
+            T* cpp_ptr = nullptr;
+            if (holder->is_class_instance_wrapper) {
+                auto instance = std::static_pointer_cast<class_instance>(holder->data);
+                if (instance) {
+                    cpp_ptr = instance->get_cpp_object_as<T>().get();
+                }
+            } else {
+                auto typed_ptr = std::static_pointer_cast<T>(holder->data);
+                cpp_ptr = typed_ptr.get();
+            }
+
+            if (!cpp_ptr) {
+                return script_value(std::monostate{}, e);
+            }
+
+            // Call the unwrap function and convert result to script_value
+            auto underlying_value = unwrap_fn(*cpp_ptr);
+            return script_value_from_cpp(underlying_value, e);
+        };
+
+        class_def_->set_unwrap_function(std::move(wrapped_fn));
+        return *this;
+    }
+
+    // ============================================================================
+    // auto_bind() - Apply auto-detection of base classes and common methods
+    // ============================================================================
+    //
+    // Usage:
+    //   class_builder<Player>(eng, "Player")
+    //       .auto_bind()                       // Applies base classes + common methods
+    //       .method("custom", &Player::custom); // Add more custom bindings
+    //
+    //   class_builder<Player>(eng, "Player")
+    //       .auto_bind(bind_mode::hierarchy);  // Just base classes, no auto methods
+    //
+    class_builder& auto_bind(bind_mode mode = bind_mode::all) {
+        // Apply base classes from _jai_base_types if present
+        if constexpr (auto_bind_concepts::has_base_types<T>) {
+            apply_base_classes_from_tuple(typename T::_jai_base_types{});
+        }
+
+        // Bind properties from type_registry if T is a property_owner
+        if constexpr (auto_bind_concepts::is_property_owner<T>) {
+            bind_properties_from_schema();
+        }
+
+        // Apply auto-detected methods if mode is 'all'
+        if (mode == bind_mode::all) {
+            if constexpr (auto_bind_concepts::has_to_string<T>) {
+                method("to_string", &T::to_string);
+            }
+            if constexpr (auto_bind_concepts::has_size<T>) {
+                method("size", &T::size);
+            }
+            if constexpr (auto_bind_concepts::has_empty<T>) {
+                method("empty", &T::empty);
+            }
+            if constexpr (auto_bind_concepts::has_equality<T>) {
+                method("==", [](const T& a, const T& b) -> bool { return a == b; });
+                method("!=", [](const T& a, const T& b) -> bool { return !(a == b); });
+            }
+        }
+
+        return *this;
+    }
+
+private:
+    // Bind properties from type_registry schema for property_owner classes
+    // This is called when T is complete, so we can directly access T's property_mgr
+    void bind_properties_from_schema() {
+        // Get the schema for this type (includes inherited properties)
+        auto all_props = type_registry::instance().all_properties<T>();
+
+        for (const auto* prop_meta : all_props) {
+            if (!prop_meta) continue;
+
+            const std::string prop_name = prop_meta->name;
+            const std::type_index value_type = prop_meta->value_type_id;
+            const bool is_observable = prop_meta->is_observable;
+
+            // Dispatch to the appropriate template based on value type
+            // We use a type-switch here because we have runtime type_index
+            if (!try_bind_property_typed<int>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<float>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<double>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<bool>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<std::string>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<int64_t>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<uint64_t>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<int32_t>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<uint32_t>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<int16_t>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<uint16_t>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<int8_t>(prop_name, value_type, is_observable) &&
+                !try_bind_property_typed<uint8_t>(prop_name, value_type, is_observable)) {
+                // Try the global type converter registry for custom types
+                try_bind_property_from_registry(prop_name, value_type);
+            }
+        }
+    }
+
+    // Try to bind a property if the value type matches ValueT
+    // Returns true if bound, false if type doesn't match
+    // For observable properties, also binds an observation method
+    template<typename ValueT>
+    bool try_bind_property_typed(const std::string& prop_name, std::type_index value_type, bool is_observable) {
+        if (value_type != std::type_index(typeid(ValueT))) {
+            return false;
+        }
+
+        engine* eng = &engine_;
+
+        // For observable properties, register the wrapper type and use a different getter
+        if (is_observable) {
+            // Ensure the observable_property_ref<ValueT> type is registered
+            ensure_observable_ref_type_registered<ValueT>();
+
+            // Create getter that returns the wrapper for observable properties
+            // This enables player.score.on_change(callback) syntax
+            auto getter = [prop_name, eng](T& self) -> script_value {
+                auto* base_prop = self.property_mgr.get(prop_name);
+                if (!base_prop) {
+                    return script_value(std::monostate{}, eng);
+                }
+                auto* obs_prop = dynamic_cast<jai::observable_property<ValueT>*>(base_prop);
+                if (!obs_prop) {
+                    return script_value(std::monostate{}, eng);
+                }
+                // Create an observable_property_ref wrapper and return it as a script object
+                auto ref = std::make_shared<observable_property_ref<ValueT>>(obs_prop, &self.property_mgr);
+                return eng->make_object(ref);
+            };
+
+            // Create setter that assigns through the property to trigger the signal
+            auto setter = [prop_name](T& self, ValueT val) {
+                jai::property_base* base_prop = self.property_mgr.get(prop_name);
+                if (!base_prop) return;
+                jai::observable_property<ValueT>* obs_prop = dynamic_cast<jai::observable_property<ValueT>*>(base_prop);
+                if (obs_prop) {
+                    *obs_prop = std::move(val);
+                }
+            };
+
+            property(prop_name, std::move(getter), std::move(setter));
+
+            // Also bind the legacy on_<prop>_change method for backwards compatibility
+            bind_observable_property<ValueT>(prop_name);
+        } else {
+            // Regular (non-observable) properties just return the value directly
+            auto getter = [prop_name, eng](T& self) -> script_value {
+                if (auto* prop = self.property_mgr.template get<ValueT>(prop_name)) {
+                    return script_value_from_cpp(prop->get(), eng);
+                }
+                return script_value(std::monostate{}, eng);
+            };
+
+            auto setter = [prop_name](T& self, ValueT val) {
+                jai::property_base* base_prop = self.property_mgr.get(prop_name);
+                if (!base_prop) return;
+                jai::property<ValueT>* regular_prop = dynamic_cast<jai::property<ValueT>*>(base_prop);
+                if (regular_prop) {
+                    regular_prop->get() = std::move(val);
+                }
+            };
+
+            property(prop_name, std::move(getter), std::move(setter));
+        }
+
+        return true;
+    }
+
+    // Bind observation method for an observable property
+    // Allows scripts to connect callbacks that fire when the property changes
+    // Supports both:
+    //   - obj.on_score_change(callback)   (legacy API)
+    //   - obj.score.on_change(callback)   (new API via transparent wrapper)
+    template<typename ValueT>
+    void bind_observable_property(const std::string& prop_name) {
+        engine* eng = &engine_;
+        std::string observe_method_name = "on_" + prop_name + "_change";
+
+        // Method signature: on_<prop>_change(callback) where callback(old_value, new_value)
+        // The connection persists for the lifetime of the owner object
+        method(observe_method_name, [prop_name, eng](T& self, const script_value& callback) -> script_value {
+            if (!callback.is_function()) {
+                throw runtime_error("on_" + prop_name + "_change requires a function argument");
+            }
+
+            // Get the property_base by name and cast to observable_property
+            auto* base_prop = self.property_mgr.get(prop_name);
+            if (!base_prop) {
+                throw runtime_error("Property '" + prop_name + "' not found");
+            }
+
+            // Dynamic cast to observable_property to access the on_change signal
+            auto* obs_prop = dynamic_cast<observable_property<ValueT>*>(base_prop);
+            if (!obs_prop) {
+                throw runtime_error("Property '" + prop_name + "' is not observable");
+            }
+
+            // Capture the script function
+            const script_function& script_func = callback.as_function();
+
+            // Create a C++ callback that invokes the script function
+            // The observable_property's on_change signal passes (old_value, new_value)
+            auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
+                // Convert C++ values to script_values
+                script_value old_sv = script_value_from_cpp(old_val, eng);
+                script_value new_sv = script_value_from_cpp(new_val, eng);
+
+                // Call the script function
+                auto result = script_func({old_sv, new_sv});
+                // Ignore result (void callback)
+            };
+
+            // Connect to the signal and get the receiver
+            auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
+
+            // Track the receiver in property_manager so it lives as long as the owner
+            self.property_mgr.template track_receiver<void(const ValueT&, const ValueT&)>(recv);
+
+            return script_value(std::monostate{}, eng); // Return null (disconnect not yet supported)
+        });
+    }
+
+    // Register the observable_property_ref<ValueT> wrapper type if not already registered.
+    // This wrapper enables the player.score.on_change(callback) syntax by:
+    //   1. Having an on_change method for callback registration
+    //   2. Being a transparent wrapper that forwards operations to the underlying value
+    template<typename ValueT>
+    void ensure_observable_ref_type_registered() {
+        using RefType = observable_property_ref<ValueT>;
+
+        // Generate type name based on ValueT
+        std::string type_name = "observable_property_ref<" + std::string(typeid(ValueT).name()) + ">";
+
+        // Check if already registered (engine tracks registered types)
+        if (engine_.is_type_registered(type_name)) {
+            return;
+        }
+
+        // Register the wrapper type
+        class_builder<RefType>(engine_, type_name)
+            // Transparent wrapper - unwraps to the value type for arithmetic, etc.
+            .transparent_wrapper([](RefType& self) -> ValueT {
+                return self.get();
+            })
+            // on_change method - connects a callback to the property's signal
+            .method("on_change", [](RefType& self, const script_value& callback) -> script_value {
+                if (!callback.is_function()) {
+                    throw runtime_error("on_change requires a function argument");
+                }
+
+                auto* obs_prop = self.property();
+                auto* prop_mgr = self.manager();
+                if (!obs_prop || !prop_mgr) {
+                    throw runtime_error("Invalid observable property reference");
+                }
+
+                engine* eng = callback.get_engine();
+                const script_function& script_func = callback.as_function();
+
+                // Create callback that invokes the script function
+                auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
+                    script_value old_sv = script_value_from_cpp(old_val, eng);
+                    script_value new_sv = script_value_from_cpp(new_val, eng);
+                    auto result = script_func({old_sv, new_sv});
+                };
+
+                // Connect and track the receiver
+                auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
+                prop_mgr->template track_receiver<void(const ValueT&, const ValueT&)>(recv);
+
+                return script_value(std::monostate{}, eng);
+            })
+            .build();
+    }
+
+    // Try to bind a property using the global type converter registry
+    // This handles custom types like MV::Point<int, int> that have been registered
+    // via property_type_converter_registrar
+    //
+    // TODO: Implement fully once property_manager has type-erased value access
+    // For now, complex property types need to be bound manually
+    void try_bind_property_from_registry(const std::string& /*prop_name*/, std::type_index value_type) {
+        // Check if converter exists (for future use)
+        if (!property_type_converter_registry::instance().has_converter(value_type)) {
+            return;  // No converter registered - skip silently
+        }
+        // Complex type binding not yet implemented
+        // Custom types need to be bound manually for now
+    }
+
+    // Helper to convert C++ value to script_value
+    // For primitive types, uses direct construction for efficiency.
+    // For custom types (classes registered via jai::registrar), delegates to value_converter
+    // which uses the engine's type conversion registry.
+    template<typename ValueT>
+    static script_value script_value_from_cpp(const ValueT& value, engine* eng) {
+        if constexpr (std::is_same_v<ValueT, int> || std::is_same_v<ValueT, int32_t>) {
+            return script_value(static_cast<script_int>(value), eng);
+        } else if constexpr (std::is_same_v<ValueT, int64_t>) {
+            return script_value(value, eng);
+        } else if constexpr (std::is_same_v<ValueT, uint64_t> || std::is_same_v<ValueT, uint32_t> ||
+                            std::is_same_v<ValueT, uint16_t> || std::is_same_v<ValueT, uint8_t> ||
+                            std::is_same_v<ValueT, int16_t> || std::is_same_v<ValueT, int8_t>) {
+            return script_value(static_cast<script_int>(value), eng);
+        } else if constexpr (std::is_same_v<ValueT, float>) {
+            return script_value(static_cast<script_float>(value), eng);
+        } else if constexpr (std::is_same_v<ValueT, double>) {
+            return script_value(static_cast<script_float>(value), eng);
+        } else if constexpr (std::is_same_v<ValueT, bool>) {
+            return script_value(value, eng);
+        } else if constexpr (std::is_same_v<ValueT, std::string>) {
+            return script_value(value, eng);
+        } else {
+            // For custom types, use value_converter which handles registered classes
+            // This works for any type registered via jai::registrar
+            return detail::value_converter<ValueT>::to(value, eng);
+        }
+    }
+
+    // Helper to convert script_value to C++ type
+    // For primitive types, uses direct accessor methods.
+    // For custom types, delegates to value_converter which handles registered classes.
+    template<typename ValueT>
+    static ValueT script_value_to_cpp(const script_value& val, engine* eng = nullptr) {
+        if constexpr (std::is_same_v<ValueT, int> || std::is_same_v<ValueT, int32_t>) {
+            return static_cast<ValueT>(val.as_int());
+        } else if constexpr (std::is_same_v<ValueT, int64_t>) {
+            return val.as_int();
+        } else if constexpr (std::is_same_v<ValueT, uint64_t> || std::is_same_v<ValueT, uint32_t> ||
+                            std::is_same_v<ValueT, uint16_t> || std::is_same_v<ValueT, uint8_t> ||
+                            std::is_same_v<ValueT, int16_t> || std::is_same_v<ValueT, int8_t>) {
+            return static_cast<ValueT>(val.as_int());
+        } else if constexpr (std::is_same_v<ValueT, float>) {
+            return static_cast<float>(val.as_float());
+        } else if constexpr (std::is_same_v<ValueT, double>) {
+            return val.as_float();
+        } else if constexpr (std::is_same_v<ValueT, bool>) {
+            return val.as_bool();
+        } else if constexpr (std::is_same_v<ValueT, std::string>) {
+            return val.as_string();
+        } else {
+            // For custom types, use value_converter which handles registered classes
+            return detail::value_converter<ValueT>::from(val, eng);
+        }
+    }
+
+public:
+
     // Finalize registration
     void build() {
+        // Prevent double-build
+        if (built_) return;
+        built_ = true;
+
         // Auto-register default constructor if:
         // 1. User didn't explicitly register any constructor
         // 2. Type is default constructible
@@ -2563,16 +3134,16 @@ public:
             );
         }
         
-        // Register converters for this type (only for concrete types)
-        // This allows functions returning T to automatically convert to value
-        if constexpr (!std::is_abstract_v<T>) {
+        // Register converters for copyable types only (used for value conversions requiring copy)
+        // Non-copyable types like property_owner classes must use shared_ptr conversions instead
+        if constexpr (!std::is_abstract_v<T> && std::is_copy_constructible_v<T>) {
             // Register a C++ type converter that creates class_instance objects
-            engine_.register_type_converter_impl(typeid(T), 
+            engine_.register_type_converter_impl(typeid(T),
                 [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const void* obj) -> script_value {
                     // Create a class_instance using the class definition
                     // This properly initializes all fields with their defaults
                     auto instance = class_def->create_instance();
-                    
+
                     // Create a shared_ptr to the C++ object (by copying)
                     auto cpp_obj = std::make_shared<T>(*static_cast<const T*>(obj));
 
@@ -2582,15 +3153,15 @@ public:
                         instance->set_field(cpp_object_field_id, script_value::make_cpp_object(class_name,
                             class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
                     }
-                    
+
                     // Return the class_instance wrapped in a value
                     if (auto eng = engine_ptr) {
-                        return script_value::make_object(class_name, 
+                        return script_value::make_object(class_name,
                             std::static_pointer_cast<void>(instance), eng);
                     }
                     throw runtime_error("Engine no longer exists");
                 });
-            
+
             // Also register with conversion registry for container conversions
             auto custom_conv = engine_.get_conversion_registry();
             if (custom_conv && !custom_conv->template has_conversion<T>()) {
@@ -2601,70 +3172,75 @@ public:
                         if (v.type() != script_value_type::jai_object_type) {
                             throw runtime_error("Cannot convert non-object to " + std::string(typeid(T).name()));
                         }
-                        
+
                         // Get object holder using public method
                         auto objHolder = v.get_object_holder();
                         if (!objHolder) {
                             throw runtime_error("Cannot convert: script_value is not an object type");
                         }
-                        
+
                         if (!objHolder->is_class_instance_wrapper) {
                             throw runtime_error("Object is not a class_instance wrapper");
                         }
-                        
+
                         // Cast to class_instance
                         auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
                         if (!instance) {
                             throw runtime_error("Failed to cast to class_instance");
                         }
-                        
+
                         // Get the C++ object field directly - don't use has_field since it's an internal field
                         auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
                         if (cpp_obj_value.is_null()) {
                             throw runtime_error("C++ object field not found in class_instance");
                         }
-                        
+
                         // Extract the C++ object directly to avoid recursion
                         if (cpp_obj_value.type() != script_value_type::jai_object_type) {
                             throw runtime_error("C++ object field is not an object");
                         }
-                        
+
                         auto cpp_objHolder = cpp_obj_value.get_object_holder();
                         if (!cpp_objHolder) {
                             throw runtime_error("Field value is not an object type");
                         }
                         auto cpp_obj = std::static_pointer_cast<T>(cpp_objHolder->data);
-                        
+
                         if (!cpp_obj) {
                             throw runtime_error("Failed to cast C++ object to expected type");
                         }
-                        
+
                         return *cpp_obj;
                     },
                     // From T to script_value
                     [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const T& obj) -> script_value {
                         // Create a class_instance using the class definition
                         auto instance = class_def->create_instance();
-                        
+
                         // Create a shared_ptr to the C++ object (by copying)
                         auto cpp_obj = std::make_shared<T>(obj);
-                        
+
                         // Store the C++ object in the class_instance
                         instance->set_field(instance->get_cpp_object_field_id(),
                             script_value::make_cpp_object(class_name,
                                 class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
-                        
+
                         // Return the class_instance wrapped in a value
                         if (auto eng = engine_ptr) {
-                            return script_value::make_object(class_name, 
+                            return script_value::make_object(class_name,
                                 std::static_pointer_cast<void>(instance), eng);
                         }
                         throw runtime_error("Engine no longer exists");
                     }
                 );
             }
-            
-            // Also register std::shared_ptr<T> conversion
+        }
+
+        // Register shared_ptr<T> conversions for all non-abstract types (doesn't require copy)
+        if constexpr (!std::is_abstract_v<T>) {
+            auto custom_conv = engine_.get_conversion_registry();
+
+            // Register std::shared_ptr<T> conversion
             if (!custom_conv->template has_conversion<std::shared_ptr<T>>()) {
                 custom_conv->template register_conversion<std::shared_ptr<T>>(
                     // From script_value to std::shared_ptr<T>
@@ -2740,6 +3316,49 @@ public:
     }
     
 private:
+    // Helper to apply base classes for each type in a tuple
+    // Collects all base definitions and sets them at once for efficiency
+    // (single diamond check, single cache invalidation)
+    template<typename... Bases>
+    void apply_base_classes_from_tuple(std::tuple<Bases...>) {
+        if constexpr (sizeof...(Bases) == 0) {
+            return;  // No bases to register
+        } else if constexpr (sizeof...(Bases) == 1) {
+            // Single inheritance - use base_class<> directly
+            (base_class<Bases>(), ...);
+        } else {
+            // Multiple inheritance - collect all definitions and use set_parents()
+            // This is more efficient: single diamond check instead of N checks
+            std::vector<std::shared_ptr<class_definition>> parent_defs;
+            parent_defs.reserve(sizeof...(Bases));
+
+            // Collect base definitions (fold expression with static_assert validation)
+            (collect_base_definition<Bases>(parent_defs), ...);
+
+            // Set all parents at once
+            if (!parent_defs.empty()) {
+                if (!class_def_->set_parents(parent_defs)) {
+                    throw std::runtime_error("Diamond inheritance detected: class '" + class_name_ +
+                        "' would have multiple paths to the same base class");
+                }
+                has_base_class_ = true;
+                // Store first base type index for polymorphic copy
+                base_type_index_ = std::type_index(typeid(std::tuple_element_t<0, std::tuple<Bases...>>));
+            }
+        }
+    }
+
+    // Helper to collect a single base class definition
+    template<typename Base>
+    void collect_base_definition(std::vector<std::shared_ptr<class_definition>>& parent_defs) {
+        static_assert(std::is_base_of_v<Base, T>,
+                      "Specified type is not a base class of this class");
+        auto base_def = engine_.get_class_definition_by_type(std::type_index(typeid(Base)));
+        if (base_def) {
+            parent_defs.push_back(base_def);
+        }
+    }
+
     engine& engine_;
     std::string class_name_;
     std::shared_ptr<class_definition> class_def_;
@@ -2747,6 +3366,7 @@ private:
     bool has_base_class_ = false;
     std::type_index base_type_index_ = std::type_index(typeid(void));
     bool has_explicit_constructor_ = false;  // Track if user registered any constructor
+    bool built_ = false;  // Track if build() was called
     
     // Automatically register container conversions for type T
     void register_container_conversions() {
@@ -2780,12 +3400,15 @@ private:
             }
             
             // Register vector conversions
-            conv_mgr.add_vector_conversion<T>();
+            // Only register value-type vector if T is copyable
+            if constexpr (std::is_copy_constructible_v<T>) {
+                conv_mgr.add_vector_conversion<T>();
+            }
             conv_mgr.add_vector_conversion<std::shared_ptr<T>>();
-            
+
             // Register common map conversions with this type as value
-            // Only register T map conversions if T is default constructible (required for std::map)
-            if constexpr (std::is_default_constructible_v<T>) {
+            // Only register T map conversions if T is copyable and default constructible (required for std::map)
+            if constexpr (std::is_copy_constructible_v<T> && std::is_default_constructible_v<T>) {
                 conv_mgr.add_map_conversion<std::string, T>();
                 conv_mgr.add_map_conversion<int, T>();
                 conv_mgr.add_map_conversion<int64_t, T>();

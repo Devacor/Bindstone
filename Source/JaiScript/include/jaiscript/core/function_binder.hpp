@@ -173,12 +173,20 @@ class engine;
             static const script_value& from(const script_value& v, engine* eng) {
                 return v;
             }
-            
+
             static script_value to(const script_value& v, engine* eng) {
                 return v;  // Return as-is, no wrapping!
             }
         };
-        
+
+        // Specialization for const script_value& - pass through directly
+        template<>
+        struct value_converter<const script_value&> {
+            static const script_value& from(const script_value& v, engine* eng) {
+                return v;
+            }
+        };
+
         // Specialization for std::shared_ptr<T> - auto-unwrap to T
         template<typename T>
         struct value_converter<std::shared_ptr<T>> {
@@ -728,15 +736,19 @@ class engine;
                 const script_value& actual_arg = arg.deref();
                 
                 // For custom classes, get shared_ptr and return reference to the object
-                // Exclude string, bound_array, bound_map, and built-in container types which have special handling
-                if constexpr (std::is_class_v<base_type> && 
+                // Exclude string, script_value, bound_array, bound_map, and built-in container types which have special handling
+                if constexpr (std::is_class_v<base_type> &&
                             !std::is_same_v<base_type, std::string> &&
+                            !std::is_same_v<base_type, script_value> &&
                             !is_bound_array_type<base_type>::value &&
                             !is_bound_map_type<base_type>::value &&
                             !is_specialization_v<base_type, std::vector> &&
                             !is_specialization_v<base_type, std::map>) {
                     auto ptr = actual_arg.as<std::shared_ptr<base_type>>();
                     return std::ref(*ptr);
+                } else if constexpr (std::is_same_v<base_type, script_value>) {
+                    // For script_value references, return directly - no conversion needed
+                    return actual_arg;
                 } else {
                     // For built-in types and special types, use the non-const as<T&>() method
                     return const_cast<script_value&>(actual_arg).as<T>();

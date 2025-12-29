@@ -20,7 +20,8 @@ A generic, reflection-enabled property system with built-in serialization suppor
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 
-class Player : public jai::property_owner {
+// CRTP pattern: property_owner<DerivedClass, OptionalBases...>
+class Player : public jai::property_owner<Player> {
 public:
     // Note: Types MUST be wrapped in parentheses
     JAI_PROPERTY((int), health, 100);
@@ -174,19 +175,71 @@ jai::serialization::binary_archive_reader reader(buffer);
 // ... same as JSON
 ```
 
+## Inheritance
+
+The `property_owner` template uses CRTP (Curiously Recurring Template Pattern) and supports inheritance tracking for JaiScript binding:
+
+### Single Inheritance
+
+```cpp
+// Base class
+class Entity : public jai::property_owner<Entity> {
+public:
+    JAI_PROPERTY((int), id, 0);
+    JAI_PROPERTY((std::string), name);
+};
+
+// Derived class - specify base in template args
+class Player : public jai::property_owner<Player, Entity> {
+public:
+    JAI_PROPERTY((int), health, 100);
+    JAI_PROPERTY((int), level, 1);
+};
+
+// Further derived
+class Warrior : public jai::property_owner<Warrior, Player> {
+public:
+    JAI_PROPERTY((int), strength, 10);
+};
+```
+
+### Multiple Inheritance
+
+```cpp
+// Multiple base classes
+class Named : public jai::property_owner<Named> {
+public:
+    JAI_PROPERTY((std::string), name);
+};
+
+class Positioned : public jai::property_owner<Positioned> {
+public:
+    JAI_PROPERTY((float), x, 0.0f);
+    JAI_PROPERTY((float), y, 0.0f);
+};
+
+// Derive from multiple bases (no diamond inheritance allowed)
+class Entity : public jai::property_owner<Entity, Named, Positioned> {
+public:
+    JAI_PROPERTY((int), id, 0);
+};
+```
+
+The inheritance information is exposed via `_jai_base_types` and used by `class_builder::auto_bind()` to automatically register base classes in JaiScript.
+
 ## Version Migration
 
 ### Adding New Fields
 
 ```cpp
 // Version 1
-class Player_v1 : public jai::property_owner {
+class Player_v1 : public jai::property_owner<Player_v1> {
     JAI_PROPERTY((int), x);
     JAI_PROPERTY((int), y);
 };
 
 // Version 2 (added z)
-class Player_v2 : public jai::property_owner {
+class Player_v2 : public jai::property_owner<Player_v2> {
     JAI_PROPERTY((int), x);
     JAI_PROPERTY((int), y);
     JAI_PROPERTY((int), z, 0);  // New field with default
@@ -200,12 +253,12 @@ player_v2.property_mgr.load(reader, {"x", "y"});  // Specify old field order
 
 ```cpp
 // Version 2 (field named "label")
-class Object_v2 : public jai::property_owner {
+class Object_v2 : public jai::property_owner<Object_v2> {
     JAI_PROPERTY((std::string), label);
 };
 
 // Version 3 (renamed to "description")
-class Object_v3 : public jai::property_owner {
+class Object_v3 : public jai::property_owner<Object_v3> {
     JAI_PROPERTY((std::string), description);
     JAI_DELETED_PROPERTY((std::string), label);
 };
@@ -221,7 +274,7 @@ obj_v3.property_mgr.load(reader, {"label"}, renames);
 
 ```cpp
 // Version 3
-class Player_v3 : public jai::property_owner {
+class Player_v3 : public jai::property_owner<Player_v3> {
     JAI_PROPERTY((int), x);
     JAI_PROPERTY((int), y);
     JAI_DELETED_PROPERTY((int), old_field);  // Removed field
@@ -264,18 +317,25 @@ class MyClass : public MV::PropertyOwner {
     MV_PROPERTY((std::string), name);
 };
 
-// After (JaiScript)
-class MyClass : public jai::property_owner {
+// After (JaiScript) - use CRTP pattern
+class MyClass : public jai::property_owner<MyClass> {
     JAI_PROPERTY((int), health, 100);
     JAI_PROPERTY((std::string), name);
+};
+
+// With inheritance
+class Derived : public jai::property_owner<Derived, MyClass> {
+    JAI_PROPERTY((float), speed, 5.0f);
 };
 ```
 
 Key differences:
+- `property_owner<T>` uses CRTP pattern (pass derived type as template arg)
 - `property_owner` instead of `PropertyOwner` (snake_case)
 - `property_mgr` instead of `propertyManager`
 - All methods use snake_case: `serialize_enabled()`, `allow_save()`
 - Uses JaiScript archives instead of Cereal
+- Inheritance is tracked via template args for auto-binding to JaiScript
 
 ## Naming Conventions
 

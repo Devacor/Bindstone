@@ -6,7 +6,7 @@
 
 using namespace jai;
 
-class test_object : public property_owner {
+class test_object : public property_owner<test_object> {
 public:
     JAI_PROPERTY((int), health, 100);
     JAI_PROPERTY((float), speed, 5.5f);

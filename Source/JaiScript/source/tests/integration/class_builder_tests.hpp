@@ -3,6 +3,8 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/properties/property_manager.hpp>
+#include <jaiscript/properties/macros.hpp>
 #include <memory>
 
 namespace jai::foundry::tests {
@@ -36,6 +38,33 @@ public:
 };
 
 int Point::point_count = 0;
+
+// Test class using JAI_PROPERTY macros for auto_bind property tests
+class PropertyOwnerTest : public property_owner<PropertyOwnerTest> {
+public:
+    JAI_PROPERTY((int), health, 100);
+    JAI_PROPERTY((float), speed, 1.5f);
+    JAI_PROPERTY((std::string), name, "Player");
+    JAI_PROPERTY((bool), active, true);
+
+    PropertyOwnerTest() = default;
+
+    // Method to verify C++ side sees the property values
+    int get_health_cpp() const { return health.get(); }
+    void set_health_cpp(int val) { health = val; }
+};
+
+// Test class using JAI_OBSERVABLE_PROPERTY for signal observation tests
+class ObservableOwnerTest : public property_owner<ObservableOwnerTest> {
+public:
+    JAI_OBSERVABLE_PROPERTY((int), score, 0);
+    JAI_OBSERVABLE_PROPERTY((std::string), status, "idle");
+
+    ObservableOwnerTest() = default;
+
+    int get_score_cpp() const { return score.get(); }
+    void set_score_cpp(int val) { score = val; }
+};
 
 class Counter {
 public:
@@ -602,6 +631,485 @@ public:
             )");
             check_eq(div_x.as<double>(), 3.0, "Point /= x");
             check_eq(div_y.as<double>(), 4.0, "Point /= y");
+        });
+
+        test("auto_bind_inheritance_chain", [this]() {
+            // Test that auto_bind with property_owner correctly chains inheritance
+            // class C : property_owner<C>        -> no base
+            // class B : property_owner<B, C>     -> inherits from C
+            // class A : property_owner<A, B>     -> inherits from B
+            // When calling method from C on instance of A, it should work via chain A -> B -> C
+
+            struct TestC : property_owner<TestC> {
+                std::string c_method() const { return "from_C"; }
+            };
+
+            struct TestB : property_owner<TestB, TestC> {
+                std::string b_method() const { return "from_B"; }
+            };
+
+            struct TestA : property_owner<TestA, TestB> {
+                std::string a_method() const { return "from_A"; }
+            };
+
+            auto eng = engine::make();
+
+            // Register in dependency order: C first, then B, then A
+            class_builder<TestC>(*eng, "TestC")
+                .constructor<>()
+                .method("c_method", &TestC::c_method)
+                .build();
+
+            class_builder<TestB>(*eng, "TestB")
+                .auto_bind()  // Should auto-register TestC as base
+                .constructor<>()
+                .method("b_method", &TestB::b_method)
+                .build();
+
+            class_builder<TestA>(*eng, "TestA")
+                .auto_bind()  // Should auto-register TestB as base
+                .constructor<>()
+                .method("a_method", &TestA::a_method)
+                .build();
+
+            // Create instance of A
+            eng->execute("auto a = TestA();");
+
+            // Test calling methods at each level
+            check_eq(eng->execute("a.a_method()").as<std::string>(), "from_A", "Direct method");
+            check_eq(eng->execute("a.b_method()").as<std::string>(), "from_B", "Inherited from B");
+            check_eq(eng->execute("a.c_method()").as<std::string>(), "from_C", "Inherited from C via chain A->B->C");
+        });
+
+        test("auto_bind_multiple_inheritance", [this]() {
+            // Test that auto_bind correctly handles multiple base classes
+            // class Left  : property_owner<Left>           -> no base
+            // class Right : property_owner<Right>          -> no base
+            // class Multi : property_owner<Multi, Left, Right>  -> inherits from BOTH
+            // Methods from both Left and Right should be accessible on Multi
+
+            struct Left : property_owner<Left> {
+                std::string left_method() const { return "from_Left"; }
+            };
+
+            struct Right : property_owner<Right> {
+                std::string right_method() const { return "from_Right"; }
+            };
+
+            struct Multi : property_owner<Multi, Left, Right> {
+                std::string multi_method() const { return "from_Multi"; }
+            };
+
+            auto eng = engine::make();
+
+            // Register base classes first
+            class_builder<Left>(*eng, "Left")
+                .constructor<>()
+                .method("left_method", &Left::left_method)
+                .build();
+
+            class_builder<Right>(*eng, "Right")
+                .constructor<>()
+                .method("right_method", &Right::right_method)
+                .build();
+
+            // Register Multi with auto_bind - should auto-register both Left and Right as bases
+            class_builder<Multi>(*eng, "Multi")
+                .auto_bind()  // Should register both Left AND Right as bases
+                .constructor<>()
+                .method("multi_method", &Multi::multi_method)
+                .build();
+
+            // Create instance of Multi
+            eng->execute("auto m = Multi();");
+
+            // Test calling methods from all three classes
+            check_eq(eng->execute("m.multi_method()").as<std::string>(), "from_Multi", "Direct method");
+            check_eq(eng->execute("m.left_method()").as<std::string>(), "from_Left", "Inherited from Left");
+            check_eq(eng->execute("m.right_method()").as<std::string>(), "from_Right", "Inherited from Right");
+        });
+
+        test("auto_bind_deep_chain", [this]() {
+            // Test deep inheritance chain with multiple inheritance
+            // This tests that chains are followed correctly even with complex hierarchies
+            //
+            //   GrandparentA     GrandparentB
+            //        |               |
+            //     ParentA         ParentB
+            //        \             /
+            //          Child
+            //
+            // Child inherits from ParentA and ParentB, which have independent grandparents
+            // All methods should be accessible
+
+            struct GrandparentA : property_owner<GrandparentA> {
+                std::string gpa_method() const { return "from_GrandparentA"; }
+            };
+
+            struct GrandparentB : property_owner<GrandparentB> {
+                std::string gpb_method() const { return "from_GrandparentB"; }
+            };
+
+            struct ParentA : property_owner<ParentA, GrandparentA> {
+                std::string pa_method() const { return "from_ParentA"; }
+            };
+
+            struct ParentB : property_owner<ParentB, GrandparentB> {
+                std::string pb_method() const { return "from_ParentB"; }
+            };
+
+            struct DeepChild : property_owner<DeepChild, ParentA, ParentB> {
+                std::string child_method() const { return "from_Child"; }
+            };
+
+            auto eng = engine::make();
+
+            // Register in dependency order (grandparents first)
+            class_builder<GrandparentA>(*eng, "GrandparentA")
+                .constructor<>()
+                .method("gpa_method", &GrandparentA::gpa_method)
+                .build();
+
+            class_builder<GrandparentB>(*eng, "GrandparentB")
+                .constructor<>()
+                .method("gpb_method", &GrandparentB::gpb_method)
+                .build();
+
+            class_builder<ParentA>(*eng, "ParentA")
+                .auto_bind()
+                .constructor<>()
+                .method("pa_method", &ParentA::pa_method)
+                .build();
+
+            class_builder<ParentB>(*eng, "ParentB")
+                .auto_bind()
+                .constructor<>()
+                .method("pb_method", &ParentB::pb_method)
+                .build();
+
+            class_builder<DeepChild>(*eng, "DeepChild")
+                .auto_bind()
+                .constructor<>()
+                .method("child_method", &DeepChild::child_method)
+                .build();
+
+            // Create instance
+            eng->execute("auto c = DeepChild();");
+
+            // Test all methods are accessible (including grandparent methods)
+            check_eq(eng->execute("c.child_method()").as<std::string>(), "from_Child", "Direct method");
+            check_eq(eng->execute("c.pa_method()").as<std::string>(), "from_ParentA", "Inherited from ParentA");
+            check_eq(eng->execute("c.pb_method()").as<std::string>(), "from_ParentB", "Inherited from ParentB");
+            check_eq(eng->execute("c.gpa_method()").as<std::string>(), "from_GrandparentA", "Inherited from GrandparentA via ParentA");
+            check_eq(eng->execute("c.gpb_method()").as<std::string>(), "from_GrandparentB", "Inherited from GrandparentB via ParentB");
+        });
+
+        test("auto_bind_operator_equality", [this]() {
+            // Test that auto_bind detects and registers operator== and operator!=
+            struct EqualityTest {
+                int value;
+                EqualityTest() : value(0) {}
+                EqualityTest(int v) : value(v) {}
+                bool operator==(const EqualityTest& other) const { return value == other.value; }
+            };
+
+            auto eng = engine::make();
+
+            class_builder<EqualityTest>(*eng, "EqualityTest")
+                .auto_bind()  // Should auto-detect operator== and register == and !=
+                .constructor<int>()
+                .property("value", &EqualityTest::value);
+
+            // Test that == was auto-registered
+            check(eng->execute("auto a = EqualityTest(5); auto b = EqualityTest(5); a == b").as<bool>(),
+                  "Same values should be equal");
+            check(!eng->execute("auto a = EqualityTest(5); auto b = EqualityTest(10); a == b").as<bool>(),
+                  "Different values should not be equal");
+
+            // Test that != was auto-registered (derived from ==)
+            check(!eng->execute("auto a = EqualityTest(5); auto b = EqualityTest(5); a != b").as<bool>(),
+                  "Same values should not be not-equal");
+            check(eng->execute("auto a = EqualityTest(5); auto b = EqualityTest(10); a != b").as<bool>(),
+                  "Different values should be not-equal");
+        });
+
+        test("jai_property_auto_bind_read", [this]() {
+            // Test that JAI_PROPERTY macros work with auto_bind for reading properties
+            auto eng = engine::make();
+
+            class_builder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
+                .auto_bind()  // Should auto-detect JAI_PROPERTY macros and bind them
+                .constructor<>()
+                .method("get_health_cpp", &PropertyOwnerTest::get_health_cpp)
+                .build();
+
+            // Test reading default property values from script
+            eng->execute("auto obj = PropertyOwnerTest();");
+            check_eq(eng->execute("obj.health").as<int>(), 100, "Default health value");
+            check_eq(eng->execute("obj.speed").as<float>(), 1.5f, "Default speed value");
+            check_eq(eng->execute("obj.name").as<std::string>(), "Player", "Default name value");
+            check_eq(eng->execute("obj.active").as<bool>(), true, "Default active value");
+        });
+
+        test("jai_property_auto_bind_write", [this]() {
+            // Test that JAI_PROPERTY macros work with auto_bind for writing properties
+            // This is the critical test: script modifications must update the C++ property
+            auto eng = engine::make();
+
+            class_builder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .method("get_health_cpp", &PropertyOwnerTest::get_health_cpp)
+                .build();
+
+            // Create a C++ object and expose it to script using make_object
+            auto cpp_obj = std::make_shared<PropertyOwnerTest>();
+            check_eq(cpp_obj->health.get(), 100, "Initial C++ health is 100");
+
+            eng->add_global("test_obj", eng->make_object(cpp_obj));
+
+            // Modify property from script
+            eng->execute("test_obj.health = 50;");
+
+            // Verify C++ side sees the change
+            check_eq(cpp_obj->health.get(), 50, "C++ health updated to 50 after script assignment");
+
+            // Verify script can read the updated value
+            check_eq(eng->execute("test_obj.health").as<int>(), 50, "Script reads updated health");
+
+            // Test other property types
+            eng->execute("test_obj.speed = 3.0;");
+            check_eq(cpp_obj->speed.get(), 3.0f, "C++ speed updated after script assignment");
+
+            eng->execute("test_obj.name = \"Hero\";");
+            check_eq(cpp_obj->name.get(), "Hero", "C++ name updated after script assignment");
+
+            eng->execute("test_obj.active = false;");
+            check_eq(cpp_obj->active.get(), false, "C++ active updated after script assignment");
+        });
+
+        test("jai_property_auto_bind_compound_assignment", [this]() {
+            // Test that compound assignment operators work with JAI_PROPERTY
+            auto eng = engine::make();
+
+            class_builder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .build();
+
+            auto cpp_obj = std::make_shared<PropertyOwnerTest>();
+            eng->add_global("obj", eng->make_object(cpp_obj));
+
+            // Test += on int property
+            eng->execute("obj.health += 25;");
+            check_eq(cpp_obj->health.get(), 125, "health += 25 works");
+
+            // Test -= on int property
+            eng->execute("obj.health -= 50;");
+            check_eq(cpp_obj->health.get(), 75, "health -= 50 works");
+
+            // Test *= on float property
+            eng->execute("obj.speed *= 2;");
+            check_eq(cpp_obj->speed.get(), 3.0f, "speed *= 2 works");
+
+            // Test /= on float property
+            eng->execute("obj.speed /= 3;");
+            check_eq(cpp_obj->speed.get(), 1.0f, "speed /= 3 works");
+        });
+
+        test("jai_property_cpp_to_script_sync", [this]() {
+            // Test that C++ modifications to properties are visible in script
+            auto eng = engine::make();
+
+            class_builder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .method("set_health_cpp", &PropertyOwnerTest::set_health_cpp)
+                .build();
+
+            auto cpp_obj = std::make_shared<PropertyOwnerTest>();
+            eng->add_global("obj", eng->make_object(cpp_obj));
+
+            // Modify from C++
+            cpp_obj->health = 999;
+
+            // Script should see the C++ change
+            check_eq(eng->execute("obj.health").as<int>(), 999, "Script sees C++ modification");
+
+            // Modify via bound C++ method
+            eng->execute("obj.set_health_cpp(42);");
+            check_eq(eng->execute("obj.health").as<int>(), 42, "Script sees method modification");
+            check_eq(cpp_obj->health.get(), 42, "C++ sees method modification");
+        });
+
+        test("observable_property_auto_bind", [this]() {
+            // Test that JAI_OBSERVABLE_PROPERTY macros work with auto_bind
+            auto eng = engine::make();
+
+            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .method("set_score_cpp", &ObservableOwnerTest::set_score_cpp)
+                .build();
+
+            // Test reading and writing observable properties
+            auto cpp_obj = std::make_shared<ObservableOwnerTest>();
+            eng->add_global("obj", eng->make_object(cpp_obj));
+
+            check_eq(eng->execute("obj.score").as<int>(), 0, "Default score is 0");
+            eng->execute("obj.score = 42;");
+            check_eq(cpp_obj->score.get(), 42, "C++ sees script modification");
+            check_eq(eng->execute("obj.score").as<int>(), 42, "Script sees its own modification");
+
+            // Test string observable property
+            check_eq(eng->execute("obj.status").as<std::string>(), "idle", "Default status is 'idle'");
+            eng->execute("obj.status = \"running\";");
+            check_eq(cpp_obj->status.get(), "running", "C++ sees string modification");
+        });
+
+        test("observable_property_script_callback", [this]() {
+            // Test that script can register callbacks for observable property changes
+            auto eng = engine::make();
+
+            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .method("set_score_cpp", &ObservableOwnerTest::set_score_cpp)
+                .build();
+
+            auto cpp_obj = std::make_shared<ObservableOwnerTest>();
+            eng->add_global("obj", eng->make_object(cpp_obj));
+
+            // Create a script variable to track callback invocations
+            eng->execute("var callback_count = 0;");
+            eng->execute("var last_old_value = -1;");
+            eng->execute("var last_new_value = -1;");
+
+            // Register a callback on score changes using JaiScript lambda syntax
+            eng->execute(R"(
+                obj.on_score_change([&](auto old_val, auto new_val) {
+                    callback_count += 1;
+                    last_old_value = old_val;
+                    last_new_value = new_val;
+                });
+            )");
+
+            // Initially no callbacks should have fired
+            check_eq(eng->execute("callback_count").as<int>(), 0, "No callbacks yet");
+
+            // Modify from script - should trigger callback
+            eng->execute("obj.score = 10;");
+            check_eq(eng->execute("callback_count").as<int>(), 1, "Callback fired once");
+            check_eq(eng->execute("last_old_value").as<int>(), 0, "Old value was 0");
+            check_eq(eng->execute("last_new_value").as<int>(), 10, "New value is 10");
+
+            // Modify from C++ - should also trigger callback
+            cpp_obj->score = 25;
+            check_eq(eng->execute("callback_count").as<int>(), 2, "Callback fired again from C++");
+            check_eq(eng->execute("last_old_value").as<int>(), 10, "Old value was 10");
+            check_eq(eng->execute("last_new_value").as<int>(), 25, "New value is 25");
+
+            // Setting to same value should NOT trigger callback (observable_property checks for change)
+            eng->execute("obj.score = 25;");
+            check_eq(eng->execute("callback_count").as<int>(), 2, "No callback for same value");
+        });
+
+        test("observable_property_multiple_callbacks", [this]() {
+            // Test that multiple script callbacks can be registered
+            auto eng = engine::make();
+
+            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .build();
+
+            auto cpp_obj = std::make_shared<ObservableOwnerTest>();
+            eng->add_global("obj", eng->make_object(cpp_obj));
+
+            eng->execute("var sum = 0;");
+
+            // Register multiple callbacks using JaiScript lambda syntax
+            eng->execute("obj.on_score_change([&](auto old_val, auto new_val) { sum += new_val; });");
+            eng->execute("obj.on_score_change([&](auto old_val, auto new_val) { sum += new_val * 2; });");
+
+            // Trigger change - both callbacks should fire
+            eng->execute("obj.score = 10;");
+
+            // sum should be 10 + 20 = 30
+            check_eq(eng->execute("sum").as<int>(), 30, "Both callbacks fired (10 + 20)");
+        });
+
+        test("observable_property_on_change_syntax", [this]() {
+            // Test the new player.score.on_change(callback) API syntax
+            // This uses transparent wrappers to allow accessing on_change on the property itself
+            auto eng = engine::make();
+
+            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .build();
+
+            auto cpp_obj = std::make_shared<ObservableOwnerTest>();
+            eng->add_global("obj", eng->make_object(cpp_obj));
+
+            // Create tracking variables
+            eng->execute("var change_count = 0;");
+            eng->execute("var last_old = -1;");
+            eng->execute("var last_new = -1;");
+
+            // Register callback using new syntax: obj.score.on_change(callback)
+            eng->execute(R"(
+                obj.score.on_change([&](auto old_val, auto new_val) {
+                    change_count += 1;
+                    last_old = old_val;
+                    last_new = new_val;
+                });
+            )");
+
+            // Initially no callbacks
+            check_eq(eng->execute("change_count").as<int>(), 0, "No callbacks initially");
+
+            // Test that obj.score still works as an integer (transparent wrapper)
+            check_eq(eng->execute("obj.score").as<int>(), 0, "obj.score returns int value");
+            check_eq(eng->execute("obj.score + 5").as<int>(), 5, "obj.score + 5 works (transparent unwrap)");
+
+            // Modify from script - should trigger callback
+            eng->execute("obj.score = 42;");
+            check_eq(eng->execute("change_count").as<int>(), 1, "Callback fired");
+            check_eq(eng->execute("last_old").as<int>(), 0, "Old value was 0");
+            check_eq(eng->execute("last_new").as<int>(), 42, "New value is 42");
+
+            // Verify arithmetic still works on the property
+            check_eq(eng->execute("obj.score * 2").as<int>(), 84, "obj.score * 2 works");
+            check_eq(eng->execute("obj.score - 2").as<int>(), 40, "obj.score - 2 works");
+
+            // Modify from C++ - should also trigger callback
+            cpp_obj->score = 100;
+            check_eq(eng->execute("change_count").as<int>(), 2, "Callback fired from C++ change");
+            check_eq(eng->execute("last_new").as<int>(), 100, "New value is 100");
+        });
+
+        test("observable_property_transparent_comparison", [this]() {
+            // Test that observable properties work in comparisons (transparent wrapper)
+            auto eng = engine::make();
+
+            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .build();
+
+            auto cpp_obj = std::make_shared<ObservableOwnerTest>();
+            eng->add_global("obj", eng->make_object(cpp_obj));
+
+            cpp_obj->score = 50;
+
+            // Test comparisons with the transparent wrapper
+            check_eq(eng->execute("obj.score == 50").as<bool>(), true, "obj.score == 50");
+            check_eq(eng->execute("obj.score != 50").as<bool>(), false, "obj.score != 50 is false");
+            check_eq(eng->execute("obj.score > 40").as<bool>(), true, "obj.score > 40");
+            check_eq(eng->execute("obj.score < 60").as<bool>(), true, "obj.score < 60");
+            check_eq(eng->execute("obj.score >= 50").as<bool>(), true, "obj.score >= 50");
+            check_eq(eng->execute("obj.score <= 50").as<bool>(), true, "obj.score <= 50");
         });
     }
 };

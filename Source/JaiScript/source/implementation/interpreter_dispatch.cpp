@@ -33,28 +33,32 @@ void interpreter::init_dispatch_table() {
 // Uses script_value::TYPEID_* constants for fast type checking
 // Returns checked_result for zero-allocation error handling
 checked_result<script_value> interpreter::handle_add(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     // Fast path for integer addition
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(left.unchecked_as_int() + right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() + unwrapped_right.unchecked_as_int());
     }
 
     // Fast path for numeric addition (int/float combinations)
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf + rf);
     }
 
     // String concatenation - check for to_string() method on objects
     if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
-        return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
+        return make_value(value_to_string_with_method(unwrapped_left) + value_to_string_with_method(unwrapped_right));
     }
 
-    // Check for custom operator+ method on objects
+    // Check for custom operator+ method on objects (using original values for method lookup)
     auto custom_result = object_arithmetic_via_method(left, right, op_plus_id_);
     if (custom_result.has_value()) {
         return custom_result.value();
@@ -64,17 +68,21 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
 }
 
 checked_result<script_value> interpreter::handle_subtract(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(left.unchecked_as_int() - right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() - unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf - rf);
     }
 
@@ -88,17 +96,21 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
 }
 
 checked_result<script_value> interpreter::handle_multiply(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(left.unchecked_as_int() * right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() * unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf * rf);
     }
 
@@ -112,23 +124,27 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
 }
 
 checked_result<script_value> interpreter::handle_divide(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        if (right.unchecked_as_int() == 0) {
+        if (unwrapped_right.unchecked_as_int() == 0) {
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
-        return make_value(left.unchecked_as_int() / right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() / unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         if (rf == 0.0) {
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         return make_value(lf / rf);
     }
 
@@ -142,23 +158,27 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
 }
 
 checked_result<script_value> interpreter::handle_modulo(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        if (right.unchecked_as_int() == 0) {
+        if (unwrapped_right.unchecked_as_int() == 0) {
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
-        return make_value(left.unchecked_as_int() % right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() % unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         if (rf == 0.0) {
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         return make_value(std::fmod(lf, rf));
     }
 
@@ -172,22 +192,26 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
 }
 
 checked_result<script_value> interpreter::handle_less(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(left.unchecked_as_int() < right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() < unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf < rf);
     }
 
     if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        return make_value(left.unchecked_as_string() < right.unchecked_as_string());
+        return make_value(unwrapped_left.unchecked_as_string() < unwrapped_right.unchecked_as_string());
     }
 
     // Check for custom operator< method on objects
@@ -200,22 +224,26 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
 }
 
 checked_result<script_value> interpreter::handle_less_equal(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(left.unchecked_as_int() <= right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() <= unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf <= rf);
     }
 
     if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        return make_value(left.unchecked_as_string() <= right.unchecked_as_string());
+        return make_value(unwrapped_left.unchecked_as_string() <= unwrapped_right.unchecked_as_string());
     }
 
     // Check for custom operator<= method on objects
@@ -228,22 +256,26 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
 }
 
 checked_result<script_value> interpreter::handle_greater(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(left.unchecked_as_int() > right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() > unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf > rf);
     }
 
     if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        return make_value(left.unchecked_as_string() > right.unchecked_as_string());
+        return make_value(unwrapped_left.unchecked_as_string() > unwrapped_right.unchecked_as_string());
     }
 
     // Check for custom operator> method on objects
@@ -256,22 +288,26 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
 }
 
 checked_result<script_value> interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
+    // Try transparent wrapper unwrapping first for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
+    const size_t li = unwrapped_left.raw_storage_index();
+    const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(left.unchecked_as_int() >= right.unchecked_as_int());
+        return make_value(unwrapped_left.unchecked_as_int() >= unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-        script_float lf = (li == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
+        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf >= rf);
     }
 
     if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        return make_value(left.unchecked_as_string() >= right.unchecked_as_string());
+        return make_value(unwrapped_left.unchecked_as_string() >= unwrapped_right.unchecked_as_string());
     }
 
     // Check for custom operator>= method on objects
@@ -320,24 +356,28 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
         return make_value(is_expired);  // weak == null is true if expired
     }
 
+    // Try transparent wrapper unwrapping for object types
+    script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
+    script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+
     // Handle numeric type comparison (int vs float should compare by value)
-    if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
+    if ((unwrapped_left.is_int() || unwrapped_left.is_float()) && (unwrapped_right.is_int() || unwrapped_right.is_float())) {
         // Convert both to float for comparison to handle 5 == 5.0 correctly
-        script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-        script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+        script_float lf = unwrapped_left.is_int() ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
+        script_float rf = unwrapped_right.is_int() ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf == rf);
     }
 
     // Type mismatch = not equal (except for numeric and weak_ptr vs null handled above)
-    if (left.type() != right.type()) {
+    if (unwrapped_left.type() != unwrapped_right.type()) {
         return make_value(false);
     }
 
-    if (left.is_null()) return make_value(true);
+    if (unwrapped_left.is_null()) return make_value(true);
     // Note: int and float are already handled above in mixed-type comparison
-    if (left.is_string()) return make_value(left.unchecked_as_string() == right.unchecked_as_string());
-    if (left.is_bool()) return make_value(left.unchecked_as_bool() == right.unchecked_as_bool());
-    if (left.is_char()) return make_value(left.unchecked_as_char() == right.unchecked_as_char());
+    if (unwrapped_left.is_string()) return make_value(unwrapped_left.unchecked_as_string() == unwrapped_right.unchecked_as_string());
+    if (unwrapped_left.is_bool()) return make_value(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool());
+    if (unwrapped_left.is_char()) return make_value(unwrapped_left.unchecked_as_char() == unwrapped_right.unchecked_as_char());
 
     // Array equality - compare by reference (same array instance)
     if (left.is_array() && right.is_array()) {

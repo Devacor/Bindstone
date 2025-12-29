@@ -652,6 +652,22 @@ namespace jai {
         // ============================================================================
         template<typename T>
         checked_result<T> checked_as() const {
+            // Try to unwrap transparent wrappers for basic types (int, float, bool, string, char)
+            // This allows observable_property_ref<int> to be used as int in C++ code
+            if constexpr (std::is_same_v<T, script_int> || std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
+                          std::is_same_v<T, script_float> || std::is_same_v<T, double> || std::is_same_v<T, float> ||
+                          std::is_same_v<T, script_bool> || std::is_same_v<T, script_char> ||
+                          std::is_same_v<T, script_string> || std::is_same_v<T, std::string>) {
+                const script_value& val = deref();
+                if (val.is_object()) {
+                    script_value unwrapped = val.try_unwrap_transparent_wrapper();
+                    // If unwrapped to a different value (not an object anymore), use that
+                    if (!unwrapped.is_object()) {
+                        return unwrapped.checked_as<T>();
+                    }
+                }
+            }
+
             // FAST PATH: Direct type specializations for hot types
             if constexpr (std::is_same_v<T, script_int>) {
                 const script_value& val = deref();
@@ -1200,7 +1216,12 @@ namespace jai {
 
         // Conversion to string for debugging
         std::string to_string() const;
-        
+
+        // Try to unwrap a transparent wrapper type (like observable_property_ref)
+        // Returns the unwrapped value if this is a transparent wrapper, otherwise returns copy of this
+        // Used by checked_as<T>() to automatically unwrap wrapper types
+        script_value try_unwrap_transparent_wrapper() const;
+
         // Dereference method - returns this for non-references, dereferences for references
         const script_value& deref() const;
         script_value& deref();

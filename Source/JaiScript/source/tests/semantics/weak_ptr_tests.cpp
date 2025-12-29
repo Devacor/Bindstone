@@ -1125,8 +1125,9 @@ public:
 private:
     void register_lifetime_tracker(engine& eng, bool with_assignment = false) {
         // Note: copy_function is automatically registered for copy-constructible types
-        auto builder = class_builder<LifetimeTracker>(eng, "LifetimeTracker")
-            .constructor<>()
+        // class_builder is non-copyable, so we use reference from construction
+        class_builder<LifetimeTracker> builder(eng, "LifetimeTracker");
+        builder.constructor<>()
             .constructor<int>()
             .method("get_value", &LifetimeTracker::get_value)
             .method("set_value", &LifetimeTracker::set_value)
@@ -1141,7 +1142,7 @@ private:
                 self.value = v;
             });
         }
-
+        // Auto-build on scope exit, or explicitly:
         builder.build();
     }
     

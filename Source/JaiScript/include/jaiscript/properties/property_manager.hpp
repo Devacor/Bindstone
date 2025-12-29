@@ -6,7 +6,9 @@
 #include <vector>
 #include <memory>
 #include <jaiscript/properties/property.hpp>
+#include <jaiscript/properties/property_schema.hpp>
 #include <jaiscript/core/engine_bindable.hpp>
+#include <jaiscript/signals/receiver_owner.hpp>
 
 namespace jai {
 	// Forward declarations
@@ -27,6 +29,15 @@ namespace jai {
 
 		void add(property_base* prop);
 		const std::map<std::string, property_base*>& all() const { return m_properties; }
+
+		// Track a script-created receiver - keeps it alive for the lifetime of the property_manager
+		// This is used by class_builder to manage observable property callbacks from scripts
+		template<typename T>
+		std::shared_ptr<receiver<T>> track_receiver(std::shared_ptr<receiver<T>> recv) {
+			return script_receivers_.track(std::move(recv));
+		}
+
+		receiver_owner& script_receivers() { return script_receivers_; }
 
 		// Engine binding support
 		void bind_to_engine(std::weak_ptr<engine> eng) {
@@ -66,68 +77,11 @@ namespace jai {
 	private:
 		std::map<std::string, property_base*> m_properties;
 		std::weak_ptr<engine> engine_ref_;
+		receiver_owner script_receivers_;  // Holds receivers created by script callbacks
 	};
 
-	class property_owner : public engine_bindable {
-	public:
-		property_manager property_mgr;
-
-		property_manager& reflection() { return property_mgr; }
-		const property_manager& reflection() const { return property_mgr; }
-
-		// Default constructor and move operations
-		property_owner() = default;
-		property_owner(property_owner&&) = default;
-		property_owner& operator=(property_owner&&) = default;
-
-		virtual ~property_owner() = default;
-
-		// Override bind_to_engine to propagate to property_mgr
-		void bind_to_engine(std::weak_ptr<engine> eng) override {
-			engine_bindable::bind_to_engine(eng);
-			property_mgr.bind_to_engine(eng);
-		}
-
-		// Post-deserialization hook for migration and data transformation
-		// Called after all properties have been loaded from the archive
-		// Override this to implement custom migration logic
-		//
-		// The archive parameter provides access to:
-		// - ar.get_version() - the version that was serialized
-		// - ar.get_user_context<T>() - custom context for dependency injection
-		//
-		// Example:
-		//   void post_deserialize(archive_reader& ar) override {
-		//       if (ar.get_version() < 2) {
-		//           // Migrate from v1 to v2
-		//           new_field = compute_from_old_fields();
-		//       }
-		//   }
-		virtual void post_deserialize(serialization::archive_reader& ar) {
-			// Default implementation does nothing
-		}
-
-		// Convenience method: Load properties and call post_deserialize hook
-		// This is the recommended way to deserialize objects
-		void load_with_hook(serialization::archive_reader& ar) {
-			property_mgr.load(ar);
-			post_deserialize(ar);
-		}
-
-	protected:
-		// Copy operations are protected to prevent slicing
-		// Derived classes must explicitly opt-in to copying
-		property_owner(const property_owner& rhs) {
-			*this = rhs;
-		}
-
-		property_owner& operator=(const property_owner& other) {
-			if (this != &other) {
-				other.property_mgr.clone_to_target(property_mgr);
-			}
-			return *this;
-		}
-	};
+	// Note: property_owner is now a CRTP template class defined later in this file.
+	// See "Property Owner (CRTP with optional inheritance tracking)" section.
 
 	// ===== IMPLEMENTATION =====
 
@@ -169,5 +123,186 @@ namespace jai {
 		}
 		return nullptr;
 	}
+
+	// ============================================================================
+	// Property Owner (CRTP with optional inheritance tracking)
+	// ============================================================================
+	//
+	// Unified property owner class. Use CRTP pattern by passing your class
+	// as the first template parameter. Additional bases are optional.
+	//
+	// Example:
+	//   // Simple class (no inheritance)
+	//   class Entity : public property_owner<Entity> {
+	//       JAI_PROPERTY((int), health);
+	//   };
+	//
+	//   // With inheritance tracking
+	//   class Player : public property_owner<Player, Entity> {
+	//       JAI_PROPERTY((std::string), name);
+	//   };
+	//
+	// The type registry will track inheritance and include base properties
+	// when serializing derived classes.
+	//
+	// Signal receiver tracking:
+	//   property_owner includes a receiver_owner for automatic signal cleanup.
+	//   Use track() to tie receiver lifetime to the object:
+	//
+	//   class Player : public property_owner<Player> {
+	//   public:
+	//       Player(signal<void(int)>& damage_signal) {
+	//           track(damage_signal.connect([this](int dmg) {
+	//               // handle damage - auto-disconnects when Player dies
+	//           }));
+	//       }
+	//   };
+
+	template<typename Derived, typename... Bases>
+	class property_owner : public Bases... {
+	public:
+		// Expose the derived type and base types for macros and class_builder
+		using _jai_owner_type = Derived;
+		using _jai_base_types = std::tuple<Bases...>;
+		static constexpr size_t _jai_base_count = sizeof...(Bases);
+
+		// Per-instance property manager (for runtime property access)
+		property_manager property_mgr;
+
+		property_manager& reflection() { return property_mgr; }
+		const property_manager& reflection() const { return property_mgr; }
+
+		// Static access to type-level schema
+		static const type_property_schema& schema() {
+			return type_registry::instance().for_type<Derived>();
+		}
+
+		// Get all property names including inherited (from type registry)
+		static std::vector<std::string> all_property_names() {
+			return type_registry::instance().all_property_names<Derived>();
+		}
+
+		// Default constructor
+		property_owner() {
+			// Ensure inheritance is registered (runs once per type)
+			static const auto _inheritance_registered = []() {
+				if constexpr (sizeof...(Bases) > 0) {
+					auto& schema = type_registry::instance().for_type<Derived>();
+					(schema.add_base(std::type_index(typeid(Bases))), ...);
+				}
+				return true;
+			}();
+			(void)_inheritance_registered;
+		}
+
+		// Move operations
+		property_owner(property_owner&&) = default;
+		property_owner& operator=(property_owner&&) = default;
+
+		virtual ~property_owner() = default;
+
+		// Engine binding support
+		void bind_to_engine(std::weak_ptr<engine> eng) {
+			// Bind bases if they have bind_to_engine
+			if constexpr (sizeof...(Bases) > 0) {
+				(try_bind_base<Bases>(eng), ...);
+			}
+			property_mgr.bind_to_engine(eng);
+		}
+
+		// Post-deserialization hook
+		virtual void post_deserialize(serialization::archive_reader& ar) {
+			// Default: call base class hooks
+			if constexpr (sizeof...(Bases) > 0) {
+				(try_post_deserialize_base<Bases>(ar), ...);
+			}
+		}
+
+		// Load with hook
+		void load_with_hook(serialization::archive_reader& ar) {
+			property_mgr.load(ar);
+			post_deserialize(ar);
+		}
+
+	protected:
+		// Receiver owner for automatic signal cleanup
+		receiver_owner receivers_;
+
+		// Track a receiver - ties its lifetime to this object
+		template<typename T>
+		std::shared_ptr<receiver<T>> track(std::shared_ptr<receiver<T>> recv) {
+			return receivers_.track(std::move(recv));
+		}
+
+		// Access to receiver_owner for advanced use cases
+		receiver_owner& receivers() { return receivers_; }
+		const receiver_owner& receivers() const { return receivers_; }
+
+		// Copy operations are protected
+		property_owner(const property_owner& rhs) {
+			*this = rhs;
+		}
+
+		property_owner& operator=(const property_owner& other) {
+			if (this != &other) {
+				other.property_mgr.clone_to_target(property_mgr);
+				// Note: receivers_ are NOT copied - each instance manages its own connections
+			}
+			return *this;
+		}
+
+	private:
+		// SFINAE helpers to call base class methods if they exist
+		template<typename Base>
+		auto try_bind_base(std::weak_ptr<engine> eng)
+			-> decltype(static_cast<Base*>(this)->bind_to_engine(eng), void()) {
+			static_cast<Base*>(this)->bind_to_engine(eng);
+		}
+		template<typename Base>
+		void try_bind_base(...) {}
+
+		template<typename Base>
+		auto try_post_deserialize_base(serialization::archive_reader& ar)
+			-> decltype(static_cast<Base*>(this)->post_deserialize(ar), void()) {
+			static_cast<Base*>(this)->post_deserialize(ar);
+		}
+		template<typename Base>
+		void try_post_deserialize_base(...) {}
+	};
+
+	// ============================================================================
+	// Type traits for property_owner
+	// ============================================================================
+
+	// Check if T has _jai_owner_type (uses property_owner CRTP)
+	template<typename T, typename = void>
+	struct has_property_owner : std::false_type {};
+
+	template<typename T>
+	struct has_property_owner<T, std::void_t<typename T::_jai_owner_type>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_property_owner_v = has_property_owner<T>::value;
+
+	// Get base types from a property_owner
+	template<typename T, typename = void>
+	struct get_base_types {
+		using type = std::tuple<>;
+	};
+
+	template<typename T>
+	struct get_base_types<T, std::void_t<typename T::_jai_base_types>> {
+		using type = typename T::_jai_base_types;
+	};
+
+	template<typename T>
+	using get_base_types_t = typename get_base_types<T>::type;
+
+	// Legacy alias for compatibility
+	template<typename Derived, typename... Bases>
+	using typed_property_owner = property_owner<Derived, Bases...>;
+
+	template<typename T>
+	inline constexpr bool has_typed_property_owner_v = has_property_owner_v<T>;
 
 } // namespace jai

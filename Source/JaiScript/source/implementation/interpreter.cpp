@@ -2709,26 +2709,54 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
 std::optional<bool> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
     // Get class instance from the left operand
     auto instance = const_cast<script_value&>(left).get_class_instance();
-    if (!instance) {
-        return std::nullopt;  // Not a class instance - no custom equality
+
+    if (instance) {
+        // Look for "==" method - used by both script classes (operator==) and class_builder
+        auto eq_id = string_symbolizer_->intern("==");
+        auto method_val = instance->get_method(eq_id, false);
+        if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+            // Check if this is a transparent wrapper - if so, unwrap and retry
+            auto class_def = instance->get_class_definition();
+            if (class_def && class_def->is_transparent_wrapper()) {
+                script_value mutable_left = left;  // Need mutable copy for unwrap
+                script_value unwrapped = class_def->unwrap(mutable_left);
+                if (!unwrapped.is_null()) {
+                    // Retry the operation with the unwrapped value
+                    return object_equality_via_method(unwrapped, right);
+                }
+            }
+            return std::nullopt;  // No == method - use default reference comparison
+        }
+
+        // Create a bound method and call it with the right operand
+        script_value bound = create_bound_method(left, method_val);
+        const script_function& method = bound.as_function();
+        std::vector<script_value> args;
+        args.push_back(right);  // Push by copy (const ref)
+
+        auto result = method(args);
+        if (result.has_value() && result.value().is_bool()) {
+            return result.value().unchecked_as_bool();
+        }
+        return std::nullopt;
     }
 
-    // Look for "==" method - used by both script classes (operator==) and class_builder
-    auto eq_id = string_symbolizer_->intern("==");
-    auto method_val = instance->get_method(eq_id, false);
-    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-        return std::nullopt;  // No == method - use default reference comparison
-    }
-
-    // Create a bound method and call it with the right operand
-    script_value bound = create_bound_method(left, method_val);
-    const script_function& method = bound.as_function();
-    std::vector<script_value> args;
-    args.push_back(right);  // Push by copy (const ref)
-
-    auto result = method(args);
-    if (result.has_value() && result.value().is_bool()) {
-        return result.value().unchecked_as_bool();
+    // Not a class_instance - check if it's a raw C++ object that might be a transparent wrapper
+    auto obj_holder = const_cast<script_value&>(left).get_object_holder();
+    if (obj_holder && !obj_holder->is_class_instance_wrapper) {
+        // This is a raw C++ object - look up its class definition by type_id
+        auto* eng = left.get_engine();
+        if (eng) {
+            auto class_def = eng->get_class_definition(obj_holder->type_id);
+            if (class_def && class_def->is_transparent_wrapper()) {
+                script_value mutable_left = left;  // Need mutable copy for unwrap
+                script_value unwrapped = class_def->unwrap(mutable_left);
+                if (!unwrapped.is_null()) {
+                    // Retry the operation with the unwrapped value
+                    return object_equality_via_method(unwrapped, right);
+                }
+            }
+        }
     }
 
     // Method didn't return a valid bool - fall back to reference comparison
@@ -2739,25 +2767,53 @@ std::optional<bool> interpreter::object_equality_via_method(const script_value& 
 std::optional<bool> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
     // Get class instance from the left operand
     auto instance = const_cast<script_value&>(left).get_class_instance();
-    if (!instance) {
-        return std::nullopt;  // Not a class instance - no custom comparison
+
+    if (instance) {
+        // Look for the operator method by symbol ID
+        auto method_val = instance->get_method(op_symbol_id, false);
+        if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+            // Check if this is a transparent wrapper - if so, unwrap and retry
+            auto class_def = instance->get_class_definition();
+            if (class_def && class_def->is_transparent_wrapper()) {
+                script_value mutable_left = left;  // Need mutable copy for unwrap
+                script_value unwrapped = class_def->unwrap(mutable_left);
+                if (!unwrapped.is_null()) {
+                    // Retry the operation with the unwrapped value
+                    return object_comparison_via_method(unwrapped, right, op_symbol_id);
+                }
+            }
+            return std::nullopt;  // No custom method - use default comparison
+        }
+
+        // Create a bound method and call it with the right operand
+        script_value bound = create_bound_method(left, method_val);
+        const script_function& method = bound.as_function();
+        std::vector<script_value> args;
+        args.push_back(right);
+
+        auto result = method(args);
+        if (result.has_value() && result.value().is_bool()) {
+            return result.value().unchecked_as_bool();
+        }
+        return std::nullopt;
     }
 
-    // Look for the operator method by symbol ID
-    auto method_val = instance->get_method(op_symbol_id, false);
-    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-        return std::nullopt;  // No custom method - use default comparison
-    }
-
-    // Create a bound method and call it with the right operand
-    script_value bound = create_bound_method(left, method_val);
-    const script_function& method = bound.as_function();
-    std::vector<script_value> args;
-    args.push_back(right);
-
-    auto result = method(args);
-    if (result.has_value() && result.value().is_bool()) {
-        return result.value().unchecked_as_bool();
+    // Not a class_instance - check if it's a raw C++ object that might be a transparent wrapper
+    auto obj_holder = const_cast<script_value&>(left).get_object_holder();
+    if (obj_holder && !obj_holder->is_class_instance_wrapper) {
+        // This is a raw C++ object - look up its class definition by type_id
+        auto* eng = left.get_engine();
+        if (eng) {
+            auto class_def = eng->get_class_definition(obj_holder->type_id);
+            if (class_def && class_def->is_transparent_wrapper()) {
+                script_value mutable_left = left;  // Need mutable copy for unwrap
+                script_value unwrapped = class_def->unwrap(mutable_left);
+                if (!unwrapped.is_null()) {
+                    // Retry the operation with the unwrapped value
+                    return object_comparison_via_method(unwrapped, right, op_symbol_id);
+                }
+            }
+        }
     }
 
     // Method didn't return a valid bool
@@ -2768,28 +2824,56 @@ std::optional<bool> interpreter::object_comparison_via_method(const script_value
 std::optional<script_value> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
     // Get class instance from the left operand
     auto instance = const_cast<script_value&>(left).get_class_instance();
-    if (!instance) {
-        return std::nullopt;  // Not a class instance - no custom arithmetic
+
+    if (instance) {
+        // Look for the operator method by symbol ID
+        auto method_val = instance->get_method(op_symbol_id, false);
+        if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+            // Check if this is a transparent wrapper - if so, unwrap and retry
+            auto class_def = instance->get_class_definition();
+            if (class_def && class_def->is_transparent_wrapper()) {
+                script_value mutable_left = left;  // Need mutable copy for unwrap
+                script_value unwrapped = class_def->unwrap(mutable_left);
+                if (!unwrapped.is_null()) {
+                    // Retry the operation with the unwrapped value
+                    return object_arithmetic_via_method(unwrapped, right, op_symbol_id);
+                }
+            }
+            return std::nullopt;  // No custom method - use default arithmetic
+        }
+
+        // Create a bound method and call it with the right operand
+        script_value bound = create_bound_method(left, method_val);
+        const script_function& method = bound.as_function();
+        std::vector<script_value> args;
+        args.push_back(right);
+
+        auto result = method(args);
+        if (result.has_value()) {
+            return result.value();
+        }
+        return std::nullopt;
     }
 
-    // Look for the operator method by symbol ID
-    auto method_val = instance->get_method(op_symbol_id, false);
-    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-        return std::nullopt;  // No custom method - use default arithmetic
+    // Not a class_instance - check if it's a raw C++ object that might be a transparent wrapper
+    auto obj_holder = const_cast<script_value&>(left).get_object_holder();
+    if (obj_holder && !obj_holder->is_class_instance_wrapper) {
+        // This is a raw C++ object - look up its class definition by type_id
+        auto* eng = left.get_engine();
+        if (eng) {
+            auto class_def = eng->get_class_definition(obj_holder->type_id);
+            if (class_def && class_def->is_transparent_wrapper()) {
+                script_value mutable_left = left;  // Need mutable copy for unwrap
+                script_value unwrapped = class_def->unwrap(mutable_left);
+                if (!unwrapped.is_null()) {
+                    // Retry the operation with the unwrapped value
+                    return object_arithmetic_via_method(unwrapped, right, op_symbol_id);
+                }
+            }
+        }
     }
 
-    // Create a bound method and call it with the right operand
-    script_value bound = create_bound_method(left, method_val);
-    const script_function& method = bound.as_function();
-    std::vector<script_value> args;
-    args.push_back(right);
-
-    auto result = method(args);
-    if (result.has_value()) {
-        return result.value();
-    }
-
-    // Method call failed
+    // No custom method or transparent wrapper
     return std::nullopt;
 }
 
@@ -6819,6 +6903,37 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         push_value(create_bound_method(objectValue, method));
         return {};
     }
+
+    // Check if this is a transparent wrapper - if so, unwrap and retry member access
+    if (class_def && class_def->is_transparent_wrapper()) {
+        script_value mutable_obj = objectValue;  // Need mutable copy for unwrap
+        script_value unwrapped = class_def->unwrap(mutable_obj);
+        if (!unwrapped.is_null()) {
+            // For primitive types (int, float, string, etc.), they don't have members
+            // But for objects, we can try member access on the unwrapped value
+            if (unwrapped.is_object()) {
+                // Create a synthetic member_expr to reuse this visitor
+                // by directly pushing the unwrapped object and recursively calling
+                auto unwrapped_instance = unwrapped.get_class_instance();
+                if (unwrapped_instance) {
+                    // Check if unwrapped object has this field
+                    if (unwrapped_instance->has_field(member_id)) {
+                        push_value(unwrapped_instance->get_field(member_id));
+                        return {};
+                    }
+                    // Check if unwrapped object has this method
+                    script_value unwrapped_method = unwrapped_instance->get_method(member_id, false);
+                    if (!unwrapped_method.is_null() && !unwrapped_method.is_invalid()) {
+                        push_value(create_bound_method(unwrapped, unwrapped_method));
+                        return {};
+                    }
+                }
+            }
+            // For primitives, the value itself doesn't have members
+            // (int, float, string, bool operations are handled in binary operators)
+        }
+    }
+
     // Set exception state instead of throwing
     std::string member_str(expr->member);
     active_exception_value_ = make_value("Object has no member '" + member_str + "'");
@@ -8478,7 +8593,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         parent_defs.reserve(decl->base_classes.size());
 
         // Look up each base class definition
-        for (const std::string& base_name : decl->base_classes) {
+        for (std::string_view base_name : decl->base_classes) {
             // First try to find a script class (intern base_name and use cached __class_ lookup)
             uint64_t base_name_id = string_symbolizer_->intern(base_name);
             auto [base_class_var_id, base_class_var_name] = string_symbolizer_->get_class_var_id_with_view(base_name_id);
@@ -8502,31 +8617,28 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             } else {
                 // Try to find a C++ class using the class lookup callback
                 if (class_lookup_callback_) {
-                    auto cpp_class_def = class_lookup_callback_(base_name);
+                    // Callback API requires std::string - convert at boundary
+                    auto cpp_class_def = class_lookup_callback_(std::string(base_name));
                     if (cpp_class_def) {
                         // Found a C++ class!
                         base_class_def = cpp_class_def;
-                    } else if (environment_->contains(base_name)) {
+                    } else if (environment_->contains(base_name_id)) {
                         // Constructor exists but no class definition found
                         // This shouldn't happen with proper engine integration
-                        uint64_t base_id = string_symbolizer_->intern(base_name);
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Constructor found for '{0}' but no class definition available", base_id);
+                            "Constructor found for '{0}' but no class definition available", base_name_id);
                     } else {
-                        uint64_t base_id = string_symbolizer_->intern(base_name);
                         return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
-                            "Base class '{0}' not found", base_id);
+                            "Base class '{0}' not found", base_name_id);
                     }
                 } else {
                     // No class lookup callback set - check if constructor exists
-                    if (environment_->contains(base_name)) {
-                        uint64_t base_id = string_symbolizer_->intern(base_name);
+                    if (environment_->contains(base_name_id)) {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Script class inheriting from C++ class '{0}' requires engine integration", base_id);
+                            "Script class inheriting from C++ class '{0}' requires engine integration", base_name_id);
                     } else {
-                        uint64_t base_id = string_symbolizer_->intern(base_name);
                         return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
-                            "Base class '{0}' not found", base_id);
+                            "Base class '{0}' not found", base_name_id);
                     }
                 }
             }

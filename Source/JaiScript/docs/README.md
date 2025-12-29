@@ -285,22 +285,176 @@ class Enemy {
 ## C++ Integration
 
 ### Exposing C++ Classes
+
+JaiScript provides a fluent `class_builder` API for exposing C++ classes to scripts. The API supports two styles: manual registration for full control, or automatic registration using the `property_owner` CRTP pattern.
+
+#### Manual Registration (Full Control)
 ```cpp
 // Clean class_builder API - 60% less code than ChaiScript
-jai::make_class_builder<Vector2>(engine, "Vec2")
+jai::class_builder<Vector2>(engine, "Vec2")
     .constructor<script_float, script_float>()
-    .constructor<script_int, script_int>()  // Automatic type conversion support
-    .field("x", &Vector2::x)
-    .field("y", &Vector2::y)
+    .constructor<script_int, script_int>()  // Automatic type conversion
+    .property("x", &Vector2::x)
+    .property("y", &Vector2::y)
     .method("length", &Vector2::length)
     .method("+", [](const Vector2& a, const Vector2& b) -> Vector2 {
         return Vector2{a.x + b.x, a.y + b.y};
     })
-    .build();
+    .build();  // Or let destructor call build() automatically
 
 // Automatic type conversions work seamlessly
-// In script: auto v = Vec2(3, 4);  // int to double conversion handled automatically
+// In script: auto v = Vec2(3, 4);  // int to double conversion handled
 ```
+
+#### Inheritance with base_class<>()
+```cpp
+// Register base class first
+jai::class_builder<Entity>(engine, "Entity")
+    .constructor<>()
+    .property("id", &Entity::id)
+    .method("get_name", &Entity::get_name);
+
+// Register derived class with inheritance
+jai::class_builder<Player>(engine, "Player")
+    .base_class<Entity>()  // Inherits Entity's methods/properties
+    .constructor<>()
+    .property("health", &Player::health)
+    .method("attack", &Player::attack);
+
+// Multiple inheritance - base_class<>() appends, doesn't replace
+jai::class_builder<Wizard>(engine, "Wizard")
+    .base_class<Player>()      // First base
+    .base_class<SpellCaster>() // Second base - methods from both accessible
+    .constructor<>()
+    .method("cast_spell", &Wizard::cast_spell);
+
+// Note: Diamond inheritance is detected and throws std::runtime_error
+```
+
+#### Auto-Binding with property_owner (Recommended for Complex Hierarchies)
+
+For classes using the `property_owner<Derived, Bases...>` CRTP pattern, `auto_bind()` automatically registers base classes:
+
+```cpp
+// Define classes using property_owner CRTP
+class Entity : public jai::property_owner<Entity> {
+public:
+    JAI_PROPERTY((int), id, 0);
+    std::string get_name() const { return "Entity"; }
+};
+
+class Player : public jai::property_owner<Player, Entity> {
+public:
+    JAI_PROPERTY((int), health, 100);
+    void attack() { /* ... */ }
+};
+
+class Wizard : public jai::property_owner<Wizard, Player> {
+public:
+    JAI_PROPERTY((int), mana, 50);
+    void cast_spell() { /* ... */ }
+};
+
+// Register with auto_bind() - base classes AND default constructor registered automatically!
+jai::class_builder<Entity>(engine, "Entity")
+    .auto_bind()  // Registers default constructor + to_string/size/empty if present
+    .method("get_name", &Entity::get_name);
+
+jai::class_builder<Player>(engine, "Player")
+    .auto_bind()  // Auto-registers Entity as base + default constructor
+    .method("attack", &Player::attack);
+
+jai::class_builder<Wizard>(engine, "Wizard")
+    .auto_bind()  // Auto-registers Player as base -> Entity chain followed
+    .method("cast_spell", &Wizard::cast_spell);
+
+// In script:
+// auto w = Wizard();
+// w.cast_spell();  // Direct method
+// w.attack();      // Inherited from Player
+// w.get_name();    // Inherited from Entity via Player
+// w.health = 50;   // Property from Player
+// w.mana = 100;    // Direct property
+```
+
+#### auto_bind() Modes
+
+`auto_bind()` supports different modes for controlling what gets auto-registered:
+
+```cpp
+// bind_mode::all (default) - Base classes + default constructor + auto-detected methods
+// Auto-detects: to_string(), size(), empty() if present
+jai::class_builder<MyClass>(engine, "MyClass")
+    .auto_bind(jai::bind_mode::all);  // or just .auto_bind()
+
+// bind_mode::properties - Base classes only, no auto constructors/methods
+jai::class_builder<MyClass>(engine, "MyClass")
+    .auto_bind(jai::bind_mode::properties)
+    .constructor<>()  // Manual constructor since not auto-detected
+    .method("custom_method", &MyClass::custom_method);
+
+// bind_mode::none - No auto-binding, just returns builder for manual setup
+jai::class_builder<MyClass>(engine, "MyClass")
+    .auto_bind(jai::bind_mode::none)  // Effectively a no-op
+    .base_class<BaseClass>()          // Manual base class
+    .constructor<>();
+```
+
+#### Multiple Inheritance with auto_bind()
+
+```cpp
+// Two independent base classes
+class Renderable : public jai::property_owner<Renderable> {
+public:
+    void draw() { /* ... */ }
+};
+
+class Collidable : public jai::property_owner<Collidable> {
+public:
+    bool check_collision() { return true; }
+};
+
+// Multiple inheritance - both bases in the tuple
+class Sprite : public jai::property_owner<Sprite, Renderable, Collidable> {
+public:
+    void update() { /* ... */ }
+};
+
+// Registration - auto_bind() registers default constructor automatically
+jai::class_builder<Renderable>(engine, "Renderable")
+    .auto_bind()
+    .method("draw", &Renderable::draw);
+
+jai::class_builder<Collidable>(engine, "Collidable")
+    .auto_bind()
+    .method("check_collision", &Collidable::check_collision);
+
+jai::class_builder<Sprite>(engine, "Sprite")
+    .auto_bind()  // Registers BOTH bases + default constructor
+    .method("update", &Sprite::update);
+
+// In script:
+// auto s = Sprite();
+// s.draw();            // From Renderable
+// s.check_collision(); // From Collidable
+// s.update();          // Direct method
+```
+
+#### When to Use Each Approach
+
+| Approach | Use When |
+|----------|----------|
+| Manual `base_class<>()` | Simple classes, no property system, full control needed |
+| `auto_bind()` (default) | Classes using `property_owner`, want default constructor + common methods |
+| `auto_bind(bind_mode::properties)` | Need base classes but want manual constructor/method control |
+
+**What auto_bind(bind_mode::all) auto-detects:**
+- Default constructor (if `std::is_default_constructible_v<T>`)
+- `to_string()` method (if present)
+- `size()` method (if present)
+- `empty()` method (if present)
+- `operator==` and `operator!=` (if `operator==(const T&, const T&)` is defined)
+- Base classes from `_jai_base_types` (if using `property_owner<T, Bases...>`)
 
 ### Adding Functions
 ```cpp

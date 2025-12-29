@@ -284,6 +284,11 @@ namespace jai {
         // Get class definition by type_id (faster than string lookup)
         std::shared_ptr<class_definition> get_class_definition(uint64_t type_id) const;
 
+        // Check if a type is registered (by name)
+        bool is_type_registered(const std::string& name) const {
+            return get_class_definition(name) != nullptr;
+        }
+
         // Get registered script name for a C++ type
         template<typename T>
         std::string get_registered_name() const;

@@ -1796,10 +1796,11 @@ checked_result<statement_ptr> parser::try_statement() {
 checked_result<declaration_ptr> parser::class_declaration() {
     JAISCRIPT_TRY_ASSIGN(token className, consume(token_type::identifier, "Expected class name"));
 
-    std::vector<std::string> base_classes;
+    std::vector<std::string_view> base_classes;
     if (match(token_type::colon)) {
         do {
             JAISCRIPT_TRY_ASSIGN(token base_class_tok, consume(token_type::identifier, "Expected base class name"));
+            // Token lexeme already points to symbolizer storage (identifiers are interned during lexing)
             base_classes.emplace_back(base_class_tok.lexeme);
         } while (match(token_type::comma));
     }

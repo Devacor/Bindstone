@@ -3383,42 +3383,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			if (expr->right->get_type() == node_type::identifier_expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				// Both operands are simple identifiers - direct variable lookup without AST traversal
+				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id);
+				if (!leftResult) return leftResult.error_value();
+				script_value leftVal = leftResult.value()->deref();
 
-				// Check slot-based storage first, then environment for left operand
-				script_value leftVal = make_value();  // Use make_value() not default ctor
-				bool leftFromFrame = false;
-				if (leftId->slot_index != SIZE_MAX && !call_stack_.empty()) {
-					script_value* leftLocal = call_stack_.back().get_local(leftId->slot_index);
-					if (leftLocal) {
-						leftVal = leftLocal->deref();
-						leftFromFrame = true;
-					}
-				}
-				if (!leftFromFrame) {
-					auto leftResult = environment_->get(leftId->symbol_id);
-					if (!leftResult) {
-						return leftResult.error_value();
-					}
-					leftVal = std::move(leftResult.value()).deref();
-				}
-
-				// Check slot-based storage first, then environment for right operand
-				script_value rightVal = make_value();  // Use make_value() not default ctor
-				bool rightFromFrame = false;
-				if (rightId->slot_index != SIZE_MAX && !call_stack_.empty()) {
-					script_value* rightLocal = call_stack_.back().get_local(rightId->slot_index);
-					if (rightLocal) {
-						rightVal = rightLocal->deref();
-						rightFromFrame = true;
-					}
-				}
-				if (!rightFromFrame) {
-					auto rightResult = environment_->get(rightId->symbol_id);
-					if (!rightResult) {
-						return rightResult.error_value();
-					}
-					rightVal = std::move(rightResult.value()).deref();
-				}
+				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id);
+				if (!rightResult) return rightResult.error_value();
+				script_value rightVal = rightResult.value()->deref();
 
 				// Fast path for integer arithmetic (most common in loops)
 				if (can_use_fast_path(expr->op.type)) {
@@ -3544,23 +3515,9 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
 			else if (expr->right->get_type() == node_type::literal_expr) {
 				auto* rightLit = static_cast<literal_expr*>(expr->right.get());
-				// Get left value - check slot-based storage first, then environment
-				script_value leftVal = make_value();
-				bool leftFromFrame = false;
-				if (leftId->slot_index != SIZE_MAX && !call_stack_.empty()) {
-					script_value* leftLocal = call_stack_.back().get_local(leftId->slot_index);
-					if (leftLocal) {
-						leftVal = leftLocal->deref();
-						leftFromFrame = true;
-					}
-				}
-				if (!leftFromFrame) {
-					auto leftResult = environment_->get(leftId->symbol_id);
-					if (!leftResult) {
-						return leftResult.error_value();
-					}
-					leftVal = std::move(leftResult.value()).deref();
-				}
+				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id);
+				if (!leftResult) return leftResult.error_value();
+				script_value leftVal = leftResult.value()->deref();
 				const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
 
 				// Ultra-fast integer path (most common for loop conditions)
@@ -3663,23 +3620,9 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 			if (expr->right->get_type() == node_type::identifier_expr) {
 				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
 				const script_value& leftVal = leftLit->value;  // Direct access!
-				// Get right value - check slot-based storage first, then environment
-				script_value rightVal = make_value();
-				bool rightFromFrame = false;
-				if (rightId->slot_index != SIZE_MAX && !call_stack_.empty()) {
-					script_value* rightLocal = call_stack_.back().get_local(rightId->slot_index);
-					if (rightLocal) {
-						rightVal = rightLocal->deref();
-						rightFromFrame = true;
-					}
-				}
-				if (!rightFromFrame) {
-					auto rightResult = environment_->get(rightId->symbol_id);
-					if (!rightResult) {
-						return rightResult.error_value();
-					}
-					rightVal = std::move(rightResult.value()).deref();
-				}
+				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id);
+				if (!rightResult) return rightResult.error_value();
+				script_value rightVal = rightResult.value()->deref();
 
 				// Ultra-fast integer path
 				if (can_use_fast_path(expr->op.type)) {
@@ -4153,18 +4096,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
 
-            // ============================================================
-            // SLOT-BASED FAST PATH: O(1) array indexing for locals
-            // ============================================================
-            // Local variables use slot-based lookup (O(1) array access)
-            script_value* varPtr = nullptr;
-            if (identifier->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                varPtr = call_stack_.back().get_local(identifier->slot_index);
-            }
-            // Fall back to environment if not a local (global variable)
-            if (!varPtr) {
-                varPtr = environment_->get_value_ptr(identifier->symbol_id);
-            }
+            // Slot-based O(1) first, then environment fallback
+            script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id);
             if (varPtr) {
                 // Fast path: direct in-place mutation for local variables
                 script_value& target = varPtr->deref();
@@ -4209,14 +4142,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         if (rhs_id->symbol_id == UINT64_MAX) {
                             rhs_id->symbol_id = string_symbolizer_->intern(rhs_id->name);
                         }
-                        // Check slot-based storage first, then environment
-                        script_value* rhs_ptr = nullptr;
-                        if (rhs_id->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                            rhs_ptr = call_stack_.back().get_local(rhs_id->slot_index);
-                        }
-                        if (!rhs_ptr) {
-                            rhs_ptr = environment_->get_value_ptr(rhs_id->symbol_id);
-                        }
+                        script_value* rhs_ptr = resolve_local_or_env(rhs_id->slot_index, rhs_id->symbol_id);
                         if (rhs_ptr && rhs_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                             script_int rhs_val = rhs_ptr->unchecked_as_int();
                             switch (expr->op.type) {
@@ -4256,14 +4182,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                     if (left_id->symbol_id == UINT64_MAX) {
                                         left_id->symbol_id = string_symbolizer_->intern(left_id->name);
                                     }
-                                    // Check slot-based storage first, then environment
-                                    script_value* left_ptr = nullptr;
-                                    if (left_id->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                                        left_ptr = call_stack_.back().get_local(left_id->slot_index);
-                                    }
-                                    if (!left_ptr) {
-                                        left_ptr = environment_->get_value_ptr(left_id->symbol_id);
-                                    }
+                                    script_value* left_ptr = resolve_local_or_env(left_id->slot_index, left_id->symbol_id);
                                     if (left_ptr && left_ptr->raw_storage_index() == script_value::TYPEID_INT) {
                                         script_int left_val = left_ptr->unchecked_as_int();
                                         script_int right_val = right_lit->value.unchecked_as_int();

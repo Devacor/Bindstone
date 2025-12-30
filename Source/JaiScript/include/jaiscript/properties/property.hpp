@@ -582,7 +582,7 @@ namespace jai {
 	// - Types with commas (e.g., std::map<int, int>) - macro handles parentheses
 	// - Schema registration (macro auto-registers to type_registry)
 	//
-	template<typename T, fixed_string Name>
+	template<typename T, auto Name>
 	class named_property : public property<T> {
 	public:
 		// Compile-time access to property name

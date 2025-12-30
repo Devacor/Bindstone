@@ -913,7 +913,28 @@ namespace jai {
         inline void push_value(script_value&& value) {
             valueStack_.push(std::move(value));
         }
-        
+
+        // Resolve variable: slot-based O(1) first, then environment fallback
+        [[nodiscard]] __forceinline script_value* resolve_local_or_env(size_t slot_index, uint64_t symbol_id) noexcept {
+            if (slot_index != SIZE_MAX && !call_stack_.empty()) {
+                if (auto* ptr = call_stack_.back().get_local(slot_index)) {
+                    return ptr;
+                }
+            }
+            return environment_->get_value_ptr(symbol_id);
+        }
+
+        // Resolve variable with error on not found (avoids value copy vs environment_->get())
+        [[nodiscard]] __forceinline checked_result<script_value*> resolve_variable_required(
+            size_t slot_index, uint64_t symbol_id) noexcept {
+            if (auto* ptr = resolve_local_or_env(slot_index, symbol_id)) {
+                return ptr;
+            }
+            return checked_result<script_value*>(
+                make_error_code(runtime_error_code::undefined_variable),
+                "Undefined variable '{0}'", symbol_id);
+        }
+
         // Binary operation helpers
         [[nodiscard]] checked_result<script_value> evaluate_arithmetic(const script_value& left, token_type op, const script_value& right);
         [[nodiscard]] checked_result<script_value> evaluate_comparison(const script_value& left, token_type op, const script_value& right);

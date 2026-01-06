@@ -2,10 +2,11 @@
 #define _MV_SCENE_SLIDER_H_
 
 #include "MV/Render/Scene/clickable.h"
+#include <jaiscript/properties.hpp>
 
 namespace MV {
 	namespace Scene {
-		class Slider : public Clickable {
+		class Slider : public jai::property_owner<Slider, Clickable> {
 			friend cereal::access;
 			friend Node;
 		public:
@@ -30,22 +31,16 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				archive(
-					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
-				);
+				archive(cereal::make_nvp("dragPercent", dragPercent.get()));
+				archive(cereal::make_nvp("dragHandle", dragHandle.get()));
+				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) {
-					reflection().load(archive, {
-						"dragPercent",
-						"dragHandle"
-					});
-				}
-				archive(
-					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
-				);
+				archive(cereal::make_nvp("dragPercent", dragPercent.get()));
+				archive(cereal::make_nvp("dragHandle", dragHandle.get()));
+				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
 			}
 
 			template <class Archive>
@@ -74,8 +69,8 @@ namespace MV {
 
 			void updateHandlePosition();
 
-			MV_PROPERTY((float), dragPercent, 0.0f);
-			MV_PROPERTY((std::shared_ptr<Node>), dragHandle);
+			JAI_PROPERTY((float), dragPercent, 0.0f);
+			JAI_PROPERTY((std::shared_ptr<Node>), dragHandle);
 		};
 
 	}

@@ -4,6 +4,43 @@
 
 #include "render.h"
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// Helper function to hook BoxAABB types
+template<typename T>
+void hookBoxAABBType(jai::dynamic_binder<MV::BoxAABB<T>>& builder) {
+	builder.auto_bind();
+	builder.constructor<>();
+	builder.constructor<const MV::Point<T>&>();
+	builder.constructor<const MV::Size<T>&>();
+	builder.constructor<const MV::Size<T>&, bool>();
+	builder.constructor<const MV::Point<T>&, const MV::Point<T>&>();
+	builder.constructor<const MV::Point<T>&, const MV::Size<T>&>();
+
+	builder.method("width", &MV::BoxAABB<T>::width);
+	builder.method("height", &MV::BoxAABB<T>::height);
+	builder.method("clear", &MV::BoxAABB<T>::clear);
+	builder.method("empty", &MV::BoxAABB<T>::empty);
+	builder.method("size", &MV::BoxAABB<T>::size);
+	builder.method("centerPoint", &MV::BoxAABB<T>::centerPoint);
+	builder.property("minPoint", &MV::BoxAABB<T>::minPoint);
+	builder.property("maxPoint", &MV::BoxAABB<T>::maxPoint);
+}
+
+// JaiScript binding for BoxAABB<float>
+static jai::registrar<MV::BoxAABB<MV::PointPrecision>, MV::Services> _hookBoxAABB("BoxAABB",
+	[](jai::dynamic_binder<MV::BoxAABB<MV::PointPrecision>>& builder, const MV::Services&) {
+	hookBoxAABBType(builder);
+});
+
+// JaiScript binding for BoxAABB<int>
+static jai::registrar<MV::BoxAABB<int>, MV::Services> _hookBoxAABBi("BoxAABBi",
+	[](jai::dynamic_binder<MV::BoxAABB<int>>& builder, const MV::Services&) {
+	hookBoxAABBType(builder);
+});
+
 namespace MV {
 	/*************************\
 	| ------PointVolume------ |

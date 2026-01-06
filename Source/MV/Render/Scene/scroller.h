@@ -2,11 +2,12 @@
 #define _MV_SCENE_SCROLLER_H_
 
 #include "clickable.h"
+#include <jaiscript/properties.hpp>
 
 namespace MV {
 	namespace Scene {
 
-		class Scroller : public Clickable {
+		class Scroller : public jai::property_owner<Scroller, Clickable> {
 			friend cereal::access;
 			friend Node;
 		public:
@@ -30,22 +31,14 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				archive(
-					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
-				);
+				archive(cereal::make_nvp("contentView", contentView.get()));
+				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) {
-					reflection().load(archive, {
-						"contentView"
-					});
-				}
-				
-				archive(
-					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
-				);
+				archive(cereal::make_nvp("contentView", contentView.get()));
+				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
 			}
 
 			template <class Archive>
@@ -71,7 +64,7 @@ namespace MV {
 			}
 
 		private:
-			MV_PROPERTY((std::shared_ptr<Node>), contentView);
+			JAI_PROPERTY((std::shared_ptr<Node>), contentView);
 
 			PointPrecision dragStartThreshold = 5.0f;
 			PointPrecision cancelTimeThreshold = 1.25f;

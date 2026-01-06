@@ -3,11 +3,12 @@
 
 #include "MV/Render/formattedText.h"
 #include "sprite.h"
+#include <jaiscript/properties.hpp>
 
 namespace MV {
 	namespace Scene {
 
-		class Text : public Drawable {
+		class Text : public jai::property_owner<Text, Drawable> {
 			friend Node;
 			friend cereal::access;
 
@@ -201,14 +202,15 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
+				archive(cereal::make_nvp("formattedText", formattedText.get()));
+				archive(cereal::make_nvp("usingBoundsForLineHeight", usingBoundsForLineHeight.get()));
 				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				if (version == 0) {
-					reflection().load(archive, { "formattedText", "usingBoundsForLineHeight" });
-				}
+				archive(cereal::make_nvp("formattedText", formattedText.get()));
+				archive(cereal::make_nvp("usingBoundsForLineHeight", usingBoundsForLineHeight.get()));
 				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 			}
 
@@ -270,9 +272,9 @@ namespace MV {
 
 			TextLibrary& textLibrary;
 
-			MV::Property<std::shared_ptr<FormattedText>> formattedText;
+			jai::property<std::shared_ptr<FormattedText>> formattedText;
 
-			MV_PROPERTY((bool), usingBoundsForLineHeight, false);
+			JAI_PROPERTY((bool), usingBoundsForLineHeight, false);
 
 			bool displayCursor = false;
 			size_t cursor = 0;

@@ -3,7 +3,54 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
 #include "MV/Utility/generalUtility.h"
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Grid
+static jai::registrar<MV::Scene::Grid, MV::Services> _hookGrid("Grid",
+	[](jai::dynamic_binder<MV::Scene::Grid>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Drawable>();
+	builder.auto_bind();
+
+	// Padding
+	builder.method("padding", static_cast<std::pair<MV::Point<>, MV::Point<>>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::padding));
+	builder.method("padding", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Size<>&)>(&MV::Scene::Grid::padding));
+
+	// Margin
+	builder.method("margin", static_cast<std::pair<MV::Point<>, MV::Point<>>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::margin));
+	builder.method("margin", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Size<>&)>(&MV::Scene::Grid::margin));
+
+	// Cell size
+	builder.method("cellSize", static_cast<MV::Size<>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::cellSize));
+	builder.method("cellSize", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Size<>&)>(&MV::Scene::Grid::cellSize));
+
+	// Grid width
+	builder.method("gridWidth", static_cast<MV::PointPrecision(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::gridWidth));
+	builder.method("gridWidth", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(MV::PointPrecision)>(&MV::Scene::Grid::gridWidth));
+
+	// Grid offset
+	builder.method("gridOffset", static_cast<MV::Point<>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::gridOffset));
+	builder.method("gridOffset", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(const MV::Point<>&)>(&MV::Scene::Grid::gridOffset));
+
+	// Columns
+	builder.method("columns", static_cast<size_t(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::columns));
+	builder.method("columns", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(size_t, bool)>(&MV::Scene::Grid::columns));
+
+	// Layout policy
+	builder.method("layoutPolicy", static_cast<MV::Scene::Grid::AutoLayoutPolicy(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::layoutPolicy));
+	builder.method("layoutPolicy", static_cast<std::shared_ptr<MV::Scene::Grid>(MV::Scene::Grid::*)(MV::Scene::Grid::AutoLayoutPolicy)>(&MV::Scene::Grid::layoutPolicy));
+
+	// Layout
+	builder.method("layoutCells", &MV::Scene::Grid::layoutCells);
+
+	// Node lookup
+	builder.method("nodeFromGrid", &MV::Scene::Grid::nodeFromGrid);
+	builder.method("nodeFromLocal", &MV::Scene::Grid::nodeFromLocal);
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Grid);
 CEREAL_CLASS_VERSION(MV::Scene::Grid, 3)
@@ -131,7 +178,7 @@ namespace MV {
 		}
 
 		Grid::Grid(const std::weak_ptr<Node> &a_owner) :
-			Drawable(a_owner),
+			jai::property_owner<Grid, Drawable>(a_owner),
 			dirtyGrid(true) {
 			points->resize(4);
 			clearTexturePoints(*points);

@@ -2,6 +2,8 @@
 #define _MV_SCENE_DRAWABLE_H_
 
 #include "node.h"
+#include "MV/Render/mv_jai_serialization_fwd.hpp"  // Forward decls for Anchors friend declarations
+#include <jaiscript/properties.hpp>
 
 #define DrawableDerivedAccessorsShowHide(ComponentType) \
 	std::shared_ptr<ComponentType> show() { \
@@ -64,7 +66,10 @@ namespace MV {
 		class Anchors {
 			friend cereal::access;
 			friend Drawable;
-			friend Property<Anchors>;
+			friend jai::property<Anchors>;
+			// JaiScript serialization support
+			friend void save(jai::serialization::archive_writer& ar, const Anchors& anchors);
+			friend void load(jai::serialization::archive_reader& ar, Anchors& anchors);
 
 		public:
 			Anchors(Drawable* a_self);
@@ -140,7 +145,7 @@ namespace MV {
 			void registerWithParent();
 		};
 
-		class Drawable : public Component {
+		class Drawable : public jai::property_owner<Drawable, Component> {
 			friend Anchors;
 			friend Node;
 			friend cereal::access;
@@ -293,34 +298,34 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
-				points.serializeEnabled(serializePoints());
-				vertexIndices.serializeEnabled(serializePoints());
+				points.serialize_enabled(serializePoints());
+				vertexIndices.serialize_enabled(serializePoints());
+				archive(cereal::make_nvp("anchors", ourAnchors));
+				archive(cereal::make_nvp("shouldDraw", shouldDraw.get()));
+				archive(cereal::make_nvp("textures", ourTextures.get()));
+				archive(cereal::make_nvp("shaderProgramId", shaderProgramId.get()));
+				archive(cereal::make_nvp("localBounds", localBounds.get()));
+				archive(cereal::make_nvp("drawType", drawType.get()));
+				archive(cereal::make_nvp("vertexIndices", vertexIndices.get()));
+				archive(cereal::make_nvp("points", points.get()));
+				archive(cereal::make_nvp("blendMode", blendModePreset.get()));
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				if (version == 0) {
-					reflection().load(archive, { "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
-				}
-				else if (version == 1) {
-					reflection().load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
-				}
-				else if (version == 2) {
-					reflection().load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
-				}
-				else if (version == 3) {
-					reflection().load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
-				}
-				else if (version == 4) {
-					points.serializeEnabled(serializePoints());
-					vertexIndices.serializeEnabled(serializePoints());
-					reflection().load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "localBounds", "drawType", "vertexIndices", "points", "blendMode" });
-				}
-				else {
-					points.serializeEnabled(serializePoints());
-					vertexIndices.serializeEnabled(serializePoints());
-				}
+				points.serialize_enabled(serializePoints());
+				vertexIndices.serialize_enabled(serializePoints());
+				// Current version - load all properties
+				archive(cereal::make_nvp("anchors", ourAnchors));
+				archive(cereal::make_nvp("shouldDraw", shouldDraw.get()));
+				archive(cereal::make_nvp("textures", ourTextures.get()));
+				archive(cereal::make_nvp("shaderProgramId", shaderProgramId.get()));
+				archive(cereal::make_nvp("localBounds", localBounds.get()));
+				archive(cereal::make_nvp("drawType", drawType.get()));
+				archive(cereal::make_nvp("vertexIndices", vertexIndices.get()));
+				archive(cereal::make_nvp("points", points.get()));
+				archive(cereal::make_nvp("blendMode", blendModePreset.get()));
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
 
@@ -339,39 +344,39 @@ namespace MV {
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component>& a_clone);
 
-			MV_NAMED_PROPERTY((std::map<size_t, std::shared_ptr<TextureHandle>>), "textures", ourTextures, [](auto& source, auto& destination) {
+			JAI_NAMED_PROPERTY((std::map<size_t, std::shared_ptr<TextureHandle>>), "textures", ourTextures, [](auto& source, auto& destination) {
 				destination->clear();
 				for (auto&& kv : source) {
 					(*destination)[kv.first] = kv.second->clone();
 				}
 			});
 
-			MV_PROPERTY((std::vector<DrawPoint>), points, {});
-			MV_PROPERTY((std::vector<GLuint>), vertexIndices, {});
+			JAI_PROPERTY((std::vector<DrawPoint>), points, {});
+			JAI_PROPERTY((std::vector<GLuint>), vertexIndices, {});
 
-			MV_PROPERTY((BoxAABB<>), localBounds);
+			JAI_PROPERTY((BoxAABB<>), localBounds);
 
 			std::shared_ptr<Shader> shaderProgram = nullptr;
-			MV_PROPERTY((std::string), shaderProgramId, PREMULTIPLY_ID);
-			
+			JAI_PROPERTY((std::string), shaderProgramId, PREMULTIPLY_ID);
+
 			std::shared_ptr<Material> materialInstance = nullptr;
-			MV_PROPERTY((std::string), materialId, "");
+			JAI_PROPERTY((std::string), materialId, "");
 			
 			GLuint bufferId = 0;
 
 			bool dirtyVertexBuffer = true;
 
-			MV_DELETED_PROPERTY((std::shared_ptr<TextureHandle>), ourTexture);
+			JAI_DELETED_PROPERTY((std::shared_ptr<TextureHandle>), ourTexture);
 
 			std::map<size_t, TextureHandle::SignalType::SharedType> textureSizeSignals;
 
-			MV_PROPERTY((GLenum), drawType, GL_TRIANGLES);
+			JAI_PROPERTY((GLenum), drawType, GL_TRIANGLES);
 
-			MV_PROPERTY((bool), shouldDraw, true);
+			JAI_PROPERTY((bool), shouldDraw, true);
 
 			virtual void initialize() override;
 
-			Property<Anchors> ourAnchors;
+			jai::property<Anchors> ourAnchors;
 			std::vector<Anchors*> childAnchors;
 
 			std::function<void(Shader&)> userMaterialSettings;
@@ -379,7 +384,7 @@ namespace MV {
 			void hookupTextureSizeWatchers();
 			void hookupTextureSizeWatcher(size_t a_textureId);
 
-			MV_NAMED_PROPERTY((BlendMode), "blendMode", blendModePreset, BLEND_DEFAULT);
+			JAI_NAMED_PROPERTY((BlendMode), "blendMode", blendModePreset, BLEND_DEFAULT);
 
 			void rebuildTextureCache();
 

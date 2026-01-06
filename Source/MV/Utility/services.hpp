@@ -3,6 +3,7 @@
 #include <typeindex>
 #include <unordered_map>
 #include <any>
+#include <type_traits>
 #include "log.h"
 #include "require.hpp"
 
@@ -31,7 +32,7 @@ namespace MV {
 			return serviceObject;
 		}
 		template<typename T, typename V>
-		T* connect(V* serviceObject) {
+		T* connect(V* serviceObject) requires (!std::is_same_v<T, V>) {
 			types[typeid(T)] = Service<T>(serviceObject);
 			return dynamic_cast<T*>(serviceObject);
 		}
@@ -60,7 +61,7 @@ namespace MV {
 			return nullptr;
 		}
 		template<typename T, typename V>
-		V* get(bool a_throwOnFail = true) const {
+		V* get(bool a_throwOnFail = true) const requires (!std::is_same_v<T, V>) {
 			auto i = types.find(typeid(T));
 			if (i != types.end()) {
 				try {

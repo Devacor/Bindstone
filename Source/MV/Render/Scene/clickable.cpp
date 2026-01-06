@@ -3,8 +3,52 @@
 #include "stencil.h"
 
 #include "cereal/archives/json.hpp"
-
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Clickable
+static jai::registrar<MV::Scene::Clickable, MV::Services> _hookClickable("Clickable",
+	[](jai::dynamic_binder<MV::Scene::Clickable>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Sprite>();
+	builder.auto_bind();
+
+	// Click detection type
+	builder.method("clickDetectionType", static_cast<MV::Scene::Clickable::BoundsType(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::clickDetectionType));
+	builder.method("clickDetectionType", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(MV::Scene::Clickable::BoundsType)>(&MV::Scene::Clickable::clickDetectionType));
+
+	// Enable/disable
+	builder.method("disable", &MV::Scene::Clickable::disable);
+	builder.method("disabled", &MV::Scene::Clickable::disabled);
+	builder.method("enabled", &MV::Scene::Clickable::enabled);
+
+	// Press handling
+	builder.method("cancelPress", &MV::Scene::Clickable::cancelPress);
+	builder.method("inPressEvent", &MV::Scene::Clickable::inPressEvent);
+	builder.method("press", &MV::Scene::Clickable::press);
+
+	// Touch eating
+	builder.method("startEatingTouches", &MV::Scene::Clickable::startEatingTouches);
+	builder.method("stopEatingTouches", &MV::Scene::Clickable::stopEatingTouches);
+	builder.method("eatingTouches", &MV::Scene::Clickable::eatingTouches);
+
+	// Drag info
+	builder.method("dragDelta", &MV::Scene::Clickable::dragDelta);
+	builder.method("totalDragDistance", &MV::Scene::Clickable::totalDragDistance);
+	builder.method("dragTime", &MV::Scene::Clickable::dragTime);
+
+	// Priority
+	builder.method("globalPriority", static_cast<int64_t(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::globalPriority));
+	builder.method("globalPriority", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(int64_t)>(&MV::Scene::Clickable::globalPriority));
+	builder.method("appendPriority", static_cast<int64_t(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::appendPriority));
+	builder.method("appendPriority", static_cast<std::shared_ptr<MV::Scene::Clickable>(MV::Scene::Clickable::*)(int64_t)>(&MV::Scene::Clickable::appendPriority));
+
+	// Mouse bounds check
+	builder.method("mouseInBounds", static_cast<bool(MV::Scene::Clickable::*)()>(&MV::Scene::Clickable::mouseInBounds));
+});
 
 CEREAL_CLASS_VERSION(MV::Scene::Clickable, 1);
 
@@ -96,7 +140,7 @@ namespace MV {
 		}
 
 		Clickable::Clickable(const std::weak_ptr<Node>& a_owner, TapDevice & a_mouse) :
-			Sprite(a_owner),
+			jai::property_owner<Clickable, Sprite>(a_owner),
 			ourMouse(a_mouse),
 			onPress(onPressSignal),
 			onRelease(onReleaseSignal),

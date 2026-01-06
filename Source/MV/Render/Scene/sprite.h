@@ -4,6 +4,7 @@
 #include "drawable.h"
 #include "cereal/access.hpp"
 #include "cereal/types/memory.hpp"
+#include <jaiscript/properties.hpp>
 
 #define SpriteDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessors(ComponentType) \
@@ -15,7 +16,7 @@
 namespace MV {
 	namespace Scene {
 
-		class Sprite : public Drawable {
+		class Sprite : public jai::property_owner<Sprite, Drawable> {
 			friend Node;
 			friend cereal::access;
 
@@ -43,7 +44,7 @@ namespace MV {
 			}
 		protected:
 			Sprite(const std::weak_ptr<Node>& a_owner) :
-				Drawable(a_owner) {
+				jai::property_owner<Sprite, Drawable>(a_owner) {
 
 				clearTexturePoints(*points);
 				appendQuadVertexIndices(*vertexIndices, 0);
@@ -51,19 +52,14 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
-				archive(
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				archive(cereal::make_nvp("subdivisions", ourSubdivisions.get()));
+				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				if (version == 1) {
-					reflection().load(archive, { "subdivisions" });
-				}
-				archive(
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				archive(cereal::make_nvp("subdivisions", ourSubdivisions.get()));
+				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 			}
 
 			template <class Archive>
@@ -99,7 +95,7 @@ namespace MV {
 
 			void updateTextureCoordinates(size_t a_textureId) override;
 
-			MV_NAMED_PROPERTY((uint16_t), "subdivisions", ourSubdivisions, 0);
+			JAI_NAMED_PROPERTY((uint16_t), "subdivisions", ourSubdivisions, 0);
 		};
 
 		template<typename PointAssign>

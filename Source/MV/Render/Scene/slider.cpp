@@ -3,6 +3,26 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Slider
+static jai::registrar<MV::Scene::Slider, MV::Services> _hookSlider("Slider",
+	[](jai::dynamic_binder<MV::Scene::Slider>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Clickable>();
+	builder.auto_bind();
+
+	// Percent
+	builder.method("percent", static_cast<MV::PointPrecision(MV::Scene::Slider::*)() const>(&MV::Scene::Slider::percent));
+	builder.method("percent", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(MV::PointPrecision, bool)>(&MV::Scene::Slider::percent));
+
+	// Handle
+	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Slider::*)() const>(&MV::Scene::Slider::handle));
+	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Slider::handle));
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Slider);
 CEREAL_CLASS_VERSION(MV::Scene::Slider, 1);
@@ -42,7 +62,7 @@ namespace MV {
 		}
 
 		Slider::Slider(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
-			Clickable(a_owner, a_mouse),
+			jai::property_owner<Slider, Clickable>(a_owner, a_mouse),
 			onPercentChange(onPercentChangeSignal) {
 			shouldDraw = true;
 		}

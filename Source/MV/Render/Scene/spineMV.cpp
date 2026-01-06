@@ -8,6 +8,49 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Spine
+static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
+	[](jai::dynamic_binder<MV::Scene::Spine>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Drawable>();
+	builder.auto_bind();
+
+	// Node binding
+	builder.method("bindNode", &MV::Scene::Spine::bindNode);
+	builder.method("unbindSlot", &MV::Scene::Spine::unbindSlot);
+	builder.method("unbindNode", &MV::Scene::Spine::unbindNode);
+	builder.method("unbindAll", &MV::Scene::Spine::unbindAll);
+	builder.method("boundSlots", &MV::Scene::Spine::boundSlots);
+	builder.method("slotPosition", &MV::Scene::Spine::slotPosition);
+
+	// Time scale
+	builder.method("timeScale", static_cast<double(MV::Scene::Spine::*)() const>(&MV::Scene::Spine::timeScale));
+	builder.method("timeScale", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(double)>(&MV::Scene::Spine::timeScale));
+
+	// Crossfade
+	builder.method("crossfade", &MV::Scene::Spine::crossfade);
+
+	// Track
+	builder.method("track", static_cast<MV::Scene::AnimationTrack&(MV::Scene::Spine::*)(int)>(&MV::Scene::Spine::track));
+	builder.method("track", static_cast<MV::Scene::AnimationTrack&(MV::Scene::Spine::*)()>(&MV::Scene::Spine::track));
+	builder.method("currentTrack", &MV::Scene::Spine::currentTrack);
+
+	// Animation
+	builder.method("animate", &MV::Scene::Spine::animate);
+	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, double, bool)>(&MV::Scene::Spine::queueAnimation));
+	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, bool)>(&MV::Scene::Spine::queueAnimation));
+
+	// Load/unload
+	builder.method("load", [](MV::Scene::Spine& self, const MV::Scene::Spine::FileBundle& bundle) { return self.load(bundle); });
+	builder.method("unload", &MV::Scene::Spine::unload);
+	builder.method("loaded", &MV::Scene::Spine::loaded);
+	builder.method("bundle", &MV::Scene::Spine::bundle);
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Spine);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenespine);
@@ -85,7 +128,7 @@ namespace MV{
 		}
 
 		Spine::Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle) :
-			Drawable(a_owner),
+			jai::property_owner<Spine, Drawable>(a_owner),
 			autoUpdate(true),
 			fileBundle(a_fileBundle),
 			onStart(onStartSignal),
@@ -96,7 +139,7 @@ namespace MV{
 		}
 
 		Spine::Spine(const std::weak_ptr<Node> &a_owner) :
-			Drawable(a_owner),
+			jai::property_owner<Spine, Drawable>(a_owner),
 			autoUpdate(true),
 			onStart(onStartSignal),
 			onEnd(onEndSignal),

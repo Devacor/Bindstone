@@ -4,6 +4,7 @@
 #include "sprite.h"
 #include "MV/Utility/stopwatch.h"
 #include "MV/Interface/tapDevice.h"
+#include <jaiscript/properties.hpp>
 
 #define ClickableComponentDerivedAccessors(ComponentType) \
 	SpriteDerivedAccessors(ComponentType) \
@@ -35,7 +36,7 @@
 namespace MV {
 	namespace Scene {
 
-		class Clickable : public Sprite {
+		class Clickable : public jai::property_owner<Clickable, Sprite> {
 			friend cereal::access;
 			friend Node;
 		public:
@@ -149,6 +150,11 @@ namespace MV {
 					cereal::make_nvp("onAccept", onAcceptSignal),
 					cereal::make_nvp("onCancel", onCancelSignal),
 					cereal::make_nvp("onDrop", onDropSignal));
+				archive(cereal::make_nvp("hitDetectionType", hitDetectionType.get()));
+				archive(cereal::make_nvp("eatTouches", eatTouches.get()));
+				archive(cereal::make_nvp("globalClickPriority", globalClickPriority.get()));
+				archive(cereal::make_nvp("appendClickPriority", appendClickPriority.get()));
+				archive(cereal::make_nvp("overrideClickPriority", overrideClickPriority.get()));
 				archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
 			}
 
@@ -160,11 +166,11 @@ namespace MV {
 					cereal::make_nvp("onAccept", onAcceptSignal),
 					cereal::make_nvp("onCancel", onCancelSignal),
 					cereal::make_nvp("onDrop", onDropSignal));
-				if (version == 0) {
-					reflection().load(archive, {
-						"hitDetectionType", "eatTouches", "globalClickPriority", "appendClickPriority", "overrideClickPriority"
-					});
-				}
+				archive(cereal::make_nvp("hitDetectionType", hitDetectionType.get()));
+				archive(cereal::make_nvp("eatTouches", eatTouches.get()));
+				archive(cereal::make_nvp("globalClickPriority", globalClickPriority.get()));
+				archive(cereal::make_nvp("appendClickPriority", appendClickPriority.get()));
+				archive(cereal::make_nvp("overrideClickPriority", overrideClickPriority.get()));
 				archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
 			}
 
@@ -190,8 +196,8 @@ namespace MV {
 				onMouseMoveHandle.reset();
 			}
 
-			MV_PROPERTY((int64_t), globalClickPriority, 100, [](auto&, auto&) {});
-			MV_PROPERTY((int64_t), appendClickPriority, 0, [](auto&, auto&) {});
+			JAI_PROPERTY((int64_t), globalClickPriority, 100, [](auto&, auto&) {});
+			JAI_PROPERTY((int64_t), appendClickPriority, 0, [](auto&, auto&) {});
 		private:
 			TapDevice::SignalType onLeftMouseDownHandle;
 			TapDevice::SignalType onLeftMouseUpHandle;
@@ -212,9 +218,9 @@ namespace MV {
 			std::string onAcceptScript;
 			std::string onCancelScript;
 
-			MV_PROPERTY((std::vector<int64_t>), overrideClickPriority, {}, [](auto&, auto&) {});
-			MV_PROPERTY((bool), eatTouches, true);
-			MV_PROPERTY((BoundsType), hitDetectionType, BoundsType::LOCAL);
+			JAI_PROPERTY((std::vector<int64_t>), overrideClickPriority, {}, [](auto&, auto&) {});
+			JAI_PROPERTY((bool), eatTouches, true);
+			JAI_PROPERTY((BoundsType), hitDetectionType, BoundsType::LOCAL);
 		};
 
 	}

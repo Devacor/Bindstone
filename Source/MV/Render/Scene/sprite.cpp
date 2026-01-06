@@ -3,6 +3,28 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Sprite
+static jai::registrar<MV::Scene::Sprite, MV::Services> _hookSprite("Sprite",
+	[](jai::dynamic_binder<MV::Scene::Sprite>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Drawable>();
+	builder.auto_bind();
+
+	// Corners - bind Point<> version
+	builder.method("corners", &MV::Scene::Sprite::corners<MV::Point<>>);
+
+	// Subdivisions
+	builder.method("subdivide", &MV::Scene::Sprite::subdivide);
+	builder.method("subdivisions", &MV::Scene::Sprite::subdivisions);
+
+	// Slice
+	builder.method("hasSlice", &MV::Scene::Sprite::hasSlice);
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Sprite);
 CEREAL_CLASS_VERSION(MV::Scene::Sprite, 2);

@@ -4,11 +4,12 @@
 #include "drawable.h"
 #include "cereal/access.hpp"
 #include "cereal/types/utility.hpp"
+#include <jaiscript/properties.hpp>
 #include <vector>
 
 namespace MV {
 	namespace Scene {
-		class Grid : public Drawable {
+		class Grid : public jai::property_owner<Grid, Drawable> {
 			friend Node;
 			friend cereal::access;
 
@@ -75,33 +76,28 @@ namespace MV {
 				if (dirtyGrid) {
 					const_cast<Grid*>(this)->layoutCells();
 				}
-				archive(
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				archive(cereal::make_nvp("topLeftOffset", topLeftOffset.get()));
+				archive(cereal::make_nvp("policy", policy.get()));
+				archive(cereal::make_nvp("maximumWidth", maximumWidth.get()));
+				archive(cereal::make_nvp("cellDimensions", cellDimensions.get()));
+				archive(cereal::make_nvp("cellPadding", cellPadding.get()));
+				archive(cereal::make_nvp("margins", margins.get()));
+				archive(cereal::make_nvp("cellColumns", cellColumns.get()));
+				archive(cereal::make_nvp("includeChildrenInChildSize", includeChildrenInChildSize.get()));
+				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const a_version) {
-				if(a_version <= 2){
-					std::vector<std::string> propertyKeys;
-					if(a_version > 1){
-						propertyKeys.push_back("topLeftOffset");
-						propertyKeys.push_back("policy");
-					}
-					if(a_version <= 1) {
-						propertyKeys.push_back("manualReposition");
-					}
-					propertyKeys.push_back("maximumWidth");
-					propertyKeys.push_back("cellDimensions");
-					propertyKeys.push_back("cellPadding");
-					propertyKeys.push_back("margins");
-					propertyKeys.push_back("cellColumns");
-					propertyKeys.push_back("includeChildrenInChildSize");
-					reflection().load(archive, propertyKeys);
-				}
-				archive(
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				archive(cereal::make_nvp("topLeftOffset", topLeftOffset.get()));
+				archive(cereal::make_nvp("policy", policy.get()));
+				archive(cereal::make_nvp("maximumWidth", maximumWidth.get()));
+				archive(cereal::make_nvp("cellDimensions", cellDimensions.get()));
+				archive(cereal::make_nvp("cellPadding", cellPadding.get()));
+				archive(cereal::make_nvp("margins", margins.get()));
+				archive(cereal::make_nvp("cellColumns", cellColumns.get()));
+				archive(cereal::make_nvp("includeChildrenInChildSize", includeChildrenInChildSize.get()));
+				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 				dirtyGrid = false;
 			}
 
@@ -145,17 +141,17 @@ namespace MV {
 			std::list<Node::BasicReceiverType> basicSignals;
 			std::list<Node::ParentInteractionReceiverType> parentInteractionSignals;
 
-			MV_PROPERTY((PointPrecision), maximumWidth, 0.0f);
-			MV_PROPERTY((Size<>), cellDimensions);
-			MV_PROPERTY((std::pair<Point<>, Point<>>), cellPadding);
-			MV_PROPERTY((std::pair<Point<>, Point<>>), margins);
-			MV_PROPERTY((Point<>), topLeftOffset);
-			MV_PROPERTY((size_t), cellColumns, 0);
+			JAI_PROPERTY((PointPrecision), maximumWidth, 0.0f);
+			JAI_PROPERTY((Size<>), cellDimensions);
+			JAI_PROPERTY((std::pair<Point<>, Point<>>), cellPadding);
+			JAI_PROPERTY((std::pair<Point<>, Point<>>), margins);
+			JAI_PROPERTY((Point<>), topLeftOffset);
+			JAI_PROPERTY((size_t), cellColumns, 0);
 			bool inLayoutCall = false;
 			bool dirtyGrid = true;
-			MV_PROPERTY((bool), includeChildrenInChildSize, true);
-			MV_PROPERTY((AutoLayoutPolicy), policy, AutoLayoutPolicy::Comprehensive);
-			MV_DELETED_PROPERTY((bool), manualReposition);
+			JAI_PROPERTY((bool), includeChildrenInChildSize, true);
+			JAI_PROPERTY((AutoLayoutPolicy), policy, AutoLayoutPolicy::Comprehensive);
+			JAI_DELETED_PROPERTY((bool), manualReposition);
 
 			std::vector<std::vector<std::weak_ptr<MV::Scene::Node>>> tiles;
 		};

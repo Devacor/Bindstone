@@ -9,10 +9,30 @@
 #include <sstream>
 #include <cstdint>
 #include <algorithm>
+#include <concepts>
 
 #include "MV/Utility/generalUtility.h"
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
+
+// Forward declarations and concepts for JaiScript serialization
+namespace jai { namespace serialization {
+	class archive_writer;
+	class archive_reader;
+
+	// Concept for symmetric serialization - uses serialize(name, value) API
+	template<typename T>
+	concept jai_archive = requires(T& ar, float& f) {
+		ar.serialize("test", f);
+	};
+
+	// Concepts for asymmetric save/load when behavior differs between read/write
+	template<typename T>
+	concept jai_writer = requires(T& ar) { ar.write_float32(0.0f); };
+
+	template<typename T>
+	concept jai_reader = requires(T& ar) { { ar.read_float32() } -> std::same_as<float>; };
+} }
 
 namespace MV {
 	using PointPrecision = float;
@@ -50,6 +70,12 @@ namespace MV {
 			archive(CEREAL_NVP(textureX), CEREAL_NVP(textureY));
 		}
 
+		// JaiScript serialization (concept disambiguates from cereal)
+		void serialize(jai::serialization::jai_archive auto& ar) {
+			ar.serialize("textureX", textureX);
+			ar.serialize("textureY", textureY);
+		}
+
 		PointPrecision textureX, textureY;
 	};
 
@@ -83,6 +109,22 @@ namespace MV {
 		void serialize(Archive& archive) {
 			normalize();
 			archive(CEREAL_NVP(R), CEREAL_NVP(G), CEREAL_NVP(B), CEREAL_NVP(A));
+			normalize();
+		}
+
+		// JaiScript serialization - asymmetric (normalize only on load)
+		void save(jai::serialization::jai_writer auto& ar) const {
+			ar.serialize("R", R);
+			ar.serialize("G", G);
+			ar.serialize("B", B);
+			ar.serialize("A", A);
+		}
+
+		void load(jai::serialization::jai_reader auto& ar) {
+			ar.serialize("R", R);
+			ar.serialize("G", G);
+			ar.serialize("B", B);
+			ar.serialize("A", A);
 			normalize();
 		}
 
@@ -187,6 +229,13 @@ namespace MV {
 			archive(CEREAL_NVP(width), CEREAL_NVP(height), CEREAL_NVP(depth));
 		}
 
+		// JaiScript serialization (concept disambiguates from cereal)
+		void serialize(jai::serialization::jai_archive auto& ar) {
+			ar.serialize("width", width);
+			ar.serialize("height", height);
+			ar.serialize("depth", depth);
+		}
+
 		T width, height, depth;
 	};
 
@@ -277,6 +326,13 @@ namespace MV {
 			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
 		}
 
+		// JaiScript serialization (concept disambiguates from cereal)
+		void serialize(jai::serialization::jai_archive auto& ar) {
+			ar.serialize("x", x);
+			ar.serialize("y", y);
+			ar.serialize("z", z);
+		}
+
 		[[nodiscard]] Point<PointPrecision> normalized() const {
 			PointPrecision length = magnitude();
 			if (length == 0) { length = 1; }
@@ -329,6 +385,13 @@ namespace MV {
 		template <class Archive>
 		void serialize(Archive& archive) {
 			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
+		}
+
+		// JaiScript serialization (concept disambiguates from cereal)
+		void serialize(jai::serialization::jai_archive auto& ar) {
+			ar.serialize("x", x);
+			ar.serialize("y", y);
+			ar.serialize("z", z);
 		}
 
 		PointPrecision x, y, z;

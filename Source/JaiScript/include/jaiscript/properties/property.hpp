@@ -29,6 +29,16 @@ namespace jai {
 
 namespace jai {
 
+	// ============================================================================
+	// Serialization mode for properties
+	// ============================================================================
+	// Similar to Unreal Engine's "transient" property specifier.
+	// Controls whether a property is serialized or skipped.
+	enum class serialize_mode {
+		automatic,  // Default: property will be serialized (may hit static_assert if type not serializable)
+		transient   // Never serialize this property - skip silently
+	};
+
 	// C++20 Concepts for cleaner constraints
 	template<typename T>
 	concept smart_pointer = requires(T t) {
@@ -61,12 +71,27 @@ namespace jai {
 
 		const std::string& name() const { return m_property_name; }
 
+		// Serialization mode accessors
+		// serialize_mode controls compile-time behavior (transient = never serialize)
+		serialize_mode serialization() const { return m_serialize_mode; }
+		void serialization(serialize_mode mode) const { m_serialize_mode = mode; }
+
+		// Dynamic serialization toggle (runtime control)
+		// Only effective when serialize_mode is automatic
 		bool serialize_enabled() const { return m_allow_serialization; }
 		void serialize_enabled(bool allow_serialization) const {
 			m_allow_serialization = allow_serialization;
 		}
 
-		virtual bool allow_save() const { return m_allow_serialization; }
+		// Convenience method: mark this property as transient (won't serialize at compile-time)
+		void set_transient() const { m_serialize_mode = serialize_mode::transient; }
+
+		// allow_save: true if property should be serialized
+		// - serialize_mode::transient always returns false
+		// - serialize_mode::automatic respects m_allow_serialization
+		virtual bool allow_save() const {
+			return m_serialize_mode != serialize_mode::transient && m_allow_serialization;
+		}
 
 		// Serialization interface - uses JaiScript archives
 		// Forward declared to avoid circular dependency
@@ -82,7 +107,8 @@ namespace jai {
 
 		inline property_base(property_manager& property_register, std::string name);
 
-		mutable bool m_allow_serialization = true;
+		mutable serialize_mode m_serialize_mode = serialize_mode::automatic;
+		mutable bool m_allow_serialization = true;  // Dynamic runtime toggle
 
 	private:
 		std::string m_property_name;
@@ -145,6 +171,30 @@ namespace jai {
 			: property_base(reg, std::move(name))
 			, m_custom_clone(std::move(cl))
 			, m_value(std::move(def)) {
+		}
+
+		// Constructor 7: With serialize_mode
+		inline property(property_manager& reg, std::string name, serialize_mode mode)
+			: property_base(reg, std::move(name))
+			, m_custom_clone()
+			, m_value{} {
+			m_serialize_mode = mode;
+		}
+
+		// Constructor 8: With value and serialize_mode
+		template<typename U, std::enable_if_t<!is_clone_function_v<U> && !std::is_same_v<std::decay_t<U>, serialize_mode>, int> = 0>
+		inline property(property_manager& reg, std::string name, U&& def, serialize_mode mode)
+			: property_base(reg, std::move(name))
+			, m_custom_clone()
+			, m_value(std::forward<U>(def)) {
+			m_serialize_mode = mode;
+		}
+
+		// Convenience method: mark this property as transient (won't serialize)
+		// Returns reference to self for use immediately after construction if needed
+		property& set_transient() {
+			m_serialize_mode = serialize_mode::transient;
+			return *this;
 		}
 
 		// Move constructor

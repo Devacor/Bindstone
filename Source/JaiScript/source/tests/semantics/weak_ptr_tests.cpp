@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <memory>
 
@@ -1125,8 +1125,8 @@ public:
 private:
     void register_lifetime_tracker(engine& eng, bool with_assignment = false) {
         // Note: copy_function is automatically registered for copy-constructible types
-        // class_builder is non-copyable, so we use reference from construction
-        class_builder<LifetimeTracker> builder(eng, "LifetimeTracker");
+        // dynamic_binder is non-copyable, so we use reference from construction
+        dynamic_binder<LifetimeTracker> builder(eng, "LifetimeTracker");
         builder.constructor<>()
             .constructor<int>()
             .method("get_value", &LifetimeTracker::get_value)
@@ -1147,7 +1147,7 @@ private:
     }
     
     void register_tree_node(engine& eng) {
-        class_builder<TreeNode>(eng, "TreeNode")
+        dynamic_binder<TreeNode>(eng, "TreeNode")
             .constructor<std::string>()
             .method("get_name", &TreeNode::get_name)
             .method("add_child", &TreeNode::add_child)

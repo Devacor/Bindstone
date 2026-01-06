@@ -97,7 +97,7 @@ jai::Engine engine;
 jai::Value result = engine.Execute("2 + 2");
 Int val = result.As<Int>();
 
-jai::make_class_builder<MyClass>(engine, "MyClass")
+jai::make_dynamic_binder<MyClass>(engine, "MyClass")
     .Constructor<Int, Float>()
     .Method("setValue", &MyClass::SetValue)
     .Build();
@@ -109,7 +109,7 @@ jai::engine engine;
 jai::script_value result = engine.execute("2 + 2");
 script_int val = result.as<script_int>();
 
-jai::make_class_builder<MyClass>(engine, "MyClass")
+jai::make_dynamic_binder<MyClass>(engine, "MyClass")
     .constructor<script_int, script_float>()
     .method("set_value", &MyClass::set_value)
     .build();

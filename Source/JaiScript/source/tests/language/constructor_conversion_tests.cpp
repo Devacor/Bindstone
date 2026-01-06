@@ -27,7 +27,7 @@
  */
 
 #include <jaiscript/jaiscript.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/testing/foundry.hpp>
 #include <cmath>
 
@@ -523,7 +523,7 @@ public:
         test("cpp_constructor_int_conversion", [&]() {
             auto eng = engine::make();
 
-            class_builder<Temperature>(*eng, "Temperature")
+            dynamic_binder<Temperature>(*eng, "Temperature")
                 .constructor<>()
                 .constructor<float>()
                 .constructor<int>()
@@ -544,14 +544,14 @@ public:
         test("cpp_constructor_object_conversion", [&]() {
             auto eng = engine::make();
 
-            class_builder<Point2D>(*eng, "Point2D")
+            dynamic_binder<Point2D>(*eng, "Point2D")
                 .constructor<>()
                 .constructor<float, float>()
                 .property("x", &Point2D::x)
                 .property("y", &Point2D::y)
                 .build();
 
-            class_builder<Point3D>(*eng, "Point3D")
+            dynamic_binder<Point3D>(*eng, "Point3D")
                 .constructor<>()
                 .constructor<float, float, float>()
                 .constructor<Point2D>()
@@ -576,7 +576,7 @@ public:
         test("cpp_constructor_string_conversion", [&]() {
             auto eng = engine::make();
 
-            class_builder<Color>(*eng, "Color")
+            dynamic_binder<Color>(*eng, "Color")
                 .constructor<>()
                 .constructor<int, int, int>()
                 .constructor<int>()
@@ -604,7 +604,7 @@ public:
         test("inheritance_ref_upcast_no_copy", [&]() {
             auto eng = engine::make();
 
-            class_builder<BaseEntity>(*eng, "BaseEntity")
+            dynamic_binder<BaseEntity>(*eng, "BaseEntity")
                 .constructor<>()
                 .constructor<int, std::string>()
                 .property("id", &BaseEntity::id)
@@ -612,7 +612,7 @@ public:
                 .method("type_name", &BaseEntity::type_name)
                 .build();
 
-            class_builder<DerivedEntity>(*eng, "DerivedEntity")
+            dynamic_binder<DerivedEntity>(*eng, "DerivedEntity")
                 .constructor<>()
                 .constructor<int, std::string, float>()
                 .base_class<BaseEntity>()

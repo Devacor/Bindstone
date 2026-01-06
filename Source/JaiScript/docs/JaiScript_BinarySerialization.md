@@ -9,7 +9,7 @@ JaiScript's serialization system aims to unify Bindstone's existing property fra
 ### Single Registration, Multiple Formats
 ```cpp
 // Register once, serialize everywhere
-make_class_builder<Player>(engine, "Player")
+make_dynamic_binder<Player>(engine, "Player")
     .version(3)
     .property("name", &Player::name)
     .property("health", &Player::health)
@@ -38,7 +38,7 @@ class Player : public MV::PropertyOwner {
     
     // Auto-register with JaiScript
     void register_with_script(engine& e) {
-        make_class_builder<Player>(e, "Player")
+        make_dynamic_binder<Player>(e, "Player")
             .auto_import_properties(this->reflection())  // Import existing MV_PROPERTY definitions
             .version(current_version)
             .serialize_construct([](const script_value& data, int version) {
@@ -53,7 +53,7 @@ class Player : public MV::PropertyOwner {
 
 ### Property Registration with Versioning
 ```cpp
-make_class_builder<GameEntity>(engine, "GameEntity")
+make_dynamic_binder<GameEntity>(engine, "GameEntity")
     .version(4)  // Current version - used for save format identification
 
     // Register all current properties
@@ -133,7 +133,7 @@ class network_archive : public archive_writer {
 
 ### Custom Serialization Support
 ```cpp
-make_class_builder<ComplexEntity>(engine, "ComplexEntity")
+make_dynamic_binder<ComplexEntity>(engine, "ComplexEntity")
     .property("basic_field", &ComplexEntity::basic_field)
     
     // Custom save logic for complex cases
@@ -185,7 +185,7 @@ if (health.modified) {
 }
 
 // JaiScript integration
-make_class_builder<NetworkedEntity>(engine, "NetworkedEntity")
+make_dynamic_binder<NetworkedEntity>(engine, "NetworkedEntity")
     .property("health", &NetworkedEntity::health, 
         network_flags::immediate | network_flags::reliable)
     .property("position", &NetworkedEntity::position,

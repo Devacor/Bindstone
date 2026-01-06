@@ -58,7 +58,7 @@ public:
     }
 
     // Accumulate an object to serialize (with automatic type/version lookup)
-    // Works with any class registered via class_builder
+    // Works with any class registered via dynamic_binder
     template<typename T>
     writer& operator()(const T& obj) {
         // Try to look up metadata from engine
@@ -67,7 +67,7 @@ public:
 
         if (engine_ref_) {
             auto eng = engine_ref_;
-            // Get the type name registered with class_builder
+            // Get the type name registered with dynamic_binder
             auto type_id = type_info::id<T>();
             auto registered_name = eng->get_type_name(type_id);
 
@@ -91,7 +91,7 @@ public:
     }
 
     // Accumulate an object with explicit type name and version
-    // Works with any class registered via class_builder
+    // Works with any class registered via dynamic_binder
     template<typename T>
     writer& operator()(const T& obj, const std::string& type_name, uint32_t version = 1) {
         // Serialize immediately to avoid lifetime issues
@@ -116,8 +116,8 @@ public:
     }
 
 private:
-    // Serialize any object registered with class_builder
-    // Uses class_builder metadata as the single source of truth
+    // Serialize any object registered with dynamic_binder
+    // Uses dynamic_binder metadata as the single source of truth
     template<typename T>
     void serialize_object(const T& obj, archive_writer& ar) {
         if (!engine_ref_) {
@@ -126,23 +126,23 @@ private:
                 obj.property_mgr.save(ar);
                 return;
             } else {
-                throw serialization_error("Engine required to serialize class_builder objects");
+                throw serialization_error("Engine required to serialize dynamic_binder objects");
             }
         }
 
         auto eng = engine_ref_;
 
-        // Get the class metadata from class_builder registry
+        // Get the class metadata from dynamic_binder registry
         auto type_id = type_info::id<T>();
         auto type_name = eng->get_type_name(type_id);
 
         if (type_name.empty()) {
-            // Not registered with class_builder - fall back to property_mgr if available
+            // Not registered with dynamic_binder - fall back to property_mgr if available
             if constexpr (std::is_base_of_v<property_owner, T>) {
                 obj.property_mgr.save(ar);
                 return;
             } else {
-                throw serialization_error("Type not registered with class_builder");
+                throw serialization_error("Type not registered with dynamic_binder");
             }
         }
 
@@ -166,7 +166,7 @@ private:
         // Wrap the C++ object as a script_value for getter calls
         auto wrapped = script_value::make_shared(std::make_shared<T>(obj), eng);
 
-        // Serialize each property using class_builder registered getters
+        // Serialize each property using dynamic_binder registered getters
         for (const auto& prop_meta : metadata->properties) {
             // Skip read-only properties (computed values, no setter)
             if (prop_meta.read_only) {
@@ -320,7 +320,7 @@ private:
 // Convenience functions for single-object serialization
 
 // With automatic type/version lookup from engine
-// Works with any class registered via class_builder
+// Works with any class registered via dynamic_binder
 template<typename T>
 std::string to_json(engine& eng, const T& obj, int indent = 2) {
     writer w(eng, false, indent);

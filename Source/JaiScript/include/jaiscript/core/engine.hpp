@@ -21,7 +21,7 @@
 
 namespace jai {
 
-    // Class constants namespace (shared with class_builder.hpp)
+    // Class constants namespace (shared with dynamic_binder.hpp)
     namespace class_constants {
         inline const std::string CPP_OBJECT_FIELD = "_cpp_object";
     }
@@ -43,6 +43,20 @@ namespace jai {
         interpreter,    // Default tree-walk interpreter
         jvm,           // Bytecode virtual machine
         auto_select    // Automatic selection based on heuristics
+    };
+
+    // Extended type info for overload resolution - stores base type + optional C++ type for objects
+    struct param_type_info {
+        script_value_type base_type;
+        std::type_index cpp_type{typeid(void)};  // For object types, used to lookup class def
+
+        param_type_info() : base_type(script_value_type::jai_null_type) {}
+        param_type_info(script_value_type t) : base_type(t), cpp_type(typeid(void)) {}
+        param_type_info(script_value_type t, std::type_index idx) : base_type(t), cpp_type(idx) {}
+
+        bool operator==(const param_type_info& other) const {
+            return base_type == other.base_type && cpp_type == other.cpp_type;
+        }
     };
 
     class engine : public std::enable_shared_from_this<engine> {
@@ -100,7 +114,7 @@ namespace jai {
         }
         
         // Add a global reference that binds to a C++ variable
-        // Supports both primitive types AND custom objects registered via class_builder
+        // Supports both primitive types AND custom objects registered via dynamic_binder
         template<typename T>
         void add_global_ref(const std::string& name, T& value, bool is_serializable = false) {
             // For primitive types, use cpp_bound for direct binding
@@ -141,7 +155,7 @@ namespace jai {
                     // Create a class_instance to wrap the object (same as constructors do)
                     auto instance = class_def->create_instance();
 
-                    // Store the C++ object in the special field (same pattern as class_builder)
+                    // Store the C++ object in the special field (same pattern as dynamic_binder)
                     // Intern the constant field name to ID
                     uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
                     instance->set_field(cpp_object_field_id,
@@ -212,23 +226,23 @@ namespace jai {
             // Wrap the function to handle type conversion for return values
             script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
             
-            // Extract parameter types for type-based overloading
-            std::vector<script_value_type> paramTypes = extractParameterTypes<Func>();
-            
+            // Extract parameter types for type-based overloading (with C++ type info for objects)
+            std::vector<param_type_info> paramTypes = extract_parameter_types_with_info<Func>();
+
             // Auto-detect numeric operator overrides and set flag
             if (arity == 2 && isNumericOperator(name)) {
                 if (hasNumericOperands(paramTypes)) {
                     setHasCustomNumericOps(true);
                 }
             }
-            
+
             // Check if this should be registered as an overload
             if (has_function(name)) {
                 // Automatically convert to overloaded function with type info
-                add_overloaded_functionWithTypes(name, arity, wrappedFunc, paramTypes);
+                add_overloaded_function_with_full_types(name, arity, wrappedFunc, paramTypes);
             } else {
                 // Register normally but store arity info for future overloading
-                add_functionWithArityAndTypes(name, wrappedFunc, arity, paramTypes);
+                add_function_with_arity_and_full_types(name, wrappedFunc, arity, paramTypes);
             }
         }
         
@@ -240,17 +254,17 @@ namespace jai {
                    name == "==" || name == "!=" || name == "<=>";
         }
         
-        bool hasNumericOperands(const std::vector<script_value_type>& paramTypes) const {
+        bool hasNumericOperands(const std::vector<param_type_info>& paramTypes) const {
             if (paramTypes.size() != 2) return false;
-            
+
             auto isNumericType = [](script_value_type t) {
-                return t == script_value_type::jai_int_type || 
-                       t == script_value_type::jai_float_type || 
-                       t == script_value_type::jai_char_type || 
+                return t == script_value_type::jai_int_type ||
+                       t == script_value_type::jai_float_type ||
+                       t == script_value_type::jai_char_type ||
                        t == script_value_type::jai_bool_type;
             };
             
-            return isNumericType(paramTypes[0]) && isNumericType(paramTypes[1]);
+            return isNumericType(paramTypes[0].base_type) && isNumericType(paramTypes[1].base_type);
         }
         
         void setHasCustomNumericOps(bool value);
@@ -259,7 +273,9 @@ namespace jai {
         // Overloaded function registration
         void add_overloaded_function(const std::string& name, size_t argCount, script_function func);
         void add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<script_value_type>& paramTypes);
+        void add_overloaded_function_with_full_types(const std::string& name, size_t argCount, script_function func, const std::vector<param_type_info>& paramTypes);
         void add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<script_value_type>& paramTypes);
+        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& paramTypes);
         
         // Class registration
         // Register a class with its type information
@@ -292,7 +308,31 @@ namespace jai {
         // Get registered script name for a C++ type
         template<typename T>
         std::string get_registered_name() const;
-        
+
+        // Check if type T has been registered via dynamic_binder
+        template<typename T>
+        bool has_registered_class() const {
+            return get_class_definition_by_type(std::type_index(typeid(T))) != nullptr;
+        }
+
+        // ============================================================================
+        // Static type binding - bind compile-time type info to this engine instance
+        // ============================================================================
+        // For types registered with JAI_STATIC_BINDER, this creates the runtime
+        // class_definition and registers it with this engine.
+        //
+        // Usage:
+        //   eng->bind_static_type<MV::Point<int>>();
+        //   eng->bind_static_types<MV::Point<int>, MV::Color, MV::Size<int>>();
+
+        template<typename T>
+        void bind_static_type();  // Implemented in static_binder_impl.hpp
+
+        template<typename... Ts>
+        void bind_static_types() {
+            (bind_static_type<Ts>(), ...);
+        }
+
         // Enhanced Conversion System
         // Get the conversion manager for this engine
         conversions::conversion_manager get_conversion_manager();
@@ -368,24 +408,7 @@ namespace jai {
                     return script_value(static_cast<To>(v.as<From>())); 
                 });
         }
-        
-        // Type registration (to be implemented)
-        template<typename T>
-        class TypeRegistrar {
-        public:
-            TypeRegistrar(engine& engine, const std::string& name);
-            TypeRegistrar& constructor();
-            template<typename... Args>
-            TypeRegistrar& constructor();
-            template<typename Method>
-            TypeRegistrar& method(const std::string& name, Method m);
-            template<typename Property>
-            TypeRegistrar& property(const std::string& name, Property p);
-        };
-        
-        template<typename T>
-        TypeRegistrar<T> registerType(const std::string& name);
-        
+
         // Variable access
         script_value get_variable(const std::string& name) const;
         bool has_variable(const std::string& name) const;
@@ -574,8 +597,8 @@ namespace jai {
                                              std::function<std::shared_ptr<void>(const void*)> copier);
         void register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef);
         
-        // Allow class_builder to access implementation details
-        template<typename T> friend class class_builder;
+        // Allow dynamic_binder to access implementation details
+        template<typename T> friend class dynamic_binder;
         // Allow function_binder to access conversion registry
         template<typename T> friend struct detail::value_converter;
         // Allow interpreter to access implementation for include/import
@@ -632,6 +655,53 @@ namespace jai {
             } else {
                 // For unknown types, return Object (could be improved)
                 return script_value_type::jai_object_type;
+            }
+        }
+
+        // Extract parameter types with full type info (including C++ type_index for objects)
+        template<typename Func>
+        std::vector<param_type_info> extract_parameter_types_with_info() {
+            using traits = detail::function_traits<std::decay_t<Func>>;
+            return extract_parameter_types_with_info_impl<typename traits::argument_types>(std::make_index_sequence<traits::arity>{});
+        }
+
+        template<typename ArgsTuple, size_t... Is>
+        std::vector<param_type_info> extract_parameter_types_with_info_impl(std::index_sequence<Is...>) {
+            return {map_cpp_type_to_param_info<std::tuple_element_t<Is, ArgsTuple>>()...};
+        }
+
+        // Map C++ types to param_type_info (with type_index for object types)
+        template<typename T>
+        static param_type_info map_cpp_type_to_param_info() {
+            using decay_t = std::decay_t<T>;
+
+            if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> ||
+                          std::is_same_v<decay_t, script_int>) {
+                return param_type_info(script_value_type::jai_int_type);
+            } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> ||
+                                 std::is_same_v<decay_t, script_float>) {
+                return param_type_info(script_value_type::jai_float_type);
+            } else if constexpr (std::is_same_v<decay_t, bool> || std::is_same_v<decay_t, script_bool>) {
+                return param_type_info(script_value_type::jai_bool_type);
+            } else if constexpr (std::is_same_v<decay_t, char> || std::is_same_v<decay_t, script_char>) {
+                return param_type_info(script_value_type::jai_char_type);
+            } else if constexpr (std::is_same_v<decay_t, std::string> || std::is_same_v<decay_t, script_string>) {
+                return param_type_info(script_value_type::jai_string_type);
+            } else if constexpr (is_specialization_v<decay_t, std::vector>) {
+                return param_type_info(script_value_type::jai_array_type);
+            } else if constexpr (is_specialization_v<decay_t, bound_array>) {
+                return param_type_info(script_value_type::jai_array_type);
+            } else if constexpr (is_specialization_v<decay_t, std::map>) {
+                return param_type_info(script_value_type::jai_map_type);
+            } else if constexpr (is_specialization_v<decay_t, bound_map>) {
+                return param_type_info(script_value_type::jai_map_type);
+            } else if constexpr (is_specialization_v<decay_t, std::shared_ptr>) {
+                // For shared_ptr<T>, extract T and store its type_index
+                using element_type = typename decay_t::element_type;
+                return param_type_info(script_value_type::jai_shared_ptr_type, std::type_index(typeid(element_type)));
+            } else {
+                // For unknown/object types, store the C++ type_index for class lookup
+                return param_type_info(script_value_type::jai_object_type, std::type_index(typeid(decay_t)));
             }
         }
     };

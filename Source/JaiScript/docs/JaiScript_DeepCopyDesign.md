@@ -34,12 +34,12 @@ case value_type::jai_array_type: {
 
 ### 2. Automatic Copy Function Registration
 
-When registering a C++ class, `class_builder` automatically captures the copy constructor:
+When registering a C++ class, `dynamic_binder` automatically captures the copy constructor:
 
 ```cpp
 template<typename T>
-class class_builder {
-    class_builder& build() {
+class dynamic_binder {
+    dynamic_binder& build() {
         if constexpr (std::is_copy_constructible_v<T>) {
             classDef_->set_copy_function([](const void* src) -> std::shared_ptr<void> {
                 const T* typed_src = static_cast<const T*>(src);
@@ -93,13 +93,13 @@ class polymorphic_type_registry {
 };
 ```
 
-### 4. class_builder API Enhancement
+### 4. dynamic_binder API Enhancement
 
 The `base_class()` method registers inheritance relationships and polymorphic copy support:
 
 ```cpp
 template<typename Base>
-class_builder& base_class() {
+dynamic_binder& base_class() {
     static_assert(std::is_base_of_v<Base, T>, 
                   "Specified type is not a base class of this class");
     
@@ -120,7 +120,7 @@ class_builder& base_class() {
 ### Simple Types
 ```cpp
 // C++ registration
-make_class_builder<Point>(engine, "Point")
+make_dynamic_binder<Point>(engine, "Point")
     .constructor<double, double>()
     .property("x", &Point::x)
     .property("y", &Point::y)
@@ -150,11 +150,11 @@ public:
 };
 
 // Registration
-make_class_builder<Shape>(engine, "Shape")
+make_dynamic_binder<Shape>(engine, "Shape")
     .method("area", &Shape::area)
     .build();
 
-make_class_builder<Circle>(engine, "Circle")
+make_dynamic_binder<Circle>(engine, "Circle")
     .base_class<Shape>()  // This enables polymorphic copy!
     .constructor<double>()
     .build();

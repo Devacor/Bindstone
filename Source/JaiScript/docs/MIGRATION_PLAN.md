@@ -6,7 +6,7 @@ Replace ChaiScript with JaiScript throughout Bindstone, leveraging the property 
 
 ## Phase 1: Infrastructure (COMPLETED ✅)
 
-- [x] `class_builder` with fluent API
+- [x] `dynamic_binder` with fluent API
 - [x] `auto_bind()` with CRTP inheritance detection
 - [x] `property_owner<Derived, Bases...>` CRTP pattern
 - [x] Operator== auto-detection
@@ -15,7 +15,7 @@ Replace ChaiScript with JaiScript throughout Bindstone, leveraging the property 
 
 ## Phase 2: Convert Hook Files
 
-Convert ChaiScript hook files to JaiScript using `class_builder` and `registrar`.
+Convert ChaiScript hook files to JaiScript using `dynamic_binder` and `registrar`.
 
 ### Hook Files (10 files, dependency order)
 
@@ -47,7 +47,7 @@ MV::Script::Registrar<BattleEffect> _hookBattleEffect([](chaiscript::ChaiScript&
 **After (JaiScript):**
 ```cpp
 jai::registrar<BattleEffect, MV::Services> _hookBattleEffect([](jai::engine& eng, const MV::Services& services) {
-    jai::class_builder<BattleEffect>(eng, "BattleEffect")
+    jai::dynamic_binder<BattleEffect>(eng, "BattleEffect")
         .base_class<MV::Scene::Component>()
         .method("alive", &BattleEffect::alive)
         .method("game", [](BattleEffect& self) -> GameInstance& { return self.game(); });
@@ -58,7 +58,7 @@ jai::registrar<BattleEffect, MV::Services> _hookBattleEffect([](jai::engine& eng
 
 | ChaiScript | JaiScript |
 |------------|-----------|
-| `chaiscript::user_type<T>()` | `class_builder<T>(eng, "Name")` |
+| `chaiscript::user_type<T>()` | `dynamic_binder<T>(eng, "Name")` |
 | `chaiscript::constructor<T()>()` | `.constructor<>()` |
 | `chaiscript::fun(&T::method)` | `.method("name", &T::method)` |
 | `chaiscript::fun([](T& self){...})` | `.method("name", [](T& self){...})` |

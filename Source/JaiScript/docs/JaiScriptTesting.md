@@ -150,7 +150,7 @@ g++ -std=c++20 -I../../../include -o test_engine test_engine.cpp -pthread
 g++ -std=c++20 -I../../../include -o test_operators test_operators.cpp -pthread
 
 # Integration tests (C++ bindings)
-g++ -std=c++20 -I../../../include -o test_class_builder test_class_builder.cpp -pthread
+g++ -std=c++20 -I../../../include -o test_dynamic_binder test_dynamic_binder.cpp -pthread
 
 # With debug info
 g++ -std=c++20 -g -I../../../include -o test_debug test_functions.cpp -pthread

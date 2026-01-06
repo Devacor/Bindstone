@@ -4,7 +4,7 @@
 
 Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-28):
 
-| Benchmark                      | Time (μs) | Notes                                    |
+| Benchmark                      | Time (uS) | Notes                                    |
 |--------------------------------|-----------|------------------------------------------|
 | Integer Addition               | <1        | Single arithmetic operation              |
 | Float Multiplication           | <1        | Single floating-point operation          |
@@ -14,12 +14,12 @@ Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (
 | Map Insert/Lookup              | 5         | 2 inserts + 1 lookup                     |
 | Class Creation                 | 11        | Class definition + instantiation         |
 | Method Invocation              | 9         | Class with method + method call          |
-| For Loop (100 iterations)      | 8         | 0.08μs per iteration (~80ns)             |
+| For Loop (100 iterations)      | 8         | 0.08uS per iteration (~80ns)             |
 | String Concatenation           | 3         | String operations                        |
 | Complex Expression             | 2         | Multi-operator expression evaluation     |
 | Class Inheritance              | 94        | Base + derived class + instantiation     |
 | Variable Lookup Heavy          | 5         | 10 variable lookups in expression        |
-| Hot Loop (1000 iterations)     | 44        | 0.044μs per iteration (~44ns)            |
+| Hot Loop (1000 iterations)     | 44        | 0.044uS per iteration (~44ns)            |
 | Simple Compound Assignment     | 14        | 100 compound assignments (+=, -=, etc.)  |
 | Engine Creation                | 42        | One-time engine initialization           |
 | Stdlib Registration            | 133       | Standard library function registration   |
@@ -69,10 +69,10 @@ instance->get_method(method_id);            // Integer lookup (O(1))
 - Public APIs still accept strings for ergonomics, internally converted to IDs once
 
 **Performance gains:**
-- Hot loops: 37% faster (1136μs → 715μs)
-- Recursion: 15-19% faster (Fibonacci: 27μs → 22μs)
-- Class operations: 14-18% faster (Creation: 7μs → 6μs, Inheritance: 133μs → 109μs)
-- Algorithms: 13-19% faster (Bubble sort: 156μs → 127μs)
+- Hot loops: 37% faster (1136uS → 715uS)
+- Recursion: 15-19% faster (Fibonacci: 27uS → 22uS)
+- Class operations: 14-18% faster (Creation: 7uS → 6uS, Inheritance: 133uS → 109uS)
+- Algorithms: 13-19% faster (Bubble sort: 156uS → 127uS)
 
 ### 2. Unchecked Accessor Optimizations (v0.1.3)
 
@@ -142,13 +142,13 @@ if (leftType == jai_int_type && rightType == jai_int_type) {
 - For-loop structure (native C++ for-loop with lambda helpers)
 
 ### Performance Impact:
-- **Recursive algorithms**: ~94% faster (Fibonacci benchmark: 3381μs → 220μs → 22μs)
-- **Loop-heavy operations**: ~37-47% faster (For Loop: 125μs → 79μs → 67μs, Hot Loop: 1345μs → 1136μs → 715μs)
-- **String method calls**: ~27% faster (String Concatenation: 11μs → 8μs)
-- **Array algorithms**: ~61% faster (Bubble Sort: 329μs → 200μs → 156μs → 127μs)
-- **Method invocation**: ~55% faster (Method Invocation: 20μs → 17μs → 9μs)
-- **Function calls**: ~60% faster (Function Calls: 10μs → 5μs → 4μs)
-- **Class operations**: ~75% faster (Class Creation: 24μs → 22μs → 7μs → 6μs, Class Inheritance: 139μs → 133μs → 109μs)
+- **Recursive algorithms**: ~94% faster (Fibonacci benchmark: 3381uS → 220uS → 22uS)
+- **Loop-heavy operations**: ~37-47% faster (For Loop: 125uS → 79uS → 67uS, Hot Loop: 1345uS → 1136uS → 715uS)
+- **String method calls**: ~27% faster (String Concatenation: 11uS → 8uS)
+- **Array algorithms**: ~61% faster (Bubble Sort: 329uS → 200uS → 156uS → 127uS)
+- **Method invocation**: ~55% faster (Method Invocation: 20uS → 17uS → 9uS)
+- **Function calls**: ~60% faster (Function Calls: 10uS → 5uS → 4uS)
+- **Class operations**: ~75% faster (Class Creation: 24uS → 22uS → 7uS → 6uS, Class Inheritance: 139uS → 133uS → 109uS)
 
 ### 4. Slot-Based Local Variable Storage (v0.1.6)
 
@@ -176,8 +176,8 @@ return &locals[slot_index];  // O(1) guaranteed, single array access
 - Function scope tracking in parser handles nested functions/lambdas correctly
 
 **Performance Impact:**
-- **Fibonacci(15)**: 1051μs → 878μs (**16% faster**)
-- **Recurse with 10 Locals (depth=15)**: 36μs (new benchmark)
+- **Fibonacci(15)**: 1051uS → 878uS (**16% faster**)
+- **Recurse with 10 Locals (depth=15)**: 36uS (new benchmark)
 - **vs Squirrel on local-heavy code**: 12x gap (better than 16x on Fibonacci)
 - **vs ChaiScript on local-heavy code**: JaiScript is **67x faster**
 
@@ -207,11 +207,11 @@ std::shared_ptr<function> function_ptr_;
 ```
 
 **Performance Impact (v0.1.5):**
-- **Hot Loops**: 71μs → 49μs (**31% faster**)
-- **For Loops**: 17μs → 15μs (**12% faster**, gap now 1.25x vs ChaiScript)
-- **Bubble Sort**: 115μs → 82μs (**29% faster**)
-- **BST**: 700μs → 596μs (**15% faster**)
-- **Fibonacci**: 20μs → 17μs (**15% faster**)
+- **Hot Loops**: 71uS → 49uS (**31% faster**)
+- **For Loops**: 17uS → 15uS (**12% faster**, gap now 1.25x vs ChaiScript)
+- **Bubble Sort**: 115uS → 82uS (**29% faster**)
+- **BST**: 700uS → 596uS (**15% faster**)
+- **Fibonacci**: 20uS → 17uS (**15% faster**)
 - **String concat**: Neutral (shared_ptr indirection hidden by actual string work)
 
 ## Architecture: Value Type Implementation
@@ -248,17 +248,17 @@ This ensures type safety and prevents undefined behavior at the cost of some mic
 
 For `for (auto i = 0; i < 100; ++i) { sum += i; }`:
 
-**JaiScript** (~8μs for 100 iterations = **80ns per iteration**):
+**JaiScript** (~8uS for 100 iterations = **80ns per iteration**):
 ```
 Per iteration:
 1. condition (i < 100):     ~1ns (get_type() + static_cast, no RTTI)
 2. body (sum += i):         ~5ns (2 ID lookups + optimized type checks + value construction)
 3. increment (++i):         ~2ns (ID lookup + optimized type check + value construction)
                            ------
-Total: ~8ns × 100 = 0.8μs + overhead = 8μs
+Total: ~8ns × 100 = 0.8uS + overhead = 8uS
 ```
 
-**JaiScript now beats ChaiScript** (8μs vs 12μs = 1.5x faster).
+**JaiScript now beats ChaiScript** (8uS vs 12uS = 1.5x faster).
 
 **Optimizations applied:**
 - Native C++ for-loop structure with lambda helpers (compiler-friendly pattern)
@@ -292,7 +292,7 @@ Loop conditions require evaluation each iteration:
 **Optimizations Applied**:
 - `is_truthy()` uses a **single `switch` statement** on `value.type()` instead of multiple type checks
 - Improved string interning eliminates redundant lookups
-- Result: JaiScript for-loop (8μs) now **beats ChaiScript** (12μs) by 1.5x
+- Result: JaiScript for-loop (8uS) now **beats ChaiScript** (12uS) by 1.5x
 
 ---
 
@@ -304,35 +304,35 @@ Performance measurements running representative workloads:
 
 | Benchmark                        | JaiScript Time | Notes |
 |----------------------------------|----------------|-------|
-| **Integer Addition**             | <1μs           | Single arithmetic operation |
-| **Float Multiplication**         | <1μs           | Floating-point operation |
-| **Variable Operations**          | 2μs            | Variable declarations + addition |
-| **Function Calls**               | 2μs            | Function declaration + invocation |
-| **Array Push/Pop**               | 7μs            | Array operations |
-| **Map Insert/Lookup**            | 5μs            | Hash map operations |
-| **Class Creation**               | 4μs            | Class instantiation |
-| **Method Invocation**            | 4μs            | Instance method call |
-| **For Loop (100 iterations)**    | 8μs            | ~80ns per iteration |
-| **Variable Lookup Heavy**        | 5μs            | Multiple variable accesses |
-| **Complex Expression**           | 2μs            | Multi-operator expression |
-| **Factorial(10) - Recursion**    | 6μs            | Recursive algorithm |
-| **Fibonacci(6) - Deep Recursion**| 14μs           | Deep recursive calls |
-| **Binary Search**                | 9μs            | Search algorithm |
-| **Bubble Sort (10 elements)**    | 64μs           | Sorting algorithm |
-| **Hot Loop (1000 iterations)**   | 44μs           | ~44ns per iteration |
-| **BST (15 nodes)**               | 489μs          | Binary Search Tree operations |
+| **Integer Addition**             | <1uS           | Single arithmetic operation |
+| **Float Multiplication**         | <1uS           | Floating-point operation |
+| **Variable Operations**          | 2uS            | Variable declarations + addition |
+| **Function Calls**               | 2uS            | Function declaration + invocation |
+| **Array Push/Pop**               | 7uS            | Array operations |
+| **Map Insert/Lookup**            | 5uS            | Hash map operations |
+| **Class Creation**               | 4uS            | Class instantiation |
+| **Method Invocation**            | 4uS            | Instance method call |
+| **For Loop (100 iterations)**    | 8uS            | ~80ns per iteration |
+| **Variable Lookup Heavy**        | 5uS            | Multiple variable accesses |
+| **Complex Expression**           | 2uS            | Multi-operator expression |
+| **Factorial(10) - Recursion**    | 6uS            | Recursive algorithm |
+| **Fibonacci(6) - Deep Recursion**| 14uS           | Deep recursive calls |
+| **Binary Search**                | 9uS            | Search algorithm |
+| **Bubble Sort (10 elements)**    | 64uS           | Sorting algorithm |
+| **Hot Loop (1000 iterations)**   | 44uS           | ~44ns per iteration |
+| **BST (15 nodes)**               | 489uS          | Binary Search Tree operations |
 
 ### Array/Map Literal Benchmarks
 
 | Benchmark | auto | var | Notes |
 |-----------|------|-----|-------|
-| Simple Array [10 ints] | 4μs | 3μs | `[1,2,3,4,5,6,7,8,9,10]` |
-| 2D Array [[5x5 ints]] | 11μs | 10μs | Nested array construction |
-| 3D Array [[[2x2x2 ints]]] | 6μs | 5μs | Deep nesting |
-| Homogeneous Map {5 keys} | 4μs | 4μs | `{"a":1, "b":2, ...}` |
-| Heterogeneous Map {5 mixed} | - | 4μs | Mixed value types |
-| Nested Map 2 levels | 6μs | 5μs | `{k: {k: int}}` |
-| Mixed Array+Map 3 levels | 8μs | 8μs | `[[{k: int}]]` |
+| Simple Array [10 ints] | 4uS | 3uS | `[1,2,3,4,5,6,7,8,9,10]` |
+| 2D Array [[5x5 ints]] | 11uS | 10uS | Nested array construction |
+| 3D Array [[[2x2x2 ints]]] | 6uS | 5uS | Deep nesting |
+| Homogeneous Map {5 keys} | 4uS | 4uS | `{"a":1, "b":2, ...}` |
+| Heterogeneous Map {5 mixed} | - | 4uS | Mixed value types |
+| Nested Map 2 levels | 6uS | 5uS | `{k: {k: int}}` |
+| Mixed Array+Map 3 levels | 8uS | 8uS | `[[{k: int}]]` |
 
 **Note:** `var` provides slight performance advantage for complex literals due to deferred type inference.
 
@@ -348,62 +348,62 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
 
 | Benchmark | JaiScript | ChaiScript | JaiScript Speedup |
 |-----------|-----------|------------|-------------------|
-| **Factorial(10)** | 6μs | 1308μs | **218x faster** |
-| **Fibonacci(6)** | 12μs | 3142μs | **262x faster** |
-| **Recurse 10 Locals (depth=10)** | 21μs | 1417μs | **67x faster** |
-| **BST (15 nodes)** | 489μs | 52,698μs | **108x faster** |
-| **Function Calls** | 2μs | 164μs | **82x faster** |
-| **Method Invocation** | 4μs | 137μs | **34x faster** |
-| **Binary Search** | 9μs | 272μs | **30x faster** |
-| **Range-For (100 elem)** | 19μs | 153μs | **8x faster** |
-| **Class Creation** | 4μs | 16μs | **4x faster** |
-| **Bubble Sort (10 elem)** | 64μs | 203μs | **3.2x faster** |
-| **String Copy (5 copies)** | 5μs | 14μs | **2.8x faster** |
-| **Variable Operations** | 2μs | 5μs | **2.5x faster** |
-| **Array Push/Pop** | 7μs | 17μs | **2.4x faster** |
-| **String Concat (20 iter)** | 8μs | 19μs | **2.4x faster** |
-| **String Methods** | 6μs | 14μs | **2.3x faster** |
-| **Map Insert/Lookup** | 5μs | 11μs | **2.2x faster** |
-| **Variable Lookup Heavy** | 5μs | 10μs | **2x faster** |
-| **Complex Expression** | 2μs | 4μs | **2x faster** |
-| **C++ Bound BST** | 44μs | 72μs | **1.6x faster** |
-| **For Loop (100 iter)** | 8μs | 12μs | **1.5x faster** |
-| **Integer Addition** | <1μs | 1μs | **>1x faster** |
-| **Float Multiplication** | 1μs | 1μs | **Equal** |
+| **Factorial(10)** | 6uS | 1308uS | **218x faster** |
+| **Fibonacci(6)** | 12uS | 3142uS | **262x faster** |
+| **Recurse 10 Locals (depth=10)** | 21uS | 1417uS | **67x faster** |
+| **BST (15 nodes)** | 489uS | 52,698uS | **108x faster** |
+| **Function Calls** | 2uS | 164uS | **82x faster** |
+| **Method Invocation** | 4uS | 137uS | **34x faster** |
+| **Binary Search** | 9uS | 272uS | **30x faster** |
+| **Range-For (100 elem)** | 19uS | 153uS | **8x faster** |
+| **Class Creation** | 4uS | 16uS | **4x faster** |
+| **Bubble Sort (10 elem)** | 64uS | 203uS | **3.2x faster** |
+| **String Copy (5 copies)** | 5uS | 14uS | **2.8x faster** |
+| **Variable Operations** | 2uS | 5uS | **2.5x faster** |
+| **Array Push/Pop** | 7uS | 17uS | **2.4x faster** |
+| **String Concat (20 iter)** | 8uS | 19uS | **2.4x faster** |
+| **String Methods** | 6uS | 14uS | **2.3x faster** |
+| **Map Insert/Lookup** | 5uS | 11uS | **2.2x faster** |
+| **Variable Lookup Heavy** | 5uS | 10uS | **2x faster** |
+| **Complex Expression** | 2uS | 4uS | **2x faster** |
+| **C++ Bound BST** | 44uS | 72uS | **1.6x faster** |
+| **For Loop (100 iter)** | 8uS | 12uS | **1.5x faster** |
+| **Integer Addition** | <1uS | 1uS | **>1x faster** |
+| **Float Multiplication** | 1uS | 1uS | **Equal** |
 
 ### Loop Performance Deep Dive
 
 | Loop Pattern | JaiScript | ChaiScript | Notes |
 |--------------|-----------|------------|-------|
-| For Loop (literal condition) | 8μs | 12μs | **JaiScript 1.5x faster** |
-| For Loop (expression condition) | 9μs | - | Dynamic end: `i < n` |
-| Range-For (copy, 100 elem) | 19μs | 153μs | **JaiScript 8x faster** |
-| Range-For (reference, 100 elem) | 24μs | - | `for(auto& x : arr)` |
-| Range-For (copy, 10 elem) | 3μs | - | Small array optimization |
-| Range-For (reference, 10 elem) | 4μs | - | Small array reference |
-| Hot Loop (10x100 nested) | 46μs | - | Nested iteration scaling |
-| Hot Loop (1000 iter, auto) | 43μs | - | Declaration type: auto |
-| Hot Loop (1000 iter, int) | 43μs | - | Declaration type: int |
-| Hot Loop (1000 iter, var) | 42μs | - | Declaration type: var |
+| For Loop (literal condition) | 8uS | 12uS | **JaiScript 1.5x faster** |
+| For Loop (expression condition) | 9uS | - | Dynamic end: `i < n` |
+| Range-For (copy, 100 elem) | 19uS | 153uS | **JaiScript 8x faster** |
+| Range-For (reference, 100 elem) | 24uS | - | `for(auto& x : arr)` |
+| Range-For (copy, 10 elem) | 3uS | - | Small array optimization |
+| Range-For (reference, 10 elem) | 4uS | - | Small array reference |
+| Hot Loop (10x100 nested) | 46uS | - | Nested iteration scaling |
+| Hot Loop (1000 iter, auto) | 43uS | - | Declaration type: auto |
+| Hot Loop (1000 iter, int) | 43uS | - | Declaration type: int |
+| Hot Loop (1000 iter, var) | 42uS | - | Declaration type: var |
 
 **Loop Optimization Notes:**
-- **JaiScript now beats ChaiScript on for loops** (8μs vs 12μs = 1.5x faster)
-- Literal condition fast path saves ~11% (8μs vs 9μs)
+- **JaiScript now beats ChaiScript on for loops** (8uS vs 12uS = 1.5x faster)
+- Literal condition fast path saves ~11% (8uS vs 9uS)
 - Range-for with copy is faster than reference (no reference wrapper overhead)
 - JaiScript range-for is **8x faster** than ChaiScript's equivalent
-- All declaration types (auto/int/var) use unified fast path with equal performance (~42-43μs)
+- All declaration types (auto/int/var) use unified fast path with equal performance (~42-43uS)
 
 ### Value Type Comparison (script_value vs BoxedValue)
 
 | Operation | JaiScript | ChaiScript | Notes |
 |-----------|-----------|------------|-------|
-| Integer Construction | <1μs | 1μs | JaiScript faster |
-| String Construction | <1μs | 1μs | JaiScript faster |
-| Boolean Construction | <1μs | 1μs | JaiScript faster |
-| Float Construction | <1μs | 1μs | JaiScript faster |
-| Type Checking | 1μs | 3μs | **JaiScript 3x faster** |
-| Array Construction | 2μs | 5μs | **JaiScript 2.5x faster** |
-| Mixed Type Operations | 3μs | 6μs | **JaiScript 2x faster** |
+| Integer Construction | <1uS | 1uS | JaiScript faster |
+| String Construction | <1uS | 1uS | JaiScript faster |
+| Boolean Construction | <1uS | 1uS | JaiScript faster |
+| Float Construction | <1uS | 1uS | JaiScript faster |
+| Type Checking | 1uS | 3uS | **JaiScript 3x faster** |
+| Array Construction | 2uS | 5uS | **JaiScript 2.5x faster** |
+| Mixed Type Operations | 3uS | 6uS | **JaiScript 2x faster** |
 
 ### Key Insights
 
@@ -411,23 +411,23 @@ Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular
    - ID-based lookups and optimized call stack give JaiScript **82-218x advantage** in function-heavy code
    - Recursive algorithms (factorial, fibonacci) show the biggest wins (~218x faster)
    - Method invocation is **34x faster** than ChaiScript
-   - Native script BST is **108x faster** (489μs vs 52.7ms)
-   - **For loops now faster**: JaiScript 8μs vs ChaiScript 12μs (1.5x faster)
+   - Native script BST is **108x faster** (489uS vs 52.7ms)
+   - **For loops now faster**: JaiScript 8uS vs ChaiScript 12uS (1.5x faster)
 
 2. **String Operations Now JaiScript's Strength**
-   - String copy is **2.8x faster** (5μs vs 14μs)
-   - String concat is **2.4x faster** (8μs vs 19μs)
+   - String copy is **2.8x faster** (5uS vs 14uS)
+   - String concat is **2.4x faster** (8uS vs 19uS)
    - Improved string interning provides consistent advantages
 
 3. **Language Features**
    - JaiScript supports proper `null` for object fields (tree structures work natively)
    - ChaiScript requires workarounds with `is_var_null()` for undefined checks
    - JaiScript's native class system handles complex data structures better
-   - C++ bound BST now **1.6x faster** than ChaiScript (44μs vs 72μs)
+   - C++ bound BST now **1.6x faster** than ChaiScript (44uS vs 72uS)
 
 4. **Real-World Implications**
    - **Game scripting**: JaiScript wins decisively across all workloads
-   - **Tight computation loops**: JaiScript now competitive (8μs vs 12μs for-loop)
+   - **Tight computation loops**: JaiScript now competitive (8uS vs 12uS for-loop)
    - **Complex data structures**: JaiScript's null support + performance is ideal
 
 *Benchmarks run on x64-Release build with MSVC 2022, /O2 /GL /LTCG optimizations (2025-12-26)*
@@ -442,24 +442,24 @@ Squirrel is a bytecode-compiled VM used in games like Left 4 Dead 2, Portal 2, a
 
 | Benchmark | JaiScript | Squirrel | Notes |
 |-----------|-----------|----------|-------|
-| **Integer Addition** | <1μs | 1μs | JaiScript faster |
-| **Float Multiplication** | 1μs | 1μs | Equal |
-| **Variable Operations** | 2μs | 2μs | Equal |
-| **Function Calls** | 2μs | 1μs | Squirrel 2x faster |
-| **Array Push/Pop** | 7μs | 3μs | Squirrel 2.3x faster |
-| **Map/Table Operations** | 5μs | 3μs | Squirrel 1.7x faster |
-| **Class Creation** | 4μs | 2μs | Squirrel 2x faster |
-| **Method Invocation** | 4μs | 2μs | Squirrel 2x faster |
-| **For Loop (100 iter)** | 8μs | 4μs | Squirrel 2x faster |
-| **Factorial(10)** | 6μs | 2μs | Squirrel 3x faster |
-| **Fibonacci(15)** | 878μs | 54μs | Squirrel 16x faster |
-| **Recurse 10 Locals (depth=15)** | 36μs | 3μs | Squirrel 12x faster |
-| **Foreach (10 elem)** | 4μs | 2μs | Squirrel 2x faster |
-| **String Concat** | 8μs | 3μs | Squirrel 2.7x faster |
-| **Null Check** | 3μs | 2μs | Squirrel 1.5x faster |
-| **Hot Loop (1000 iter)** | 42μs | 10μs | Squirrel 4x faster |
-| **BST (15 nodes)** | 406μs | 15μs | Squirrel 27x faster |
-| **C++ BST (15 nodes)** | 45μs | 11μs | Squirrel 4x faster |
+| **Integer Addition** | <1uS | 1uS | JaiScript faster |
+| **Float Multiplication** | 1uS | 1uS | Equal |
+| **Variable Operations** | 2uS | 2uS | Equal |
+| **Function Calls** | 2uS | 1uS | Squirrel 2x faster |
+| **Array Push/Pop** | 7uS | 3uS | Squirrel 2.3x faster |
+| **Map/Table Operations** | 5uS | 3uS | Squirrel 1.7x faster |
+| **Class Creation** | 4uS | 2uS | Squirrel 2x faster |
+| **Method Invocation** | 4uS | 2uS | Squirrel 2x faster |
+| **For Loop (100 iter)** | 8uS | 4uS | Squirrel 2x faster |
+| **Factorial(10)** | 6uS | 2uS | Squirrel 3x faster |
+| **Fibonacci(15)** | 878uS | 54uS | Squirrel 16x faster |
+| **Recurse 10 Locals (depth=15)** | 36uS | 3uS | Squirrel 12x faster |
+| **Foreach (10 elem)** | 4uS | 2uS | Squirrel 2x faster |
+| **String Concat** | 8uS | 3uS | Squirrel 2.7x faster |
+| **Null Check** | 3uS | 2uS | Squirrel 1.5x faster |
+| **Hot Loop (1000 iter)** | 42uS | 10uS | Squirrel 4x faster |
+| **BST (15 nodes)** | 406uS | 15uS | Squirrel 27x faster |
+| **C++ BST (15 nodes)** | 45uS | 11uS | Squirrel 4x faster |
 
 ### Analysis
 
@@ -468,7 +468,7 @@ Squirrel's bytecode VM provides consistent 2-4x performance advantage over JaiSc
 **Key Takeaways:**
 - Squirrel's bytecode compilation pays off for tight loops and recursion
 - JaiScript's slot-based locals approach Squirrel's efficiency (12x gap vs 16x on Fibonacci)
-- JaiScript remains competitive on simple operations (<1-2μs difference)
+- JaiScript remains competitive on simple operations (<1-2uS difference)
 - C++ binding reduces gap significantly: 4x (C++ BST) vs 27x (pure script BST)
 - For typical game scripting (event handlers, UI), the 2-4x difference is negligible
 
@@ -479,14 +479,14 @@ Squirrel's bytecode VM provides consistent 2-4x performance advantage over JaiSc
 ### Performance Profile
 
 **Excellent Performance:**
-- ✅ **Function/Method Calls**: 2-4μs - ID-based lookups + string interning eliminate overhead
-- ✅ **Recursion**: 6-14μs - Efficient stack frame management + cached symbol IDs + unchecked accessors
-- ✅ **Algorithms**: Fast execution for search (9μs), sort (64μs), and computational tasks
-- ✅ **Class Operations**: 4μs instantiation - ID-based field/method access
+- ✅ **Function/Method Calls**: 2-4uS - ID-based lookups + string interning eliminate overhead
+- ✅ **Recursion**: 6-14uS - Efficient stack frame management + cached symbol IDs + unchecked accessors
+- ✅ **Algorithms**: Fast execution for search (9uS), sort (64uS), and computational tasks
+- ✅ **Class Operations**: 4uS instantiation - ID-based field/method access
 - ✅ **For Loops**: ~80ns per iteration - **now faster than ChaiScript**
-- ✅ **Hot Loops**: 44μs for 1000 iterations (~44ns per iteration)
-- ✅ **String Operations**: 5-8μs - 2-3x faster than ChaiScript
-- ✅ **Container Operations**: 5-7μs - 2x faster than ChaiScript
+- ✅ **Hot Loops**: 44uS for 1000 iterations (~44ns per iteration)
+- ✅ **String Operations**: 5-8uS - 2-3x faster than ChaiScript
+- ✅ **Container Operations**: 5-7uS - 2x faster than ChaiScript
 
 **Recommendations:**
 - Use JaiScript for all game scripting workloads - it now beats ChaiScript everywhere
@@ -527,7 +527,7 @@ for (init; ; update) {
 - Truthiness conversion on condition
 - Switch-based dispatch for AST traversal (~2-4% faster than virtual calls)
 
-**Result**: 8μs for 100 iterations = ~80ns per iteration. **JaiScript now beats ChaiScript** on for-loops.
+**Result**: 8uS for 100 iterations = ~80ns per iteration. **JaiScript now beats ChaiScript** on for-loops.
 
 ## Why JaiScript is Fast
 
@@ -590,7 +590,7 @@ This enables `/Zi` debug info with optimizations for tools like Visual Studio Pr
 ## Performance Tips
 
 ### For Library Users:
-1. **Reuse engine instances** - Engine creation is ~42μs (stdlib registration adds ~133μs)
+1. **Reuse engine instances** - Engine creation is ~42uS (stdlib registration adds ~133uS)
 2. **Pre-register types** - C++ class registration is one-time cost
 3. **Use typed parameters** - Avoid runtime type conversions
 4. **Batch script execution** - Parse once, execute many times
@@ -607,7 +607,7 @@ This enables `/Zi` debug info with optimizations for tools like Visual Studio Pr
 
 Potential improvements under consideration:
 - [ ] JIT compilation for hot loops
-- [x] Constant folding in parser (implemented - 1μs vs ChaiScript's 3μs)
+- [x] Constant folding in parser (implemented - 1uS vs ChaiScript's 3uS)
 - [ ] Dead code elimination
 - [ ] Type inference for faster dispatch
 - [ ] SIMD operations for arrays
@@ -619,18 +619,18 @@ Track performance improvements over time (git-verified):
 
 | Date       | Commit   | For Loop (100) | Hot Loop (1000) | vs ChaiScript | Notes                           |
 |------------|----------|----------------|-----------------|---------------|---------------------------------|
-| 2025-12-28 | HEAD     | 8μs            | 42μs            | **1.5x faster** | Slot-based local variables (Fib: 1051→878μs) |
-| 2025-12-26 | cfc7720c | 8μs            | 44μs            | **1.5x faster** | String interning improvements |
-| 2025-12-24 | 13d54d35 | 15μs           | 49μs            | 1.25x slower  | strong_ptr + shared string storage |
-| 2025-12-18 | 9878fe2d | 17μs           | 76μs            | 1.4x slower   | + dynamic_cast removal (90 calls) + throw cleanup |
-| 2025-12-15 | 9310a48f | 28μs           | 197μs           | 2.3x slower   | Switch-based AST dispatch |
-| 2025-12-04 | bb2b900a | 42μs           | ~400μs          | 3.5x slower   | "only 2x loop perf of ChaiScript" |
-| 2025-11-07 | bf50a1a6 | 67-79μs        | 715μs           | ~6x slower    | Aggressive string interning |
-| 2025-11-04 | 47b8a6aa | 101μs          | 1136μs          | 8.4x slower   | Initial PERFORMANCE.md |
+| 2025-12-28 | HEAD     | 8uS            | 42uS            | **1.5x faster** | Slot-based local variables (Fib: 1051→878uS) |
+| 2025-12-26 | cfc7720c | 8uS            | 44uS            | **1.5x faster** | String interning improvements |
+| 2025-12-24 | 13d54d35 | 15uS           | 49uS            | 1.25x slower  | strong_ptr + shared string storage |
+| 2025-12-18 | 9878fe2d | 17uS           | 76uS            | 1.4x slower   | + dynamic_cast removal (90 calls) + throw cleanup |
+| 2025-12-15 | 9310a48f | 28uS           | 197uS           | 2.3x slower   | Switch-based AST dispatch |
+| 2025-12-04 | bb2b900a | 42uS           | ~400uS          | 3.5x slower   | "only 2x loop perf of ChaiScript" |
+| 2025-11-07 | bf50a1a6 | 67-79uS        | 715uS           | ~6x slower    | Aggressive string interning |
+| 2025-11-04 | 47b8a6aa | 101uS          | 1136uS          | 8.4x slower   | Initial PERFORMANCE.md |
 
 **Progress: 8.4x slower → 1.5x FASTER = JaiScript now wins on loops**
 
-ChaiScript For Loop baseline: 12μs
+ChaiScript For Loop baseline: 12uS
 
 ---
 

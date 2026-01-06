@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <sstream>
@@ -118,7 +118,7 @@ public:
             stdlib::register_all(engine);
             
             // Register test_point class
-            make_class_builder<test_point>(engine, "TestPoint")
+            make_dynamic_binder<test_point>(engine, "TestPoint")
                 .constructor<>()
                 .constructor<double, double>()
                 .property("x", &test_point::x)
@@ -225,7 +225,7 @@ public:
             stdlib::register_all(engine);
             
             // Register test_node class with shared_ptr/weak_ptr support
-            make_class_builder<test_node>(engine, "TestNode")
+            make_dynamic_binder<test_node>(engine, "TestNode")
                 .constructor<const std::string&>()
                 .method("get_name", &test_node::get_name)
                 .method("set_name", &test_node::set_name)

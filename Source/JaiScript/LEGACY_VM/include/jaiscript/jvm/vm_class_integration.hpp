@@ -50,31 +50,31 @@ private:
 
 // VM-optimized class builder for maximum performance
 template<typename T>
-class vm_optimized_class_builder : public enhanced_class_builder<T> {
+class vm_optimized_dynamic_binder : public enhanced_dynamic_binder<T> {
 public:
-    using enhanced_class_builder<T>::enhanced_class_builder;
+    using enhanced_dynamic_binder<T>::enhanced_dynamic_binder;
     
     // Mark methods for aggressive inlining
-    vm_optimized_class_builder& inline_method(const std::string& name) {
+    vm_optimized_dynamic_binder& inline_method(const std::string& name) {
         inline_hints_.insert(name);
         return *this;
     }
     
     // Mark methods as non-virtual (final) for devirtualization
-    vm_optimized_class_builder& final_method(const std::string& name) {
+    vm_optimized_dynamic_binder& final_method(const std::string& name) {
         final_methods_.insert(name);
         return *this;
     }
     
     // Enable field access optimization
-    vm_optimized_class_builder& optimize_field_access() {
+    vm_optimized_dynamic_binder& optimize_field_access() {
         optimize_fields_ = true;
         return *this;
     }
     
     // Build with VM optimizations
     void build() {
-        enhanced_class_builder<T>::build();
+        enhanced_dynamic_binder<T>::build();
         apply_vm_optimizations();
     }
     

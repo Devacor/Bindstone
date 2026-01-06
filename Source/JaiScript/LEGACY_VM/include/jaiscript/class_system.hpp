@@ -108,7 +108,7 @@ inline std::unique_ptr<class_system_integration> enable_class_system(engine& js)
  *     .allow_script_inheritance();
  */
 #define JAISCRIPT_REGISTER_CLASS(ClassName) \
-    jaiscript::enhanced_class_builder<ClassName>(js, #ClassName)
+    jaiscript::enhanced_dynamic_binder<ClassName>(js, #ClassName)
 
 /**
  * Convenience macros for common class operations

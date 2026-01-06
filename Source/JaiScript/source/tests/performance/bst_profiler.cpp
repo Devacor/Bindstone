@@ -66,7 +66,7 @@ int main(int argc, char* argv[]) {
     auto eng = engine::make();
 
     // Bind C++ TreeNode class
-    class_builder<CppTreeNode>(*eng, "CppTreeNode")
+    dynamic_binder<CppTreeNode>(*eng, "CppTreeNode")
         .constructor<int>()
         .property("value", &CppTreeNode::value)
         .property("left", &CppTreeNode::left, jai::skip_type_check)
@@ -127,8 +127,8 @@ int main(int argc, char* argv[]) {
 
     double avg_us = static_cast<double>(duration.count()) / iterations;
     std::cout << "\n=== Results ===\n";
-    std::cout << "Total time: " << duration.count() << " μs\n";
-    std::cout << "Average per iteration: " << avg_us << " μs\n";
+    std::cout << "Total time: " << duration.count() << " uS\n";
+    std::cout << "Average per iteration: " << avg_us << " uS\n";
     std::cout << "Iterations per second: " << (1000000.0 / avg_us) << "\n";
 
     return 0;

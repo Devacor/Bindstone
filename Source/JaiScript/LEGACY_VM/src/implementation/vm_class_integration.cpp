@@ -417,7 +417,7 @@ void optimize_for_pattern(
 // Template implementations
 
 template<typename T>
-void vm_optimized_class_builder<T>::apply_vm_optimizations() {
+void vm_optimized_dynamic_binder<T>::apply_vm_optimizations() {
     auto class_def = this->class_def_;
     
     // Apply inline hints

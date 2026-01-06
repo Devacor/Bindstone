@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <vector>
 #include <map>
 #include <memory>
@@ -191,7 +191,7 @@ public:
             auto engine = engine::make();
             
             // Register TestObject class
-            class_builder<TestObject>(*engine, "TestObject")
+            dynamic_binder<TestObject>(*engine, "TestObject")
                 .constructor<>()
                 .constructor<int, const std::string&>()
                 .method("getValue", &TestObject::get_value)

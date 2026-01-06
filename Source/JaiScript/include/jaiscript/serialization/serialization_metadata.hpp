@@ -38,6 +38,13 @@ struct property_metadata {
         throttle_500ms = 1 << 5
     };
     uint32_t network_flags = network_flags::none;
+
+    // Direct serialization lambdas for runtime fallback (dynamic_binder-registered types)
+    // These work with raw void* pointers to avoid needing script_value wrappers
+    // save: (const void* cpp_object, archive_writer&) -> saves the property value
+    // load: (void* cpp_object, archive_reader&) -> loads the property value
+    std::function<void(const void*, archive_writer&)> save;
+    std::function<void(void*, archive_reader&)> load;
 };
 
 // Class serialization metadata

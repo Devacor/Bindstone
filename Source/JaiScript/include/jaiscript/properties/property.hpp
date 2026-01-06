@@ -1,11 +1,16 @@
 #pragma once
 
+#ifndef __JAISCRIPT_PROPERTY_HPP__
+#define __JAISCRIPT_PROPERTY_HPP__
+
 #include <string>
 #include <functional>
 #include <memory>
 #include <compare>
 #include <concepts>
 #include <type_traits>
+
+#include "../core/fixed_string.hpp"
 
 // Forward declarations
 namespace jai {
@@ -15,9 +20,6 @@ namespace jai {
 	template<typename T> class property;
 	template<typename T, auto Name> class named_property;
 	template<typename T> class deleted_property;
-
-	// Forward declare fixed_string for NTTP
-	template<size_t N> struct fixed_string;
 
 	namespace serialization {
 		class archive_writer;
@@ -43,32 +45,6 @@ namespace jai {
 	concept boolean_testable = requires(const T & t) {
 		{ static_cast<bool>(t) };  // Can be explicitly converted to bool
 	};
-
-	// ============================================================================
-	// C++20 fixed_string for Non-Type Template Parameters (NTTP)
-	// ============================================================================
-	// Allows compile-time string literals as template parameters:
-	//   jai::property<int, "health"> health{property_mgr, 100};
-	//
-	template<size_t N>
-	struct fixed_string {
-		char data[N]{};
-
-		constexpr fixed_string(const char (&str)[N]) {
-			for (size_t i = 0; i < N; ++i) data[i] = str[i];
-		}
-
-		constexpr operator std::string_view() const { return {data, N - 1}; }
-		constexpr const char* c_str() const { return data; }
-		constexpr size_t size() const { return N - 1; }
-
-		// Comparison for use in template parameters
-		constexpr bool operator==(const fixed_string&) const = default;
-	};
-
-	// Deduction guide
-	template<size_t N>
-	fixed_string(const char (&)[N]) -> fixed_string<N>;
 
 	// ============================================================================
 	// Property base class
@@ -617,3 +593,4 @@ namespace jai {
 	};
 
 } // namespace jai
+#endif

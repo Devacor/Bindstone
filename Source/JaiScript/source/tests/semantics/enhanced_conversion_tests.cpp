@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/conversion_registry.hpp>
 #include <jaiscript/core/engine_impl.hpp>
 #include <jaiscript/core/bound_array.hpp>
@@ -158,8 +158,8 @@ public:
             // Register standard conversions first
             engine->add_standard_conversions();
             
-            // Use class_builder to register Point and all its conversions
-            class_builder<Point>(*engine, "Point")
+            // Use dynamic_binder to register Point and all its conversions
+            dynamic_binder<Point>(*engine, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)

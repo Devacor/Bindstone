@@ -11,7 +11,7 @@ namespace jai {
     class wrapped_function;
     class class_definition;
     class class_instance;
-    template<typename T> class class_builder;
+    template<typename T> class dynamic_binder;
     class variable_scope;
     class parse_error;
     class runtime_error;

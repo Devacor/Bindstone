@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <vector>
 #include <map>
 #include <chrono>
@@ -37,7 +37,7 @@ public:
             check_eq(result.as<int64_t>(), 49995000LL);
             
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            std::cout << "    Large vector (10k elements) conversion time: " << duration << "μs" << std::endl;
+            std::cout << "    Large vector (10k elements) conversion time: " << duration << "uS" << std::endl;
         });
         
         test("vector_int_basic", [this]() {
@@ -263,7 +263,7 @@ public:
             check_eq(result.as<int64_t>(), 49995000LL);
             
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            std::cout << "    Large vector (10k elements) conversion time: " << duration << "μs" << std::endl;
+            std::cout << "    Large vector (10k elements) conversion time: " << duration << "uS" << std::endl;
         });
         
         test("type_mismatch_errors", [this]() {
@@ -315,7 +315,7 @@ public:
             struct Point { double x, y; };
             
             // Register Point class
-            class_builder<Point>(*engine, "Point")
+            dynamic_binder<Point>(*engine, "Point")
                 .constructor<>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -384,11 +384,11 @@ public:
                 auto typed_time = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2).count();
                 
                 std::cout << "    Performance comparison (100 iterations, 1000 elements):" << std::endl;
-                std::cout << "      Variadic version: " << variadic_time << "μs" << std::endl;
-                std::cout << "      Typed version: " << typed_time << "μs" << std::endl;
+                std::cout << "      Variadic version: " << variadic_time << "uS" << std::endl;
+                std::cout << "      Typed version: " << typed_time << "uS" << std::endl;
                 std::cout << "      Speedup: " << (double)variadic_time / typed_time << "x" << std::endl;
             } catch (...) {
-                std::cout << "    Typed version not working yet, variadic took: " << variadic_time << "μs" << std::endl;
+                std::cout << "    Typed version not working yet, variadic took: " << variadic_time << "uS" << std::endl;
             }
         });
     }

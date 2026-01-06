@@ -2,7 +2,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
 #include <memory>
@@ -92,9 +92,9 @@ public:
     bool operator>=(const Counter& other) const { return value >= other.value; }
 };
 
-class class_builder_tests : public suite {
+class dynamic_binder_tests : public suite {
 public:
-    class_builder_tests() : suite("Class Builder") {}
+    dynamic_binder_tests() : suite("Class Builder") {}
     
     void pre_test() override {
         // Reset static state before each test
@@ -105,7 +105,7 @@ public:
         test("basic_class_registration", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<>()
                 .constructor<double, double>()
                 .method("length", &Point::length)
@@ -120,7 +120,7 @@ public:
         test("constructors", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<>()
                 .constructor<double, double>()
                 .property("x", &Point::x)
@@ -141,7 +141,7 @@ public:
         test("methods", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .method("move_by", &Point::move_by)
                 .property("x", &Point::x)
@@ -157,7 +157,7 @@ public:
         test("properties", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -173,7 +173,7 @@ public:
         test("operator_overloading", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .method("+", &Point::operator+)
                 .property("x", &Point::x)
@@ -190,7 +190,7 @@ public:
         test("static_methods", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -207,7 +207,7 @@ public:
         test("static_properties", [this]() {
             auto eng = engine::make();
 
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<>()
                 .build();
 
@@ -225,7 +225,7 @@ public:
         test("method_chaining", [this]() {
             auto eng = engine::make();
             
-            class_builder<Counter>(*eng, "Counter")
+            dynamic_binder<Counter>(*eng, "Counter")
                 .constructor<>()
                 .constructor<int>()
                 .method("increment", &Counter::increment)
@@ -241,7 +241,7 @@ public:
         test("lambda_methods", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -270,7 +270,7 @@ public:
         test("custom_getters_setters", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -295,7 +295,7 @@ public:
         test("shared_ptr_support", [this]() {
             auto eng = engine::make();
             
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -318,7 +318,7 @@ public:
         test("const_correctness", [this]() {
             auto eng = engine::make();
             
-            class_builder<Counter>(*eng, "Counter")
+            dynamic_binder<Counter>(*eng, "Counter")
                 .constructor<int>()
                 .method("get", &Counter::get)  // const method
                 .method("reset", &Counter::reset)  // non-const method
@@ -341,7 +341,7 @@ public:
                 int add(int a, int b, int c) { return a + b + c; }
             };
             
-            class_builder<Calculator>(*eng, "Calculator")
+            dynamic_binder<Calculator>(*eng, "Calculator")
                 .constructor<>()
                 .method("add", 
                     static_cast<int(Calculator::*)(int)>(&Calculator::add))
@@ -360,7 +360,7 @@ public:
         test("equality_operator", [this]() {
             auto eng = engine::make();
 
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -395,7 +395,7 @@ public:
 
             // Test registering operator== via lambda (for cases where the class
             // doesn't have a C++ operator==, or for custom comparison logic)
-            class_builder<Counter>(*eng, "Counter")
+            dynamic_binder<Counter>(*eng, "Counter")
                 .constructor<int>()
                 .method("get", &Counter::get)
                 .method("==", [](const Counter& self, const Counter& other) {
@@ -416,7 +416,7 @@ public:
             auto eng = engine::make();
 
             // Register Point with all comparison operators
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -456,7 +456,7 @@ public:
             auto eng = engine::make();
 
             // Register Counter with comparison operators via lambda
-            class_builder<Counter>(*eng, "Counter")
+            dynamic_binder<Counter>(*eng, "Counter")
                 .constructor<int>()
                 .method("get", &Counter::get)
                 .method("<", [](const Counter& self, const Counter& other) {
@@ -479,7 +479,7 @@ public:
             auto eng = engine::make();
 
             // Register Point with arithmetic operators
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -504,7 +504,7 @@ public:
             auto eng = engine::make();
 
             // Register Counter with all arithmetic operators
-            class_builder<Counter>(*eng, "Counter")
+            dynamic_binder<Counter>(*eng, "Counter")
                 .constructor<int>()
                 .method("get", &Counter::get)
                 .method("+", &Counter::operator+)
@@ -537,7 +537,7 @@ public:
             auto eng = engine::make();
 
             // Register Point with arithmetic operators via lambda
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -566,7 +566,7 @@ public:
             auto eng = engine::make();
 
             // Register Point with arithmetic operators
-            class_builder<Point>(*eng, "Point")
+            dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -655,18 +655,18 @@ public:
             auto eng = engine::make();
 
             // Register in dependency order: C first, then B, then A
-            class_builder<TestC>(*eng, "TestC")
+            dynamic_binder<TestC>(*eng, "TestC")
                 .constructor<>()
                 .method("c_method", &TestC::c_method)
                 .build();
 
-            class_builder<TestB>(*eng, "TestB")
+            dynamic_binder<TestB>(*eng, "TestB")
                 .auto_bind()  // Should auto-register TestC as base
                 .constructor<>()
                 .method("b_method", &TestB::b_method)
                 .build();
 
-            class_builder<TestA>(*eng, "TestA")
+            dynamic_binder<TestA>(*eng, "TestA")
                 .auto_bind()  // Should auto-register TestB as base
                 .constructor<>()
                 .method("a_method", &TestA::a_method)
@@ -703,18 +703,18 @@ public:
             auto eng = engine::make();
 
             // Register base classes first
-            class_builder<Left>(*eng, "Left")
+            dynamic_binder<Left>(*eng, "Left")
                 .constructor<>()
                 .method("left_method", &Left::left_method)
                 .build();
 
-            class_builder<Right>(*eng, "Right")
+            dynamic_binder<Right>(*eng, "Right")
                 .constructor<>()
                 .method("right_method", &Right::right_method)
                 .build();
 
             // Register Multi with auto_bind - should auto-register both Left and Right as bases
-            class_builder<Multi>(*eng, "Multi")
+            dynamic_binder<Multi>(*eng, "Multi")
                 .auto_bind()  // Should register both Left AND Right as bases
                 .constructor<>()
                 .method("multi_method", &Multi::multi_method)
@@ -765,29 +765,29 @@ public:
             auto eng = engine::make();
 
             // Register in dependency order (grandparents first)
-            class_builder<GrandparentA>(*eng, "GrandparentA")
+            dynamic_binder<GrandparentA>(*eng, "GrandparentA")
                 .constructor<>()
                 .method("gpa_method", &GrandparentA::gpa_method)
                 .build();
 
-            class_builder<GrandparentB>(*eng, "GrandparentB")
+            dynamic_binder<GrandparentB>(*eng, "GrandparentB")
                 .constructor<>()
                 .method("gpb_method", &GrandparentB::gpb_method)
                 .build();
 
-            class_builder<ParentA>(*eng, "ParentA")
+            dynamic_binder<ParentA>(*eng, "ParentA")
                 .auto_bind()
                 .constructor<>()
                 .method("pa_method", &ParentA::pa_method)
                 .build();
 
-            class_builder<ParentB>(*eng, "ParentB")
+            dynamic_binder<ParentB>(*eng, "ParentB")
                 .auto_bind()
                 .constructor<>()
                 .method("pb_method", &ParentB::pb_method)
                 .build();
 
-            class_builder<DeepChild>(*eng, "DeepChild")
+            dynamic_binder<DeepChild>(*eng, "DeepChild")
                 .auto_bind()
                 .constructor<>()
                 .method("child_method", &DeepChild::child_method)
@@ -815,7 +815,7 @@ public:
 
             auto eng = engine::make();
 
-            class_builder<EqualityTest>(*eng, "EqualityTest")
+            dynamic_binder<EqualityTest>(*eng, "EqualityTest")
                 .auto_bind()  // Should auto-detect operator== and register == and !=
                 .constructor<int>()
                 .property("value", &EqualityTest::value);
@@ -837,7 +837,7 @@ public:
             // Test that JAI_PROPERTY macros work with auto_bind for reading properties
             auto eng = engine::make();
 
-            class_builder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
+            dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
                 .auto_bind()  // Should auto-detect JAI_PROPERTY macros and bind them
                 .constructor<>()
                 .method("get_health_cpp", &PropertyOwnerTest::get_health_cpp)
@@ -856,7 +856,7 @@ public:
             // This is the critical test: script modifications must update the C++ property
             auto eng = engine::make();
 
-            class_builder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
+            dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
                 .auto_bind()
                 .constructor<>()
                 .method("get_health_cpp", &PropertyOwnerTest::get_health_cpp)
@@ -892,7 +892,7 @@ public:
             // Test that compound assignment operators work with JAI_PROPERTY
             auto eng = engine::make();
 
-            class_builder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
+            dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
                 .auto_bind()
                 .constructor<>()
                 .build();
@@ -921,7 +921,7 @@ public:
             // Test that C++ modifications to properties are visible in script
             auto eng = engine::make();
 
-            class_builder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
+            dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
                 .auto_bind()
                 .constructor<>()
                 .method("set_health_cpp", &PropertyOwnerTest::set_health_cpp)
@@ -946,7 +946,7 @@ public:
             // Test that JAI_OBSERVABLE_PROPERTY macros work with auto_bind
             auto eng = engine::make();
 
-            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+            dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
                 .constructor<>()
                 .method("set_score_cpp", &ObservableOwnerTest::set_score_cpp)
@@ -971,7 +971,7 @@ public:
             // Test that script can register callbacks for observable property changes
             auto eng = engine::make();
 
-            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+            dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
                 .constructor<>()
                 .method("set_score_cpp", &ObservableOwnerTest::set_score_cpp)
@@ -1018,7 +1018,7 @@ public:
             // Test that multiple script callbacks can be registered
             auto eng = engine::make();
 
-            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+            dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
                 .constructor<>()
                 .build();
@@ -1044,7 +1044,7 @@ public:
             // This uses transparent wrappers to allow accessing on_change on the property itself
             auto eng = engine::make();
 
-            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+            dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
                 .constructor<>()
                 .build();
@@ -1093,7 +1093,7 @@ public:
             // Test that observable properties work in comparisons (transparent wrapper)
             auto eng = engine::make();
 
-            class_builder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+            dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
                 .constructor<>()
                 .build();
@@ -1117,4 +1117,4 @@ public:
 } // namespace jai::foundry::tests
 
 // Auto-register with the test framework
-FOUNDRY_REGISTER(jai::foundry::tests::class_builder_tests)
+FOUNDRY_REGISTER(jai::foundry::tests::dynamic_binder_tests)

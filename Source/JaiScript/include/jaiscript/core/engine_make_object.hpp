@@ -1,7 +1,7 @@
 #pragma once
 
 #include "value.hpp"
-#include "class_builder.hpp"
+#include "dynamic_binder.hpp"
 #include <typeindex>
 
 namespace jai {
@@ -19,7 +19,7 @@ script_value script_value::make_registered_object(engine* eng, Args&&... args) {
     
     if (!class_def) {
         throw runtime_error("Type '" + std::string(typeid(T).name()) + 
-                          "' is not registered. Use class_builder<T> to register it first.");
+                          "' is not registered. Use dynamic_binder<T> to register it first.");
     }
     
     // Get the registered class name

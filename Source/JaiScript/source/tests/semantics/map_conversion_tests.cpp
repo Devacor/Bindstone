@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <vector>
 #include <map>
 #include <unordered_map>
@@ -358,7 +358,7 @@ public:
             auto engine = engine::make();
             
             // Register Person class
-            class_builder<Person>(*engine, "Person")
+            dynamic_binder<Person>(*engine, "Person")
                 .constructor<>()
                 .constructor<const std::string&, int>()
                 .method("getName", &Person::get_name)

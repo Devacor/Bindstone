@@ -343,7 +343,7 @@ script_value script_value::clone() const {
         // No copy function registered - type is non-copyable
         throw runtime_error(
             "Cannot clone shared_ptr<" + obj_holder->type_name + ">: type is non-copyable. "
-            "Register a copy constructor with class_builder<" + obj_holder->type_name + ">::copy_constructor() "
+            "Register a copy constructor with dynamic_binder<" + obj_holder->type_name + ">::copy_constructor() "
             "to enable deep copying.");
     }
 
@@ -419,7 +419,7 @@ script_value script_value::clone() const {
                     // No copy function registered - throw error instead of silent aliasing
                     throw runtime_error(
                         "Cannot deep copy C++ object of type '" + obj_holder->type_name +
-                        "'. Register a copy constructor with class_builder<T>::copy_constructor() "
+                        "'. Register a copy constructor with dynamic_binder<T>::copy_constructor() "
                         "or use shared_ptr<" + obj_holder->type_name + "> for reference semantics.");
                 }
             }

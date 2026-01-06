@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/bound_array.hpp>
 #include <vector>
 #include <map>
@@ -47,7 +47,7 @@ public:
             auto engine = engine::make();
             
             // Register Widget class - this should automatically register vector<Widget>
-            class_builder<Widget>(*engine, "Widget")
+            dynamic_binder<Widget>(*engine, "Widget")
                 .constructor<>()
                 .constructor<const std::string&, int>()
                 .property("name", &Widget::name)
@@ -74,7 +74,7 @@ public:
             auto engine = engine::make();
             
             // Register Widget class
-            class_builder<Widget>(*engine, "Widget")
+            dynamic_binder<Widget>(*engine, "Widget")
                 .constructor<>()
                 .constructor<const std::string&, int>()
                 .property("name", &Widget::name)
@@ -102,7 +102,7 @@ public:
             auto engine = engine::make();
             
             // Register Widget class
-            class_builder<Widget>(*engine, "Widget")
+            dynamic_binder<Widget>(*engine, "Widget")
                 .constructor<>()
                 .constructor<const std::string&, int>()
                 .property("name", &Widget::name)
@@ -130,7 +130,7 @@ public:
             auto engine = engine::make();
             
             // Register Widget class
-            class_builder<Widget>(*engine, "Widget")
+            dynamic_binder<Widget>(*engine, "Widget")
                 .constructor<>()
                 .constructor<const std::string&, int>()
                 .property("name", &Widget::name)
@@ -172,7 +172,7 @@ public:
             };
             
             // Register NonDefaultWidget - should only register vector conversions, not map
-            class_builder<NonDefaultWidget>(*engine, "NonDefaultWidget")
+            dynamic_binder<NonDefaultWidget>(*engine, "NonDefaultWidget")
                 .constructor<const std::string&, int>()
                 .property("name", &NonDefaultWidget::name)
                 .property("value", &NonDefaultWidget::value)
@@ -196,7 +196,7 @@ public:
             auto engine = engine::make();
             
             // Register Widget class
-            class_builder<Widget>(*engine, "Widget")
+            dynamic_binder<Widget>(*engine, "Widget")
                 .constructor<>()
                 .constructor<const std::string&, int>()
                 .property("name", &Widget::name)
@@ -244,7 +244,7 @@ public:
             };
             
             // Register Calculator with methods
-            class_builder<Calculator>(*engine, "Calculator")
+            dynamic_binder<Calculator>(*engine, "Calculator")
                 .constructor<>()
                 .constructor<double>()
                 .method("add", &Calculator::add)
@@ -283,18 +283,18 @@ public:
             auto engine = engine::make();
 
             // Register base and derived classes (Animal, Dog, Cat defined at namespace scope)
-            class_builder<Animal>(*engine, "Animal")
+            dynamic_binder<Animal>(*engine, "Animal")
                 .property("name", &Animal::name)
                 .method("speak", &Animal::speak)
                 .build();
             
-            class_builder<Dog>(*engine, "Dog")
+            dynamic_binder<Dog>(*engine, "Dog")
                 .constructor<>()
                 .constructor<const std::string&>()
                 .base_class<Animal>()
                 .build();
             
-            class_builder<Cat>(*engine, "Cat")
+            dynamic_binder<Cat>(*engine, "Cat")
                 .constructor<>()
                 .constructor<const std::string&>()
                 .base_class<Animal>()
@@ -356,12 +356,12 @@ public:
             auto engine = engine::make();
 
             // Register base and derived classes
-            class_builder<Animal>(*engine, "Animal")
+            dynamic_binder<Animal>(*engine, "Animal")
                 .property("name", &Animal::name)
                 .method("speak", &Animal::speak)
                 .build();
 
-            class_builder<Dog>(*engine, "Dog")
+            dynamic_binder<Dog>(*engine, "Dog")
                 .constructor<>()
                 .constructor<const std::string&>()
                 .base_class<Animal>()

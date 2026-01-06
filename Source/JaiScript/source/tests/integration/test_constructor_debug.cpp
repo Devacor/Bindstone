@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <iostream>
 #include <cmath>
 
@@ -29,7 +29,7 @@ public:
             auto eng = engine::make();
             
             std::cout << "Registering TestPoint class...\n";
-            class_builder<TestPoint>(*eng, "TestPoint")
+            dynamic_binder<TestPoint>(*eng, "TestPoint")
                 .constructor<>()
                 .constructor<double, double>()
                 .method("length", &TestPoint::length)

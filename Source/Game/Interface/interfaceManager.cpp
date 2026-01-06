@@ -1,5 +1,34 @@
 #include "InterfaceManager.h"
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "Game/state.h"
+
+// JaiScript binding for Interface
+static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
+	[](jai::dynamic_binder<MV::Interface>& builder, const MV::Services&) {
+	builder.auto_bind();  // Calls Interface::on_bind for private member bindings
+
+	builder.method("show", &MV::Interface::show);
+	builder.method("hide", &MV::Interface::hide);
+	builder.method("visible", &MV::Interface::visible);
+	builder.method("id", &MV::Interface::id);
+	builder.method("root", &MV::Interface::root);
+	builder.method("focus", &MV::Interface::focus);
+	builder.method("removeFocus", &MV::Interface::removeFocus);
+});
+
+// JaiScript binding for InterfaceManager
+static jai::registrar<MV::InterfaceManager, MV::Services> _hookInterfaceManager("InterfaceManager",
+	[](jai::dynamic_binder<MV::InterfaceManager>& builder, const MV::Services&) {
+	builder.auto_bind();  // Calls InterfaceManager::jai_auto_bind for private member bindings
+
+	// Note: make() and page() return Interface& which is non-copyable (has reference member)
+	// value_converter fallback tries to copy, which fails. These need proper registration or
+	// should return shared_ptr instead.
+	builder.method("root", &MV::InterfaceManager::root);
+});
+
 namespace MV {
 
 	Interface::Interface(const std::string &a_pageId, InterfaceManager& a_manager) :
@@ -59,24 +88,27 @@ namespace MV {
 			manager.root()->add(node);
 			node->active(false);
 
-			manager.script().fileEval("InterfaceManager::initialize", "Interface/" + pageId + "/initialize.script", { { "self", chaiscript::Boxed_Value(this) } });
+			// TODO: Port script to JaiScript
+			// manager.script().eval_file("Interface/" + pageId + "/initialize.jai");
 			if (scriptInitialize) {
 				scriptInitialize(*this);
 			}
 		}
 	}
 
-	InterfaceManager::InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, MV::Script &a_script, std::string a_scriptName) :
+	InterfaceManager::InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, jai::engine& a_engine, std::string a_scriptName) :
 		ourMouse(a_mouse),
 		ourManagers(a_managers),
-		ourScript(a_script),
+		jaiEngine_(a_engine),
 		node(a_root->make(a_scriptName)->depth(1)) {
 	}
 
 	InterfaceManager& InterfaceManager::initialize() {
-		ourScript.fileEval("InterfaceManager::initialize", node->id(), { { "self", chaiscript::Boxed_Value(this) } });
+		// TODO: Port script to JaiScript and use jaiEngine_.eval_file()
+		// jaiEngine_.set_local("self", jai::script_value::from_ptr(this, &jaiEngine_));
+		// jaiEngine_.eval_file(node->id());
 		if (scriptInitialize) {
-			scriptInitialize(*this); 
+			scriptInitialize(*this);
 		}
 		return *this;
 	}
@@ -94,6 +126,20 @@ namespace MV {
 			activeTextPage = nullptr;
 			SDL_StopTextInput();
 		}
+	}
+
+	// jai_auto_bind implementations - called by dynamic_binder::auto_bind() to register private members
+	void Interface::jai_auto_bind(jai::dynamic_binder<Interface>& builder) {
+		// Note: manager() not bound - InterfaceManager contains non-copyable members (unique_ptr vector)
+		// and value_converter would try to copy it if not registered. Access via scripts not needed.
+		builder.property("initialize", &Interface::scriptInitialize);
+		builder.property("onShow", &Interface::scriptShow);
+		builder.property("onHide", &Interface::scriptHide);
+		builder.property("update", &Interface::scriptUpdate);
+	}
+
+	void InterfaceManager::jai_auto_bind(jai::dynamic_binder<InterfaceManager>& builder) {
+		builder.property("initialize", &InterfaceManager::scriptInitialize);
 	}
 
 }

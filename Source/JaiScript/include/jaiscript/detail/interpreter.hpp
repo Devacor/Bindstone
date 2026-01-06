@@ -514,9 +514,13 @@ namespace jai {
         string_symbolizer* get_string_symbolizer() const { return string_symbolizer_; }
         
         // Access to current argument metadata for reference parameter support
-        const std::vector<std::pair<uint64_t, std::shared_ptr<environment>>>& get_current_arg_metadata() const { 
-            return current_arg_metadata_; 
+        // Returns symbol_id and raw environment pointer (safe since metadata only lives during call)
+        const std::vector<std::pair<uint64_t, environment*>>& get_current_arg_metadata() const {
+            return current_arg_metadata_;
         }
+
+        // Get current environment as shared_ptr (needed for make_reference calls)
+        std::shared_ptr<environment> get_environment_shared() const { return environment_; }
         
         // Execute a method AST with a given environment
         checked_result<script_value> execute_method_ast(std::shared_ptr<function_decl> ast,
@@ -630,7 +634,8 @@ namespace jai {
         std::shared_ptr<environment> environment_;
 
         // Current argument metadata for reference parameter passing
-        std::vector<std::pair<uint64_t, std::shared_ptr<environment>>> current_arg_metadata_;
+        // Uses raw pointers - safe since metadata only lives during call scope
+        std::vector<std::pair<uint64_t, environment*>> current_arg_metadata_;
         
         // Optimized stack for expression evaluation results
         class script_valueStack {

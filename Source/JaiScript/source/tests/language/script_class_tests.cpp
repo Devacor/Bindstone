@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <cmath>
 
@@ -98,7 +98,7 @@ public:
                 double magnitude() const { return std::sqrt(x*x + y*y); }
             };
             
-            class_builder<Vector2D>(*js_engine, "Vector2D")
+            dynamic_binder<Vector2D>(*js_engine, "Vector2D")
                 .constructor<double, double>()
                 .property("x", &Vector2D::x)
                 .property("y", &Vector2D::y)
@@ -148,7 +148,7 @@ public:
                 int getHealth() const { return health; }
             };
             
-            class_builder<Creature>(*js_engine, "Creature")
+            dynamic_binder<Creature>(*js_engine, "Creature")
                 .constructor<std::string>()
                 .constructor<std::string, int>()
                 .property("name", &Creature::name)

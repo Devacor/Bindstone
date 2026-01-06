@@ -82,36 +82,56 @@ struct engine::implementation {
     };
     
     polymorphic_type_registry polymorphic_copiers;
-    
+
     // Structure to hold overloaded functions with type information
     struct OverloadSet {
+        // Marker for variadic functions that accept any number of arguments
+        static constexpr size_t VARIADIC_ARITY = SIZE_MAX;
+
         struct Overload {
             size_t argCount;
             script_value function;
-            std::vector<script_value_type> paramTypes; // Type signature for type-based matching
+            std::vector<param_type_info> paramTypes; // Extended type signature for type-based matching
             std::function<bool(const std::vector<script_value>&)> typeMatcher; // Custom type matcher
-            
-            Overload(size_t count, const script_value& func, const std::vector<script_value_type>& types = {})
+
+            Overload(size_t count, const script_value& func, const std::vector<param_type_info>& types = {})
                 : argCount(count), function(func), paramTypes(types) {}
+
+            bool is_variadic() const { return argCount == VARIADIC_ARITY; }
         };
         
         std::vector<Overload> overloads;
-        
-        // Reference to the conversion registry
+
+        // Reference to the conversion registry and class lookup
         std::shared_ptr<const conversions::conversion_registry> conversions;
-        
+        std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type = nullptr;
+
         OverloadSet() : conversions() {}
-        
-        void setConversionRegistry(std::shared_ptr<const conversions::conversion_registry> registry) {
+
+        void set_conversion_registry(std::shared_ptr<const conversions::conversion_registry> registry) {
             conversions = registry;
         }
-        
-        void addOverload(size_t argCount, const script_value& func, const std::vector<script_value_type>& paramTypes = {}) {
+
+        void set_class_lookup(std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* lookup) {
+            classes_by_type = lookup;
+        }
+
+        // Convert legacy script_value_type vector to param_type_info vector
+        void add_overload(size_t argCount, const script_value& func, const std::vector<script_value_type>& types = {}) {
+            std::vector<param_type_info> paramTypes;
+            paramTypes.reserve(types.size());
+            for (auto t : types) {
+                paramTypes.emplace_back(t);
+            }
+            add_overload_with_types(argCount, func, paramTypes);
+        }
+
+        void add_overload_with_types(size_t argCount, const script_value& func, const std::vector<param_type_info>& paramTypes) {
             // If we have type info, check for exact type match first
             if (!paramTypes.empty()) {
                 auto it = std::find_if(overloads.begin(), overloads.end(),
-                    [&](const Overload& o) { 
-                        return o.argCount == argCount && o.paramTypes == paramTypes; 
+                    [&](const Overload& o) {
+                        return o.argCount == argCount && o.paramTypes == paramTypes;
                     });
                 if (it != overloads.end()) {
                     it->function = func;
@@ -120,8 +140,8 @@ struct engine::implementation {
             } else {
                 // No type info - remove any existing overload with same arg count and no type info
                 auto it = std::find_if(overloads.begin(), overloads.end(),
-                    [argCount](const Overload& o) { 
-                        return o.argCount == argCount && o.paramTypes.empty(); 
+                    [argCount](const Overload& o) {
+                        return o.argCount == argCount && o.paramTypes.empty();
                     });
                 if (it != overloads.end()) {
                     it->function = func;
@@ -134,8 +154,7 @@ struct engine::implementation {
         
         script_value findBestMatch(const std::vector<script_value>& args) const {
             size_t argCount = args.size();
-            
-            
+
             // Use C++-style overload resolution: find all viable candidates, then pick the best
             struct Candidate {
                 const Overload* overload;
@@ -145,19 +164,20 @@ struct engine::implementation {
 
             // Phase 1: Find all viable candidates
             for (const auto& overload : overloads) {
-                if (overload.argCount != argCount && overload.argCount != 0) {
-                    continue; // Wrong number of arguments
-                }
-
-                if (overload.argCount == 0) {
-                    // Wildcard function - always viable but with high cost
-                    viableCandidates.push_back({&overload, 999});
+                // Variadic functions (VARIADIC_ARITY) match any argument count
+                if (overload.is_variadic()) {
+                    // Variadic function - always viable but lowest priority
+                    viableCandidates.push_back({&overload, 2000});
                     continue;
                 }
 
+                if (overload.argCount != argCount) {
+                    continue; // Wrong number of arguments - must match exactly
+                }
+
                 if (overload.paramTypes.empty()) {
-                    // No type info - viable with medium cost
-                    viableCandidates.push_back({&overload, 100});
+                    // No type info - fallback priority (like script method var/any)
+                    viableCandidates.push_back({&overload, 1000});
                     continue;
                 }
 
@@ -165,12 +185,70 @@ struct engine::implementation {
                 int totalCost = 0;
                 bool viable = true;
                 for (size_t i = 0; i < argCount && viable; ++i) {
-                    int cost = conversions ? conversions->get_builtin_conversion_cost(args[i].type(), overload.paramTypes[i])
-                                          : (args[i].type() == overload.paramTypes[i] ? 0 : 1000);
-                    if (cost >= 1000) {
-                        viable = false; // No valid conversion
+                    const auto& paramInfo = overload.paramTypes[i];
+                    script_value_type argType = args[i].type();
+
+                    // Handle object/shared_ptr types with inheritance checking
+                    if ((paramInfo.base_type == script_value_type::jai_object_type ||
+                         paramInfo.base_type == script_value_type::jai_shared_ptr_type) &&
+                        (argType == script_value_type::jai_object_type ||
+                         argType == script_value_type::jai_shared_ptr_type)) {
+
+                        // If we have class lookup and C++ type info, do inheritance check
+                        if (classes_by_type && paramInfo.cpp_type != typeid(void)) {
+                            auto paramClassIt = classes_by_type->find(paramInfo.cpp_type);
+                            if (paramClassIt != classes_by_type->end()) {
+                                // Get expected class name
+                                std::string expectedClassName = paramClassIt->second->get_name();
+
+                                // Get argument's class info
+                                auto instance = const_cast<script_value&>(args[i]).get_class_instance();
+                                if (instance) {
+                                    auto argClassDef = instance->get_class_definition();
+                                    if (argClassDef) {
+                                        if (argClassDef->get_name() == expectedClassName) {
+                                            // Exact match
+                                            // shared_ptr<T> -> T counts as small conversion
+                                            if (argType == script_value_type::jai_shared_ptr_type &&
+                                                paramInfo.base_type == script_value_type::jai_object_type) {
+                                                totalCost += 1;
+                                            }
+                                            // else exact match, cost 0
+                                        } else if (argClassDef->is_subtype_of(expectedClassName)) {
+                                            // Derived type - small conversion cost
+                                            totalCost += 1;
+                                        } else {
+                                            // Incompatible class types
+                                            viable = false;
+                                        }
+                                    } else {
+                                        // Can't get class def, check by name
+                                        if (instance->get_class_name() != expectedClassName) {
+                                            viable = false;
+                                        }
+                                    }
+                                } else {
+                                    // No instance - not a valid object
+                                    viable = false;
+                                }
+                            } else {
+                                // Expected class not found - accept any object with high cost
+                                totalCost += 100;
+                            }
+                        } else {
+                            // No C++ type info - legacy path, accept with penalty so typed overloads are preferred
+                            totalCost += 50;
+                        }
                     } else {
-                        totalCost += cost;
+                        // Non-object types or mixed object/primitive - use conversion registry
+                        // This handles both primitive conversions (int->float) and custom conversions (MyType->int)
+                        int cost = conversions ? conversions->get_builtin_conversion_cost(argType, paramInfo.base_type)
+                                              : (argType == paramInfo.base_type ? 0 : 1000);
+                        if (cost >= 1000) {
+                            viable = false;
+                        } else {
+                            totalCost += cost;
+                        }
                     }
                 }
 
@@ -183,20 +261,20 @@ struct engine::implementation {
             if (viableCandidates.empty()) {
                 throw runtime_error("No viable candidates for function call");
             }
-            
+
             auto best = std::min_element(viableCandidates.begin(), viableCandidates.end(),
                 [](const Candidate& a, const Candidate& b) { return a.totalCost < b.totalCost; });
-            
+
             // Check for ambiguity (multiple candidates with same cost)
             int bestCost = best->totalCost;
             auto numBest = std::count_if(viableCandidates.begin(), viableCandidates.end(),
                 [bestCost](const Candidate& c) { return c.totalCost == bestCost; });
-            
-            if (numBest > 1 && bestCost < 100) { // Don't report ambiguity for untyped functions
+
+            if (numBest > 1 && bestCost < 1000) { // Don't report ambiguity for untyped/var functions
                 // Could throw ambiguity error here, but for now just pick first
                 // throw runtime_error("Ambiguous function call");
             }
-            
+
             return best->overload->function;
         }
     };
@@ -319,7 +397,8 @@ struct engine::implementation {
     OverloadSet& getOrCreateOverloadSet(const std::string& name) {
         auto& overloadSet = overloadedFunctions[name];
         if (!overloadSet.conversions) {
-            overloadSet.setConversionRegistry(conversions);
+            overloadSet.set_conversion_registry(conversions);
+            overloadSet.set_class_lookup(&classesByType);
         }
         return overloadSet;
     }
@@ -517,8 +596,8 @@ void engine::initialize_engine_reference() {
     
     // Set up custom extractor for class_instance objects in the conversion registry
     impl->conversions->set_custom_extractor([this](const std::string& type_name, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
-        // Check if this is a class that was registered with class_builder
-        // class_builder creates objects with type_name matching the class name
+        // Check if this is a class that was registered with dynamic_binder
+        // dynamic_binder creates objects with type_name matching the class name
         auto classIt = impl->classes.find(type_name);
         if (classIt != impl->classes.end()) {
             // This is a registered class, obj should be a class_instance
@@ -686,7 +765,7 @@ void engine::initialize_engine_reference() {
     add_standard_conversions();
 
     // BOOTSTRAP: Manually register class_definition to avoid chicken-and-egg problem
-    // We can't use class_builder because it would try to create a script_value wrapping
+    // We can't use dynamic_binder because it would try to create a script_value wrapping
     // a class_definition, which requires class_definition to already be registered!
     {
         auto class_def = std::make_shared<class_definition>("class_definition",
@@ -718,7 +797,7 @@ void engine::initialize_engine_reference() {
     );
     
     // Add built-in functions
-    add_function("print", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+    add_variadic_function("print", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
         for (const auto& arg : args) {
             std::cout << arg.to_string();
         }
@@ -917,13 +996,14 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
 
 void engine::add_variadic_function(const std::string& name, script_function func) {
     // Variadic function registration - handles any number of arguments
-    // Register with arity 0 to indicate it's a wildcard function
+    // Register with SIZE_MAX to indicate it's a wildcard function
+    constexpr size_t VARIADIC = SIZE_MAX;
     if (has_function(name)) {
-        // Add as overload with arity 0 (wildcard - accepts any number of args)
-        add_overloaded_function(name, 0, func);
+        // Add as overload with SIZE_MAX (wildcard - accepts any number of args)
+        add_overloaded_function(name, VARIADIC, func);
     } else {
-        // Register with arity 0 to mark it as variadic
-        add_functionWithArity(name, func, 0);
+        // Register with SIZE_MAX to mark it as variadic
+        add_functionWithArity(name, func, VARIADIC);
     }
 }
 
@@ -941,19 +1021,19 @@ void engine::add_functionWithArity(const std::string& name, script_function func
             auto arityIt = impl->functionArities.find(name);
             size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
 
-            impl->getOrCreateOverloadSet(name).setConversionRegistry(impl->conversions);
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, std::move(existing_result.value()));
+            impl->getOrCreateOverloadSet(name).set_conversion_registry(impl->conversions);
+            impl->getOrCreateOverloadSet(name).add_overload(existingArity, std::move(existing_result.value()));
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
         }
         
         // Now add the new function as an overload
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this));
+        impl->getOrCreateOverloadSet(name).add_overload(arity, script_value::make_function(func, this));
         impl->updateOverloadedFunction(name, this);
     } else if (overloadIt != impl->overloadedFunctions.end()) {
         // Already have overloaded functions, just add this one
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this));
+        impl->getOrCreateOverloadSet(name).add_overload(arity, script_value::make_function(func, this));
         impl->updateOverloadedFunction(name, this);
     } else {
         // No existing function, just add normally
@@ -981,7 +1061,7 @@ void engine::add_overloaded_function(const std::string& name, size_t argCount, s
         auto overloadIt = impl->overloadedFunctions.find(name);
         if (overloadIt == impl->overloadedFunctions.end()) {
             // First time creating overload set for this function
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, std::move(existing_result.value()));
+            impl->getOrCreateOverloadSet(name).add_overload(existingArity, std::move(existing_result.value()));
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
@@ -989,7 +1069,7 @@ void engine::add_overloaded_function(const std::string& name, size_t argCount, s
     }
     
     // Now add the new overload
-    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func, this));
+    impl->getOrCreateOverloadSet(name).add_overload(argCount, script_value::make_function(func, this));
     impl->updateOverloadedFunction(name, this);
 }
 
@@ -1004,14 +1084,35 @@ void engine::add_overloaded_functionWithTypes(const std::string& name, size_t ar
         auto arityIt = impl->functionArities.find(name);
         size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
 
-        impl->getOrCreateOverloadSet(name).addOverload(existingArity, std::move(existing_result.value()));
+        impl->getOrCreateOverloadSet(name).add_overload(existingArity, std::move(existing_result.value()));
         if (arityIt != impl->functionArities.end()) {
             impl->functionArities.erase(arityIt);
         }
     }
     
     // Now add the new overload with type information
-    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func, this), paramTypes);
+    impl->getOrCreateOverloadSet(name).add_overload(argCount, script_value::make_function(func, this), paramTypes);
+    impl->updateOverloadedFunction(name, this);
+}
+
+void engine::add_overloaded_function_with_full_types(const std::string& name, size_t argCount, script_function func, const std::vector<param_type_info>& paramTypes) {
+    // Check if we need to move an existing function from global_environment_
+    auto existing_result = impl->global_environment_->get(name);
+    bool hasExistingFunction = existing_result && existing_result.value().is_function();
+
+    if (hasExistingFunction) {
+        // Move existing function to overloaded set first
+        auto arityIt = impl->functionArities.find(name);
+        size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
+
+        impl->getOrCreateOverloadSet(name).add_overload_with_types(existingArity, std::move(existing_result.value()), {});
+        if (arityIt != impl->functionArities.end()) {
+            impl->functionArities.erase(arityIt);
+        }
+    }
+
+    // Now add the new overload with full type information
+    impl->getOrCreateOverloadSet(name).add_overload_with_types(argCount, script_value::make_function(func, this), paramTypes);
     impl->updateOverloadedFunction(name, this);
 }
 
@@ -1029,25 +1130,67 @@ void engine::add_functionWithArityAndTypes(const std::string& name, script_funct
             auto arityIt = impl->functionArities.find(name);
             size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
 
-            impl->getOrCreateOverloadSet(name).setConversionRegistry(impl->conversions);
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, std::move(existing_result.value()));
+            impl->getOrCreateOverloadSet(name).set_conversion_registry(impl->conversions);
+            impl->getOrCreateOverloadSet(name).add_overload(existingArity, std::move(existing_result.value()));
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
         }
         
         // Now add the new function as an overload with type info
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this), paramTypes);
+        impl->getOrCreateOverloadSet(name).add_overload(arity, script_value::make_function(func, this), paramTypes);
         impl->updateOverloadedFunction(name, this);
     } else if (overloadIt != impl->overloadedFunctions.end()) {
         // Already have overloaded functions, just add this one with type info
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this), paramTypes);
+        impl->getOrCreateOverloadSet(name).add_overload(arity, script_value::make_function(func, this), paramTypes);
         impl->updateOverloadedFunction(name, this);
     } else {
         // No existing function, check if we have type info
         if (!paramTypes.empty()) {
             // Have type info, create overload set immediately
-            impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, this), paramTypes);
+            impl->getOrCreateOverloadSet(name).add_overload(arity, script_value::make_function(func, this), paramTypes);
+            impl->updateOverloadedFunction(name, this);
+        } else {
+            // No type info, add normally
+            script_value funcValue = script_value::make_function(func, this);
+            impl->global_environment_->define(name, funcValue);
+            impl->functionArities[name] = arity;
+        }
+    }
+}
+
+void engine::add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& paramTypes) {
+    // Check if we have an existing function with this name
+    auto existing_result = impl->global_environment_->get(name);
+    bool hasExistingFunction = existing_result && existing_result.value().is_function();
+
+    auto overloadIt = impl->overloadedFunctions.find(name);
+
+    if (hasExistingFunction) {
+        // Move existing function to overloaded set
+        if (overloadIt == impl->overloadedFunctions.end()) {
+            auto arityIt = impl->functionArities.find(name);
+            size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
+
+            impl->getOrCreateOverloadSet(name).set_conversion_registry(impl->conversions);
+            impl->getOrCreateOverloadSet(name).add_overload_with_types(existingArity, std::move(existing_result.value()), {});
+            if (arityIt != impl->functionArities.end()) {
+                impl->functionArities.erase(arityIt);
+            }
+        }
+
+        // Now add the new function as an overload with full type info
+        impl->getOrCreateOverloadSet(name).add_overload_with_types(arity, script_value::make_function(func, this), paramTypes);
+        impl->updateOverloadedFunction(name, this);
+    } else if (overloadIt != impl->overloadedFunctions.end()) {
+        // Already have overloaded functions, just add this one with full type info
+        impl->getOrCreateOverloadSet(name).add_overload_with_types(arity, script_value::make_function(func, this), paramTypes);
+        impl->updateOverloadedFunction(name, this);
+    } else {
+        // No existing function, check if we have type info
+        if (!paramTypes.empty()) {
+            // Have type info, create overload set immediately
+            impl->getOrCreateOverloadSet(name).add_overload_with_types(arity, script_value::make_function(func, this), paramTypes);
             impl->updateOverloadedFunction(name, this);
         } else {
             // No type info, add normally
@@ -1682,14 +1825,19 @@ script_value engine::try_create_reference(size_t arg_index, const script_value& 
         return fallback; // No valid metadata for this argument, use fallback
     }
     
-    // Try to get pointer to the original variable
+    // Try to get pointer to the original variable (env is raw pointer from metadata)
     script_value* target = env->get_value_ptr(symbol_id);
     if (!target) {
         return fallback; // Variable not found, use fallback
     }
-    
+
     // Create reference wrapper to original variable
-    return script_value::make_reference(target, env);
+    // Get shared_ptr from interpreter if the raw pointer matches current environment
+    std::shared_ptr<environment> env_shared;
+    if (env == current_interpreter->get_current_environment().get()) {
+        env_shared = current_interpreter->get_current_environment();
+    }
+    return script_value::make_reference(target, env_shared);
 }
 
 conversions::conversion_manager engine::get_conversion_manager() {

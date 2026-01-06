@@ -6,7 +6,7 @@
 #include "../../include/jaiscript/core/engine.hpp"
 #include "../../include/jaiscript/core/bound_array.hpp"
 #include "../../include/jaiscript/core/bound_map.hpp"
-#include "../../include/jaiscript/core/class_builder.hpp"
+#include "../../include/jaiscript/core/dynamic_binder.hpp"
 #include <limits>
 #include <stdexcept>
 #include <algorithm>

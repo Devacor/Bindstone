@@ -4,7 +4,7 @@
 
 Replace ChaiScript with JaiScript throughout Bindstone, leveraging:
 - **Auto-registration** via `jai::registrar<T, Context>`
-- **Property auto-binding** via `jai::class_builder<T>::auto_bind()`
+- **Property auto-binding** via `jai::dynamic_binder<T>::auto_bind()`
 - **Signal/receiver patterns** for reactive callbacks with `receiver_owner`
 - **Observable properties** for change notifications
 - **JaiScript serialization** to replace Cereal (binary + JSON archive support)
@@ -18,8 +18,8 @@ Replace ChaiScript with JaiScript throughout Bindstone, leveraging:
 | Feature | Location | Usage |
 |---------|----------|-------|
 | `jai::registrar<T, Context>` | [registrar.hpp](include/jaiscript/core/registrar.hpp) | Auto-registers bindings at file scope |
-| `jai::class_builder<T>` | [class_builder.hpp](include/jaiscript/core/class_builder.hpp) | Fluent API for class bindings |
-| `.auto_bind()` | class_builder | Auto-binds all properties from property_owner |
+| `jai::dynamic_binder<T>` | [dynamic_binder.hpp](include/jaiscript/core/dynamic_binder.hpp) | Fluent API for class bindings |
+| `.auto_bind()` | dynamic_binder | Auto-binds all properties from property_owner |
 | `jai::property_owner<Derived, Bases...>` | [property_manager.hpp](include/jaiscript/properties/property_manager.hpp) | CRTP base with property_manager + receiver_owner |
 | `JAI_PROPERTY(type, name)` | properties | Declares serializable property |
 | `jai::signal<T>` | [signal.hpp](include/jaiscript/signals/signal.hpp) | Thread-safe signal/slot |
@@ -36,7 +36,7 @@ Replace ChaiScript with JaiScript throughout Bindstone, leveraging:
 ```cpp
 // File scope - runs automatically before main()
 static jai::registrar<Point, MV::Services> _point_registrar([](jai::engine& eng, const MV::Services& services) {
-    jai::class_builder<Point>(eng, "Point")
+    jai::dynamic_binder<Point>(eng, "Point")
         .constructor<float, float>()
         .property("x", &Point::x)
         .property("y", &Point::y)
@@ -56,7 +56,7 @@ class Entity : public jai::property_owner<Entity> {
 };
 
 // Auto-binds all JAI_PROPERTY members:
-jai::class_builder<Entity>(eng, "Entity")
+jai::dynamic_binder<Entity>(eng, "Entity")
     .auto_bind()  // Binds health, name automatically
     .build();
 ```
@@ -189,7 +189,7 @@ class Creature : public jai::property_owner<Creature, MV::Scene::Component> {
 
 // Now auto_bind() works!
 static jai::registrar<Creature, JaiContext> _creature([](jai::engine& eng, const JaiContext&) {
-    jai::class_builder<Creature>(eng, "Creature")
+    jai::dynamic_binder<Creature>(eng, "Creature")
         .base_class<MV::Scene::Component>()
         .auto_bind()  // Binds stats, skin automatically!
         .method("alive", &Creature::alive)
@@ -290,14 +290,14 @@ class Sprite : public jai::property_owner<Sprite, Drawable> {
 ```cpp
 // Component registration
 static jai::registrar<Component, JaiContext> _component([](jai::engine& eng, const JaiContext&) {
-    jai::class_builder<Component>(eng, "Component")
+    jai::dynamic_binder<Component>(eng, "Component")
         .auto_bind()  // Binds componentId from Component's property_mgr
         .build();
 });
 
 // Drawable registration - auto_bind walks _jai_base_types to include Component
 static jai::registrar<Drawable, JaiContext> _drawable([](jai::engine& eng, const JaiContext&) {
-    jai::class_builder<Drawable>(eng, "Drawable")
+    jai::dynamic_binder<Drawable>(eng, "Drawable")
         .base_class<Component>()
         .auto_bind()  // Binds shouldDraw, shaderProgramId + walks to Component
         .method("hide", &Drawable::hide)
@@ -307,7 +307,7 @@ static jai::registrar<Drawable, JaiContext> _drawable([](jai::engine& eng, const
 
 // Sprite registration
 static jai::registrar<Sprite, JaiContext> _sprite([](jai::engine& eng, const JaiContext&) {
-    jai::class_builder<Sprite>(eng, "Sprite")
+    jai::dynamic_binder<Sprite>(eng, "Sprite")
         .base_class<Drawable>()
         .auto_bind()  // Binds texturePath + walks to Drawable + Component
         .build();
@@ -359,7 +359,7 @@ using namespace MV::Script;
 
 // Point registration - runs at file scope
 static jai::registrar<MV::Point<>, JaiContext> _point([](jai::engine& eng, const JaiContext&) {
-    jai::class_builder<MV::Point<>>(eng, "Point")
+    jai::dynamic_binder<MV::Point<>>(eng, "Point")
         .constructor<>()
         .constructor<float, float>()
         .property("x", &MV::Point<>::x)
@@ -371,7 +371,7 @@ static jai::registrar<MV::Point<>, JaiContext> _point([](jai::engine& eng, const
 
 // Size registration
 static jai::registrar<MV::Size<>, JaiContext> _size([](jai::engine& eng, const JaiContext&) {
-    jai::class_builder<MV::Size<>>(eng, "Size")
+    jai::dynamic_binder<MV::Size<>>(eng, "Size")
         .constructor<>()
         .constructor<float, float>()
         .property("width", &MV::Size<>::width)
@@ -381,7 +381,7 @@ static jai::registrar<MV::Size<>, JaiContext> _size([](jai::engine& eng, const J
 
 // Color registration
 static jai::registrar<MV::Color, JaiContext> _color([](jai::engine& eng, const JaiContext&) {
-    jai::class_builder<MV::Color>(eng, "Color")
+    jai::dynamic_binder<MV::Color>(eng, "Color")
         .constructor<>()
         .constructor<float, float, float, float>()
         .property("r", &MV::Color::R)
@@ -418,7 +418,7 @@ std::shared_ptr<jai::engine> create_jaiscript_engine(const MV::Services& service
 **Pattern Mapping:**
 | ChaiScript | JaiScript |
 |------------|-----------|
-| `chaiscript::user_type<T>()` | `jai::class_builder<T>(eng, "Name")` |
+| `chaiscript::user_type<T>()` | `jai::dynamic_binder<T>(eng, "Name")` |
 | `chaiscript::constructor<T()>()` | `.constructor<>()` |
 | `chaiscript::fun(&T::method)` | `.method("name", &T::method)` |
 | `chaiscript::fun([](T& self){ ... })` | `.method("name", [](T& self){ ... })` |
@@ -683,7 +683,7 @@ class Creature { ... };
 
 static jai::registrar<Creature, MV::Script::JaiContext> _creature_binding(
     [](jai::engine& eng, const MV::Script::JaiContext&) {
-        jai::class_builder<Creature>(eng, "Creature")
+        jai::dynamic_binder<Creature>(eng, "Creature")
             // ...
             .build();
     });
@@ -710,8 +710,8 @@ class NetworkedEntity : public jai::property_owner<NetworkedEntity> {
 
 JaiScript supports hot-reloading class definitions. Leverage this during development:
 ```cpp
-// class_builder registers type info that survives hot reload
-jai::class_builder<Creature>(eng, "Creature")
+// dynamic_binder registers type info that survives hot reload
+jai::dynamic_binder<Creature>(eng, "Creature")
     .enable_hot_reload()  // Preserves instances across reloads
     .auto_bind()
     .build();

@@ -1,10 +1,10 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/serialization/archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
-#include <jaiscript/core/class_builder_serialization.hpp>  // Must be included after class_builder and archive headers
+#include <jaiscript/core/dynamic_binder_serialization.hpp>  // Must be included after dynamic_binder and archive headers
 #include <memory>
 #include <string>
 
@@ -81,7 +81,7 @@ public:
             auto eng = engine::make();
 
             // Register class with context-only factory
-            class_builder<context_required_object>(eng, "ContextRequiredObject")
+            dynamic_binder<context_required_object>(eng, "ContextRequiredObject")
                 .method("get_service_name", &context_required_object::get_service_name)
                 .method("get_value", &context_required_object::get_value)
                 .method("is_initialized", &context_required_object::is_initialized)
@@ -135,7 +135,7 @@ public:
             auto eng = engine::make();
 
             // Register class with archive-only factory (pre-reads properties)
-            class_builder<property_preread_object>(eng, "PropertyPrereadObject")
+            dynamic_binder<property_preread_object>(eng, "PropertyPrereadObject")
                 .method("get_id", &property_preread_object::get_id)
                 .method("get_constructor_value", &property_preread_object::get_constructor_value)
                 .method("get_name", &property_preread_object::get_name)
@@ -184,7 +184,7 @@ public:
             auto eng = engine::make();
 
             // Register class with both context and archive dependencies
-            class_builder<complex_object>(eng, "ComplexObject")
+            dynamic_binder<complex_object>(eng, "ComplexObject")
                 .method("get_service_name", &complex_object::get_service_name)
                 .method("get_id", &complex_object::get_id)
                 .method("get_value", &complex_object::get_value)

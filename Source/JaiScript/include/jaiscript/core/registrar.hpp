@@ -10,51 +10,27 @@
 #include <string_view>
 #include <optional>
 #include <algorithm>
+
+// C++20 features detection
+#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
+#define JAI_HAS_CONCEPTS 1
 #include <concepts>
+#else
+#define JAI_HAS_CONCEPTS 0
+#endif
+
+#if defined(__cpp_nontype_template_args) && __cpp_nontype_template_args >= 201911L
+#define JAI_HAS_NTTP_STRING 1
+#include "fixed_string.hpp"
+#else
+#define JAI_HAS_NTTP_STRING 0
+#endif
 
 namespace jai {
 
 // Forward declarations
 class engine;
-template<typename T> class class_builder;
-
-// ============================================================================
-// fixed_string - C++20 NTTP-compatible compile-time string
-// ============================================================================
-
-template<std::size_t N>
-struct fixed_string {
-    char value[N]{};
-
-    constexpr fixed_string() = default;
-
-    constexpr fixed_string(const char (&str)[N]) noexcept {
-        std::copy_n(str, N, value);
-    }
-
-    [[nodiscard]] constexpr std::string_view view() const noexcept {
-        return {value, N - 1};
-    }
-
-    [[nodiscard]] constexpr operator std::string_view() const noexcept {
-        return view();
-    }
-
-    [[nodiscard]] std::string str() const {
-        return std::string(value, N - 1);
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const noexcept {
-        return N - 1;
-    }
-
-    [[nodiscard]] constexpr const char* c_str() const noexcept {
-        return value;
-    }
-};
-
-template<std::size_t N>
-fixed_string(const char (&)[N]) -> fixed_string<N>;
+template<typename T> class dynamic_binder;
 
 // ============================================================================
 // Type Name Registry - Global mapping from type_index to script name
@@ -165,57 +141,128 @@ private:
 };
 
 // ============================================================================
-// jai::registrar - C++20 static type registration with compile-time name
+// jai::registrar - Type registration for JaiScript engine
 // ============================================================================
 //
-// Usage:
-//
-//   // Simple - just auto_bind the type
+// C++20 Usage (with NTTP string literals):
 //   static jai::registrar<Player, "Player"> _player;
+//   static jai::registrar<Player, "Player", Services> _player([](auto& builder, const Services& ctx) { ... });
 //
-//   // With customization
-//   static jai::registrar<Player, "Player"> _player([](auto& builder) {
-//       builder.method("heal", &Player::heal);
-//   });
+// C++17 Usage (runtime name):
+//   static jai::registrar<Player, MV::Services> _player("Player", [](auto& builder, const Services& ctx) { ... });
 //
-//   // With context
-//   static jai::registrar<Player, "Player", Services> _player([](auto& builder, const Services& ctx) {
-//       builder.method("getService", [&ctx](Player&) { return ctx.get(); });
-//   });
-//
-//   // At engine initialization:
+// At engine initialization:
 //   jai::bind_registrar(engine);                     // No context
 //   jai::bind_registrar<Services>(engine, services); // With context
 
-template<typename T, fixed_string Name, typename Context = void>
-class registrar;
+// ============================================================================
+// C++17-compatible registrar (runtime name)
+// ============================================================================
 
 // Primary template - with context
-template<typename T, fixed_string Name, typename Context>
+template<typename T, typename Context>
 class registrar {
 public:
     // Default: auto_bind + build
-    registrar() {
-        type_name_registry::instance().register_type<T>(Name.view());
+    explicit registrar(const char* name) {
+        std::string name_str(name);
+        type_name_registry::instance().register_type<T>(name);
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
-            [](engine& eng, const Context&) {
-                class_builder<T> builder(eng, Name.str());
+            [name_str](engine& eng, const Context&) {
+                dynamic_binder<T> builder(eng, name_str);
                 builder.auto_bind();
                 builder.build();
             }
         );
     }
 
-    // With configuration lambda: (class_builder<T>&, const Context&) -> void
+    // With configuration lambda: (dynamic_binder<T>&, const Context&) -> void
     template<typename F>
-        requires std::invocable<F, class_builder<T>&, const Context&>
-    explicit registrar(F&& configure) {
+    registrar(const char* name, F&& configure) {
+        std::string name_str(name);
+        type_name_registry::instance().register_type<T>(name);
+        registrar_registry<Context>::instance().add(
+            std::type_index(typeid(T)),
+            [name_str, configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
+                dynamic_binder<T> builder(eng, name_str);
+                builder.auto_bind();
+                configure(builder, ctx);
+                builder.build();
+            }
+        );
+    }
+};
+
+// Specialization for no context
+template<typename T>
+class registrar<T, void> {
+public:
+    // Default: auto_bind + build
+    explicit registrar(const char* name) {
+        std::string name_str(name);
+        type_name_registry::instance().register_type<T>(name);
+        registrar_registry<void>::instance().add(
+            std::type_index(typeid(T)),
+            [name_str](engine& eng) {
+                dynamic_binder<T> builder(eng, name_str);
+                builder.auto_bind();
+                builder.build();
+            }
+        );
+    }
+
+    // With configuration lambda: (dynamic_binder<T>&) -> void
+    template<typename F>
+    registrar(const char* name, F&& configure) {
+        std::string name_str(name);
+        type_name_registry::instance().register_type<T>(name);
+        registrar_registry<void>::instance().add(
+            std::type_index(typeid(T)),
+            [name_str, configure = std::forward<F>(configure)](engine& eng) {
+                dynamic_binder<T> builder(eng, name_str);
+                builder.auto_bind();
+                configure(builder);
+                builder.build();
+            }
+        );
+    }
+};
+
+#if JAI_HAS_NTTP_STRING && JAI_HAS_CONCEPTS
+// ============================================================================
+// C++20 registrar with NTTP string (compile-time name)
+// ============================================================================
+
+template<typename T, fixed_string Name, typename Context = void>
+class nttp_registrar;
+
+// Primary template - with context
+template<typename T, fixed_string Name, typename Context>
+class nttp_registrar {
+public:
+    // Default: auto_bind + build
+    nttp_registrar() {
+        type_name_registry::instance().register_type<T>(Name.view());
+        registrar_registry<Context>::instance().add(
+            std::type_index(typeid(T)),
+            [](engine& eng, const Context&) {
+                dynamic_binder<T> builder(eng, Name.str());
+                builder.auto_bind();
+                builder.build();
+            }
+        );
+    }
+
+    // With configuration lambda: (dynamic_binder<T>&, const Context&) -> void
+    template<typename F>
+        requires std::invocable<F, dynamic_binder<T>&, const Context&>
+    explicit nttp_registrar(F&& configure) {
         type_name_registry::instance().register_type<T>(Name.view());
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
-                class_builder<T> builder(eng, Name.str());
+                dynamic_binder<T> builder(eng, Name.str());
                 builder.auto_bind();
                 configure(builder, ctx);
                 builder.build();
@@ -226,30 +273,30 @@ public:
 
 // Specialization for no context
 template<typename T, fixed_string Name>
-class registrar<T, Name, void> {
+class nttp_registrar<T, Name, void> {
 public:
     // Default: auto_bind + build
-    registrar() {
+    nttp_registrar() {
         type_name_registry::instance().register_type<T>(Name.view());
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [](engine& eng) {
-                class_builder<T> builder(eng, Name.str());
+                dynamic_binder<T> builder(eng, Name.str());
                 builder.auto_bind();
                 builder.build();
             }
         );
     }
 
-    // With configuration lambda: (class_builder<T>&) -> void
+    // With configuration lambda: (dynamic_binder<T>&) -> void
     template<typename F>
-        requires std::invocable<F, class_builder<T>&>
-    explicit registrar(F&& configure) {
+        requires std::invocable<F, dynamic_binder<T>&>
+    explicit nttp_registrar(F&& configure) {
         type_name_registry::instance().register_type<T>(Name.view());
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [configure = std::forward<F>(configure)](engine& eng) {
-                class_builder<T> builder(eng, Name.str());
+                dynamic_binder<T> builder(eng, Name.str());
                 builder.auto_bind();
                 configure(builder);
                 builder.build();
@@ -257,6 +304,8 @@ public:
         );
     }
 };
+
+#endif // JAI_HAS_NTTP_STRING && JAI_HAS_CONCEPTS
 
 // ============================================================================
 // bind_registrar - Trigger all registered bindings
@@ -273,7 +322,7 @@ inline void bind_registrar(engine& eng) {
 
 } // namespace jai
 
-// Include class_builder.hpp to make registrar lambdas work
-#include <jaiscript/core/class_builder.hpp>
+// Include dynamic_binder.hpp to make registrar lambdas work
+#include <jaiscript/core/dynamic_binder.hpp>
 
 #endif // __JAISCRIPT_CORE_REGISTRAR_HPP__

@@ -1,7 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 
 // Note: This requires ChaiScript to be available
 // Install via: vcpkg install chaiscript
@@ -235,7 +235,7 @@ public:
         )");
 
         // Bind C++ TreeNode class to JaiScript for fair comparison
-        class_builder<CppTreeNode>(*jai_engine, "CppTreeNode")
+        dynamic_binder<CppTreeNode>(*jai_engine, "CppTreeNode")
             .constructor<int>()
             .property("value", &CppTreeNode::value)
             .property("left", &CppTreeNode::left, jai::skip_type_check)  // Self-referential
@@ -598,7 +598,7 @@ public:
                          << " ChaiScript=" << chai_result << "\n";
             }
 
-            // Increased iterations to get better metrics (from ~2μs to ~10μs)
+            // Increased iterations to get better metrics (from ~2uS to ~10uS)
             benchmark("JaiScript - Integer Addition", [this]() {
                 jai_engine->execute("42 + 58;");
             }, 5000);
@@ -610,7 +610,7 @@ public:
 
         // ===== Float Multiplication =====
         test("JaiScript vs ChaiScript: Float Multiplication", [this]() {
-            // Increased iterations to get better metrics (from ~2μs to ~10μs)
+            // Increased iterations to get better metrics (from ~2uS to ~10uS)
             benchmark("JaiScript - Float Multiplication", [this]() {
                 jai_engine->execute("3.14 * 2.71;");
             }, 5000);
@@ -889,7 +889,7 @@ public:
 
         // ===== Complex Expression =====
         test("JaiScript vs ChaiScript: Complex Expression", [this]() {
-            // Increased iterations to get better metrics (from ~4μs to ~20μs)
+            // Increased iterations to get better metrics (from ~4uS to ~20uS)
             benchmark("JaiScript - Complex Expression", [this]() {
                 jai_engine->execute("(10 + 20) * (30 - 15) / 5;");
             }, 5000);
@@ -1107,8 +1107,8 @@ public:
 
             // ChaiScript BST benchmark - skipped due to poor performance (~52ms/iteration)
             // The benchmark works correctly but is too slow to run in the test suite.
-            // Last measured: 52698μs/iteration (vs JaiScript's ~563μs - 94x slower)
-            std::cout << "    ChaiScript - BST (15 nodes): 52698μs/iteration (skipped - too slow)\n";
+            // Last measured: 52698uS/iteration (vs JaiScript's ~563uS - 94x slower)
+            std::cout << "    ChaiScript - BST (15 nodes): 52698uS/iteration (skipped - too slow)\n";
         });
 
         // ===== String Operations =====

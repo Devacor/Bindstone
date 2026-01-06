@@ -38,7 +38,7 @@
 #include "core/engine.hpp"
 
 // 9. Class building system (depends on engine) - LAST!
-#include "core/class_builder.hpp"
+#include "core/dynamic_binder.hpp"
 
 // 10. AST and interpretation system (optional for advanced users)
 #include "detail/ast.hpp"

@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai;
@@ -110,7 +110,7 @@ public:
             stdlib::register_all(*engine);
             
             // Register Point class
-            class_builder<Point>(*engine, "Point")
+            dynamic_binder<Point>(*engine, "Point")
                 .constructor<>()
                 .constructor<double, double>()
                 .property("x", &Point::x)
@@ -137,18 +137,18 @@ public:
             stdlib::register_all(*engine);
             
             // Register polymorphic classes
-            class_builder<GeometricShape>(*engine, "GeometricShape")
+            dynamic_binder<GeometricShape>(*engine, "GeometricShape")
                 .method("area", &GeometricShape::area)
                 .method("type", &GeometricShape::type)
                 .build();
                 
-            class_builder<GeometricCircle>(*engine, "GeometricCircle")
+            dynamic_binder<GeometricCircle>(*engine, "GeometricCircle")
                 .base_class<GeometricShape>()
                 .constructor<double>()
                 .property("radius", &GeometricCircle::radius)
                 .build();
                 
-            class_builder<GeometricRectangle>(*engine, "GeometricRectangle")
+            dynamic_binder<GeometricRectangle>(*engine, "GeometricRectangle")
                 .base_class<GeometricShape>()
                 .constructor<double, double>()
                 .property("width", &GeometricRectangle::width)
@@ -180,7 +180,7 @@ public:
             stdlib::register_all(*engine);
             
             // Register Point class
-            class_builder<Point>(*engine, "Point")
+            dynamic_binder<Point>(*engine, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)

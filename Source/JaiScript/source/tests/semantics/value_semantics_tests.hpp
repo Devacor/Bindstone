@@ -2,7 +2,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <memory>
 
 namespace jai::foundry::tests {
@@ -349,7 +349,7 @@ public:
                 std::shared_ptr<TrackedObject> get_object() { return obj; }
             };
             
-            class_builder<ObjectContainer>(*eng, "ObjectContainer")
+            dynamic_binder<ObjectContainer>(*eng, "ObjectContainer")
                 .constructor<>()
                 .method("get_object", &ObjectContainer::get_object)
                 .build();
@@ -372,7 +372,7 @@ public:
     
 private:
     void register_tracked_object(engine& eng) {
-        class_builder<TrackedObject>(eng, "TrackedObject")
+        dynamic_binder<TrackedObject>(eng, "TrackedObject")
             .constructor<int>()
             .method("modify", &TrackedObject::modify)
             .method("get", &TrackedObject::get)

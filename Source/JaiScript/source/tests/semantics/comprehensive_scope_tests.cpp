@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <iostream>
 #include <vector>
@@ -14,7 +14,7 @@ namespace jai::foundry::tests {
 // Global log to track construction/destruction order
 static std::vector<std::string> operation_log;
 
-// C++ class bound via class_builder
+// C++ class bound via dynamic_binder
 class CppBoundObject {
 public:
     static int instance_count;  // Total created (for unique IDs)
@@ -59,7 +59,7 @@ int CppBoundObject::instance_count = 0;
 int CppBoundObject::alive_count = 0;
 
 void register_cpp_bound_object(engine& eng) {
-    class_builder<CppBoundObject>(eng, "CppBoundObject")
+    dynamic_binder<CppBoundObject>(eng, "CppBoundObject")
         .constructor<std::string>()
         .method("instance_method", &CppBoundObject::instance_method)
         .method("get_name", &CppBoundObject::get_name)

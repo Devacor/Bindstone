@@ -61,8 +61,11 @@ class binary_archive_reader;
 class json_archive_writer;
 class json_archive_reader;
 
+// Base tag type for all JaiScript archives (used for SFINAE disambiguation from cereal)
+struct archive_base {};
+
 // Archive writer interface
-class archive_writer {
+class archive_writer : public archive_base {
 protected:
     // Engine reference for creating script_values during serialization
     engine* engine_ref_;
@@ -133,6 +136,25 @@ public:
         return engine_ref_;
     }
 
+    // ============================================================================
+    // Shared pointer ID tracking (for de-duplication)
+    // ============================================================================
+    // Call get_or_assign_shared_id to track a shared_ptr. Returns {id, is_new}.
+    // - If is_new is true, serialize the full object
+    // - If is_new is false, just write the ID (object was already serialized)
+    // - ID 0 means null pointer
+    std::pair<uint32_t, bool> get_or_assign_shared_id(const void* raw_ptr) {
+        return track_shared_ptr(raw_ptr);
+    }
+
+    // Check if a pointer has already been assigned an ID without assigning a new one
+    // Returns 0 if not found (pointer not yet serialized)
+    uint32_t lookup_shared_id(const void* raw_ptr) const {
+        if (raw_ptr == nullptr) return 0;
+        auto it = shared_ptr_ids_.find(raw_ptr);
+        return it != shared_ptr_ids_.end() ? it->second : 0;
+    }
+
     // Does this archive format require explicit property keys array?
     // Binary: true (no named fields), JSON: false (has object keys)
     virtual bool needs_property_keys() const = 0;
@@ -196,6 +218,12 @@ public:
         write_custom(value);
     }
 
+    // operator() as alias for serialize() - enables ar("name", value) syntax
+    template<typename T>
+    void operator()(const char* name, const T& value) {
+        serialize(name, value);
+    }
+
 protected:
     std::map<std::string, bool> property_enabled_;
     uint32_t version_ = 0;
@@ -234,13 +262,17 @@ private:
 };
 
 // Archive reader interface
-class archive_reader {
+class archive_reader : public archive_base {
 protected:
     // Engine reference for creating script_values
     engine* engine_ref_;
 
-    // Shared pointer tracking for deserialization
+    // Shared pointer tracking for deserialization (script_value based)
     std::unordered_map<uint32_t, script_value> id_to_shared_ptr_;  // ID -> reconstructed shared_ptr
+
+    // C++ shared_ptr tracking for property serialization (type-erased)
+    // Used by property_serialization for weak_ptr reconstruction
+    std::unordered_map<uint32_t, std::shared_ptr<void>> cpp_shared_ptrs_;
 
     // User context storage (for dependency injection during deserialization)
     std::map<std::type_index, void*> user_contexts_;
@@ -317,6 +349,35 @@ public:
     // Get engine reference
     engine* get_engine() const {
         return engine_ref_;
+    }
+
+    // ============================================================================
+    // Shared pointer ID tracking (for de-duplication and weak_ptr reconstruction)
+    // ============================================================================
+    // Register a newly deserialized shared_ptr with its ID
+    // The shared_ptr is stored type-erased so weak_ptr can be reconstructed later
+    template<typename T>
+    void register_deserialized_shared(uint32_t id, const std::shared_ptr<T>& ptr) {
+        if (id != 0 && ptr) {
+            cpp_shared_ptrs_[id] = std::static_pointer_cast<void>(ptr);
+        }
+    }
+
+    // Get a previously deserialized shared_ptr by ID
+    // Returns empty shared_ptr if ID not found or was null
+    template<typename T>
+    std::shared_ptr<T> get_deserialized_shared(uint32_t id) const {
+        if (id == 0) return nullptr;
+        auto it = cpp_shared_ptrs_.find(id);
+        if (it != cpp_shared_ptrs_.end()) {
+            return std::static_pointer_cast<T>(it->second);
+        }
+        return nullptr;
+    }
+
+    // Check if we have a shared_ptr for this ID
+    bool has_deserialized_shared(uint32_t id) const {
+        return id != 0 && cpp_shared_ptrs_.find(id) != cpp_shared_ptrs_.end();
     }
 
     // Does this archive format require explicit property keys array?
@@ -500,6 +561,12 @@ public:
         read_property_name(read_name);
         (void)name;  // Could verify read_name == name if desired
         read_custom(value);
+    }
+
+    // operator() as alias for serialize() - enables ar("name", value) syntax
+    template<typename T>
+    void operator()(const char* name, T& value) {
+        serialize(name, value);
     }
 
 protected:

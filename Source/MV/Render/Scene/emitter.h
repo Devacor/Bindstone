@@ -116,6 +116,28 @@ namespace MV {
 				}
 				directionalChangeCurrent = directionalChangeTemplate;
 			}
+
+			// JaiScript serialization (concept disambiguates from cereal)
+			void serialize(jai::serialization::jai_archive auto& ar) {
+				ar.serialize("rateOfChange", rateOfChange);
+				ar.serialize("directionalChange", directionalChangeTemplate);
+				ar.serialize("rotationalChange", rotationalChange);
+				ar.serialize("beginSpeed", beginSpeed);
+				ar.serialize("endSpeed", endSpeed);
+				ar.serialize("beginScale", beginScale);
+				ar.serialize("endScale", endScale);
+				ar.serialize("beginColor", beginColor);
+				ar.serialize("endColor", endColor);
+				ar.serialize("maxLifespan", maxLifespan);
+				ar.serialize("gravityMagnitude", gravityMagnitude);
+				ar.serialize("gravityDirection", gravityDirection);
+				ar.serialize("animationFramesPerSecond", animationFramesPerSecond);
+
+				// On load only: sync directionalChangeCurrent with template
+				if constexpr (!jai::serialization::jai_writer<decltype(ar)>) {
+					directionalChangeCurrent = directionalChangeTemplate;
+				}
+			}
 		};
 
 		struct Particle {

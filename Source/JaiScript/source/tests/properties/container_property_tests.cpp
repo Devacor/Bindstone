@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/properties/property.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
@@ -45,14 +45,14 @@ public:
             auto eng = engine::make();
             stdlib::register_all(eng);
 
-            class_builder<Cat>(*eng, "Cat")
+            dynamic_binder<Cat>(*eng, "Cat")
                 .constructor<>()
                 .constructor<std::string>()
                 .method("meow_name", &Cat::meow_name)
                 .property("name", &Cat::name)
                 .build();
 
-            class_builder<CatOwner>(*eng, "CatOwner")
+            dynamic_binder<CatOwner>(*eng, "CatOwner")
                 .constructor<>()
                 .property("my_cats", &CatOwner::my_cats)
                 .build();
@@ -77,7 +77,7 @@ public:
         test("vector_registration", [this]() {
             auto eng = engine::make();
 
-            class_builder<Cat>(*eng, "Cat")
+            dynamic_binder<Cat>(*eng, "Cat")
                 .constructor<>()
                 .constructor<std::string>()
                 .method("meow_name", &Cat::meow_name)
@@ -85,7 +85,7 @@ public:
                 .build();
 
             // Should succeed - containers not validated at registration
-            class_builder<CatOwner>(*eng, "CatOwner")
+            dynamic_binder<CatOwner>(*eng, "CatOwner")
                 .constructor<>()
                 .property("my_cats", &CatOwner::my_cats)
                 .build();
@@ -96,14 +96,14 @@ public:
         test("cpp_populate_script_access", [this]() {
             auto eng = engine::make();
 
-            class_builder<Cat>(*eng, "Cat")
+            dynamic_binder<Cat>(*eng, "Cat")
                 .constructor<>()
                 .constructor<std::string>()
                 .method("meow_name", &Cat::meow_name)
                 .property("name", &Cat::name)
                 .build();
 
-            class_builder<CatOwner>(*eng, "CatOwner")
+            dynamic_binder<CatOwner>(*eng, "CatOwner")
                 .constructor<>()
                 .property("my_cats", &CatOwner::my_cats)
                 .build();
@@ -127,14 +127,14 @@ public:
         test("script_populate_and_access", [this]() {
             auto eng = engine::make();
 
-            class_builder<Cat>(*eng, "Cat")
+            dynamic_binder<Cat>(*eng, "Cat")
                 .constructor<>()
                 .constructor<std::string>()
                 .method("meow_name", &Cat::meow_name)
                 .property("name", &Cat::name)
                 .build();
 
-            class_builder<CatOwner>(*eng, "CatOwner")
+            dynamic_binder<CatOwner>(*eng, "CatOwner")
                 .constructor<>()
                 .property("my_cats", &CatOwner::my_cats)
                 .build();

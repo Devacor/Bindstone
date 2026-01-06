@@ -5,8 +5,8 @@
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
-#include <jaiscript/core/class_builder.hpp>
-#include <jaiscript/core/class_builder_serialization.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/dynamic_binder_serialization.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai;
@@ -1081,10 +1081,10 @@ public:
             check_eq(loaded.area, 0);
         });
 
-        // ===== CLASS_BUILDER POST-DESERIALIZE TESTS =====
+        // ===== dynamic_binder POST-DESERIALIZE TESTS =====
 
-        test("class_builder_post_deserialize_with_version", [&]() {
-            // Test that class_builder registered classes can use post_deserialize hook with version
+        test("dynamic_binder_post_deserialize_with_version", [&]() {
+            // Test that dynamic_binder registered classes can use post_deserialize hook with version
             auto eng = engine::make();
 
             // Define a simple C++ class
@@ -1095,9 +1095,9 @@ public:
                 int version_loaded = 0;
             };
 
-            // Register with class_builder and add post_deserialize hook
+            // Register with dynamic_binder and add post_deserialize hook
             // Note: No explicit .constructor<>() - auto-registration should handle it
-            class_builder<Rectangle>(*eng, "Rectangle")
+            dynamic_binder<Rectangle>(*eng, "Rectangle")
                 .property("width", &Rectangle::width)
                 .property("height", &Rectangle::height)
                 .post_deserialize_hook([](Rectangle& self, int version) {
@@ -1325,7 +1325,7 @@ public:
             resource_manager new_mgr("assets/data", 99);
 
             // Deserialize using context-based construction
-            // Note: This demonstrates how context injection would work with class_builder
+            // Note: This demonstrates how context injection would work with dynamic_binder
             // For property_manager, we deserialize and then manually inject dependencies
             serialization::json_archive_reader json_reader(json, eng.get());
 

@@ -2,7 +2,7 @@
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <cmath>
 
 namespace jai {
@@ -373,7 +373,7 @@ namespace stdlib {
     // Register vector types with an engine
     inline void register_vector_types(engine& eng_ref) {
         // Vec2
-        class_builder<Vec2>(eng_ref, "Vec2")
+        dynamic_binder<Vec2>(eng_ref, "Vec2")
             .constructor<>()
             .constructor<double, double>()
             .property("x", &Vec2::x)
@@ -429,7 +429,7 @@ namespace stdlib {
             .build();
 
         // Vec3
-        class_builder<Vec3>(eng_ref, "Vec3")
+        dynamic_binder<Vec3>(eng_ref, "Vec3")
             .constructor<>()
             .constructor<double, double, double>()
             .property("x", &Vec3::x)

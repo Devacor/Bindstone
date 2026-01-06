@@ -1,8 +1,8 @@
 #pragma once
 
-#ifndef __JAISCRIPT_CORE_CLASS_BUILDER_HPP__
-#define __JAISCRIPT_CORE_CLASS_BUILDER_HPP__
-#define JAISCRIPT_CLASS_BUILDER_HPP_INCLUDED
+#ifndef __JAISCRIPT_CORE_dynamic_binder_HPP__
+#define __JAISCRIPT_CORE_dynamic_binder_HPP__
+#define JAISCRIPT_dynamic_binder_HPP_INCLUDED
 
 #include "engine.hpp"
 #include "value.hpp"
@@ -943,7 +943,7 @@ public:
         return unwrap_function_(wrapper_value, engine_);
     }
 
-    // Set the unwrap function (called by class_builder::transparent_wrapper)
+    // Set the unwrap function (called by dynamic_binder::transparent_wrapper)
     void set_unwrap_function(std::function<script_value(script_value&, engine*)> fn) {
         is_transparent_wrapper_ = true;
         unwrap_function_ = std::move(fn);
@@ -1521,7 +1521,7 @@ concept has_engine_constructor = requires(engine* eng) {
 };
 
 // Detail namespace for factory registration helpers
-namespace class_builder_detail {
+namespace dynamic_binder_detail {
     using namespace serialization;
 
     // Helper to create wrapped script_value from C++ object
@@ -1564,7 +1564,7 @@ namespace class_builder_detail {
 
     // Forward declarations for context-based deserialization factories
     // These functions require archive_reader to be fully defined before instantiation.
-    // Implementations are provided in class_builder_serialization.hpp which should be
+    // Implementations are provided in dynamic_binder_serialization.hpp which should be
     // included explicitly by code that uses these context-based factories.
     template<typename T, typename ContextType, typename FactoryFunc>
     std::function<script_value(serialization::archive_reader&, uint32_t)>
@@ -1581,7 +1581,7 @@ namespace class_builder_detail {
 struct skip_type_check_t {};
 inline constexpr skip_type_check_t skip_type_check{};
 
-namespace class_builder_validation {
+namespace dynamic_binder_validation {
     // Helper to detect if a type is a standard container
     template<typename T>
     struct is_std_container : std::false_type {};
@@ -1640,7 +1640,7 @@ namespace class_builder_validation {
     using get_validation_type_t = typename get_validation_type<T>::type;
 
     // Helper to determine if a type needs registration validation
-    // Returns true for types that should be registered with class_builder
+    // Returns true for types that should be registered with dynamic_binder
     // Returns false for primitives, std::string, STL containers, and script_value
     // IMPORTANT: Smart pointers are unwrapped - we validate the inner type
     template<typename T>
@@ -1653,7 +1653,49 @@ namespace class_builder_validation {
                !std::is_same_v<inner_type, script_value> &&
                std::is_class_v<inner_type>;
     }
+
 }
+
+// ============================================================================
+// detail namespace - Implementation helpers (already inside namespace jai)
+// ============================================================================
+
+namespace detail {
+    // ============================================================================
+    // extract_cpp_object_ptr<T> - Extract C++ object from class_instance or cpp_bound
+    // ============================================================================
+    //
+    // This helper extracts a raw T* pointer from a script_value that represents
+    // a C++ object. Handles two cases:
+    //   1. class_instance wrapper: extracts via get_field(cpp_object_field_id)
+    //   2. cpp_bound value: extracts directly from cpp_bound_ptr_
+    //
+    // Used by dynamic_binder method handlers to support method chaining where
+    // methods return T& (creating cpp_bound values) that are then used as 'this'
+    // for subsequent method calls.
+    //
+    template<typename T>
+    T* extract_cpp_object_ptr(const script_value& val) {
+        // Case 1: Non-owning cpp_bound reference (from T& return)
+        if (val.is_cpp_bound()) {
+            T* ptr = val.get_cpp_bound_as<T>();
+            if (ptr) return ptr;
+            // If cpp_bound but wrong type, fall through to try class_instance path
+        }
+
+        // Case 2: class_instance wrapper (normal constructed object)
+        auto instance = val.as<std::shared_ptr<class_instance>>();
+        auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
+
+        // The cpp_object field could also be cpp_bound or a shared_ptr
+        if (cpp_obj_value.is_cpp_bound()) {
+            return cpp_obj_value.get_cpp_bound_as<T>();
+        }
+
+        auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+        return cpp_obj.get();
+    }
+} // namespace detail
 
 // ============================================================================
 // Bind Mode for auto_build()
@@ -1707,13 +1749,23 @@ concept has_base_types = requires {
     typename T::_jai_base_types;
 };
 
+// Forward declaration for jai_auto_bind detection
+template<typename U> class dynamic_binder;
+
+// Detect if T has static jai_auto_bind(dynamic_binder<T>&) method
+// This allows classes to register their own private members during auto_bind()
+template<typename T>
+concept has_jai_auto_bind = requires(dynamic_binder<T>& builder) {
+    { T::jai_auto_bind(builder) } -> std::same_as<void>;
+};
+
 } // namespace auto_bind_concepts
 
 // Builder pattern for registering C++ classes to JaiScript
 template<typename T>
-class class_builder {
+class dynamic_binder {
 public:
-    class_builder(engine& engine, const std::string& class_name)
+    dynamic_binder(engine& engine, const std::string& class_name)
         : engine_(engine), class_name_(class_name) {
         // Extract base template name if this is a templated type
         std::string baseTemplateName = extract_base_template_name(class_name);
@@ -1734,24 +1786,24 @@ public:
     }
     
     // Constructor that accepts a shared_ptr<engine>
-    class_builder(std::shared_ptr<engine>& engine_ptr, const std::string& class_name)
-        : class_builder(*engine_ptr, class_name) {
+    dynamic_binder(std::shared_ptr<engine>& engine_ptr, const std::string& class_name)
+        : dynamic_binder(*engine_ptr, class_name) {
     }
 
     // Destructor - automatically call build() if not already called
     // This ensures the class is registered even if the user forgets to call build()
-    ~class_builder() {
+    ~dynamic_binder() {
         if (!built_) {
             build();
         }
     }
 
     // Disable copy (would cause double-build issues)
-    class_builder(const class_builder&) = delete;
-    class_builder& operator=(const class_builder&) = delete;
+    dynamic_binder(const dynamic_binder&) = delete;
+    dynamic_binder& operator=(const dynamic_binder&) = delete;
 
     // Enable move
-    class_builder(class_builder&& other) noexcept
+    dynamic_binder(dynamic_binder&& other) noexcept
         : engine_(other.engine_)
         , class_name_(std::move(other.class_name_))
         , class_def_(std::move(other.class_def_))
@@ -1767,7 +1819,7 @@ public:
 
     // Add constructor
     template<typename... Args>
-    class_builder& constructor() {
+    dynamic_binder& constructor() {
         has_explicit_constructor_ = true;  // Track that user explicitly registered a constructor
 
         // Register the constructor as an overloaded function
@@ -1808,7 +1860,7 @@ public:
             // Helper to avoid template parameter pack in lambda (MSVC workaround)
             using constructor_helper = std::shared_ptr<T>(*)(const std::vector<script_value>&, engine*);
             constructor_helper helper = [](const std::vector<script_value>& args, engine* eng) -> std::shared_ptr<T> {
-                return class_builder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, eng);
+                return dynamic_binder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, eng);
             };
 
             engine_.add_overloaded_function(class_name_, sizeof...(Args), [class_def = class_def_, class_name = class_name_, engine_ptr, helper](const std::vector<script_value>& args) -> script_value {
@@ -1835,7 +1887,7 @@ public:
     
     // Add method binding - member function pointer version
     template<typename R, typename... Args>
-    class_builder& method(const std::string& name, R(T::*method)(Args...)) {
+    dynamic_binder& method(const std::string& name, R(T::*method)(Args...)) {
         auto method_func = [method, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
@@ -1843,24 +1895,21 @@ public:
             
             // Validate argument count (first arg is 'this', so we need sizeof...(Args) + 1 total)
             if (args.size() != sizeof...(Args) + 1) {
-                throw runtime_error("Method expects " + std::to_string(sizeof...(Args)) + 
+                throw runtime_error("Method expects " + std::to_string(sizeof...(Args)) +
                                  " arguments, got " + std::to_string(args.size() - 1));
             }
-            
-            // Extract the class_instance from the first argument (this)
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            
-            // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
+
+            // Extract the C++ object from the first argument (this)
+            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+
             // Call the method with unpacked arguments
             if (auto eng = engine_ptr) {
-                return class_builder<T>::callMethodImpl(cpp_obj.get(), method, args, std::index_sequence_for<Args...>{}, eng);
+                return dynamic_binder<T>::callMethodImpl(cpp_obj, method, args, std::index_sequence_for<Args...>{}, eng);
             }
             throw runtime_error("Engine no longer exists");
         };
-        
+
         // Add method to the class definition (for object.method() calls)
         // Methods are stored per-class and accessed through the object instance
         class_def_->add_method(name, method_func, sizeof...(Args));
@@ -1870,28 +1919,25 @@ public:
 
     // Add const method binding
     template<typename R, typename... Args>
-    class_builder& method(const std::string& name, R(T::*method)(Args...) const) {
+    dynamic_binder& method(const std::string& name, R(T::*method)(Args...) const) {
         auto method_func = [method, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
             }
-            
+
             // Validate argument count (first arg is 'this', so we need sizeof...(Args) + 1 total)
             if (args.size() != sizeof...(Args) + 1) {
-                throw runtime_error("Method expects " + std::to_string(sizeof...(Args)) + 
+                throw runtime_error("Method expects " + std::to_string(sizeof...(Args)) +
                                  " arguments, got " + std::to_string(args.size() - 1));
             }
-            
-            // Extract the class_instance from the first argument (this)
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            
-            // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
+
+            // Extract the C++ object from the first argument (this)
+            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+
             // Call the method with unpacked arguments
             if (engine_ptr) {
-                return class_builder<T>::callConstMethodImpl(cpp_obj.get(), method, args, std::index_sequence_for<Args...>{}, engine_ptr);
+                return dynamic_binder<T>::callConstMethodImpl(cpp_obj, method, args, std::index_sequence_for<Args...>{}, engine_ptr);
             }
             throw runtime_error("Engine no longer exists");
         };
@@ -1907,7 +1953,11 @@ public:
     // Supports: .method("setText", [](Button& self, const std::string& text) { self.setText(text); })
     // Note: First parameter can be a reference to self for accessing the object
     template<typename Callable>
-    class_builder& method(const std::string& name, Callable&& callable) {
+    dynamic_binder& method(const std::string& name, Callable&& callable) {
+        // Detect accidental use of member data pointers - use property() instead
+        static_assert(!std::is_member_object_pointer_v<std::decay_t<Callable>>,
+            "Member data pointers cannot be passed to method(). Use property() instead.");
+
         // Use function_traits to determine the signature
         using traits = detail::function_traits<std::decay_t<Callable>>;
         using args_tuple = typename traits::argument_types;
@@ -1928,19 +1978,18 @@ public:
                 
                 // Expected argument count is arity - 1 (excluding self) + 1 (for 'this')
                 if (args.size() != traits::arity) {
-                    throw runtime_error("Method expects " + std::to_string(traits::arity - 1) + 
+                    throw runtime_error("Method expects " + std::to_string(traits::arity - 1) +
                                      " arguments, got " + std::to_string(args.size() - 1));
                 }
-                
-                // Extract the C++ object from the class_instance
-                auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-                
+
+                // Extract the C++ object from the first argument (this)
+                // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+
                 // Call the lambda with the C++ object as first argument and remaining args
                 if (auto eng = engine_ptr) {
                     return callLambdaWithSelf<typename traits::return_type, args_tuple>(
-                        callable, cpp_obj.get(), args, std::make_index_sequence<traits::arity>{}, eng);
+                        callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, eng);
                 }
                 throw runtime_error("Engine no longer exists");
             } else {
@@ -1969,7 +2018,7 @@ public:
     
     // Add static method binding - for regular function pointers
     template<typename R, typename... Args>
-    class_builder& static_method(const std::string& name, R(*func)(Args...)) {
+    dynamic_binder& static_method(const std::string& name, R(*func)(Args...)) {
         auto static_method_func = [func, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             // Validate argument count (no 'this' for static methods)
             if (args.size() != sizeof...(Args)) {
@@ -2003,7 +2052,11 @@ public:
     
     // Add static method binding - for lambdas and callables
     template<typename Callable>
-    class_builder& static_method(const std::string& name, Callable&& callable) {
+    dynamic_binder& static_method(const std::string& name, Callable&& callable) {
+        // Detect accidental use of member pointers
+        static_assert(!std::is_member_pointer_v<std::decay_t<Callable>>,
+            "Member pointers cannot be passed to static_method(). Use method() or property() instead.");
+
         using traits = detail::function_traits<std::decay_t<Callable>>;
         
         auto static_method_func = [callable = std::forward<Callable>(callable), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
@@ -2040,7 +2093,7 @@ public:
 
     // Add custom serialization constructor for non-default constructible types
     template<typename constructor_func>
-    class_builder& serialize_construct(constructor_func&& constructor) {
+    dynamic_binder& serialize_construct(constructor_func&& constructor) {
         // Store the custom constructor in the class definition
         class_def_->add_method("_serialize_construct", [constructor = std::forward<constructor_func>(constructor), class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
@@ -2077,35 +2130,35 @@ public:
     }
     
     // Set class version
-    class_builder& version(uint32_t v) {
+    dynamic_binder& version(uint32_t v) {
         serialization_metadata_.current_version = v;
         return *this;
     }
 
     // Add property/field binding (with automatic registration validation)
     template<typename P>
-    class_builder& property(const std::string& name, P T::*member) {
+    dynamic_binder& property(const std::string& name, P T::*member) {
         return property_impl<P>(name, member, false);
     }
 
     // Add property/field binding (opt-out of registration validation)
     // Use this to explicitly acknowledge circular dependencies
     template<typename P>
-    class_builder& property(const std::string& name, P T::*member, skip_type_check_t) {
+    dynamic_binder& property(const std::string& name, P T::*member, skip_type_check_t) {
         return property_impl<P>(name, member, true);
     }
 
 private:
     // Internal implementation for property registration with validation
     template<typename P>
-    class_builder& property_impl(const std::string& name, P T::*member, bool skip_validation) {
+    dynamic_binder& property_impl(const std::string& name, P T::*member, bool skip_validation) {
         // Validate that property type is registered (unless explicitly skipped)
-        if constexpr (class_builder_validation::needs_registration_check<P>()) {
+        if constexpr (dynamic_binder_validation::needs_registration_check<P>()) {
             if (!skip_validation) {
                 // Extract the validation type (unwraps smart pointers)
-                using validation_type_t = typename class_builder_validation::get_validation_type<P>::type;
+                using validation_type_t = typename dynamic_binder_validation::get_validation_type<P>::type;
 
-                // Check if this type has been registered with class_builder
+                // Check if this type has been registered with dynamic_binder
                 // We use std::type_index to identify types, just like the rest of the codebase
                 auto prop_type_index = std::type_index(typeid(validation_type_t));
                 auto registered_class = engine_.get_class_definition_by_type(prop_type_index);
@@ -2114,7 +2167,7 @@ private:
                     throw std::runtime_error(
                         "Property '" + name + "' of class '" + class_name_ + "' uses unregistered type '" +
                         typeid(P).name() + "'. " +
-                        "You must register this type with class_builder before registering '" + class_name_ + "', " +
+                        "You must register this type with dynamic_binder before registering '" + class_name_ + "', " +
                         "or use skip_type_check to explicitly acknowledge circular dependencies:\n" +
                         "  .property(\"" + name + "\", &" + class_name_ + "::" + name + ", jai::skip_type_check)"
                     );
@@ -2138,48 +2191,42 @@ private:
             if (args.empty()) {
                 throw runtime_error("Property getter called without 'this' object");
             }
-            
-            // Extract the class_instance from the first argument (this)
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            
-            // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
-			if (auto eng = engine_ptr) {
-				// Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
-				if constexpr (is_specialization_v<P, std::vector>) {
-					using element_type = typename P::value_type;
-					// Create bound_cpp_vector wrapper that references the C++ vector directly
-					auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
-						cpp_obj.get()->*member, eng);
-					return eng->make_object(wrapper);
-				}
-				else {
-					return detail::value_converter<P>::to(cpp_obj.get()->*member, eng);
-				}
-			}
+
+            // Extract the C++ object from the first argument (this)
+            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+
+            if (auto eng = engine_ptr) {
+                // Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
+                if constexpr (is_specialization_v<P, std::vector>) {
+                    using element_type = typename P::value_type;
+                    // Create bound_cpp_vector wrapper that references the C++ vector directly
+                    auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
+                        cpp_obj->*member, eng);
+                    return eng->make_object(wrapper);
+                }
+                else {
+                    return detail::value_converter<P>::to(cpp_obj->*member, eng);
+                }
+            }
             throw runtime_error("Engine no longer exists");
         });
-        
+
         class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.size() < 2) {
                 throw runtime_error("Property setter requires 'this' and value");
             }
 
-            // Extract the class_instance from the first argument (this)
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-
-            // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+            // Extract the C++ object from the first argument (this)
+            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
             // Special case: if P is script_value, don't convert
             if constexpr (std::is_same_v<P, script_value>) {
                 // deref() returns *this if not a reference, so this handles both cases
-                (cpp_obj.get()->*member).deref() = args[1].clone();
+                (cpp_obj->*member).deref() = args[1].clone();
             } else {
-                cpp_obj.get()->*member = args[1].as<P>();
+                cpp_obj->*member = args[1].as<P>();
             }
             return script_value(std::monostate{}, engine_ptr); // null
         });
@@ -2188,54 +2235,6 @@ private:
         uint64_t field_id = engine_.symbolize(name);
         uint64_t setter_id = engine_.symbolize("_set_" + name);
         class_def_->register_property_setter(field_id, setter_id);
-
-        // Also add traditional getter/setter methods for compatibility
-        std::string getterName = "get" + name;
-        getterName[3] = std::toupper(getterName[3]); // Capitalize first letter
-        
-        class_def_->add_method(getterName, [member, class_name = class_name_, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (args.empty()) {
-                throw runtime_error("Getter called without 'this' object");
-            }
-            
-            // Extract the class_instance from the first argument (this)
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            
-            // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
-            if (auto eng = engine_ptr) {
-                return detail::value_converter<P>::to(cpp_obj.get()->*member, eng);
-            }
-            throw runtime_error("Engine no longer exists");
-        });
-        
-        // Add setter
-        std::string setterName = "set" + name;
-        setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
-        
-        class_def_->add_method(setterName, [member, class_name = class_name_, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (args.size() < 2) {
-                throw runtime_error("Setter requires 'this' and value");
-            }
-            
-            // Extract the class_instance from the first argument (this)
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            
-            // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
-            // Special case: if P is script_value, don't convert
-            if constexpr (std::is_same_v<P, script_value>) {
-                // deref() returns *this if not a reference, so this handles both cases
-                (cpp_obj.get()->*member).deref() = args[1].clone();
-            } else {
-                cpp_obj.get()->*member = args[1].as<P>();
-            }
-            return script_value(std::monostate{}, engine_ptr); // null
-        });
 
         // Register bound_cpp_vector<T> if this property is a std::vector
         if constexpr (is_specialization_v<P, std::vector>) {
@@ -2246,7 +2245,7 @@ private:
             auto existing = engine_.get_class_definition_by_type(std::type_index(typeid(bound_cpp_vector<element_type>)));
             if (!existing) {
                 // Register bound_cpp_vector<element_type> with array-like methods
-                class_builder<bound_cpp_vector<element_type>>(engine_, wrapper_type_name)
+                dynamic_binder<bound_cpp_vector<element_type>>(engine_, wrapper_type_name)
                     .method("size", &bound_cpp_vector<element_type>::size)
                     .method("empty", &bound_cpp_vector<element_type>::empty)
                     .method("clear", &bound_cpp_vector<element_type>::clear)
@@ -2268,7 +2267,7 @@ private:
 public:
     // Add property with getter/setter (supports both lambdas and member function pointers)
     template<typename Getter, typename Setter>
-    class_builder& property(const std::string& name, Getter&& getter, Setter&& setter) {
+    dynamic_binder& property(const std::string& name, Getter&& getter, Setter&& setter) {
         // Register the property as a field
         class_def_->add_field(name, script_value(std::monostate{}, &engine_)); // Register field name
 
@@ -2298,18 +2297,15 @@ public:
                 throw runtime_error("Property getter called without 'this' object");
             }
 
-            // Extract the class_instance from the first argument (this)
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-
-            // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+            // Extract the C++ object from the first argument (this)
+            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
             // Check if getter is a member function pointer
             if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
                 // Call member function pointer: (obj->*getter)()
                 if (auto eng = engine_ptr) {
-                    return detail::value_converter<decltype((cpp_obj.get()->*getter)())>::to((cpp_obj.get()->*getter)(), eng);
+                    return detail::value_converter<decltype((cpp_obj->*getter)())>::to((cpp_obj->*getter)(), eng);
                 }
                 throw runtime_error("Engine no longer exists");
             } else {
@@ -2320,7 +2316,7 @@ public:
                 throw runtime_error("Engine no longer exists");
             }
         });
-        
+
         // Add setter method - use different implementations based on setter type
         if constexpr (std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>) {
             // Readonly property - add a no-op setter
@@ -2334,14 +2330,15 @@ public:
                 if (args.size() < 2) {
                     throw runtime_error("Property setter requires 'this' and value");
                 }
-                auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+
+                // Extract the C++ object from the first argument (this)
+                // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
                 using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
                 auto value = args[1].as<value_type>();
-                (cpp_obj.get()->*setter)(value);
+                (cpp_obj->*setter)(value);
                 return script_value(std::monostate{}, engine_ptr);
             });
         } else {
@@ -2350,9 +2347,10 @@ public:
                 if (args.size() < 2) {
                     throw runtime_error("Property setter requires 'this' and value");
                 }
-                auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+
+                // Extract the C++ object from the first argument (this)
+                // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
                 using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
@@ -2367,83 +2365,12 @@ public:
         uint64_t setter_id = engine_.symbolize("_set_" + name);
         class_def_->register_property_setter(field_id, setter_id);
 
-        // Also add traditional getter/setter methods for compatibility
-        std::string getterName = "get" + name;
-        getterName[3] = std::toupper(getterName[3]); // Capitalize first letter
-
-        class_def_->add_method(getterName, [getter = std::forward<Getter>(getter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (args.empty()) {
-                throw runtime_error("Getter called without 'this' object");
-            }
-
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-
-            // Check if getter is a member function pointer
-            if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
-                if (auto eng = engine_ptr) {
-                    return detail::value_converter<decltype((cpp_obj.get()->*getter)())>::to((cpp_obj.get()->*getter)(), eng);
-                }
-                throw runtime_error("Engine no longer exists");
-            } else {
-                if (auto eng = engine_ptr) {
-                    return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), eng);
-                }
-                throw runtime_error("Engine no longer exists");
-            }
-        });
-
-        // Add setter - use different implementations based on setter type
-        std::string setterName = "set" + name;
-        setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
-
-        if constexpr (std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>) {
-            // Read-only property - throw error when trying to set
-            class_def_->add_method(setterName, [prop_name = name, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-                throw runtime_error("Property '" + prop_name + "' is read-only");
-                return script_value(std::monostate{}, engine_ptr);
-            });
-        } else if constexpr (std::is_member_function_pointer_v<std::decay_t<Setter>>) {
-            // Member function pointer setter
-            class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-                if (args.size() < 2) {
-                    throw runtime_error("Setter requires 'this' and value");
-                }
-                auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-
-                using setter_traits = detail::function_traits<std::decay_t<Setter>>;
-                using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
-                auto value = args[1].as<value_type>();
-                (cpp_obj.get()->*setter)(value);
-                return script_value(std::monostate{}, engine_ptr);
-            });
-        } else {
-            // Lambda setter
-            class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-                if (args.size() < 2) {
-                    throw runtime_error("Setter requires 'this' and value");
-                }
-                auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
-                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-
-                using setter_traits = detail::function_traits<std::decay_t<Setter>>;
-                using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
-                auto value = args[1].as<value_type>();
-                setter(*cpp_obj, value);
-                return script_value(std::monostate{}, engine_ptr);
-            });
-        }
-        
         return *this;
     }
     
     // Add static property binding - for simple variable access
     template<typename P>
-    class_builder& static_property(const std::string& name, P* static_var) {
+    dynamic_binder& static_property(const std::string& name, P* static_var) {
         // Convert name to ID
         uint64_t name_id = engine_.symbolize(name);
 
@@ -2460,30 +2387,12 @@ public:
             throw runtime_error("Engine no longer exists");
         });
 
-        // Add setter method for write access
-        std::string setterName = "set" + name;
-        setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
-        uint64_t setter_id = engine_.symbolize(setterName);
-
-        class_def_->add_static_method(setter_id, [static_var, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (args.size() != 1) {
-                throw runtime_error("Static property setter requires exactly one argument");
-            }
-            
-            *static_var = args[0].as<P>();
-            
-            if (auto eng = engine_ptr) {
-                return script_value(std::monostate{}, eng);
-            }
-            throw runtime_error("Engine no longer exists");
-        });
-        
         return *this;
     }
     
     // Add static property with lambda getter/setter
     template<typename Getter, typename Setter>
-    class_builder& static_property(const std::string& name, Getter&& getter, Setter&& setter) {
+    dynamic_binder& static_property(const std::string& name, Getter&& getter, Setter&& setter) {
         // Add getter method
         std::string getter_name = "_get_" + name;
         uint64_t getter_id = engine_.symbolize(getter_name);
@@ -2494,28 +2403,10 @@ public:
             throw runtime_error("Engine no longer exists");
         });
 
-        // Add setter method
-        std::string setterName = "set" + name;
-        setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
-        uint64_t setter_id = engine_.symbolize(setterName);
+        // Note: setter parameter kept for API compatibility but not registered as setX()
+        // Static property assignment uses set_static_field() directly in the interpreter
+        (void)setter;  // Suppress unused warning
 
-        class_def_->add_static_method(setter_id, [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (args.size() != 1) {
-                throw runtime_error("Static property setter requires exactly one argument");
-            }
-            
-            using setter_traits = detail::function_traits<std::decay_t<Setter>>;
-            using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
-            auto value = args[0].as<value_type>();
-            
-            setter(value);
-            
-            if (auto eng = engine_ptr) {
-                return script_value(std::monostate{}, eng);
-            }
-            throw runtime_error("Engine no longer exists");
-        });
-        
         return *this;
     }
     
@@ -2525,7 +2416,7 @@ public:
     // 2. Polymorphic copy support
     // Can be chained: .base_class<A>().base_class<B>() for multiple inheritance
     template<typename Base>
-    class_builder& base_class() {
+    dynamic_binder& base_class() {
         static_assert(std::is_base_of_v<Base, T>,
                       "Specified type is not a base class of this class");
 
@@ -2551,7 +2442,7 @@ public:
     
     // Add explicit type conversion support - general purpose
     template<typename From, typename To>
-    class_builder& add_type_conversion(std::function<To(const From&)> converter) {
+    dynamic_binder& add_type_conversion(std::function<To(const From&)> converter) {
         // Register the conversion with the engine
         // This would need to be implemented in the engine's type system
         // Usage: .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Button>>([](const auto& item) { return item.self(); })
@@ -2567,7 +2458,7 @@ public:
     // 2. Context-only: [](ContextType* ctx) -> std::shared_ptr<T>
     // 3. Context + archive: [](ContextType* ctx, serialization::archive_reader& archive) -> std::shared_ptr<T>
     template<typename ContextType = void, typename FactoryFunc>
-    class_builder& deserialization_factory(FactoryFunc&& factory) {
+    dynamic_binder& deserialization_factory(FactoryFunc&& factory) {
         using namespace serialization;
 
         // Detect factory signature using function traits
@@ -2583,12 +2474,12 @@ public:
             if constexpr (std::is_same_v<std::decay_t<arg0_type>, serialization::archive_reader>) {
                 // Archive-only factory: [](serialization::archive_reader& archive) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
-                    class_builder_detail::make_archive_only_factory<T>(
+                    dynamic_binder_detail::make_archive_only_factory<T>(
                         std::forward<FactoryFunc>(factory), class_name_, &engine_);
             } else if constexpr (!std::is_void_v<ContextType>) {
                 // Context-only factory: [](ContextType* ctx) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
-                    class_builder_detail::make_context_only_factory<T, ContextType>(
+                    dynamic_binder_detail::make_context_only_factory<T, ContextType>(
                         std::forward<FactoryFunc>(factory), class_name_, &engine_);
             } else {
                 // Context-only factory requires ContextType to be specified
@@ -2600,7 +2491,7 @@ public:
             if constexpr (!std::is_void_v<ContextType>) {
                 // Context + archive factory: [](ContextType* ctx, serialization::archive_reader& archive) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
-                    class_builder_detail::make_context_archive_factory<T, ContextType>(
+                    dynamic_binder_detail::make_context_archive_factory<T, ContextType>(
                         std::forward<FactoryFunc>(factory), class_name_, &engine_);
             } else {
                 static_assert(!std::is_void_v<ContextType>,
@@ -2635,7 +2526,7 @@ public:
     //       }
     //   })
     template<typename Callable>
-    class_builder& post_deserialize_hook(Callable&& callable) {
+    dynamic_binder& post_deserialize_hook(Callable&& callable) {
         // Register as a regular method named "post_deserialize"
         return method("post_deserialize", std::forward<Callable>(callable));
     }
@@ -2657,13 +2548,13 @@ public:
     // a script_value containing the underlying value.
     //
     // Usage:
-    //   class_builder<observable_property<int>>(eng, "observable_int")
+    //   dynamic_binder<observable_property<int>>(eng, "observable_int")
     //       .transparent_wrapper([](observable_property<int>& self) { return self.get(); })
     //       .method("on_change", ...)
     //       .build();
     //
     template<typename UnwrapFn>
-    class_builder& transparent_wrapper(UnwrapFn&& unwrap_fn) {
+    dynamic_binder& transparent_wrapper(UnwrapFn&& unwrap_fn) {
         engine* eng = &engine_;
 
         // Create the unwrap function that works with script_value
@@ -2708,17 +2599,17 @@ public:
     // ============================================================================
     //
     // Usage:
-    //   class_builder<Player>(eng, "Player")
+    //   dynamic_binder<Player>(eng, "Player")
     //       .auto_bind()                       // Applies base classes + common methods
     //       .method("custom", &Player::custom); // Add more custom bindings
     //
-    //   class_builder<Player>(eng, "Player")
+    //   dynamic_binder<Player>(eng, "Player")
     //       .auto_bind(bind_mode::hierarchy);  // Just base classes, no auto methods
     //
-    class_builder& auto_bind(bind_mode mode = bind_mode::all) {
+    dynamic_binder& auto_bind(bind_mode mode = bind_mode::all) {
         // Apply base classes from _jai_base_types if present
         if constexpr (auto_bind_concepts::has_base_types<T>) {
-            apply_base_classes_from_tuple(typename T::_jai_base_types{});
+            apply_base_classes_from_tuple(std::type_identity<typename T::_jai_base_types>{});
         }
 
         // Bind properties from type_registry if T is a property_owner
@@ -2741,6 +2632,11 @@ public:
                 method("==", [](const T& a, const T& b) -> bool { return a == b; });
                 method("!=", [](const T& a, const T& b) -> bool { return !(a == b); });
             }
+        }
+
+        // Call T::jai_auto_bind(*this) if it exists - allows classes to register private members
+        if constexpr (auto_bind_concepts::has_jai_auto_bind<T>) {
+            T::jai_auto_bind(*this);
         }
 
         return *this;
@@ -2922,7 +2818,7 @@ private:
         }
 
         // Register the wrapper type
-        class_builder<RefType>(engine_, type_name)
+        dynamic_binder<RefType>(engine_, type_name)
             // Transparent wrapper - unwraps to the value type for arithmetic, etc.
             .transparent_wrapper([](RefType& self) -> ValueT {
                 return self.get();
@@ -3091,9 +2987,9 @@ public:
         }
         
         engine_.add_class<T>(class_name_, class_def_);
-        
-        // Register serialization metadata with the engine's registry
-        engine_.get_serialization_registry().register_class(class_name_, serialization_metadata_);
+
+        // Register serialization metadata with the engine's registry (with type_index for runtime lookup)
+        engine_.get_serialization_registry().register_class(class_name_, std::type_index(typeid(T)), serialization_metadata_);
         
         
         // Register custom conversions for shared_ptr<T> to handle class_instance wrapping
@@ -3319,8 +3215,9 @@ private:
     // Helper to apply base classes for each type in a tuple
     // Collects all base definitions and sets them at once for efficiency
     // (single diamond check, single cache invalidation)
+    // Uses std::type_identity to avoid requiring default constructors on base classes
     template<typename... Bases>
-    void apply_base_classes_from_tuple(std::tuple<Bases...>) {
+    void apply_base_classes_from_tuple(std::type_identity<std::tuple<Bases...>>) {
         if constexpr (sizeof...(Bases) == 0) {
             return;  // No bases to register
         } else if constexpr (sizeof...(Bases) == 1) {
@@ -3818,4 +3715,4 @@ inline class_instance::~class_instance() {
 // Include script class after class_definition is complete
 #include "script_class.hpp"
 
-#endif // __JAISCRIPT_CORE_CLASS_BUILDER_HPP__
+#endif // __JAISCRIPT_CORE_dynamic_binder_HPP__

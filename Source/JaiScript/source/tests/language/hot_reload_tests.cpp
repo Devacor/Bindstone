@@ -1,7 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -998,8 +998,8 @@ public:
             
             // Always output performance metrics
             std::cerr << "\nHot reload performance comparison (1000 instances):" << std::endl;
-            std::cerr << "  Fields unchanged (optimized): " << duration_optimized << " μs" << std::endl;
-            std::cerr << "  Fields changed (full migration): " << duration_unoptimized << " μs" << std::endl;
+            std::cerr << "  Fields unchanged (optimized): " << duration_optimized << " uS" << std::endl;
+            std::cerr << "  Fields changed (full migration): " << duration_unoptimized << " uS" << std::endl;
             std::cerr << "  Speedup: " << std::fixed << std::setprecision(2) << speedup << "x" << std::endl;
             std::cerr << std::endl;
             
@@ -1160,8 +1160,8 @@ public:
             
             // Fingerprint optimization should make identical redefinition essentially free
             std::cerr << "\nFingerprint optimization results:" << std::endl;
-            std::cerr << "  Identical class redefinition: " << duration_identical << " μs" << std::endl;
-            std::cerr << "  Changed class redefinition: " << duration_changed << " μs" << std::endl;
+            std::cerr << "  Identical class redefinition: " << duration_identical << " uS" << std::endl;
+            std::cerr << "  Changed class redefinition: " << duration_changed << " uS" << std::endl;
             std::cerr << std::endl;
             
             // Identical should be at least as fast (with small tolerance for timing variance)

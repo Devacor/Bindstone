@@ -2,31 +2,31 @@
 
 // This header provides implementations for context-based deserialization factories.
 //
-// IMPORTANT: This header must be included AFTER both class_builder.hpp and archive.hpp
+// IMPORTANT: This header must be included AFTER both dynamic_binder.hpp and archive.hpp
 // to ensure archive_reader is fully defined before template instantiation.
 //
 // Usage pattern:
-//   #include <jaiscript/core/class_builder.hpp>
+//   #include <jaiscript/core/dynamic_binder.hpp>
 //   #include <jaiscript/serialization/archive.hpp>
-//   #include <jaiscript/core/class_builder_serialization.hpp>  // Include last
+//   #include <jaiscript/core/dynamic_binder_serialization.hpp>  // Include last
 //
 // These factories enable deserialization with user-provided context objects:
 //   - make_context_only_factory: Factory function receives only user context pointer
 //   - make_context_archive_factory: Factory function receives context pointer and archive reference
 
-#ifndef JAISCRIPT_CLASS_BUILDER_HPP_INCLUDED
-#error "class_builder.hpp must be included before class_builder_serialization.hpp"
+#ifndef JAISCRIPT_dynamic_binder_HPP_INCLUDED
+#error "dynamic_binder.hpp must be included before dynamic_binder_serialization.hpp"
 #endif
 
 #ifndef JAISCRIPT_ARCHIVE_HPP_INCLUDED
-#error "archive.hpp must be included before class_builder_serialization.hpp"
+#error "archive.hpp must be included before dynamic_binder_serialization.hpp"
 #endif
 
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/serialization/archive.hpp>
 
 namespace jai {
-namespace class_builder_detail {
+namespace dynamic_binder_detail {
 
     // Type-erased context extractor implementation
     using context_extractor_t = std::function<void*(serialization::archive_reader&, const std::string&)>;
@@ -88,5 +88,5 @@ namespace class_builder_detail {
         };
     }
 
-} // namespace class_builder_detail
+} // namespace dynamic_binder_detail
 } // namespace jai

@@ -2,7 +2,7 @@
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <iostream>
 #include <sstream>
 #include <format>
@@ -195,8 +195,8 @@ namespace stdlib {
     inline void register_io_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
         // Register the special control types
-        class_builder<skip_newline_t>(eng_ref, "skip_newline_t").build();
-        class_builder<skip_flush_t>(eng_ref, "skip_flush_t").build();
+        dynamic_binder<skip_newline_t>(eng_ref, "skip_newline_t").build();
+        dynamic_binder<skip_flush_t>(eng_ref, "skip_flush_t").build();
         
         // Create shared instances that can be used as singletons
         auto skip_newline_ptr = std::make_shared<skip_newline_t>();

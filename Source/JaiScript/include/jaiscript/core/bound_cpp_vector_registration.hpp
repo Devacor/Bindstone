@@ -4,7 +4,7 @@
 #define __JAISCRIPT_CORE_BOUND_CPP_VECTOR_REGISTRATION_HPP__
 
 #include "bound_cpp_vector.hpp"
-#include "class_builder.hpp"
+#include "dynamic_binder.hpp"
 #include <string>
 
 namespace jai {
@@ -24,7 +24,7 @@ class engine;
  */
 template<typename T>
 void register_bound_cpp_vector(engine& eng, const std::string& type_name) {
-    class_builder<bound_cpp_vector<T>>(eng, type_name)
+    dynamic_binder<bound_cpp_vector<T>>(eng, type_name)
         // Array-like methods
         .method("size", &bound_cpp_vector<T>::size)
         .method("empty", &bound_cpp_vector<T>::empty)

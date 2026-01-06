@@ -1,5 +1,5 @@
 #include "jaiscript/core/class_registry.hpp"
-#include "jaiscript/core/class_builder.hpp"
+#include "jaiscript/core/dynamic_binder.hpp"
 #include <stdexcept>
 #include <set>
 

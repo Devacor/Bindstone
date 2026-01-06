@@ -94,10 +94,10 @@ public:
             }
         } else {
             // Custom object type - this should not be used directly
-            // Custom objects should be registered via class_builder and created via engine->make_object<T>()
+            // Custom objects should be registered via dynamic_binder and created via engine->make_object<T>()
             // If you're seeing this error, register your type first!
             throw runtime_error("Cannot create script_value for unregistered custom type in bound_array. "
-                              "Use class_builder<T> to register the type first, then create objects via engine->make_object<T>()");
+                              "Use dynamic_binder<T> to register the type first, then create objects via engine->make_object<T>()");
         }
     }
     

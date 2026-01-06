@@ -14,11 +14,18 @@
 // Forward declarations to avoid circular dependencies
 namespace jai {
     class engine;
-    
+
     // Helper function to convert custom types using engine's conversion registry
     // Implementation in engine_impl.hpp
     template<typename T>
     script_value convert_custom_type_with_registry(const T& t, engine* eng);
+
+    // Helper function to convert C++ reference to script_value
+    // For registered types, creates non-owning reference via make_cpp_bound
+    // For unregistered types, falls back to copy semantics
+    // Implementation in engine_impl.hpp
+    template<typename T>
+    script_value convert_reference_with_registry(T& t, engine* eng);
 }
 #include <type_traits>
 #include <typeinfo>
@@ -33,9 +40,15 @@ class engine;
     namespace detail {
         
         // Helper to convert C++ types to/from value
+        // Note: This generic template only works for copyable types.
+        // Non-copyable types should be handled via shared_ptr<T> specialization or T& references.
         template<typename T>
         struct value_converter {
-            static T from(const script_value& v, engine* eng) {
+            // from() only exists for copy-constructible types (uses requires clause)
+            // For non-copyable types, use shared_ptr<T> or T& reference conversions
+            static T from(const script_value& v, engine* eng)
+                requires std::is_copy_constructible_v<T> || is_specialization_v<T, std::vector> || is_specialization_v<T, std::map>
+            {
                 // Handle containers explicitly to avoid infinite recursion
                 if constexpr (is_specialization_v<T, std::vector>) {
                     using element_type = typename T::value_type;
@@ -45,18 +58,15 @@ class engine;
                     using value_type = typename T::mapped_type;
                     return conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
                 } else if constexpr (std::is_class_v<T> && !std::is_same_v<T, std::string>) {
-                    // For custom classes, try to extract directly from shared_ptr to avoid extra copies
+                    // For custom copyable classes, try to extract directly from shared_ptr
                     if (v.is_object()) {
                         try {
-                            // Try to get as shared_ptr and dereference - this creates only one copy
                             auto ptr = v.as<std::shared_ptr<T>>();
-                            return *ptr;  // Single copy here
+                            return *ptr;  // Copy here - only for copyable types
                         } catch (const std::exception&) {
-                            // Fall back to conversion registry if direct extraction fails
                             return v.as<T>();
                         }
                     } else {
-                        // Not an object, use standard conversion
                         return v.as<T>();
                     }
                 } else {
@@ -76,7 +86,7 @@ class engine;
                     using key_type = typename T::key_type;
                     using value_type = typename T::mapped_type;
                     return conversions::convert_stdmap_to_script_map<key_type, value_type>(t, eng);
-                } else if constexpr (std::is_class_v<T> && 
+                } else if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string>) {
                     // For user classes, use the conversion registry if available
                     // Implementation moved to engine_impl.hpp to avoid circular dependencies
@@ -84,12 +94,27 @@ class engine;
                         throw runtime_error("Engine reference required for custom type conversion");
                     }
                     return convert_custom_type_with_registry<T>(t, eng);
-                } else {
+                } else if constexpr (std::is_enum_v<T>) {
+                    // For enums, convert to underlying integer type
+                    if (!eng) {
+                        throw runtime_error("Engine reference required for script_value creation");
+                    }
+                    return script_value(static_cast<script_int>(t), eng);
+                } else if constexpr (std::is_integral_v<T> || std::is_floating_point_v<T> ||
+                                     std::is_same_v<T, bool> || std::is_same_v<T, std::string>) {
                     // For basic types, use the script_value constructor with engine
                     if (!eng) {
                         throw runtime_error("Engine reference required for script_value creation");
                     }
                     return script_value(t, eng);
+                } else {
+                    // Unknown type - provide clear error
+                    static_assert(std::is_integral_v<T> || std::is_floating_point_v<T> ||
+                                  std::is_same_v<T, bool> || std::is_same_v<T, std::string> ||
+                                  std::is_class_v<T> || std::is_enum_v<T>,
+                        "value_converter<T>::to() does not support this type. "
+                        "Register a custom converter or use a supported type.");
+                    throw runtime_error("Unsupported type for script_value conversion");
                 }
             }
         };
@@ -239,7 +264,15 @@ class engine;
             }
             
             static script_value to(T& t, engine* eng) {
-                // Delegate to the const T& version with the engine parameter
+                // For class types, use helper that checks registration (implementation in engine_impl.hpp)
+                // This avoids copying non-copyable types and preserves reference semantics
+                if constexpr (std::is_class_v<T> &&
+                             !std::is_same_v<T, std::string> &&
+                             !is_specialization_v<T, std::vector> &&
+                             !is_specialization_v<T, std::map>) {
+                    return convert_reference_with_registry<T>(t, eng);
+                }
+                // For basic types, delegate to const T& version
                 return value_converter<const T&>::to(t, eng);
             }
         };
@@ -304,7 +337,7 @@ class engine;
             
             static script_value to(const T& t, engine* eng) {
                 // Check if this is a custom class type (excluding standard containers and string)
-                if constexpr (std::is_class_v<T> && 
+                if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
                              !is_specialization_v<T, std::map>) {
@@ -313,7 +346,16 @@ class engine;
                     if (!eng) {
                         throw runtime_error("Engine reference required for custom type conversion");
                     }
-                    return convert_custom_type_with_registry<T>(t, eng);
+                    // Only call convert_custom_type_with_registry for copyable types
+                    // Non-copyable types should be passed by reference or shared_ptr
+                    if constexpr (std::is_copy_constructible_v<T>) {
+                        return convert_custom_type_with_registry<T>(t, eng);
+                    } else {
+                        // For non-copyable types passed by const ref, we cannot create a script value
+                        // The caller should use T& or shared_ptr<T> instead
+                        throw runtime_error("Cannot convert non-copyable type by const reference. "
+                                           "Use T& or shared_ptr<T> instead.");
+                    }
                 } else {
                     // For basic types and standard containers, use the script_value constructor with engine
                     if (!eng) {
@@ -590,12 +632,12 @@ class engine;
                 call_void_impl_static<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
                 return script_value(std::monostate{}, eng); // Return null for void
             } else {
-                // Non-void function
-                auto result = call_non_void_impl_static<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
+                // Non-void function - use decltype(auto) to preserve reference types
+                decltype(auto) result = call_non_void_impl_static<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
                 return detail::value_converter<R>::to(result, eng);
             }
         }
-        
+
         template<typename ArgsTuple, typename F, size_t... Is>
         static void call_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
             // Create parameter storage on stack
@@ -624,12 +666,12 @@ class engine;
                 call_with_reference_support_void<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
                 return script_value(std::monostate{}, eng); // Return null for void
             } else {
-                // Non-void function with reference support
-                auto result = call_with_reference_support_non_void<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
+                // Non-void function with reference support - use decltype(auto) to preserve reference types
+                decltype(auto) result = call_with_reference_support_non_void<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
                 return detail::value_converter<R>::to(result, eng);
             }
         }
-        
+
         template<typename ArgsTuple, typename F, size_t... Is>
         static void call_with_reference_support_void(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
             // Create bound_map objects on the stack for zero-copy semantics

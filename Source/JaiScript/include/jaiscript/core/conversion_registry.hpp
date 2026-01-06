@@ -175,7 +175,7 @@ private:
     extractor_func custom_extractor_;
     
     // C++ type converters (for void* to script_value conversions)
-    // Used by class_builder for C++ class instance conversions
+    // Used by dynamic_binder for C++ class instance conversions
     std::unordered_map<type_id, std::function<script_value(const void*)>, type_id_hash> cpp_type_converters_;
 };
 

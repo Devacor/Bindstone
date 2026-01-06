@@ -246,7 +246,7 @@ public:
                         // Runtime validation: Ensure type is registered
                         throw serialization_error(
                             "Cannot serialize unregistered type '" + type_name + "'. " +
-                            "Register the type with class_builder before serialization."
+                            "Register the type with dynamic_binder before serialization."
                         );
                     }
                 }

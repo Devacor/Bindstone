@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <cmath>
 
@@ -2084,7 +2084,7 @@ public:
             auto eng = engine::make();
 
             // Register C++ Entity class
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<>()
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
@@ -2113,7 +2113,7 @@ public:
         test("script_inherits_cpp_base_method_call", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .property("id", &Entity::id)
@@ -2135,7 +2135,7 @@ public:
         test("script_inherits_cpp_override_method", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .method("get_type", &Entity::get_type)
@@ -2159,7 +2159,7 @@ public:
         test("script_inherits_cpp_super_call", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .method("get_type", &Entity::get_type)
@@ -2183,7 +2183,7 @@ public:
         test("script_inherits_cpp_script_specific_field", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .property("id", &Entity::id)
@@ -2218,7 +2218,7 @@ public:
         test("script_inherits_cpp_type_preserved_in_parameter", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .property("id", &Entity::id)
@@ -2245,7 +2245,7 @@ public:
             auto eng = engine::make();
 
             // Register Vehicle
-            class_builder<Vehicle>(*eng, "Vehicle")
+            dynamic_binder<Vehicle>(*eng, "Vehicle")
                 .constructor<int, std::string>()
                 .property("speed", &Vehicle::speed)
                 .property("model", &Vehicle::model)
@@ -2254,7 +2254,7 @@ public:
                 .build();
 
             // Register Animal
-            class_builder<Animal>(*eng, "Animal")
+            dynamic_binder<Animal>(*eng, "Animal")
                 .constructor<std::string, int>()
                 .property("species", &Animal::species)
                 .property("legs", &Animal::legs)
@@ -2295,12 +2295,12 @@ public:
         test("script_inherits_cpp_type_mismatch_rejected", [this]() {
             auto eng = engine::make();
 
-            class_builder<Vehicle>(*eng, "Vehicle")
+            dynamic_binder<Vehicle>(*eng, "Vehicle")
                 .constructor<int, std::string>()
                 .property("speed", &Vehicle::speed)
                 .build();
 
-            class_builder<Animal>(*eng, "Animal")
+            dynamic_binder<Animal>(*eng, "Animal")
                 .constructor<std::string, int>()
                 .property("species", &Animal::species)
                 .build();
@@ -2332,7 +2332,7 @@ public:
         test("script_inherits_cpp_multi_level", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .property("id", &Entity::id)
@@ -2364,7 +2364,7 @@ public:
             // This verifies the iterative solution handles arbitrary depth
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .property("id", &Entity::id)
@@ -2402,7 +2402,7 @@ public:
         test("script_inherits_cpp_cpp_method_mutation", [this]() {
             auto eng = engine::make();
 
-            class_builder<Vehicle>(*eng, "Vehicle")
+            dynamic_binder<Vehicle>(*eng, "Vehicle")
                 .constructor<int, std::string>()
                 .property("speed", &Vehicle::speed)
                 .property("model", &Vehicle::model)
@@ -2425,7 +2425,7 @@ public:
         test("script_inherits_cpp_script_overrides_cpp_field_access", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .property("id", &Entity::id)
@@ -2452,7 +2452,7 @@ public:
         test("script_inherits_cpp_shared_ptr_inheritance", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .property("id", &Entity::id)
@@ -2473,7 +2473,7 @@ public:
         test("script_inherits_cpp_return_derived_from_base_function", [this]() {
             auto eng = engine::make();
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
                 .property("name", &Entity::name)
                 .property("id", &Entity::id)

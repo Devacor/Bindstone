@@ -2711,7 +2711,7 @@ std::optional<bool> interpreter::object_equality_via_method(const script_value& 
     auto instance = const_cast<script_value&>(left).get_class_instance();
 
     if (instance) {
-        // Look for "==" method - used by both script classes (operator==) and class_builder
+        // Look for "==" method - used by both script classes (operator==) and dynamic_binder
         auto eq_id = string_symbolizer_->intern("==");
         auto method_val = instance->get_method(eq_id, false);
         if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
@@ -4893,7 +4893,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             ? std::static_pointer_cast<class_instance>(holder->data)
                             : nullptr;
                         if (!instance) {
-                            // Not a class instance wrapper (e.g., raw C++ object not registered via class_builder)
+                            // Not a class instance wrapper (e.g., raw C++ object not registered via dynamic_binder)
                             auto type_info = value.get_type_info();
                             uint64_t type_id = type_info ? type_info->id : 0;
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
@@ -6199,53 +6199,63 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     // Use a local vector for arguments to avoid issues with nested calls
     std::vector<script_value> arguments;
     arguments.reserve(expr->arguments.size());
-    
-    // Also track argument metadata for reference parameters
-    std::vector<std::pair<uint64_t, std::shared_ptr<environment>>> argMetadata;
-    argMetadata.reserve(expr->arguments.size());
-    
-    for (const auto& argExpr : expr->arguments) {
-        // Check if this is a simple identifier (needed for references)
-        if (argExpr->get_type() == node_type::identifier_expr) {
-            auto* identExpr = static_cast<identifier_expr*>(argExpr.get());
-            // Get the symbol ID for this variable
-            uint64_t symbol_id = string_symbolizer_->intern(identExpr->name);
-            argMetadata.emplace_back(symbol_id, environment_);
-        } else {
-            // Not an identifier - can't take reference
-            argMetadata.emplace_back(UINT64_MAX, nullptr);
-        }
-        
-        // Evaluate argument with exception handling
-        try {
-            JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
-            arguments.emplace_back(std::move(pop_value()));
-        } catch (const script_exception& e) {
-            // Convert to interpreter exception state
-            active_exception_value_ = make_value(std::string(e.what()));
-            current_exception_ = e;
-            is_unwinding_ = true;
-            push_value(make_value());  // Push null for the failed call
-            return {};
-        } catch (const std::runtime_error& e) {
-            // Convert runtime errors to script exceptions
-            active_exception_value_ = make_value(std::string(e.what()));
-            current_exception_ = script_exception(e.what());
-            is_unwinding_ = true;
-            push_value(make_value());  // Push null for the failed call
-            return {};
+
+    // Only track argument metadata if there are arguments (optimization for method chaining)
+    const bool has_args = !expr->arguments.empty();
+
+    // Save previous metadata for nested call support (raw pointers - no shared_ptr overhead)
+    std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+    if (has_args) {
+        saved_metadata = std::move(current_arg_metadata_);
+        current_arg_metadata_.clear();
+        current_arg_metadata_.reserve(expr->arguments.size());
+
+        for (const auto& argExpr : expr->arguments) {
+            // Check if this is a simple identifier (needed for references)
+            if (argExpr->get_type() == node_type::identifier_expr) {
+                auto* identExpr = static_cast<identifier_expr*>(argExpr.get());
+                // Get the symbol ID for this variable
+                uint64_t symbol_id = string_symbolizer_->intern(identExpr->name);
+                current_arg_metadata_.emplace_back(symbol_id, environment_.get());
+            } else {
+                // Not an identifier - can't take reference
+                current_arg_metadata_.emplace_back(UINT64_MAX, nullptr);
+            }
+
+            // Evaluate argument with exception handling
+            try {
+                JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+                arguments.emplace_back(std::move(pop_value()));
+            } catch (const script_exception& e) {
+                // Restore metadata before returning
+                current_arg_metadata_ = std::move(saved_metadata);
+                // Convert to interpreter exception state
+                active_exception_value_ = make_value(std::string(e.what()));
+                current_exception_ = e;
+                is_unwinding_ = true;
+                push_value(make_value());  // Push null for the failed call
+                return {};
+            } catch (const std::runtime_error& e) {
+                // Restore metadata before returning
+                current_arg_metadata_ = std::move(saved_metadata);
+                // Convert runtime errors to script exceptions
+                active_exception_value_ = make_value(std::string(e.what()));
+                current_exception_ = script_exception(e.what());
+                is_unwinding_ = true;
+                push_value(make_value());  // Push null for the failed call
+                return {};
+            }
         }
     }
-    
-    // Store argument metadata in a member variable so call_function can access it
-    current_arg_metadata_ = std::move(argMetadata);
-    
+
     // Call the function - now returns checked_result instead of throwing
     const script_function& func = callee.as_function();
     auto result_checked = func(arguments);
 
-    // Clear argument metadata
-    current_arg_metadata_.clear();
+    // Restore previous metadata after call completes
+    if (has_args) {
+        current_arg_metadata_ = std::move(saved_metadata);
+    }
 
     // Check if function call succeeded
     if (!result_checked) {
@@ -6764,6 +6774,56 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
     // Extract the class_instance from the object
     auto objHolder = objectValue.get_object_holder();
+
+    // Handle cpp_bound objects (non-owning references to C++ objects from T& returns)
+    // These have is_class_instance_wrapper=false and data=nullptr, but cpp_bound_ptr_ set
+    if (objectValue.is_cpp_bound() && !objHolder->is_class_instance_wrapper) {
+        // Get the class definition from the engine using the type name
+        auto class_def = engine_->get_class_definition(objHolder->type_name);
+        if (class_def) {
+            uint64_t member_id = expr->member_id;
+
+            // Look for a method in the class definition
+            script_value method = class_def->get_method(member_id, false);
+            if (!method.is_null() && !method.is_invalid()) {
+                // Return a bound method with the cpp_bound value as 'this'
+                push_value(create_bound_method(objectValue, method));
+                return {};
+            }
+
+            // Check for property getter
+            if (class_def->has_property_getters()) {
+                uint64_t getter_id = expr->getter_id;
+                if (getter_id == UINT64_MAX) {
+                    auto [id, _] = string_symbolizer_->get_getter_id_with_view(member_id);
+                    getter_id = id;
+                    expr->getter_id = getter_id;
+                }
+                script_value getter = class_def->get_method(getter_id, false);
+                if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
+                    // Call the getter with 'this' as argument
+                    const script_function& func = getter.as_function();
+                    std::vector<script_value> args = {objectValue};
+                    auto result = func(args);
+                    if (!result) {
+                        return result.error_value();
+                    }
+                    push_value(std::move(result.value()));
+                    return {};
+                }
+            }
+
+            // Member not found on cpp_bound object
+            std::string member_str(expr->member);
+            active_exception_value_ = make_value("Object has no member '" + member_str + "'");
+            current_exception_ = script_exception("Object has no member '" + member_str + "'", expr->location);
+            is_unwinding_ = true;
+            push_value(make_value());
+            return {};
+        }
+        // Cannot access member on non-class object
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+    }
 
     // Get the class_instance - both C++ and script classes use class_instance wrapper
     // (script_class_instance inherits from class_instance)
@@ -10001,12 +10061,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (param.is_reference) {
             // For reference parameters, create a reference value
             // References still go into environment since they need special tracking
-            if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
-                auto symbol_id = current_arg_metadata_[i].first;
-                auto env = current_arg_metadata_[i].second;
+            const auto& current_arg_metadata = get_current_arg_metadata();
+            if (!current_arg_metadata.empty() && i < current_arg_metadata.size()) {
+                auto symbol_id = current_arg_metadata[i].first;
+                auto env = current_arg_metadata[i].second;
 
                 if (symbol_id != UINT64_MAX && env != nullptr) {
-                    // Get pointer to the argument
+                    // Get pointer to the argument (env is raw pointer from metadata)
                     script_value* argPtr = env->get_value_ptr(symbol_id);
                     if (!argPtr) {
                         cleanup();
@@ -10031,7 +10092,28 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                         call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
                     } else {
                         // Create reference to the argument - add to call frame using slot
-                        script_value refValue = script_value::make_reference(argPtr, env);
+                        // Get shared_ptr for env: search current env, then call stack frames
+                        std::shared_ptr<environment> env_shared;
+                        if (env == environment_.get()) {
+                            env_shared = environment_;
+                        } else {
+                            // Search call stack for matching environment
+                            for (size_t fi = frame_index; fi > 0; --fi) {
+                                auto& frame = call_stack_[fi - 1];
+                                if (frame.closure_env.get() == env) {
+                                    env_shared = frame.closure_env;
+                                    break;
+                                }
+                            }
+                            // Also check global environment
+                            if (!env_shared) {
+                                auto global_env = get_global_environment();
+                                if (global_env.get() == env) {
+                                    env_shared = global_env;
+                                }
+                            }
+                        }
+                        script_value refValue = script_value::make_reference(argPtr, env_shared);
                         call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
                     }
                 } else {

@@ -29,7 +29,7 @@
 
 // Schema registration helper - registers to type_registry using _jai_owner_type
 // Note: We only store type info here. The getter/setter lambdas are generated
-// later in class_builder::bind_properties_from_schema() when the type is complete.
+// later in dynamic_binder::bind_properties_from_schema() when the type is complete.
 #define JAI_SCHEMA_REGISTER(prop_type, name, is_obs) \
     inline static const int _jai_schema_reg_##name = []{ \
         using OwnerT = _jai_owner_type; \

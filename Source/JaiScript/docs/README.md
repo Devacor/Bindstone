@@ -21,7 +21,7 @@ JaiScript solves these issues while maintaining the performance and C++ integrat
 - **Exceptional Performance** - 25-578x faster than ChaiScript
 - **C++-like Syntax** - Familiar to C++ developers  
 - **Modern Language Features** - Lambdas with captures, flexible function syntax, operator overloading
-- **Seamless C++ Integration** - Clean class_builder API for exposing C++ types
+- **Seamless C++ Integration** - Clean dynamic_binder API for exposing C++ types
 - **Hot Reload for Script Classes** - Redefine script classes at runtime with automatic instance migration
 - **Standard Naming Conventions** - Uses snake_case throughout to match C++ standard library
 - **Zero Dependencies** - Standalone implementation
@@ -286,12 +286,12 @@ class Enemy {
 
 ### Exposing C++ Classes
 
-JaiScript provides a fluent `class_builder` API for exposing C++ classes to scripts. The API supports two styles: manual registration for full control, or automatic registration using the `property_owner` CRTP pattern.
+JaiScript provides a fluent `dynamic_binder` API for exposing C++ classes to scripts. The API supports two styles: manual registration for full control, or automatic registration using the `property_owner` CRTP pattern.
 
 #### Manual Registration (Full Control)
 ```cpp
-// Clean class_builder API - 60% less code than ChaiScript
-jai::class_builder<Vector2>(engine, "Vec2")
+// Clean dynamic_binder API - 60% less code than ChaiScript
+jai::dynamic_binder<Vector2>(engine, "Vec2")
     .constructor<script_float, script_float>()
     .constructor<script_int, script_int>()  // Automatic type conversion
     .property("x", &Vector2::x)
@@ -309,20 +309,20 @@ jai::class_builder<Vector2>(engine, "Vec2")
 #### Inheritance with base_class<>()
 ```cpp
 // Register base class first
-jai::class_builder<Entity>(engine, "Entity")
+jai::dynamic_binder<Entity>(engine, "Entity")
     .constructor<>()
     .property("id", &Entity::id)
     .method("get_name", &Entity::get_name);
 
 // Register derived class with inheritance
-jai::class_builder<Player>(engine, "Player")
+jai::dynamic_binder<Player>(engine, "Player")
     .base_class<Entity>()  // Inherits Entity's methods/properties
     .constructor<>()
     .property("health", &Player::health)
     .method("attack", &Player::attack);
 
 // Multiple inheritance - base_class<>() appends, doesn't replace
-jai::class_builder<Wizard>(engine, "Wizard")
+jai::dynamic_binder<Wizard>(engine, "Wizard")
     .base_class<Player>()      // First base
     .base_class<SpellCaster>() // Second base - methods from both accessible
     .constructor<>()
@@ -356,15 +356,15 @@ public:
 };
 
 // Register with auto_bind() - base classes AND default constructor registered automatically!
-jai::class_builder<Entity>(engine, "Entity")
+jai::dynamic_binder<Entity>(engine, "Entity")
     .auto_bind()  // Registers default constructor + to_string/size/empty if present
     .method("get_name", &Entity::get_name);
 
-jai::class_builder<Player>(engine, "Player")
+jai::dynamic_binder<Player>(engine, "Player")
     .auto_bind()  // Auto-registers Entity as base + default constructor
     .method("attack", &Player::attack);
 
-jai::class_builder<Wizard>(engine, "Wizard")
+jai::dynamic_binder<Wizard>(engine, "Wizard")
     .auto_bind()  // Auto-registers Player as base -> Entity chain followed
     .method("cast_spell", &Wizard::cast_spell);
 
@@ -384,17 +384,17 @@ jai::class_builder<Wizard>(engine, "Wizard")
 ```cpp
 // bind_mode::all (default) - Base classes + default constructor + auto-detected methods
 // Auto-detects: to_string(), size(), empty() if present
-jai::class_builder<MyClass>(engine, "MyClass")
+jai::dynamic_binder<MyClass>(engine, "MyClass")
     .auto_bind(jai::bind_mode::all);  // or just .auto_bind()
 
 // bind_mode::properties - Base classes only, no auto constructors/methods
-jai::class_builder<MyClass>(engine, "MyClass")
+jai::dynamic_binder<MyClass>(engine, "MyClass")
     .auto_bind(jai::bind_mode::properties)
     .constructor<>()  // Manual constructor since not auto-detected
     .method("custom_method", &MyClass::custom_method);
 
 // bind_mode::none - No auto-binding, just returns builder for manual setup
-jai::class_builder<MyClass>(engine, "MyClass")
+jai::dynamic_binder<MyClass>(engine, "MyClass")
     .auto_bind(jai::bind_mode::none)  // Effectively a no-op
     .base_class<BaseClass>()          // Manual base class
     .constructor<>();
@@ -421,15 +421,15 @@ public:
 };
 
 // Registration - auto_bind() registers default constructor automatically
-jai::class_builder<Renderable>(engine, "Renderable")
+jai::dynamic_binder<Renderable>(engine, "Renderable")
     .auto_bind()
     .method("draw", &Renderable::draw);
 
-jai::class_builder<Collidable>(engine, "Collidable")
+jai::dynamic_binder<Collidable>(engine, "Collidable")
     .auto_bind()
     .method("check_collision", &Collidable::check_collision);
 
-jai::class_builder<Sprite>(engine, "Sprite")
+jai::dynamic_binder<Sprite>(engine, "Sprite")
     .auto_bind()  // Registers BOTH bases + default constructor
     .method("update", &Sprite::update);
 
@@ -538,9 +538,9 @@ class engine {
     void add_function(const script_string& name, script_function func);
     void add_variadic_function(const script_string& name, script_function func);
     
-    // Type registration (see class_builder)
+    // Type registration (see dynamic_binder)
     template<typename T>
-    class_builder<T> addClass(const script_string& name);
+    dynamic_binder<T> addClass(const script_string& name);
 };
 ```
 

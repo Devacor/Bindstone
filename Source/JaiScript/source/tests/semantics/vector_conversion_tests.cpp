@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/bound_array.hpp>
 #include <vector>
 #include <map>
@@ -227,7 +227,7 @@ public:
             auto engine = engine::make();
             
             // Register Point class
-            class_builder<Point>(*engine, "Point")
+            dynamic_binder<Point>(*engine, "Point")
                 .constructor<>()
                 .constructor<double, double>()
                 .method("distanceFromOrigin", &Point::distance_from_origin)

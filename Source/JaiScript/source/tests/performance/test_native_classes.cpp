@@ -45,7 +45,7 @@ public:
             auto end = high_resolution_clock::now();
             auto duration = duration_cast<microseconds>(end - start).count();
             
-            std::cout << "Basic class test completed in " << duration << " μs\n";
+            std::cout << "Basic class test completed in " << duration << " uS\n";
             check(true); // Just ensure it runs
         });
         
@@ -90,7 +90,7 @@ public:
             auto end = high_resolution_clock::now();
             auto duration = duration_cast<microseconds>(end - start).count();
             
-            std::cout << "Inheritance test completed in " << duration << " μs\n";
+            std::cout << "Inheritance test completed in " << duration << " uS\n";
             check_eq(result.as_int(), 85); // Started at 100, -10 for move, -5 for bark
         });
         

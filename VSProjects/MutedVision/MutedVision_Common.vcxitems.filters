@@ -34,6 +34,27 @@
     <Filter Include="MV\Serialization">
       <UniqueIdentifier>{b3ddf901-4fda-4459-9297-cf276e8880f5}</UniqueIdentifier>
     </Filter>
+    <Filter Include="jaiscript">
+      <UniqueIdentifier>{0df1445a-4e9d-48ca-9bab-3c7cd751593d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="jaiscript\core">
+      <UniqueIdentifier>{d5d1608c-8408-4e9e-99ba-263d8ec01f66}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="jaiscript\detail">
+      <UniqueIdentifier>{7161028b-99dd-4535-b8b3-3084b269dddc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="jaiscript\properties">
+      <UniqueIdentifier>{da9005d5-3c75-4320-86fc-86fdb8e2a057}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="jaiscript\serialization">
+      <UniqueIdentifier>{bfdb1e96-b6a6-4f61-a6ae-4205adb6acac}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="jaiscript\signals">
+      <UniqueIdentifier>{b5b60010-bc33-465e-94f8-a0a2a0276c57}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="jaiscript\stdlib">
+      <UniqueIdentifier>{06aa28d4-2561-4de0-89c8-d490c121fe39}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.cpp">
@@ -156,6 +177,9 @@
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.cpp">
       <Filter>MV\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\jaiscript.cpp">
+      <Filter>jaiscript</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -366,6 +390,195 @@
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\properties.hpp">
       <Filter>MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\jaiscript.hpp">
+      <Filter>jaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\jaiscript_fwd.hpp">
+      <Filter>jaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties.hpp">
+      <Filter>jaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\binding_traits.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\bound_array.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\bound_cpp_vector.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\bound_cpp_vector_registration.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\bound_map.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\builtin_methods.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\checked_result.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_builder.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_builder_serialization.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\class_registry.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\conversion_registry.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\conversion_registry_fwd.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\conversion_registry_impl.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\conversion_registry_templates.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine_bindable.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine_impl.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine_make_object.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\execution_backend.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\function_binder.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\parameter_storage.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\parse_errors.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\property_type_converter.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\registrar.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\runtime_errors.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\script_class.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\serialization.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\strong_ptr.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\type_info.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\types.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value_ext.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value_impl.hpp">
+      <Filter>jaiscript\core</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\ast.hpp">
+      <Filter>jaiscript\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\interpreter.hpp">
+      <Filter>jaiscript\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\interpreter_backend.hpp">
+      <Filter>jaiscript\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\lexer.hpp">
+      <Filter>jaiscript\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\parser.hpp">
+      <Filter>jaiscript\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\string_symbolizer.hpp">
+      <Filter>jaiscript\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\containers.hpp">
+      <Filter>jaiscript\stdlib</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\io.hpp">
+      <Filter>jaiscript\stdlib</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\json.hpp">
+      <Filter>jaiscript\stdlib</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\math.hpp">
+      <Filter>jaiscript\stdlib</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\stdlib.hpp">
+      <Filter>jaiscript\stdlib</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\vector.hpp">
+      <Filter>jaiscript\stdlib</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\signals\receiver_owner.hpp">
+      <Filter>jaiscript\signals</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\signals\signal.hpp">
+      <Filter>jaiscript\signals</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\signals\signal_impl.hpp">
+      <Filter>jaiscript\signals</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\signals\signal_serialization.hpp">
+      <Filter>jaiscript\signals</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\archive.hpp">
+      <Filter>jaiscript\serialization</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\binary_archive.hpp">
+      <Filter>jaiscript\serialization</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\json_archive.hpp">
+      <Filter>jaiscript\serialization</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\serialization_metadata.hpp">
+      <Filter>jaiscript\serialization</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\serialization\serializer.hpp">
+      <Filter>jaiscript\serialization</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties\macros.hpp">
+      <Filter>jaiscript\properties</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties\observable_property.hpp">
+      <Filter>jaiscript\properties</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties\property.hpp">
+      <Filter>jaiscript\properties</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties\property_manager.hpp">
+      <Filter>jaiscript\properties</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties\property_schema.hpp">
+      <Filter>jaiscript\properties</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\properties\property_serialization.hpp">
+      <Filter>jaiscript\properties</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

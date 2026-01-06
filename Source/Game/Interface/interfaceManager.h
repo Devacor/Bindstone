@@ -3,15 +3,16 @@
 
 #include "MV/Render/package.h"
 #include "Game/state.h"
-#include "MV/Script/script.h"
 #include "MV/Interface/tapDevice.h"
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 
 namespace MV {
 	class InterfaceManager;
-	class Script;
 
 	class Interface {
-		friend MV::Script;
+		friend jai::engine;
+		friend jai::dynamic_binder<Interface>;
 	public:
 		Interface() = delete;
 		Interface(const Interface&) = delete;
@@ -47,6 +48,9 @@ namespace MV {
 			return false;
 		}
 
+		// Called by dynamic_binder::auto_bind() to register private members
+		static void jai_auto_bind(jai::dynamic_binder<Interface>& builder);
+
 	private:
 		void initialize();
 
@@ -63,9 +67,15 @@ namespace MV {
 	};
 
 	class InterfaceManager {
-		friend MV::Script;
+		friend jai::engine;
+		friend jai::dynamic_binder<InterfaceManager>;
 	public:
-		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, MV::Script &a_script, std::string a_scriptName);
+		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, jai::engine& a_engine, std::string a_scriptName);
+
+		// Non-copyable due to unique_ptr and reference members
+		InterfaceManager(const InterfaceManager&) = delete;
+		InterfaceManager& operator=(const InterfaceManager&) = delete;
+
 		InterfaceManager& initialize();
 		TapDevice& mouse() {
 			return ourMouse;
@@ -80,8 +90,8 @@ namespace MV {
 			return ourManagers;
 		}
 
-		MV::Script& script() {
-			return ourScript;
+		jai::engine& script() {
+			return jaiEngine_;
 		}
 
 		void update(double a_dt) {
@@ -115,12 +125,16 @@ namespace MV {
 
 		void setActiveText(Interface* a_current);
 		void removeActiveText(Interface* a_current);
+
+		// Called by dynamic_binder::auto_bind() to register private members
+		static void jai_auto_bind(jai::dynamic_binder<InterfaceManager>& builder);
+
 	private:
 		std::vector<std::unique_ptr<Interface>> pages;
 
 		TapDevice& ourMouse;
 		Managers& ourManagers;
-		MV::Script& ourScript;
+		jai::engine& jaiEngine_;
 
 		std::shared_ptr<MV::Scene::Node> node;
 

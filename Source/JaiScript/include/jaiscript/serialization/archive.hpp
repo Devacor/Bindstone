@@ -167,59 +167,70 @@ public:
     // Generic value writing (determines type at runtime)
     virtual void write_value(const script_value& value) = 0;
     
-    // Conditional serialization state
-    void set_property_enabled(const std::string& property_name, bool enabled) {
-        property_enabled_[property_name] = enabled;
-    }
-    
-    bool is_property_enabled(const std::string& property_name) const {
-        auto it = property_enabled_.find(property_name);
-        return it != property_enabled_.end() ? it->second : true;
-    }
-    
     // Version being serialized
     void set_version(uint32_t version) { version_ = version; }
     uint32_t get_version() const { return version_; }
-    
-    // Type-aware value writing
-    void write_value_typed(const script_value& value, const type_info_ptr& type_info) {
-        if (!type_info) {
-            // Fallback to runtime type
-            write_value(value);
-            return;
-        }
-        
-        // Use type info to write with proper size
-        switch (type_info->base_type) {
-            case script_value_type::jai_int_type:
-                if (type_info->native_size == 1) {
-                    write_int8(static_cast<int8_t>(value.as<script_int>()));
-                } else if (type_info->native_size == 2) {
-                    write_int16(static_cast<int16_t>(value.as<script_int>()));
-                } else if (type_info->native_size == 4) {
-                    write_int32(static_cast<int32_t>(value.as<script_int>()));
-                } else {
-                    write_int64(value.as<script_int>());
-                }
-                break;
-                
-            case script_value_type::jai_float_type:
-                if (type_info->native_size == 4) {
-                    write_float32(static_cast<float>(value.as<script_float>()));
-                } else {
-                    write_float64(value.as<script_float>());
-                }
-                break;
-                
-            default:
-                write_value(value);
-                break;
-        }
+
+    // ============================================================================
+    // Public API: serialize("name", value) - always use named properties
+    // ============================================================================
+    // Usage in your type's save/load functions:
+    //   void save(archive_writer& ar) const {
+    //       ar.serialize("x", x);
+    //       ar.serialize("y", y);
+    //   }
+
+    // Serialize primitives (named)
+    template<typename T>
+    std::enable_if_t<std::is_arithmetic_v<T> || std::is_same_v<T, std::string>>
+    serialize(const char* name, const T& value) {
+        write_property_name(name);
+        write_primitive(value);
+    }
+
+    // Serialize custom types (named) - calls T::save(archive) or save(archive, T) via ADL
+    template<typename T>
+    std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>>
+    serialize(const char* name, const T& value) {
+        write_property_name(name);
+        write_custom(value);
     }
 
 protected:
     std::map<std::string, bool> property_enabled_;
     uint32_t version_ = 0;
+
+private:
+    // Helper: write primitive value (type dispatch)
+    template<typename T>
+    void write_primitive(const T& value) {
+        if constexpr (std::is_same_v<T, int8_t>) write_int8(value);
+        else if constexpr (std::is_same_v<T, int16_t>) write_int16(value);
+        else if constexpr (std::is_same_v<T, int32_t>) write_int32(value);
+        else if constexpr (std::is_same_v<T, int64_t>) write_int64(value);
+        else if constexpr (std::is_same_v<T, uint8_t>) write_uint8(value);
+        else if constexpr (std::is_same_v<T, uint16_t>) write_uint16(value);
+        else if constexpr (std::is_same_v<T, uint32_t>) write_uint32(value);
+        else if constexpr (std::is_same_v<T, uint64_t>) write_uint64(value);
+        else if constexpr (std::is_same_v<T, float>) write_float32(value);
+        else if constexpr (std::is_same_v<T, double>) write_float64(value);
+        else if constexpr (std::is_same_v<T, bool>) write_bool(value);
+        else if constexpr (std::is_same_v<T, std::string>) write_string(value);
+        else if constexpr (std::is_integral_v<T>) write_int64(static_cast<int64_t>(value));
+        else if constexpr (std::is_floating_point_v<T>) write_float64(static_cast<double>(value));
+    }
+
+    // Helper: write custom type (ADL dispatch)
+    template<typename T>
+    void write_custom(const T& value) {
+        // Try member save first, then ADL free save
+        if constexpr (requires { const_cast<T&>(value).save(*this); }) {
+            const_cast<T&>(value).save(*this);
+        } else {
+            // ADL lookup for free function save(archive_writer&, const T&)
+            save(*this, value);
+        }
+    }
 };
 
 // Archive reader interface
@@ -360,83 +371,62 @@ public:
     // Generic value reading (determines type from stream)
     virtual script_value read_value() = 0;
 
-    // Set pre-read properties (called by binary_archive_reader before factory invocation)
-    void set_preread_properties(std::map<std::string, script_value> props) {
-        preread_properties_ = std::move(props);
-        has_preread_properties_ = true;
-    }
-
-    // Clear pre-read properties (called after factory completes)
-    void clear_preread_properties() {
-        preread_properties_.clear();
-        has_preread_properties_ = false;
-    }
-
-    // Get a pre-read property (returns nullptr if not found)
-    const script_value* get_preread_property(const std::string& name) const {
-        auto it = preread_properties_.find(name);
-        return it != preread_properties_.end() ? &it->second : nullptr;
-    }
-
-    // Check if we have pre-read properties available
-    bool has_preread_properties() const { return has_preread_properties_; }
+    // Version being deserialized
+    uint32_t get_version() const { return version_; }
 
     // Read a specific property by name and convert to C++ type
-    // Used for property pre-reading before construction
-    // When pre-read properties are available (binary format), reads from the pre-read map
-    // Otherwise (JSON format), reads from the stream directly
+    // Used for factory deserialization when properties need to be read before construction
     template<typename T>
     T read_property(const std::string& property_name) {
-        // Helper lambda to convert script_value to T
-        auto convert_value = [](const script_value& value) -> T {
-            if constexpr (std::is_same_v<T, std::string>) {
-                return value.as<std::string>();
-            } else if constexpr (std::is_integral_v<T>) {
-                return static_cast<T>(value.as<script_int>());
-            } else if constexpr (std::is_floating_point_v<T>) {
-                return static_cast<T>(value.as<script_float>());
-            } else if constexpr (std::is_same_v<T, bool>) {
-                return value.as<bool>();
-            } else {
-                // For complex types, assume they can be extracted directly
-                // This will work for shared_ptr<T> if value holds an object
-                return value.as<T>();
-            }
-        };
-
         // Check if we have pre-read properties (binary format)
         if (has_preread_properties_) {
             auto it = preread_properties_.find(property_name);
             if (it == preread_properties_.end()) {
                 throw serialization_error("Property '" + property_name + "' not found in pre-read properties");
             }
-            return convert_value(it->second);
+            return convert_script_value<T>(it->second);
         } else {
             // Fall back to reading from stream (JSON format)
             std::string name;
             if (!read_property_name(name) || name != property_name) {
                 throw serialization_error("Expected property '" + property_name + "' but found '" + name + "'");
             }
-            return convert_value(read_value());
+            return convert_script_value<T>(read_value());
         }
     }
 
-    // Version being deserialized
-    uint32_t get_version() const { return version_; }
-    
-    // Type-aware value reading
+    // ============================================================================
+    // Protected: Internal helpers for derived archive classes
+    // ============================================================================
+protected:
+    // Pre-read properties support (used by binary_archive_reader for factory deserialization)
+    void set_preread_properties(std::map<std::string, script_value> props) {
+        preread_properties_ = std::move(props);
+        has_preread_properties_ = true;
+    }
+
+    void clear_preread_properties() {
+        preread_properties_.clear();
+        has_preread_properties_ = false;
+    }
+
+    const script_value* get_preread_property(const std::string& name) const {
+        auto it = preread_properties_.find(name);
+        return it != preread_properties_.end() ? &it->second : nullptr;
+    }
+
+    bool has_preread_properties() const { return has_preread_properties_; }
+
+    // Type-aware value reading (used internally)
     script_value read_value_typed(const type_info_ptr& type_info) {
         if (!type_info) {
-            // Fallback to runtime type detection
             return read_value();
         }
 
-        // Check engine pointer is valid
         if (!engine_ref_) {
             throw serialization_error("Engine pointer is null during deserialization");
         }
 
-        // Use type info to read with proper size
         switch (type_info->base_type) {
             case script_value_type::jai_int_type:
                 if (type_info->native_size == 1) {
@@ -463,8 +453,89 @@ public:
         }
     }
 
+private:
+    // Helper: convert script_value to C++ type
+    template<typename T>
+    static T convert_script_value(const script_value& value) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            return value.as<std::string>();
+        } else if constexpr (std::is_same_v<T, bool>) {
+            return value.as<bool>();
+        } else if constexpr (std::is_integral_v<T>) {
+            return static_cast<T>(value.as<script_int>());
+        } else if constexpr (std::is_floating_point_v<T>) {
+            return static_cast<T>(value.as<script_float>());
+        } else {
+            return value.as<T>();
+        }
+    }
+
+public:
+    // ============================================================================
+    // Public API: serialize("name", value) - always use named properties
+    // ============================================================================
+    // Usage in your type's save/load functions:
+    //   void load(archive_reader& ar) {
+    //       ar.serialize("x", x);
+    //       ar.serialize("y", y);
+    //   }
+
+    // Serialize primitives (named)
+    template<typename T>
+    std::enable_if_t<std::is_arithmetic_v<T> || std::is_same_v<T, std::string>>
+    serialize(const char* name, T& value) {
+        // Consume the property name that writer wrote (symmetric with archive_writer)
+        std::string read_name;
+        read_property_name(read_name);
+        (void)name;  // Could verify read_name == name if desired
+        read_primitive(value);
+    }
+
+    // Serialize custom types (named) - calls T::load(archive) or load(archive, T) via ADL
+    template<typename T>
+    std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>>
+    serialize(const char* name, T& value) {
+        // Consume the property name that writer wrote (symmetric with archive_writer)
+        std::string read_name;
+        read_property_name(read_name);
+        (void)name;  // Could verify read_name == name if desired
+        read_custom(value);
+    }
+
 protected:
     uint32_t version_ = 0;
+
+private:
+    // Helper: read primitive value (type dispatch)
+    template<typename T>
+    void read_primitive(T& value) {
+        if constexpr (std::is_same_v<T, int8_t>) value = read_int8();
+        else if constexpr (std::is_same_v<T, int16_t>) value = read_int16();
+        else if constexpr (std::is_same_v<T, int32_t>) value = read_int32();
+        else if constexpr (std::is_same_v<T, int64_t>) value = read_int64();
+        else if constexpr (std::is_same_v<T, uint8_t>) value = read_uint8();
+        else if constexpr (std::is_same_v<T, uint16_t>) value = read_uint16();
+        else if constexpr (std::is_same_v<T, uint32_t>) value = read_uint32();
+        else if constexpr (std::is_same_v<T, uint64_t>) value = read_uint64();
+        else if constexpr (std::is_same_v<T, float>) value = read_float32();
+        else if constexpr (std::is_same_v<T, double>) value = read_float64();
+        else if constexpr (std::is_same_v<T, bool>) value = read_bool();
+        else if constexpr (std::is_same_v<T, std::string>) value = read_string();
+        else if constexpr (std::is_integral_v<T>) value = static_cast<T>(read_int64());
+        else if constexpr (std::is_floating_point_v<T>) value = static_cast<T>(read_float64());
+    }
+
+    // Helper: read custom type (ADL dispatch)
+    template<typename T>
+    void read_custom(T& value) {
+        // Try member load first, then ADL free load
+        if constexpr (requires { value.load(*this); }) {
+            value.load(*this);
+        } else {
+            // ADL lookup for free function load(archive_reader&, T&)
+            load(*this, value);
+        }
+    }
 };
 
 // Registry for class serialization metadata - now tied to engine instance
@@ -476,17 +547,43 @@ public:
         classes_[class_name] = metadata;
     }
 
+    // Register class with type_index for runtime lookup by C++ type
+    void register_class(const std::string& class_name, std::type_index type_idx, const class_metadata& metadata) {
+        classes_[class_name] = metadata;
+        type_to_class_name_[type_idx] = class_name;
+    }
+
     const class_metadata* get_class_metadata(const std::string& class_name) const {
         auto it = classes_.find(class_name);
         return it != classes_.end() ? &it->second : nullptr;
+    }
+
+    // Get metadata by C++ type_index (for automatic serialization of dynamic_binder-registered types)
+    const class_metadata* get_class_metadata_by_type(std::type_index type_idx) const {
+        auto it = type_to_class_name_.find(type_idx);
+        if (it != type_to_class_name_.end()) {
+            return get_class_metadata(it->second);
+        }
+        return nullptr;
+    }
+
+    // Get class name by type_index
+    const std::string* get_class_name_by_type(std::type_index type_idx) const {
+        auto it = type_to_class_name_.find(type_idx);
+        return it != type_to_class_name_.end() ? &it->second : nullptr;
     }
 
     bool has_class(const std::string& class_name) const {
         return classes_.find(class_name) != classes_.end();
     }
 
+    bool has_class_by_type(std::type_index type_idx) const {
+        return type_to_class_name_.find(type_idx) != type_to_class_name_.end();
+    }
+
 private:
     std::map<std::string, class_metadata> classes_;
+    std::map<std::type_index, std::string> type_to_class_name_;
 };
 
 } // namespace serialization

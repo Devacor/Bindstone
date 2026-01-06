@@ -57,7 +57,7 @@ namespace MV::Script {
 
 // Auto-register all properties from a PropertyOwner to JaiScript
 template<typename T>
-jai::class_builder<T>& bind_properties(jai::class_builder<T>& builder, T& instance) {
+jai::dynamic_binder<T>& bind_properties(jai::dynamic_binder<T>& builder, T& instance) {
     instance.reflection().visit([&](const std::string& name, PropertyBase* prop) {
         // Properties are registered as getters/setters
         // Type dispatch based on property's underlying type
@@ -70,12 +70,12 @@ jai::class_builder<T>& bind_properties(jai::class_builder<T>& builder, T& instan
     return builder;
 }
 
-// Lightweight method binding helper - chainable with class_builder
+// Lightweight method binding helper - chainable with dynamic_binder
 template<typename T>
 class method_binder {
-    jai::class_builder<T>& builder_;
+    jai::dynamic_binder<T>& builder_;
 public:
-    method_binder(jai::class_builder<T>& b) : builder_(b) {}
+    method_binder(jai::dynamic_binder<T>& b) : builder_(b) {}
 
     template<typename Fn>
     method_binder& method(const std::string& name, Fn&& fn) {
@@ -83,7 +83,7 @@ public:
         return *this;
     }
 
-    jai::class_builder<T>& done() { return builder_; }
+    jai::dynamic_binder<T>& done() { return builder_; }
 };
 
 } // namespace MV::Script
@@ -112,7 +112,7 @@ public:
 ```cpp
 // Example: Converting Creature hooks
 MV::Script::JaiRegistrar<Creature> _jaiCreature([](jai::engine& eng, const MV::Services& services) {
-    jai::class_builder<Creature> builder(eng, "Creature");
+    jai::dynamic_binder<Creature> builder(eng, "Creature");
 
     builder
         .base_class<MV::Scene::Component>()
@@ -135,12 +135,12 @@ MV::Script::JaiRegistrar<Creature> _jaiCreature([](jai::engine& eng, const MV::S
 
 ### Phase 2: Convert Hook Files to JaiScript
 
-Replace ChaiScript `a_script.add(chaiscript::fun(...))` patterns with JaiScript `class_builder<T>` patterns.
+Replace ChaiScript `a_script.add(chaiscript::fun(...))` patterns with JaiScript `dynamic_binder<T>` patterns.
 
 **Pattern Mapping:**
 | ChaiScript | JaiScript |
 |------------|-----------|
-| `chaiscript::user_type<T>()` | `class_builder<T>(eng, "Name")` |
+| `chaiscript::user_type<T>()` | `dynamic_binder<T>(eng, "Name")` |
 | `chaiscript::constructor<T()>()` | `.constructor<>()` |
 | `chaiscript::fun(&T::method)` | `.method("name", &T::method)` |
 | `chaiscript::fun([](T& self){ ... })` | `.method("name", [](T& self){ ... })` |

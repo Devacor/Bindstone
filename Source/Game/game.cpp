@@ -2,6 +2,19 @@
 #include "MV\Utility\stringUtility.h"
 #include <functional>
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
+
+// JaiScript binding for StandardMessages
+static jai::registrar<StandardMessages, MV::Services> _hookStandardMessages("StandardMessages",
+	[](jai::dynamic_binder<StandardMessages>& builder, const MV::Services&) {
+	builder.auto_bind();
+	builder.property("lobbyConnected", &StandardMessages::lobbyConnected);
+	builder.property("lobbyDisconnect", &StandardMessages::lobbyDisconnect);
+	builder.property("lobbyAuthenticated", &StandardMessages::lobbyAuthenticated);
+});
+
 void sdl_quit(void){
 	SDL_Quit();
 	TTF_Quit();
@@ -10,7 +23,11 @@ void sdl_quit(void){
 Game::Game(Managers& a_managers) :
 	gameData(a_managers, false),
 	done(false),
-	scriptEngine(a_managers.services){
+	jaiEngine_(jai::engine::make()) {
+
+	// Register stdlib and trigger all registrars
+	jai::stdlib::register_all(*jaiEngine_);
+	jai::bind_registrar<MV::Services>(*jaiEngine_, a_managers.services);
 
 	returnFromBackground();
 
@@ -107,7 +124,7 @@ void Game::initializeWindow(){
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::TapDevice& a_mouse, LocalData& a_data)
 
 	if (!MV::RUNNING_IN_HEADLESS) {
-		ourGui = std::make_unique<MV::InterfaceManager>(uiRoot, ourMouse, gameData.managers(), scriptEngine, "Interface/interfaceManager.script"s);
+		ourGui = std::make_unique<MV::InterfaceManager>(uiRoot, ourMouse, gameData.managers(), *jaiEngine_, "Interface/interfaceManager.script"s);
 		ourGui->initialize();
 	}
 }

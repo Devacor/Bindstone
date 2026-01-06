@@ -4,6 +4,7 @@
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/serialization/archive.hpp>
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/core/static_binder.hpp>
 #include <vector>
 #include <map>
 #include <unordered_map>
@@ -13,6 +14,276 @@
 
 namespace jai {
 namespace property_serialization {
+
+	// Type traits for detecting containers without accessing nested types directly
+	template<typename T> struct is_std_vector : std::false_type {};
+	template<typename T, typename A> struct is_std_vector<std::vector<T, A>> : std::true_type {};
+	template<typename T> inline constexpr bool is_std_vector_v = is_std_vector<T>::value;
+
+	template<typename T> struct is_std_map : std::false_type {};
+	template<typename K, typename V, typename C, typename A> struct is_std_map<std::map<K, V, C, A>> : std::true_type {};
+	template<typename T> inline constexpr bool is_std_map_v = is_std_map<T>::value;
+
+	// Element type extractors (only valid when the type IS a container)
+	template<typename T> struct vector_element { using type = void; };
+	template<typename T, typename A> struct vector_element<std::vector<T, A>> { using type = T; };
+	template<typename T> using vector_element_t = typename vector_element<T>::type;
+
+	template<typename T> struct map_key { using type = void; };
+	template<typename K, typename V, typename C, typename A> struct map_key<std::map<K, V, C, A>> { using type = K; };
+	template<typename T> using map_key_t = typename map_key<T>::type;
+
+	template<typename T> struct map_value { using type = void; };
+	template<typename K, typename V, typename C, typename A> struct map_value<std::map<K, V, C, A>> { using type = V; };
+	template<typename T> using map_value_t = typename map_value<T>::type;
+
+	// ============================================================================
+	// Detection traits for custom serialization support (cereal-style)
+	// ============================================================================
+	//
+	// Supports multiple patterns (checked in this priority order):
+	//   1. Member functions: t.save(archive_writer&) const / t.load(archive_reader&)
+	//   2. Free functions (ADL): save(archive_writer&, const T&) / load(archive_reader&, T&)
+	//
+	// If neither exists, the type is not serializable (serialization will be skipped).
+
+	// --- Member function detection ---
+	// Detects: t.save(archive_writer&) const
+	template<typename T, typename = void>
+	struct has_member_save : std::false_type {};
+
+	template<typename T>
+	struct has_member_save<T, std::void_t<
+		decltype(std::declval<const T&>().save(std::declval<serialization::archive_writer&>()))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_member_save_v = has_member_save<T>::value;
+
+	// Detects: t.load(archive_reader&)
+	template<typename T, typename = void>
+	struct has_member_load : std::false_type {};
+
+	template<typename T>
+	struct has_member_load<T, std::void_t<
+		decltype(std::declval<T&>().load(std::declval<serialization::archive_reader&>()))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_member_load_v = has_member_load<T>::value;
+
+	// --- Free function detection (ADL) ---
+	// Detects: save(archive_writer&, const T&) via ADL
+	template<typename T, typename = void>
+	struct has_free_save : std::false_type {};
+
+	template<typename T>
+	struct has_free_save<T, std::void_t<
+		decltype(save(std::declval<serialization::archive_writer&>(), std::declval<const T&>()))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_free_save_v = has_free_save<T>::value;
+
+	// Detects: load(archive_reader&, T&) via ADL
+	template<typename T, typename = void>
+	struct has_free_load : std::false_type {};
+
+	template<typename T>
+	struct has_free_load<T, std::void_t<
+		decltype(load(std::declval<serialization::archive_reader&>(), std::declval<T&>()))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_free_load_v = has_free_load<T>::value;
+
+	// --- Member serialize() detection (cereal-style bidirectional) ---
+	// Detects: t.serialize(archive_writer&) OR t.serialize(archive_reader&)
+	template<typename T, typename = void>
+	struct has_member_serialize_save : std::false_type {};
+
+	template<typename T>
+	struct has_member_serialize_save<T, std::void_t<
+		decltype(std::declval<T&>().serialize(std::declval<serialization::archive_writer&>()))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_member_serialize_save_v = has_member_serialize_save<T>::value;
+
+	template<typename T, typename = void>
+	struct has_member_serialize_load : std::false_type {};
+
+	template<typename T>
+	struct has_member_serialize_load<T, std::void_t<
+		decltype(std::declval<T&>().serialize(std::declval<serialization::archive_reader&>()))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_member_serialize_load_v = has_member_serialize_load<T>::value;
+
+	// --- Free function serialize() detection (cereal-style bidirectional via ADL) ---
+	// Detects: serialize(archive_writer&, T&) or serialize(archive_reader&, T&)
+	template<typename T, typename = void>
+	struct has_free_serialize_save : std::false_type {};
+
+	template<typename T>
+	struct has_free_serialize_save<T, std::void_t<
+		decltype(serialize(std::declval<serialization::archive_writer&>(), std::declval<T&>()))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_free_serialize_save_v = has_free_serialize_save<T>::value;
+
+	template<typename T, typename = void>
+	struct has_free_serialize_load : std::false_type {};
+
+	template<typename T>
+	struct has_free_serialize_load<T, std::void_t<
+		decltype(serialize(std::declval<serialization::archive_reader&>(), std::declval<T&>()))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_free_serialize_load_v = has_free_serialize_load<T>::value;
+
+	// --- Combined checks ---
+	// For save: member save() OR member serialize() OR free save() OR free serialize()
+	template<typename T>
+	inline constexpr bool has_any_save_v =
+		has_member_save_v<T> || has_member_serialize_save_v<T> ||
+		has_free_save_v<T> || has_free_serialize_save_v<T>;
+
+	// For load: member load() OR member serialize() OR free load() OR free serialize()
+	template<typename T>
+	inline constexpr bool has_any_load_v =
+		has_member_load_v<T> || has_member_serialize_load_v<T> ||
+		has_free_load_v<T> || has_free_serialize_load_v<T>;
+
+	template<typename T>
+	inline constexpr bool has_custom_serialization_v = has_any_save_v<T> && has_any_load_v<T>;
+
+	// Legacy aliases for compatibility
+	template<typename T>
+	inline constexpr bool has_jai_save_v = has_any_save_v<T>;
+
+	template<typename T>
+	inline constexpr bool has_jai_load_v = has_any_load_v<T>;
+
+	// --- property_owner detection ---
+	// Detects: T has a property_mgr member (inherits from property_owner<T>)
+	// This enables automatic serialization via JAI_PROPERTY definitions
+	template<typename T, typename = void>
+	struct is_property_owner : std::false_type {};
+
+	template<typename T>
+	struct is_property_owner<T, std::void_t<
+		decltype(std::declval<T&>().property_mgr)
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool is_property_owner_v = is_property_owner<T>::value;
+
+	// ============================================================================
+	// Dispatch helpers - call the appropriate serialization function
+	// ============================================================================
+	// Priority order (composable - explicit functions can call others internally):
+	//   1. Member save()/load() - explicit custom functions (can compose others)
+	//   2. Free save()/load() - explicit custom functions via ADL (can compose others)
+	//   3. JAI_STATIC_BINDER - compile-time property serialization
+	//   4. property_owner<T> - auto-serialize via property_mgr (JAI_PROPERTY)
+	//   5. Member serialize() - cereal-style bidirectional
+	//   6. Free serialize() - cereal-style bidirectional via ADL
+	//   7. static_assert - compile-time error if no serialization support
+	//
+	// COMPOSABILITY: Explicit save/load functions have highest priority so users
+	// can implement custom logic that internally calls:
+	//   - jai_static_type<T>::save(ar, obj) for static binder properties
+	//   - obj.property_mgr.save(ar) for property_owner properties
+	// This allows adding computed fields, version migration, etc.
+
+	// Save dispatcher
+	template<typename T>
+	void dispatch_save(serialization::archive_writer& ar, const T& value) {
+		if constexpr (has_member_save_v<T>) {
+			// Explicit member save() - user has full control, can compose others
+			value.save(ar);
+		} else if constexpr (has_free_save_v<T>) {
+			// Explicit free save() - user has full control, can compose others
+			save(ar, value);
+		} else if constexpr (has_static_type_v<T>) {
+			// JAI_STATIC_BINDER - compile-time property serialization
+			jai_static_type<T>::save(ar, value);
+		} else if constexpr (is_property_owner_v<T>) {
+			// property_owner<T> - auto-serialize via property_mgr
+			value.property_mgr.save(ar);
+		} else if constexpr (has_member_serialize_save_v<T>) {
+			// cereal-style member serialize()
+			const_cast<T&>(value).serialize(ar);
+		} else if constexpr (has_free_serialize_save_v<T>) {
+			// cereal-style free serialize()
+			serialize(ar, const_cast<T&>(value));
+		} else {
+			// No serialization support - compile-time error
+			static_assert(
+				has_member_save_v<T> || has_free_save_v<T> ||
+				has_static_type_v<T> || is_property_owner_v<T> ||
+				has_member_serialize_save_v<T> || has_free_serialize_save_v<T>,
+				"Type has no serialization support. Provide one of: "
+				"T::save(archive_writer&), "
+				"save(archive_writer&, const T&), "
+				"JAI_STATIC_BINDER(T, ...), "
+				"inherit from property_owner<T>, "
+				"T::serialize(Archive&), or "
+				"serialize(Archive&, T&)");
+		}
+	}
+
+	// Load dispatcher
+	template<typename T>
+	void dispatch_load(serialization::archive_reader& ar, T& value) {
+		if constexpr (has_member_load_v<T>) {
+			// Explicit member load() - user has full control, can compose others
+			value.load(ar);
+		} else if constexpr (has_free_load_v<T>) {
+			// Explicit free load() - user has full control, can compose others
+			load(ar, value);
+		} else if constexpr (has_static_type_v<T>) {
+			// JAI_STATIC_BINDER - compile-time property deserialization
+			jai_static_type<T>::load(ar, value);
+		} else if constexpr (is_property_owner_v<T>) {
+			// property_owner<T> - auto-deserialize via property_mgr
+			value.property_mgr.load(ar);
+		} else if constexpr (has_member_serialize_load_v<T>) {
+			// cereal-style member serialize()
+			value.serialize(ar);
+		} else if constexpr (has_free_serialize_load_v<T>) {
+			// cereal-style free serialize()
+			serialize(ar, value);
+		} else {
+			// No deserialization support - compile-time error
+			static_assert(
+				has_member_load_v<T> || has_free_load_v<T> ||
+				has_static_type_v<T> || is_property_owner_v<T> ||
+				has_member_serialize_load_v<T> || has_free_serialize_load_v<T>,
+				"Type has no deserialization support. Provide one of: "
+				"T::load(archive_reader&), "
+				"load(archive_reader&, T&), "
+				"JAI_STATIC_BINDER(T, ...), "
+				"inherit from property_owner<T>, "
+				"T::serialize(Archive&), or "
+				"serialize(Archive&, T&)");
+		}
+	}
+
+	// Legacy ADL helpers (kept for compatibility, now use dispatch functions internally)
+	template<typename T>
+	void adl_save(serialization::archive_writer& ar, const T& value) {
+		dispatch_save(ar, value);
+	}
+
+	template<typename T>
+	void adl_load(serialization::archive_reader& ar, T& value) {
+		dispatch_load(ar, value);
+	}
 
 	// Helper to serialize primitives
 	template<typename T>
@@ -212,34 +483,43 @@ namespace property_serialization {
 // Now implement property<T>::save() and load() using the helpers
 namespace jai {
 
+	// Compile-time check: is this type serializable?
+	template<typename T>
+	inline constexpr bool is_type_serializable_v =
+		property_serialization::is_direct_serializable_v<T> ||
+		property_serialization::is_std_vector_v<T> ||
+		property_serialization::is_std_map_v<T> ||
+		property_serialization::has_any_save_v<T>;
+
 	template<typename T>
 	inline void property<T>::save(serialization::archive_writer& ar) const {
 		if (!m_allow_serialization) {
 			return;
 		}
 
-		ar.write_property_name(name());
-
 		// Handle different type categories
 		if constexpr (property_serialization::is_direct_serializable_v<T>) {
 			// Direct primitives and strings
+			ar.write_property_name(name());
 			property_serialization::write_primitive(ar, m_value);
 		}
-		else if constexpr (std::is_same_v<T, std::vector<typename T::value_type>>) {
+		else if constexpr (property_serialization::is_std_vector_v<T>) {
 			// Vectors
+			ar.write_property_name(name());
 			property_serialization::write_container(ar, m_value);
 		}
-		else if constexpr (std::is_same_v<T, std::map<typename T::key_type, typename T::mapped_type>>) {
+		else if constexpr (property_serialization::is_std_map_v<T>) {
 			// Maps
+			ar.write_property_name(name());
 			property_serialization::write_map(ar, m_value);
 		}
-		else {
-			// For custom types, they must provide their own serialization
-			// This will be a compile error with a helpful message
-			static_assert(sizeof(T) == 0,
-				"Property type must be directly serializable (primitive/string) or a container of such types. "
-				"For custom types, you must implement custom serialization logic.");
+		else if constexpr (property_serialization::has_any_save_v<T>) {
+			// Custom types with save support (member or free function)
+			ar.write_property_name(name());
+			property_serialization::dispatch_save(ar, m_value);
 		}
+		// else: Type has no serialization support - silently skip
+		// (This allows properties of non-serializable types to exist without breaking compilation)
 	}
 
 	template<typename T>
@@ -252,18 +532,21 @@ namespace jai {
 			// Direct primitives and strings
 			property_serialization::read_primitive(ar, m_value);
 		}
-		else if constexpr (std::is_same_v<T, std::vector<typename T::value_type>>) {
+		else if constexpr (property_serialization::is_std_vector_v<T>) {
 			// Vectors
 			property_serialization::read_vector(ar, m_value);
 		}
-		else if constexpr (std::is_same_v<T, std::map<typename T::key_type, typename T::mapped_type>>) {
+		else if constexpr (property_serialization::is_std_map_v<T>) {
 			// Maps
 			property_serialization::read_map(ar, m_value);
 		}
+		else if constexpr (property_serialization::has_any_load_v<T>) {
+			// Custom types with load support (member or free function)
+			property_serialization::dispatch_load(ar, m_value);
+		}
 		else {
-			static_assert(sizeof(T) == 0,
-				"Property type must be directly serializable (primitive/string) or a container of such types. "
-				"For custom types, you must implement custom serialization logic.");
+			// Type has no deserialization support - skip the value in the archive
+			ar.read_value();
 		}
 	}
 
@@ -283,17 +566,22 @@ namespace jai {
 			T dummy;
 			property_serialization::read_primitive(ar, dummy);
 		}
-		else if constexpr (std::is_same_v<T, std::vector<typename T::value_type>>) {
-			std::vector<typename T::value_type> dummy;
+		else if constexpr (property_serialization::is_std_vector_v<T>) {
+			std::vector<property_serialization::vector_element_t<T>> dummy;
 			property_serialization::read_vector(ar, dummy);
 		}
-		else if constexpr (std::is_same_v<T, std::map<typename T::key_type, typename T::mapped_type>>) {
-			std::map<typename T::key_type, typename T::mapped_type> dummy;
+		else if constexpr (property_serialization::is_std_map_v<T>) {
+			std::map<property_serialization::map_key_t<T>, property_serialization::map_value_t<T>> dummy;
 			property_serialization::read_map(ar, dummy);
 		}
+		else if constexpr (property_serialization::has_any_load_v<T>) {
+			// Custom types with load support - read and discard
+			T dummy{};
+			property_serialization::dispatch_load(ar, dummy);
+		}
 		else {
-			// For custom types, just skip reading
-			// The archive should handle skipping unknown types
+			// Type has no deserialization support - skip the value in the archive
+			ar.read_value();
 		}
 	}
 

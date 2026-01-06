@@ -20,7 +20,7 @@ High-performance C++-like scripting language with hot-reload support. Snake_case
 
 **Types:** Primitives (int64, double, char, bool, string), arrays `[1,2,3]`, maps `{"key": value}`, weak_ptr, references, functions. Automatic conversions.
 
-**C++ Integration:** class_builder API, lambda methods, properties, constructor overloading, zero-copy const&, operator overloading.
+**C++ Integration:** dynamic_binder API, lambda methods, properties, constructor overloading, zero-copy const&, operator overloading.
 
 **Performance:** string_symbolizer, fast arithmetic paths, move semantics.
 
@@ -130,9 +130,9 @@ FOUNDRY_REGISTER(my_tests)  // Auto-registers for discovery
 
 **Values:** Type-erased `std::variant`, custom class_instance extractor, move semantics, thread-local for reference params.
 
-**class_builder:**
+**dynamic_binder:**
 ```cpp
-class_builder<MyClass>(engine, "MyClass")
+dynamic_binder<MyClass>(engine, "MyClass")
     .constructor<script_int, script_float>()
     .method("method_name", &MyClass::method_name)
     .method("chainable", [](MyClass& self) -> MyClass& { return self; })
@@ -434,7 +434,7 @@ make isolated-core/lexer_tests.cpp
 - 4-72x faster than ChaiScript across all benchmarks  
 - Complete object-oriented programming with native script classes
 - Production-ready hot reload system with advanced optimizations
-- Seamless C++ integration via sophisticated class_builder API
+- Seamless C++ integration via sophisticated dynamic_binder API
 
 ## Fully Working Features (2024)
 **Core Language:** Complete lexer/parser/interpreter with all C++ operators including ternary (`?:`), bitwise (`|`, `^`, `&`), arithmetic (`+`, `-`, `*`, `/`, `%`, `++`, `--`), comparison (`<`, `>`, `<=`, `>=`, `==`, `!=`, `<=>`), logical (`&&`, `||`, `!`), assignment (`=`, `+=`, `-=`, etc.).
@@ -457,21 +457,21 @@ class Tiger : Cat {
 }
 ```
 
-**C++ Integration:** Full class_builder API for exposing C++ classes with constructors, methods, properties, inheritance. Zero-copy bindings.
+**C++ Integration:** Full dynamic_binder API for exposing C++ classes with constructors, methods, properties, inheritance. Zero-copy bindings.
 
 **Hot Reload:** Production-grade system with:
 - Automatic instance migration (preserves field values)
 - Method redefinition (updates all implementations)  
 - Advanced optimizations: 20x speedup (fingerprinting), 60x speedup (field-unchanged detection)
 - Custom migration via `hot_reload_migrate()` method
-- Performance: <10ms for 100 instances, <100μs for identical classes
+- Performance: <10ms for 100 instances, <100uS for identical classes
 
 **VM Backend:** Optional bytecode virtual machine for large scripts (>1000 chars), auto-switching.
 
 **Standard Library:** print(), to_string(), type_of(), JSON support (to_json/from_json).
 
 ## Performance Benchmarks vs ChaiScript
-- Engine creation: 3.1x faster (1,608μs vs 4,955μs)
+- Engine creation: 3.1x faster (1,608uS vs 4,955uS)
 - Simple arithmetic: 4.2x faster (interpreter), 7.4x faster (VM)  
 - Variable assignment: 15.5x faster (interpreter), 54.6x faster (VM)
 - Function calls: 21.7x faster (interpreter), 63.5x faster (VM)
@@ -520,7 +520,7 @@ auto result = engine.execute("2 + 2");
 int value = result.as<int>();
 
 // C++ class binding
-class_builder<MyClass>(engine, "MyClass")
+dynamic_binder<MyClass>(engine, "MyClass")
     .constructor<int, float>()
     .method("method", &MyClass::method)
     .property("field", &MyClass::field)

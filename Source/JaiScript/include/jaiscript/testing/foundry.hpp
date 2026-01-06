@@ -205,7 +205,7 @@ private:
             auto total = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
             auto per_iteration = total.count() / iterations;
             
-            std::cout << "    " << name << ": " << per_iteration << "μs/iteration\n";
+            std::cout << "    " << name << ": " << per_iteration << "uS/iteration\n";
 
             post_test();
         } catch (const std::exception& e) {

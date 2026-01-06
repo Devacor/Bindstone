@@ -1,7 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 
 // Note: This requires Squirrel to be available
 // The squirrel source is at: Source/JaiScript/squirrel
@@ -425,7 +425,7 @@ public:
         )");
 
         // Bind C++ TreeNode class to JaiScript for fair comparison
-        class_builder<CppTreeNode>(*jai_engine, "CppTreeNode")
+        dynamic_binder<CppTreeNode>(*jai_engine, "CppTreeNode")
             .constructor<int>()
             .property("value", &CppTreeNode::value)
             .property("left", &CppTreeNode::left, jai::skip_type_check)

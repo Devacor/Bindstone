@@ -1,8 +1,8 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
-#include <jaiscript/core/class_builder.hpp>
-#include <jaiscript/core/class_builder_serialization.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/dynamic_binder_serialization.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai;
@@ -14,42 +14,42 @@ namespace jai::foundry::tests {
 // C++ Base Classes for Testing
 // ============================================================================
 
-// Simple C++ base class
-class Entity {
+// Simple C++ base class (renamed to avoid ODR conflict with static_binder_tests Entity)
+class SerEntity {
 public:
     int id = 0;
     std::string name = "unnamed";
 
-    virtual ~Entity() = default;
+    virtual ~SerEntity() = default;
 
-    virtual std::string get_type_name() const { return "Entity"; }
+    virtual std::string get_type_name() const { return "SerEntity"; }
 };
 
 // C++ derived class
-class Character : public Entity {
+class SerCharacter : public SerEntity {
 public:
     int health = 100;
     int max_health = 100;
 
-    std::string get_type_name() const override { return "Character"; }
+    std::string get_type_name() const override { return "SerCharacter"; }
 };
 
 // Another C++ derived class
-class Item : public Entity {
+class SerItem : public SerEntity {
 public:
     float weight = 1.0f;
     int stack_count = 1;
 
-    std::string get_type_name() const override { return "Item"; }
+    std::string get_type_name() const override { return "SerItem"; }
 };
 
 // Deeply nested hierarchy
-class Player : public Character {
+class SerPlayer : public SerCharacter {
 public:
     int experience = 0;
     int level = 1;
 
-    std::string get_type_name() const override { return "Player"; }
+    std::string get_type_name() const override { return "SerPlayer"; }
 };
 
 // ============================================================================
@@ -173,10 +173,10 @@ public:
             stdlib::register_json_functions(*eng);
 
             // Register C++ Entity class
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<SerEntity>(*eng, "Entity")
                 .constructor<>()
-                .property("id", &Entity::id)
-                .property("name", &Entity::name)
+                .property("id", &SerEntity::id)
+                .property("name", &SerEntity::name)
                 .build();
 
             // Create, modify, serialize, deserialize
@@ -197,10 +197,10 @@ public:
             auto eng = engine::make();
             stdlib::register_json_functions(*eng);
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<SerEntity>(*eng, "Entity")
                 .constructor<>()
-                .property("id", &Entity::id)
-                .property("name", &Entity::name)
+                .property("id", &SerEntity::id)
+                .property("name", &SerEntity::name)
                 .build();
 
             eng->execute(R"(
@@ -224,18 +224,18 @@ public:
             stdlib::register_json_functions(*eng);
 
             // Register hierarchy - inherited properties are automatically included
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<SerEntity>(*eng, "Entity")
                 .constructor<>()
-                .property("id", &Entity::id)
-                .property("name", &Entity::name)
+                .property("id", &SerEntity::id)
+                .property("name", &SerEntity::name)
                 .build();
 
-            class_builder<Character>(*eng, "Character")
+            dynamic_binder<SerCharacter>(*eng, "Character")
                 .constructor<>()
-                .base_class<Entity>()
+                .base_class<SerEntity>()
                 // Only declare Character-specific properties - id/name inherited automatically
-                .property("health", &Character::health)
-                .property("max_health", &Character::max_health)
+                .property("health", &SerCharacter::health)
+                .property("max_health", &SerCharacter::max_health)
                 .build();
 
             eng->execute(R"(
@@ -262,24 +262,24 @@ public:
 
             // Register full hierarchy: Entity -> Character -> Player
             // Each class only declares its own properties - inheritance is automatic
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<SerEntity>(*eng, "Entity")
                 .constructor<>()
-                .property("id", &Entity::id)
-                .property("name", &Entity::name)
+                .property("id", &SerEntity::id)
+                .property("name", &SerEntity::name)
                 .build();
 
-            class_builder<Character>(*eng, "Character")
+            dynamic_binder<SerCharacter>(*eng, "Character")
                 .constructor<>()
-                .base_class<Entity>()
-                .property("health", &Character::health)
-                .property("max_health", &Character::max_health)
+                .base_class<SerEntity>()
+                .property("health", &SerCharacter::health)
+                .property("max_health", &SerCharacter::max_health)
                 .build();
 
-            class_builder<Player>(*eng, "Player")
+            dynamic_binder<SerPlayer>(*eng, "Player")
                 .constructor<>()
-                .base_class<Character>()
-                .property("experience", &Player::experience)
-                .property("level", &Player::level)
+                .base_class<SerCharacter>()
+                .property("experience", &SerPlayer::experience)
+                .property("level", &SerPlayer::level)
                 .build();
 
             eng->execute(R"(
@@ -423,10 +423,10 @@ public:
             auto eng = engine::make();
             stdlib::register_json_functions(*eng);
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<SerEntity>(*eng, "Entity")
                 .constructor<>()
-                .property("id", &Entity::id)
-                .property("name", &Entity::name)
+                .property("id", &SerEntity::id)
+                .property("name", &SerEntity::name)
                 .build();
 
             eng->execute(R"(
@@ -446,17 +446,17 @@ public:
             auto eng = engine::make();
             stdlib::register_json_functions(*eng);
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<SerEntity>(*eng, "Entity")
                 .constructor<>()
-                .property("id", &Entity::id)
-                .property("name", &Entity::name)
+                .property("id", &SerEntity::id)
+                .property("name", &SerEntity::name)
                 .build();
 
-            class_builder<Character>(*eng, "Character")
+            dynamic_binder<SerCharacter>(*eng, "Character")
                 .constructor<>()
-                .base_class<Entity>()
-                .property("health", &Character::health)
-                .property("max_health", &Character::max_health)
+                .base_class<SerEntity>()
+                .property("health", &SerCharacter::health)
+                .property("max_health", &SerCharacter::max_health)
                 .build();
 
             eng->execute(R"(
@@ -526,18 +526,18 @@ public:
             character_hook_called = false;
             character_hook_version = 0;
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<SerEntity>(*eng, "Entity")
                 .constructor<>()
-                .property("id", &Entity::id)
-                .property("name", &Entity::name)
+                .property("id", &SerEntity::id)
+                .property("name", &SerEntity::name)
                 .build();
 
-            class_builder<Character>(*eng, "Character")
+            dynamic_binder<SerCharacter>(*eng, "Character")
                 .constructor<>()
-                .base_class<Entity>()
-                .property("health", &Character::health)
-                .property("max_health", &Character::max_health)
-                .post_deserialize_hook([](Character& self, int version) {
+                .base_class<SerEntity>()
+                .property("health", &SerCharacter::health)
+                .property("max_health", &SerCharacter::max_health)
+                .post_deserialize_hook([](SerCharacter& self, int version) {
                     character_hook_called = true;
                     character_hook_version = version;
                     // Ensure health doesn't exceed max
@@ -677,17 +677,17 @@ public:
             auto eng = engine::make();
             stdlib::register_json_functions(*eng);
 
-            class_builder<Entity>(*eng, "Entity")
+            dynamic_binder<SerEntity>(*eng, "Entity")
                 .constructor<>()
-                .property("id", &Entity::id)
-                .property("name", &Entity::name)
+                .property("id", &SerEntity::id)
+                .property("name", &SerEntity::name)
                 .build();
 
-            class_builder<Character>(*eng, "Character")
+            dynamic_binder<SerCharacter>(*eng, "Character")
                 .constructor<>()
-                .base_class<Entity>()
-                .property("health", &Character::health)
-                .property("max_health", &Character::max_health)
+                .base_class<SerEntity>()
+                .property("health", &SerCharacter::health)
+                .property("max_health", &SerCharacter::max_health)
                 .build();
 
             eng->execute(R"(

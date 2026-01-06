@@ -14,6 +14,15 @@ namespace jai {
 	// Forward declarations
 	class engine;
 
+	// Helper to get the first type from a parameter pack
+	namespace detail {
+		template<typename First, typename...>
+		struct first_type { using type = First; };
+
+		template<typename... Ts>
+		using first_type_t = typename first_type<Ts...>::type;
+	}
+
 	namespace serialization {
 		class archive_writer;
 		class archive_reader;
@@ -31,7 +40,7 @@ namespace jai {
 		const std::map<std::string, property_base*>& all() const { return m_properties; }
 
 		// Track a script-created receiver - keeps it alive for the lifetime of the property_manager
-		// This is used by class_builder to manage observable property callbacks from scripts
+		// This is used by dynamic_binder to manage observable property callbacks from scripts
 		template<typename T>
 		std::shared_ptr<receiver<T>> track_receiver(std::shared_ptr<receiver<T>> recv) {
 			return script_receivers_.track(std::move(recv));
@@ -161,7 +170,7 @@ namespace jai {
 	template<typename Derived, typename... Bases>
 	class property_owner : public Bases... {
 	public:
-		// Expose the derived type and base types for macros and class_builder
+		// Expose the derived type and base types for macros and dynamic_binder
 		using _jai_owner_type = Derived;
 		using _jai_base_types = std::tuple<Bases...>;
 		static constexpr size_t _jai_base_count = sizeof...(Bases);
@@ -184,6 +193,28 @@ namespace jai {
 
 		// Default constructor
 		property_owner() {
+			register_inheritance();
+		}
+
+		// Forwarding constructor for single base - forwards all arguments to that base
+		// This allows derived classes to initialize their base properly:
+		//   Sprite(args) : property_owner(args) { }
+		template<typename... Args>
+		explicit property_owner(Args&&... args) requires (sizeof...(Bases) == 1)
+			: detail::first_type_t<Bases...>(std::forward<Args>(args)...) {
+			register_inheritance();
+		}
+
+		// Forwarding constructor for multiple bases - forwards one arg per base
+		// Requires number of args to match number of bases
+		template<typename... Args>
+		explicit property_owner(Args&&... args) requires (sizeof...(Bases) > 1 && sizeof...(Bases) == sizeof...(Args))
+			: Bases(std::forward<Args>(args))... {
+			register_inheritance();
+		}
+
+	private:
+		void register_inheritance() {
 			// Ensure inheritance is registered (runs once per type)
 			static const auto _inheritance_registered = []() {
 				if constexpr (sizeof...(Bases) > 0) {
@@ -194,6 +225,8 @@ namespace jai {
 			}();
 			(void)_inheritance_registered;
 		}
+
+	public:
 
 		// Move operations
 		property_owner(property_owner&&) = default;

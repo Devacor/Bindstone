@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <sstream>
 
 using namespace jai;
@@ -50,7 +50,7 @@ public:
             auto eng = engine::make();
             
             // Register test_object class
-            class_builder<test_object>(*eng, "test_object")
+            dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
                 .method("set_value", &test_object::set_value)
@@ -86,7 +86,7 @@ public:
             auto eng = engine::make();
             
             // Register base and derived classes
-            class_builder<test_object>(*eng, "test_object")
+            dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
                 .method("set_value", &test_object::set_value)
@@ -94,7 +94,7 @@ public:
                 .method("set_name", &test_object::set_name)
                 .build();
             
-            class_builder<derived_object>(*eng, "derived_object")
+            dynamic_binder<derived_object>(*eng, "derived_object")
                 .constructor<int, script_string, script_float>()
                 .base_class<test_object>()
                 .method("get_extra", &derived_object::get_extra)
@@ -134,7 +134,7 @@ public:
             auto eng = engine::make();
             
             // Register test_object class
-            class_builder<test_object>(*eng, "test_object")
+            dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
                 .method("set_value", &test_object::set_value)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 
 namespace jai {
 namespace stdlib {
@@ -11,7 +11,7 @@ namespace stdlib {
         script_value first;
         script_value second;
         
-        // Engine-aware constructor - will be used as default by class_builder
+        // Engine-aware constructor - will be used as default by dynamic_binder
         explicit script_pair(engine* eng)
             : first(std::monostate{}, eng),
               second(std::monostate{}, eng) {}
@@ -114,7 +114,7 @@ namespace stdlib {
 
     inline void register_container_types(engine& eng) {
         // Register the pair type for map iteration
-        class_builder<script_pair>(eng, "pair")
+        dynamic_binder<script_pair>(eng, "pair")
             .constructor<>()  // Will automatically use engine-aware constructor
             .constructor<script_value, script_value>()
             .property("first", &script_pair::first)

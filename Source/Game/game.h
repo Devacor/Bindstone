@@ -15,10 +15,11 @@
 #include <string>
 #include <ctime>
 
-#include "MV/Script/script.h"
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/registrar.hpp>
 
 class Game {
-	friend MV::Script;
+	friend jai::engine;
 public:
 	Game(Managers &a_managers);
 
@@ -102,7 +103,11 @@ public:
 
 	void returnFromBackground() {
 		gameData.managers().services.connect(&ourMouse);
-		gameData.managers().services.connect(&scriptEngine);
+		gameData.managers().services.connect<jai::engine>(jaiEngine_.get());
+	}
+
+	jai::engine& script() {
+		return *jaiEngine_;
 	}
 private:
 	Game(const Game &) = delete;
@@ -120,7 +125,7 @@ private:
 
 	std::shared_ptr<MV::Scene::Node> rootScene;
 
-	MV::Script scriptEngine;
+	std::shared_ptr<jai::engine> jaiEngine_;
 
 	std::shared_ptr<LocalPlayer> localPlayer;
 

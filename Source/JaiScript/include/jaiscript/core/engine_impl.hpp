@@ -5,7 +5,7 @@
 
 #include "engine.hpp"
 #include "conversion_registry.hpp"
-#include "class_builder.hpp"
+#include "dynamic_binder.hpp"
 
 namespace jai {
 
@@ -26,21 +26,61 @@ std::string engine::get_registered_name() const {
 // Template implementations that need both engine and conversion_registry
 
 // Helper function for function_binder to convert custom types using engine's conversion registry
+// Overload for copyable types - can create a shared_ptr copy as fallback
 template<typename T>
-script_value convert_custom_type_with_registry(const T& t, engine* eng) {
+script_value convert_custom_type_with_registry(const T& t, engine* eng)
+    requires std::is_copy_constructible_v<T>
+{
     auto registry = eng->get_conversion_registry();
     if (registry && registry->template has_conversion<T>()) {
         return registry->template convert_to_script<T>(t);
     }
-    
-    // Fallback: no class registered, create a simple object wrapper
-    // This should rarely happen since class_builder automatically registers conversions
+
+    // Fallback: no class registered, create a shared_ptr copy
     auto sharedObj = std::make_shared<T>(t);
     if (!eng) {
         throw runtime_error("Engine reference required for custom type conversion");
     }
     // Use engine to create object with proper type name lookup
     return eng->make_object(sharedObj);
+}
+
+// Overload for non-copyable types - must be registered or error
+template<typename T>
+script_value convert_custom_type_with_registry(const T& t, engine* eng)
+    requires (!std::is_copy_constructible_v<T>)
+{
+    auto registry = eng->get_conversion_registry();
+    if (registry && registry->template has_conversion<T>()) {
+        return registry->template convert_to_script<T>(t);
+    }
+
+    // Non-copyable type with no registered conversion
+    // The caller should have used shared_ptr<T> or registered the type properly
+    throw runtime_error("Cannot convert non-copyable type by value. "
+                       "Register the type with dynamic_binder or return shared_ptr<T>.");
+}
+
+// Helper function to convert C++ reference to script_value
+// For registered types, creates non-owning reference via make_cpp_bound
+// For unregistered copyable types, falls back to copy semantics
+// For unregistered non-copyable types, throws error
+template<typename T>
+script_value convert_reference_with_registry(T& t, engine* eng) {
+    // For registered class types, create non-owning reference
+    if (eng && eng->has_registered_class<T>()) {
+        return script_value::make_cpp_bound(&t, eng);
+    }
+
+    // For unregistered types, behavior depends on copyability
+    if constexpr (std::is_copy_constructible_v<T>) {
+        // Fall back to copy semantics for unregistered copyable types
+        return convert_custom_type_with_registry<T>(t, eng);
+    } else {
+        // Non-copyable and not registered - error
+        throw runtime_error("Cannot convert non-copyable type by reference. "
+                           "Register the type with dynamic_binder first.");
+    }
 }
 
 // Implementation of engine-aware vector conversion function

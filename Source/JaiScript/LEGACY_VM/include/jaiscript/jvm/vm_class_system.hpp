@@ -123,7 +123,7 @@ enable_full_class_system(
  *     .inline_method("distance");
  */
 #define VM_REGISTER_CLASS(ClassName) \
-    jaiscript::jvm::vm_optimized_class_builder<ClassName>(js, #ClassName)
+    jaiscript::jvm::vm_optimized_dynamic_binder<ClassName>(js, #ClassName)
 
 /**
  * Performance macros for VM class operations

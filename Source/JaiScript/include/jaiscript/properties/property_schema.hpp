@@ -75,7 +75,7 @@ struct property_meta {
 	}
 
 	// Constructor without lambdas - used by JAI_PROPERTY macros
-	// The getter/setter are generated later in class_builder when the type is complete
+	// The getter/setter are generated later in dynamic_binder when the type is complete
 	property_meta(std::string n, std::type_index ti, std::type_index value_ti,
 	              size_t offset, bool allow_ser, bool observable)
 		: name(std::move(n))

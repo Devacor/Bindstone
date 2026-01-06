@@ -989,9 +989,9 @@ public:
                   "Expected ~103.14, got " + std::to_string(result.as<double>()));
         });
 
-        // TODO: These C++ class_builder tests require assignment_from<T> API to be implemented
-        // test("cpp_class_assignment_operator_conversion") - needs class_builder::assignment_from<T>
-        // test("cpp_class_assignment_from_script_class") - needs class_builder::assignment_from_script
+        // TODO: These C++ dynamic_binder tests require assignment_from<T> API to be implemented
+        // test("cpp_class_assignment_operator_conversion") - needs dynamic_binder::assignment_from<T>
+        // test("cpp_class_assignment_from_script_class") - needs dynamic_binder::assignment_from_script
 
         test("assignment_operator_not_found_rejected", [this]() {
             auto eng = engine::make();

@@ -13,7 +13,7 @@
       "variables": [
         {
           "name": "JAISCRIPT_ENABLE_BENCHMARKS",
-          "value": "False",
+          "value": "True",
           "type": "BOOL"
         }
       ]
@@ -36,11 +36,16 @@
         },
         {
           "name": "JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES",
-          "value": "False",
+          "value": "True",
           "type": "BOOL"
         },
         {
           "name": "JAISCRIPT_ENABLE_PROFILING",
+          "value": "True",
+          "type": "BOOL"
+        },
+        {
+          "name": "JAISCRIPT_BUILD_TESTS",
           "value": "True",
           "type": "BOOL"
         }

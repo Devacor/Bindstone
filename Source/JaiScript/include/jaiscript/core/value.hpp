@@ -254,6 +254,29 @@ namespace jai {
         bool is_function() const { return deref().raw_storage_index() == TYPEID_FUNCTION; }
         bool is_reference() const { return raw_storage_index() == TYPEID_REFERENCE; }  // Don't deref for this check!
         bool is_cpp_bound() const { return cpp_bound_ptr_ != nullptr; }
+
+        // Check if this is a non-owning C++ object reference
+        // Returns true when: cpp_bound_ptr_ is set AND object_holder has no owning data
+        bool is_non_owning_object() const {
+            if (!cpp_bound_ptr_) return false;
+            auto idx = raw_storage_index();
+            if (idx != TYPEID_OBJECT && idx != TYPEID_SHARED_PTR) return false;
+            auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
+            return objHolder && !objHolder->data;
+        }
+
+        // Get raw pointer to cpp_bound object (for non-owning method calls)
+        // Returns nullptr if not cpp_bound. Caller is responsible for type safety.
+        void* get_cpp_bound_ptr() const { return cpp_bound_ptr_; }
+
+        // Type-safe extraction of cpp_bound pointer
+        // Returns nullptr if not cpp_bound or type doesn't match
+        template<typename T>
+        T* get_cpp_bound_as() const {
+            if (!cpp_bound_ptr_) return nullptr;
+            return static_cast<T*>(cpp_bound_ptr_);
+        }
+
         bool is_weak_ptr() const { return deref().raw_storage_index() == TYPEID_WEAK_PTR; }
 
         // Type marker helpers - check if value has shared_ptr<T> or weak_ptr<T> type info
@@ -474,7 +497,7 @@ namespace jai {
         
         // Generic extraction with type checking
         // Thin wrapper around checked_as<T>() that throws on error
-        // NOTE: This throws for compatibility with C++ bindings (class_builder, function_binder)
+        // NOTE: This throws for compatibility with C++ bindings (dynamic_binder, function_binder)
         // Internal interpreter code should use checked_as<T>() directly
         template<typename T>
         T as() const {
@@ -1145,6 +1168,16 @@ namespace jai {
                 if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                     auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
 
+                    // Check for non-owning C++ reference (cpp_bound_ptr_ set, data null)
+                    // Cannot safely return shared_ptr from non-owning reference
+                    if (cpp_bound_ptr_ && !objHolder->data) {
+                        return checked_result<T>(
+                            make_error_code(runtime_error_code::type_mismatch),
+                            "Cannot extract shared_ptr from non-owning C++ reference. "
+                            "The object is bound by reference, not owned. Use T& or T* extraction."
+                        );
+                    }
+
                     // Check if we need to use the custom extractor
                     if (objHolder->is_class_instance_wrapper) {
                         if (engine_) {
@@ -1195,6 +1228,22 @@ namespace jai {
                 // For custom classes, try to extract shared_ptr and dereference
                 auto t = type();
                 if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
+                    auto objHolder = std::get<strong_ptr<object_holder>>(storage_);
+
+                    // Handle non-owning C++ reference via cpp_bound_ptr_
+                    if (cpp_bound_ptr_ && !objHolder->data) {
+                        // Copy from non-owning pointer (only if copyable)
+                        if constexpr (std::is_copy_constructible_v<T>) {
+                            return checked_result<T>(*static_cast<T*>(cpp_bound_ptr_));
+                        } else {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "Cannot copy non-copyable type from non-owning C++ reference"
+                            );
+                        }
+                    }
+
+                    // Owning path: extract shared_ptr and dereference
                     auto ptr_result = checked_as<std::shared_ptr<T>>();
                     if (!ptr_result) {
                         return ptr_result.error_value();  // Preserves symbol IDs for formatting
@@ -1543,7 +1592,7 @@ namespace jai {
         
     private:
         // Friends only for essential access patterns
-        template<typename T> friend class class_builder;  // For make_cpp_object
+        template<typename T> friend class dynamic_binder;  // For make_cpp_object
         friend class serialization::binary_archive_writer;  // For storage_ access
         friend class serialization::binary_archive_reader;  // For storage_ access
         friend class serialization::json_archive_writer;    // For storage_ access

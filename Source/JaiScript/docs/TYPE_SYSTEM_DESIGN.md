@@ -190,7 +190,7 @@ The interpreter determines operation type based on RHS:
 **C++ Bound Types**: C++ bound types support auto-unwrap when `"="` method is registered:
 
 ```cpp
-class_builder<Counter>(eng, "Counter")
+dynamic_binder<Counter>(eng, "Counter")
     .method("=", [](Counter& self, int v) { self.value = v; })
     .build();
 

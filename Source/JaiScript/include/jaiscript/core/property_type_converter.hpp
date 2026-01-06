@@ -23,7 +23,7 @@ class engine;
 //
 // Type-erased converter for property values. This allows complex types like
 // MV::Point<int, int> to be bound as property values without modifying the
-// core class_builder code.
+// core dynamic_binder code.
 //
 // Usage:
 //   // At file scope (static initialization):
@@ -152,7 +152,7 @@ struct property_type_converter_registrar {
 // ============================================================================
 //
 // Note: Primitive types (int, float, bool, string, etc.) are handled directly
-// in class_builder without needing registration. Only complex types need to
+// in dynamic_binder without needing registration. Only complex types need to
 // be registered via property_type_converter_registrar.
 
 } // namespace jai

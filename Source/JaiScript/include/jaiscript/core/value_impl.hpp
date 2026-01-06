@@ -30,6 +30,8 @@ namespace jai {
     }
 
     // Factory method for C++ bound values
+    // For primitives: binds directly to C++ memory (existing behavior)
+    // For registered class types: creates non-owning object reference (NEW)
     template<typename T>
     script_value script_value::make_cpp_bound(T* target, engine* eng) {
         script_value val(std::monostate{}, eng);
@@ -56,8 +58,26 @@ namespace jai {
                 // char -> script_char
                 val.type_info_ = eng->get_type_info_char();
                 val.storage_ = script_char{'\0'};
+            } else if constexpr (std::is_class_v<T>) {
+                // For class types, check if registered
+                if (eng->template has_registered_class<T>()) {
+                    // Create object_holder with type info but NO owning data
+                    // This enables non-owning reference semantics for T& returns
+                    auto holder = make_strong<object_holder>();
+                    holder->type_name = eng->template get_registered_name<T>();
+                    holder->type_id = eng->get_symbolizer()->intern(holder->type_name);
+                    holder->data = nullptr;  // Non-owning! cpp_bound_ptr_ holds the pointer
+                    holder->is_class_instance_wrapper = false;
+
+                    val.type_info_ = eng->get_type_info_object(holder->type_name);
+                    val.storage_ = std::move(holder);
+                } else {
+                    // Fallback for unregistered class types
+                    val.type_info_ = eng->get_type_info_object(typeid(T).name());
+                    val.storage_ = std::monostate{};
+                }
             } else {
-                // For complex types, use object type
+                // For other complex types (enums, etc.), use object type
                 val.type_info_ = eng->get_type_info_object(typeid(T).name());
                 val.storage_ = std::monostate{};
             }

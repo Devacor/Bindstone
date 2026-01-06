@@ -467,7 +467,7 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 		text(std::to_string(static_cast<int>(controls->elementToEdit->blend())))->
 		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
 			try {
-				controls->elementToEdit->blend(static_cast<MV::Scene::Drawable::BlendModePreset>(std::stoi(a_text->text())));
+				controls->elementToEdit->blend(static_cast<MV::BlendMode>(std::stoi(a_text->text())));
 			} catch (std::invalid_argument&) {} catch (std::out_of_range&) {}
 		});
 
@@ -1159,7 +1159,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		text(std::to_string(static_cast<int>(controls->elementToEdit->blend())))->
 		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
 		try {
-			controls->elementToEdit->blend(static_cast<MV::Scene::Drawable::BlendModePreset>(std::stoi(a_text->text())));
+			controls->elementToEdit->blend(static_cast<MV::BlendMode>(std::stoi(a_text->text())));
 		} catch (std::invalid_argument&) {} catch (std::out_of_range&) {}
 	});
 
@@ -1452,7 +1452,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		text(std::to_string(static_cast<int>(controls->elementToEdit->blend())))->
 		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
 		try {
-			controls->elementToEdit->blend(static_cast<MV::Scene::Drawable::BlendModePreset>(std::stoi(a_text->text())));
+			controls->elementToEdit->blend(static_cast<MV::BlendMode>(std::stoi(a_text->text())));
 		} catch (std::invalid_argument&) {} catch (std::out_of_range&) {}
 		});
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jaiscript/core/class_builder.hpp"
+#include "jaiscript/core/dynamic_binder.hpp"
 #include "jaiscript/core/script_class.hpp"
 #include <memory>
 #include <map>
@@ -21,7 +21,7 @@ public:
     // Register script-defined class
     checked_result<void> register_script_class(std::shared_ptr<script_class_definition> class_def);
 
-    // Register C++ class (existing class_builder)
+    // Register C++ class (existing dynamic_binder)
     checked_result<void> register_cpp_class(std::shared_ptr<class_definition> class_def);
     
     // Unified lookup

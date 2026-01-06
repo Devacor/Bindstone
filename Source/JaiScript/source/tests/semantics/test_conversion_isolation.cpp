@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <iostream>
 #include <vector>
 
@@ -27,7 +27,7 @@ public:
             auto engine = engine::make();
             
             // Register Widget class
-            class_builder<SimpleWidget>(*engine, "SimpleWidget")
+            dynamic_binder<SimpleWidget>(*engine, "SimpleWidget")
                 .constructor<>()
                 .constructor<const std::string&, int>()
                 .property("name", &SimpleWidget::name)
@@ -66,7 +66,7 @@ public:
             auto engine = engine::make();  // Fresh engine
             
             // Register Widget class again
-            class_builder<SimpleWidget>(*engine, "SimpleWidget")
+            dynamic_binder<SimpleWidget>(*engine, "SimpleWidget")
                 .constructor<>()
                 .constructor<const std::string&, int>()
                 .property("name", &SimpleWidget::name)

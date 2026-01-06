@@ -28,7 +28,7 @@
 #include "MV/Render/points.h"
 #include "MV/Render/matrix.hpp"
 #include "MV/Utility/generalUtility.h"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 
 #ifdef __APPLE__
 #import "TargetConditionals.h" 
@@ -495,14 +495,14 @@ namespace MV {
 		friend Window;
 		friend RenderWorld;
 
-		MV::Signal<void(int32_t)> onCameraUpdatedSignal;
+		jai::signal_emitter<void(int32_t)> onCameraUpdatedSignal;
 	public:
 		Draw2D();
 		~Draw2D();
 
-		MV::SignalRegister<void(int32_t)> onCameraUpdated;
+		jai::signal<void(int32_t)> onCameraUpdated;
 
-		typedef MV::Signal<void(int32_t)>::SharedReceiverType CameraRecieveType;
+		typedef jai::signal<void(int32_t)>::shared_receiver_type CameraRecieveType;
 
 		Window& window();
 		const Window& window() const;

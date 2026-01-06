@@ -14,7 +14,7 @@
 #include "MV/Render/points.h"
 #include "MV/Render/boxaabb.h"
 #include "MV/Utility/generalUtility.h"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Utility/task.h"
 #include "MV/Utility/visitor.hpp"
 #include "MV/Utility/services.hpp"

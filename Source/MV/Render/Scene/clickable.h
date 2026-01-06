@@ -47,40 +47,40 @@ namespace MV {
 			enum class BoundsType { LOCAL, NODE, CHILDREN, NODE_CHILDREN, NONE };
 		private:
 
-			Signal<ButtonSignalSignature> onDisabledSignal;
-			Signal<ButtonSignalSignature> onEnabledSignal;
+			jai::signal_emitter<ButtonSignalSignature> onDisabledSignal;
+			jai::signal_emitter<ButtonSignalSignature> onEnabledSignal;
 
-			Signal<ButtonSignalSignature> onPressSignal;
-			Signal<DropSignalSignature> onReleaseSignal;
+			jai::signal_emitter<ButtonSignalSignature> onPressSignal;
+			jai::signal_emitter<DropSignalSignature> onReleaseSignal;
 
-			Signal<ButtonSignalSignature> onAcceptSignal;
-			Signal<ButtonSignalSignature> onCancelSignal;
+			jai::signal_emitter<ButtonSignalSignature> onAcceptSignal;
+			jai::signal_emitter<ButtonSignalSignature> onCancelSignal;
 
-			Signal<DragSignalSignature> onDragSignal;
-			Signal<DropSignalSignature> onDropSignal;
+			jai::signal_emitter<DragSignalSignature> onDragSignal;
+			jai::signal_emitter<DropSignalSignature> onDropSignal;
 
 		public:
 			SpriteDerivedAccessors(Clickable)
 
 				//void (std::shared_ptr<Clickable>)
-				SignalRegister<ButtonSignalSignature> onEnabled;
+				jai::signal<ButtonSignalSignature> onEnabled;
 			//void (std::shared_ptr<Clickable>)
-			SignalRegister<ButtonSignalSignature> onDisabled;
+			jai::signal<ButtonSignalSignature> onDisabled;
 
 			//void (std::shared_ptr<Clickable>)
-			SignalRegister<ButtonSignalSignature> onPress;
+			jai::signal<ButtonSignalSignature> onPress;
 			//void (std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity)
-			SignalRegister<DropSignalSignature> onRelease;
+			jai::signal<DropSignalSignature> onRelease;
 
 			//void (std::shared_ptr<Clickable>)
-			SignalRegister<ButtonSignalSignature> onAccept;
+			jai::signal<ButtonSignalSignature> onAccept;
 			//void (std::shared_ptr<Clickable>)
-			SignalRegister<ButtonSignalSignature> onCancel;
+			jai::signal<ButtonSignalSignature> onCancel;
 
 			//void (std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition)
-			SignalRegister<DragSignalSignature> onDrag;
+			jai::signal<DragSignalSignature> onDrag;
 			//void (std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity)
-			SignalRegister<DropSignalSignature> onDrop;
+			jai::signal<DropSignalSignature> onDrop;
 
 			std::shared_ptr<Clickable> clickDetectionType(BoundsType a_type);
 
@@ -144,12 +144,7 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
-				archive(cereal::make_nvp("onPress", onPressSignal),
-					cereal::make_nvp("onRelease", onReleaseSignal),
-					cereal::make_nvp("onDrag", onDragSignal),
-					cereal::make_nvp("onAccept", onAcceptSignal),
-					cereal::make_nvp("onCancel", onCancelSignal),
-					cereal::make_nvp("onDrop", onDropSignal));
+				// Note: Signals are no longer serialized - ChaiScript callbacks need manual migration to JaiScript
 				archive(cereal::make_nvp("hitDetectionType", hitDetectionType.get()));
 				archive(cereal::make_nvp("eatTouches", eatTouches.get()));
 				archive(cereal::make_nvp("globalClickPriority", globalClickPriority.get()));
@@ -160,12 +155,7 @@ namespace MV {
 
 			template <class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				archive(cereal::make_nvp("onPress", onPressSignal),
-					cereal::make_nvp("onRelease", onReleaseSignal),
-					cereal::make_nvp("onDrag", onDragSignal),
-					cereal::make_nvp("onAccept", onAcceptSignal),
-					cereal::make_nvp("onCancel", onCancelSignal),
-					cereal::make_nvp("onDrop", onDropSignal));
+				// Note: Signals are no longer serialized - ChaiScript callbacks need manual migration to JaiScript
 				archive(cereal::make_nvp("hitDetectionType", hitDetectionType.get()));
 				archive(cereal::make_nvp("eatTouches", eatTouches.get()));
 				archive(cereal::make_nvp("globalClickPriority", globalClickPriority.get()));

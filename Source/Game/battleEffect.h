@@ -5,7 +5,7 @@
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
 #include "MV/Utility/generalUtility.h"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include <string>
 #include <memory>
 #include "MV/ArtificialIntelligence/pathfinding.h"
@@ -112,15 +112,15 @@ class BattleEffect : public MV::Scene::Component {
 	friend MV::Script;
 public:
 	typedef void CallbackSignature(std::shared_ptr<BattleEffect>);
-	typedef MV::SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
+	typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
 
 protected:
-	MV::Signal<CallbackSignature> onArriveSignal;
-	MV::Signal<CallbackSignature> onFizzleSignal;
+	jai::signal_emitter<CallbackSignature> onArriveSignal;
+	jai::signal_emitter<CallbackSignature> onFizzleSignal;
 
 public:
-	MV::SignalRegister<CallbackSignature> onArrive;
-	MV::SignalRegister<CallbackSignature> onFizzle;
+	jai::signal<CallbackSignature> onArrive;
+	jai::signal<CallbackSignature> onFizzle;
 
 	ComponentDerivedAccessors(BattleEffect)
 		

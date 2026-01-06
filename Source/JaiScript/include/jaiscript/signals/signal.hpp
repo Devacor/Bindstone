@@ -15,6 +15,14 @@
 #include <mutex>
 #endif
 
+// Forward declarations for serialization
+namespace jai {
+    namespace serialization {
+        class archive_writer;
+        class archive_reader;
+    }
+}
+
 namespace jai {
 
 // ============================================================================
@@ -659,6 +667,12 @@ private:
 
 	// Allow signal<T> to access internals
 	template<typename U> friend class signal;
+
+	// Allow serialization functions to access internals
+	template<typename U>
+	friend void save_signal_emitter(serialization::archive_writer& ar, const signal_emitter<U>& sig);
+	template<typename U>
+	friend void load_signal_emitter(serialization::archive_reader& ar, signal_emitter<U>& sig);
 };
 
 
@@ -785,5 +799,8 @@ private:
 };
 
 } // namespace jai
+
+// Include template implementations (requires engine.hpp, so must come after class definitions)
+#include <jaiscript/signals/signal_impl.hpp>
 
 #endif // __JAISCRIPT_SIGNALS_SIGNAL_HPP__

@@ -5,6 +5,7 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 #include <jaiscript/properties/property_cereal.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -477,6 +478,49 @@ namespace MV {
 				}
 			}
 		}
+
+		/*************************\
+		| ----JaiScript Serialize-|
+		\*************************/
+
+		// ParticleChangeValues JaiScript serialization
+		void ParticleChangeValues::save(jai::serialization::archive_writer& ar) const {
+			ar("rateOfChange", rateOfChange);
+			ar("directionalChange", directionalChangeTemplate);
+			ar("rotationalChange", rotationalChange);
+			ar("beginSpeed", beginSpeed);
+			ar("endSpeed", endSpeed);
+			ar("beginScale", beginScale);
+			ar("endScale", endScale);
+			ar("beginColor", beginColor);
+			ar("endColor", endColor);
+			ar("maxLifespan", maxLifespan);
+			ar("gravityMagnitude", gravityMagnitude);
+			ar("gravityDirection", gravityDirection);
+			ar("animationFramesPerSecond", animationFramesPerSecond);
+		}
+
+		void ParticleChangeValues::load(jai::serialization::archive_reader& ar) {
+			ar("rateOfChange", rateOfChange);
+			ar("directionalChange", directionalChangeTemplate);
+			ar("rotationalChange", rotationalChange);
+			ar("beginSpeed", beginSpeed);
+			ar("endSpeed", endSpeed);
+			ar("beginScale", beginScale);
+			ar("endScale", endScale);
+			ar("beginColor", beginColor);
+			ar("endColor", endColor);
+			ar("maxLifespan", maxLifespan);
+			ar("gravityMagnitude", gravityMagnitude);
+			ar("gravityDirection", gravityDirection);
+			ar("animationFramesPerSecond", animationFramesPerSecond);
+			// Sync directionalChangeCurrent with template on load
+			directionalChangeCurrent = directionalChangeTemplate;
+		}
+
+		// Free function overloads for ADL dispatch
+		void save(jai::serialization::archive_writer& ar, const ParticleChangeValues& v) { v.save(ar); }
+		void load(jai::serialization::archive_reader& ar, ParticleChangeValues& v) { v.load(ar); }
 
 	}
 }

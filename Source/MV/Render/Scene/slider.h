@@ -12,9 +12,9 @@ namespace MV {
 		public:
 			typedef void SliderSignalSignature(std::shared_ptr<Slider>);
 		private:
-			Signal<SliderSignalSignature> onPercentChangeSignal;
+			jai::signal_emitter<SliderSignalSignature> onPercentChangeSignal;
 		public:
-			SignalRegister<SliderSignalSignature> onPercentChange;
+			jai::signal<SliderSignalSignature> onPercentChange;
 
 			ClickableComponentDerivedAccessors(Slider)
 

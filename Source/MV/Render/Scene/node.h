@@ -30,9 +30,9 @@ namespace MV {
 			typedef void BasicSignature(const std::shared_ptr<Node> &a_this);
 			typedef void ComponentSignature(const std::shared_ptr<Component> &a_this);
 
-			typedef Signal<BasicSignature>::SharedReceiverType BasicReceiverType;
-			typedef Signal<ParentInteractionSignature>::SharedReceiverType ParentInteractionReceiverType;
-			typedef Signal<ComponentSignature>::SharedReceiverType ComponentReceiverType;
+			typedef jai::signal<BasicSignature>::shared_receiver_type BasicReceiverType;
+			typedef jai::signal<ParentInteractionSignature>::shared_receiver_type ParentInteractionReceiverType;
+			typedef jai::signal<ComponentSignature>::shared_receiver_type ComponentReceiverType;
 
 			class Quiet {
 			public:
@@ -70,36 +70,36 @@ namespace MV {
 		private:
 			friend Quiet;
 
-			Signal<BasicSignature> onChildAddSignal;
-			Signal<ParentInteractionSignature> onChildRemoveSignal;
-			Signal<ParentInteractionSignature> onChildOrderChangeSignal;
-			Signal<BasicSignature> onAddSignal;
-			Signal<BasicSignature> onRemoveSignal;
+			jai::signal_emitter<BasicSignature> onChildAddSignal;
+			jai::signal_emitter<ParentInteractionSignature> onChildRemoveSignal;
+			jai::signal_emitter<ParentInteractionSignature> onChildOrderChangeSignal;
+			jai::signal_emitter<BasicSignature> onAddSignal;
+			jai::signal_emitter<BasicSignature> onRemoveSignal;
 
-			Signal<BasicSignature> onEnableSignal;
-			Signal<BasicSignature> onDisableSignal;
-			Signal<BasicSignature> onPauseSignal;
-			Signal<BasicSignature> onResumeSignal;
-			Signal<BasicSignature> onShowSignal;
-			Signal<BasicSignature> onHideSignal;
+			jai::signal_emitter<BasicSignature> onEnableSignal;
+			jai::signal_emitter<BasicSignature> onDisableSignal;
+			jai::signal_emitter<BasicSignature> onPauseSignal;
+			jai::signal_emitter<BasicSignature> onResumeSignal;
+			jai::signal_emitter<BasicSignature> onShowSignal;
+			jai::signal_emitter<BasicSignature> onHideSignal;
 
-			Signal<BasicSignature> onBoundsRequestSignal;
+			jai::signal_emitter<BasicSignature> onBoundsRequestSignal;
 
-			Signal<BasicSignature> onTransformChangeSignal;
-			Signal<BasicSignature> onLocalBoundsChangeSignal;
-			Signal<BasicSignature> onChildBoundsChangeSignal;
-			Signal<BasicSignature> onOrderChangeSignal;
-			Signal<BasicSignature> onAlphaChangeSignal;
-			
-			Signal<ComponentSignature> onAttachSignal;
-			Signal<ComponentSignature> onDetachSignal;
-			Signal<ComponentSignature> onComponentUpdateSignal;
+			jai::signal_emitter<BasicSignature> onTransformChangeSignal;
+			jai::signal_emitter<BasicSignature> onLocalBoundsChangeSignal;
+			jai::signal_emitter<BasicSignature> onChildBoundsChangeSignal;
+			jai::signal_emitter<BasicSignature> onOrderChangeSignal;
+			jai::signal_emitter<BasicSignature> onAlphaChangeSignal;
 
-			Signal<BasicSignature> onChangeSignal;
+			jai::signal_emitter<ComponentSignature> onAttachSignal;
+			jai::signal_emitter<ComponentSignature> onDetachSignal;
+			jai::signal_emitter<ComponentSignature> onComponentUpdateSignal;
 
-			Signal<BasicSignature> onMatrixDirtySignal;
+			jai::signal_emitter<BasicSignature> onChangeSignal;
 
-			Signal<BasicSignature>::SharedReceiverType onParentAlphaChangeSignal;
+			jai::signal_emitter<BasicSignature> onMatrixDirtySignal;
+
+			BasicReceiverType onParentAlphaChangeSignal;
 
 			class ReSort {
 			public:
@@ -123,34 +123,34 @@ namespace MV {
 
 			~Node();
 
-			SignalRegister<BasicSignature> onChildAdd;
-			SignalRegister<ParentInteractionSignature> onChildRemove;
-			SignalRegister<ParentInteractionSignature> onChildOrderChange;
-			SignalRegister<BasicSignature> onAdd;
-			SignalRegister<BasicSignature> onRemove;
+			jai::signal<BasicSignature> onChildAdd;
+			jai::signal<ParentInteractionSignature> onChildRemove;
+			jai::signal<ParentInteractionSignature> onChildOrderChange;
+			jai::signal<BasicSignature> onAdd;
+			jai::signal<BasicSignature> onRemove;
 
-			SignalRegister<BasicSignature> onEnable;
-			SignalRegister<BasicSignature> onDisable;
-			SignalRegister<BasicSignature> onPause;
-			SignalRegister<BasicSignature> onResume;
-			SignalRegister<BasicSignature> onShow;
-			SignalRegister<BasicSignature> onHide;
+			jai::signal<BasicSignature> onEnable;
+			jai::signal<BasicSignature> onDisable;
+			jai::signal<BasicSignature> onPause;
+			jai::signal<BasicSignature> onResume;
+			jai::signal<BasicSignature> onShow;
+			jai::signal<BasicSignature> onHide;
 
-			SignalRegister<BasicSignature> onBoundsRequest;
+			jai::signal<BasicSignature> onBoundsRequest;
 
-			SignalRegister<BasicSignature> onTransformChange;
-			SignalRegister<BasicSignature> onLocalBoundsChange;
-			SignalRegister<BasicSignature> onChildBoundsChange;
-			SignalRegister<BasicSignature> onOrderChange;
-			SignalRegister<BasicSignature> onAlphaChange;
+			jai::signal<BasicSignature> onTransformChange;
+			jai::signal<BasicSignature> onLocalBoundsChange;
+			jai::signal<BasicSignature> onChildBoundsChange;
+			jai::signal<BasicSignature> onOrderChange;
+			jai::signal<BasicSignature> onAlphaChange;
 
-			SignalRegister<BasicSignature> onChange;
+			jai::signal<BasicSignature> onChange;
 
-			SignalRegister<ComponentSignature> onDetach;
-			SignalRegister<ComponentSignature> onAttach;
-			SignalRegister<ComponentSignature> onComponentUpdate;
+			jai::signal<ComponentSignature> onDetach;
+			jai::signal<ComponentSignature> onAttach;
+			jai::signal<ComponentSignature> onComponentUpdate;
 
-			SignalRegister<BasicSignature> onMatrixDirty;
+			jai::signal<BasicSignature> onMatrixDirty;
 
 			void draw();
 			void drawChildren();

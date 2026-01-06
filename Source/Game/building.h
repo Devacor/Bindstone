@@ -4,7 +4,7 @@
 #include "MV/Render/package.h"
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include <string>
 #include <memory>
 #include "MV/ArtificialIntelligence/pathfinding.h"
@@ -150,10 +150,10 @@ class Building : public MV::Scene::Component {
 	friend MV::Scene::Node;
 	friend MV::Script;
 	friend cereal::access;
-	MV::Signal<void(std::shared_ptr<Building>)> onUpgradedSignal;
+	jai::signal_emitter<void(std::shared_ptr<Building>)> onUpgradedSignal;
 
 public:
-	MV::SignalRegister<void(std::shared_ptr<Building>)> onUpgraded;
+	jai::signal<void(std::shared_ptr<Building>)> onUpgraded;
 
 	ComponentDerivedAccessors(Building)
 

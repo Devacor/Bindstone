@@ -9,6 +9,7 @@
 #include "MV/Interface/package.h"
 #include "MV/Audio/package.h"
 #include "MV/Utility/services.hpp"
+#include <jaiscript/signals/signal.hpp>
 
 struct DefaultLogin {
 	std::string id;
@@ -16,9 +17,9 @@ struct DefaultLogin {
 };
 
 struct StandardMessages {
-	MV::Signal<void()> lobbyConnected;
-	MV::Signal<void(const std::string &)> lobbyDisconnect;
-	MV::Signal<void(bool, const std::string &)> lobbyAuthenticated;
+	jai::signal_emitter<void()> lobbyConnected;
+	jai::signal_emitter<void(const std::string &)> lobbyDisconnect;
+	jai::signal_emitter<void(bool, const std::string &)> lobbyAuthenticated;
 };
 
 struct Managers {

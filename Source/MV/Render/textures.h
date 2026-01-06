@@ -12,7 +12,7 @@
 #include "render.h"
 #include "boxaabb.h"
 
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Serialization/serialize.h"
 
 namespace MV {
@@ -229,10 +229,10 @@ namespace MV {
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
 		friend cereal::access;
 	protected:
-		Signal<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
+		jai::signal_emitter<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
 	public:
-		SignalRegister<void(std::shared_ptr<TextureDefinition>)> onReload;
-		typedef Receiver<void(std::shared_ptr<TextureDefinition>)> SignalType;
+		jai::signal<void(std::shared_ptr<TextureDefinition>)> onReload;
+		typedef jai::receiver<void(std::shared_ptr<TextureDefinition>)> SignalType;
 
 		virtual ~TextureDefinition();
 		std::shared_ptr<TextureHandle> makeHandle();
@@ -425,10 +425,10 @@ namespace MV {
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
 		friend cereal::access;
 		friend TextureDefinition;
-		Signal<void(std::shared_ptr<TextureHandle>)> sizeChangeSignal;
+		jai::signal_emitter<void(std::shared_ptr<TextureHandle>)> sizeChangeSignal;
 	public:
 		virtual ~TextureHandle();
-		typedef Receiver<void (std::shared_ptr<TextureHandle>)> SignalType;
+		typedef jai::receiver<void (std::shared_ptr<TextureHandle>)> SignalType;
 
 		//0 to texturePixels
 		std::shared_ptr<TextureHandle> bounds(const BoxAABB<int> &a_bounds);
@@ -472,7 +472,7 @@ namespace MV {
 
 		std::shared_ptr<TextureDefinition> texture() const;
 
-		SignalRegister<void(std::shared_ptr<TextureHandle>)> sizeChange;
+		jai::signal<void(std::shared_ptr<TextureHandle>)> sizeChange;
 
 		std::shared_ptr<TextureHandle> name(const std::string &a_name) {
 			debugName = a_name;

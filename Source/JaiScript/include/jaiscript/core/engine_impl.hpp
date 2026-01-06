@@ -29,15 +29,16 @@ std::string engine::get_registered_name() const {
 // Overload for copyable types - can create a shared_ptr copy as fallback
 template<typename T>
 script_value convert_custom_type_with_registry(const T& t, engine* eng)
-    requires std::is_copy_constructible_v<T>
+    requires std::is_copy_constructible_v<std::remove_const_t<T>>
 {
+    using NonConstT = std::remove_const_t<T>;
     auto registry = eng->get_conversion_registry();
-    if (registry && registry->template has_conversion<T>()) {
-        return registry->template convert_to_script<T>(t);
+    if (registry && registry->template has_conversion<NonConstT>()) {
+        return registry->template convert_to_script<NonConstT>(t);
     }
 
-    // Fallback: no class registered, create a shared_ptr copy
-    auto sharedObj = std::make_shared<T>(t);
+    // Fallback: no class registered, create a shared_ptr copy (strip const for shared_ptr)
+    auto sharedObj = std::make_shared<NonConstT>(t);
     if (!eng) {
         throw runtime_error("Engine reference required for custom type conversion");
     }
@@ -48,11 +49,12 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
 // Overload for non-copyable types - must be registered or error
 template<typename T>
 script_value convert_custom_type_with_registry(const T& t, engine* eng)
-    requires (!std::is_copy_constructible_v<T>)
+    requires (!std::is_copy_constructible_v<std::remove_const_t<T>>)
 {
+    using NonConstT = std::remove_const_t<T>;
     auto registry = eng->get_conversion_registry();
-    if (registry && registry->template has_conversion<T>()) {
-        return registry->template convert_to_script<T>(t);
+    if (registry && registry->template has_conversion<NonConstT>()) {
+        return registry->template convert_to_script<NonConstT>(t);
     }
 
     // Non-copyable type with no registered conversion
@@ -67,13 +69,15 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
 // For unregistered non-copyable types, throws error
 template<typename T>
 script_value convert_reference_with_registry(T& t, engine* eng) {
+    using NonConstT = std::remove_const_t<T>;
+
     // For registered class types, create non-owning reference
-    if (eng && eng->has_registered_class<T>()) {
+    if (eng && eng->has_registered_class<NonConstT>()) {
         return script_value::make_cpp_bound(&t, eng);
     }
 
     // For unregistered types, behavior depends on copyability
-    if constexpr (std::is_copy_constructible_v<T>) {
+    if constexpr (std::is_copy_constructible_v<NonConstT>) {
         // Fall back to copy semantics for unregistered copyable types
         return convert_custom_type_with_registry<T>(t, eng);
     } else {
@@ -81,6 +85,34 @@ script_value convert_reference_with_registry(T& t, engine* eng) {
         throw runtime_error("Cannot convert non-copyable type by reference. "
                            "Register the type with dynamic_binder first.");
     }
+}
+
+// Implementation of engine::make_value for non-primitive lvalue references
+// Uses convert_reference_with_registry to handle registered types
+template<typename T>
+requires (!std::is_arithmetic_v<std::remove_cvref_t<T>> &&
+          !std::is_same_v<std::remove_cvref_t<T>, script_string> &&
+          !std::is_same_v<std::remove_cvref_t<T>, std::string> &&
+          !std::is_convertible_v<T, const char*> &&  // Exclude string literals and char pointers
+          !std::is_same_v<std::remove_cvref_t<T>, std::monostate> &&
+          std::is_lvalue_reference_v<T>)
+script_value engine::make_value(T&& value) {
+    return convert_reference_with_registry(value, this);
+}
+
+// Implementation of engine::make_value for non-primitive rvalue references
+// Uses convert_custom_type_with_registry to handle class types passed by value
+template<typename T>
+requires (!std::is_arithmetic_v<std::remove_cvref_t<T>> &&
+          !std::is_same_v<std::remove_cvref_t<T>, script_string> &&
+          !std::is_same_v<std::remove_cvref_t<T>, std::string> &&
+          !std::is_convertible_v<T, const char*> &&
+          !std::is_same_v<std::remove_cvref_t<T>, std::monostate> &&
+          !std::is_pointer_v<std::remove_cvref_t<T>> &&
+          std::is_rvalue_reference_v<T&&> &&
+          !std::is_lvalue_reference_v<T>)
+script_value engine::make_value(T&& value) {
+    return convert_custom_type_with_registry(value, this);
 }
 
 // Implementation of engine-aware vector conversion function

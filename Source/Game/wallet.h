@@ -1,7 +1,7 @@
 #ifndef __MV_WALLET_H__
 #define __MV_WALLET_H__
 
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include "cereal/cereal.hpp"
 #include <string>
 #include <array>
@@ -10,12 +10,12 @@ class Wallet {
 public:
 	enum CurrencyType { GAME, SOFT, HARD, TOTAL };
 private:
-	MV::Signal<void(Wallet&)> onChangeSignal;
-	MV::Signal<void(Wallet&, CurrencyType, int64_t)> onChangeCurrencySignal;
+	jai::signal_emitter<void(Wallet&)> onChangeSignal;
+	jai::signal_emitter<void(Wallet&, CurrencyType, int64_t)> onChangeCurrencySignal;
 
 public:
-	MV::SignalRegister<void(Wallet&)> onChange;
-	MV::SignalRegister<void(Wallet&, CurrencyType, int64_t)> onChangeCurrency;
+	jai::signal<void(Wallet&)> onChange;
+	jai::signal<void(Wallet&, CurrencyType, int64_t)> onChangeCurrency;
 
 	Wallet();
 	Wallet(const std::array<int64_t, TOTAL> &a_initialValues);

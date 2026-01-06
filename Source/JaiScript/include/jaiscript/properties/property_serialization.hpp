@@ -3,6 +3,7 @@
 #include <jaiscript/properties/property.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/construct.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/static_binder.hpp>
 #include <vector>
@@ -244,6 +245,106 @@ namespace property_serialization {
 
 	template<typename T>
 	inline constexpr bool has_jai_load_v = has_any_load_v<T>;
+
+	// ============================================================================
+	// load_and_construct support (for types without default constructors)
+	// ============================================================================
+	// This mirrors cereal's load_and_construct pattern for types that cannot be
+	// default-constructed. Supports two patterns:
+	//
+	// 1. Static member function (when you can modify the class):
+	//    static void load_and_construct(archive_reader& ar, construct<T>& c);
+	//
+	// 2. Free function via ADL (when you can't modify the class):
+	//    void load_and_construct(archive_reader& ar, construct<T>& c);
+	//
+	// The user calls c(args...) to construct the object, then accesses members via c->
+
+} // namespace property_serialization
+
+// jai::access and jai::serialization::construct are defined in <jaiscript/serialization/construct.hpp>
+
+namespace property_serialization {
+	// Aliases for backward compatibility and convenience
+	template<typename T>
+	using construct = serialization::construct<T>;
+
+	template<typename T>
+	using construct_unique = serialization::construct_unique<T>;
+
+	// --- load_and_construct detection traits ---
+
+	// Detects: T::load_and_construct(archive_reader&, construct<T>&) - static member (shared_ptr)
+	template<typename T, typename = void>
+	struct has_member_load_and_construct : std::false_type {};
+
+	template<typename T>
+	struct has_member_load_and_construct<T, std::void_t<
+		decltype(T::load_and_construct(
+			std::declval<serialization::archive_reader&>(),
+			std::declval<construct<T>&>()
+		))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_member_load_and_construct_v = has_member_load_and_construct<T>::value;
+
+	// Detects: load_and_construct(archive_reader&, construct<T>&) - free function via ADL (shared_ptr)
+	template<typename T, typename = void>
+	struct has_free_load_and_construct : std::false_type {};
+
+	template<typename T>
+	struct has_free_load_and_construct<T, std::void_t<
+		decltype(load_and_construct(
+			std::declval<serialization::archive_reader&>(),
+			std::declval<construct<T>&>()
+		))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_free_load_and_construct_v = has_free_load_and_construct<T>::value;
+
+	// Combined: either member or free function (shared_ptr version)
+	template<typename T>
+	inline constexpr bool has_load_and_construct_v =
+		has_member_load_and_construct_v<T> || has_free_load_and_construct_v<T>;
+
+	// --- load_and_construct detection for unique_ptr ---
+
+	// Detects: T::load_and_construct(archive_reader&, construct_unique<T>&) - static member
+	template<typename T, typename = void>
+	struct has_member_load_and_construct_unique : std::false_type {};
+
+	template<typename T>
+	struct has_member_load_and_construct_unique<T, std::void_t<
+		decltype(T::load_and_construct(
+			std::declval<serialization::archive_reader&>(),
+			std::declval<construct_unique<T>&>()
+		))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_member_load_and_construct_unique_v = has_member_load_and_construct_unique<T>::value;
+
+	// Detects: load_and_construct(archive_reader&, construct_unique<T>&) - free function via ADL
+	template<typename T, typename = void>
+	struct has_free_load_and_construct_unique : std::false_type {};
+
+	template<typename T>
+	struct has_free_load_and_construct_unique<T, std::void_t<
+		decltype(load_and_construct(
+			std::declval<serialization::archive_reader&>(),
+			std::declval<construct_unique<T>&>()
+		))
+	>> : std::true_type {};
+
+	template<typename T>
+	inline constexpr bool has_free_load_and_construct_unique_v = has_free_load_and_construct_unique<T>::value;
+
+	// Combined: either member or free function (unique_ptr version)
+	template<typename T>
+	inline constexpr bool has_load_and_construct_unique_v =
+		has_member_load_and_construct_unique_v<T> || has_free_load_and_construct_unique_v<T>;
 
 	// --- property_owner detection ---
 	// Detects: T has a property_mgr member (inherits from property_owner<T>)
@@ -781,7 +882,9 @@ namespace property_serialization {
 		has_member_load_v<T> ||
 		has_free_load_v<T> ||
 		has_member_serialize_load_v<T> ||
-		has_free_serialize_load_v<T>;
+		has_free_serialize_load_v<T> ||
+		has_load_and_construct_v<T> ||         // Types with load_and_construct (shared_ptr)
+		has_load_and_construct_unique_v<T>;    // Types with load_and_construct (unique_ptr)
 
 	// Write shared_ptr with ID-based de-duplication
 	template<typename T>
@@ -848,21 +951,37 @@ namespace property_serialization {
 			}
 
 			// First time seeing this ID - deserialize the object
-			ptr = std::make_shared<T>();
-			if constexpr (is_direct_serializable_v<T>) {
-				read_primitive(ar, *ptr);
-			} else if constexpr (has_static_type_v<T>) {
-				jai_static_type<T>::load(ar, *ptr);
-			} else if constexpr (is_property_owner_v<T>) {
-				ptr->property_mgr.load(ar);
-			} else if constexpr (has_member_load_v<T>) {
-				ptr->load(ar);
-			} else if constexpr (has_free_load_v<T>) {
-				load(ar, *ptr);
-			} else if constexpr (has_member_serialize_load_v<T>) {
-				ptr->serialize(ar);
-			} else if constexpr (has_free_serialize_load_v<T>) {
-				serialize(ar, *ptr);
+			// Check if type requires load_and_construct (no default constructor)
+			if constexpr (has_load_and_construct_v<T>) {
+				// Use load_and_construct pattern - type controls its own construction
+				construct<T> c(ptr);
+				if constexpr (has_member_load_and_construct_v<T>) {
+					T::load_and_construct(ar, c);
+				} else {
+					// Free function via ADL
+					load_and_construct(ar, c);
+				}
+				if (!c.is_constructed()) {
+					throw serialization_error("load_and_construct did not construct the object");
+				}
+			} else {
+				// Default construction path
+				ptr = std::make_shared<T>();
+				if constexpr (is_direct_serializable_v<T>) {
+					read_primitive(ar, *ptr);
+				} else if constexpr (has_static_type_v<T>) {
+					jai_static_type<T>::load(ar, *ptr);
+				} else if constexpr (is_property_owner_v<T>) {
+					ptr->property_mgr.load(ar);
+				} else if constexpr (has_member_load_v<T>) {
+					ptr->load(ar);
+				} else if constexpr (has_free_load_v<T>) {
+					load(ar, *ptr);
+				} else if constexpr (has_member_serialize_load_v<T>) {
+					ptr->serialize(ar);
+				} else if constexpr (has_free_serialize_load_v<T>) {
+					serialize(ar, *ptr);
+				}
 			}
 
 			// Register for weak_ptr reconstruction
@@ -912,21 +1031,37 @@ namespace property_serialization {
 				ptr.reset();
 				return;
 			} else {
-				ptr = std::make_unique<T>();
-				if constexpr (is_direct_serializable_v<T>) {
-					read_primitive(ar, *ptr);
-				} else if constexpr (has_static_type_v<T>) {
-					jai_static_type<T>::load(ar, *ptr);
-				} else if constexpr (is_property_owner_v<T>) {
-					ptr->property_mgr.load(ar);
-				} else if constexpr (has_member_load_v<T>) {
-					ptr->load(ar);
-				} else if constexpr (has_free_load_v<T>) {
-					load(ar, *ptr);
-				} else if constexpr (has_member_serialize_load_v<T>) {
-					ptr->serialize(ar);
-				} else if constexpr (has_free_serialize_load_v<T>) {
-					serialize(ar, *ptr);
+				// Check if type requires load_and_construct (no default constructor)
+				if constexpr (has_load_and_construct_unique_v<T>) {
+					// Use load_and_construct pattern for unique_ptr
+					construct_unique<T> c(ptr);
+					if constexpr (has_member_load_and_construct_unique_v<T>) {
+						T::load_and_construct(ar, c);
+					} else {
+						// Free function via ADL
+						load_and_construct(ar, c);
+					}
+					if (!c.is_constructed()) {
+						throw serialization_error("load_and_construct did not construct the object");
+					}
+				} else {
+					// Default construction path
+					ptr = std::make_unique<T>();
+					if constexpr (is_direct_serializable_v<T>) {
+						read_primitive(ar, *ptr);
+					} else if constexpr (has_static_type_v<T>) {
+						jai_static_type<T>::load(ar, *ptr);
+					} else if constexpr (is_property_owner_v<T>) {
+						ptr->property_mgr.load(ar);
+					} else if constexpr (has_member_load_v<T>) {
+						ptr->load(ar);
+					} else if constexpr (has_free_load_v<T>) {
+						load(ar, *ptr);
+					} else if constexpr (has_member_serialize_load_v<T>) {
+						ptr->serialize(ar);
+					} else if constexpr (has_free_serialize_load_v<T>) {
+						serialize(ar, *ptr);
+					}
 				}
 			}
 		} else {

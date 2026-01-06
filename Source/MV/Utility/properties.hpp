@@ -12,7 +12,7 @@
 #include <concepts>
 #include <type_traits>
 #include "require.hpp"
-#include "signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include <cereal/cereal.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
@@ -905,10 +905,10 @@ namespace MV {
 			}
 		}
 
-		MV::SignalRegister<ChangeSignature> onChanged;
+		jai::signal<ChangeSignature> onChanged;
 
 	protected:
-		MV::Signal<ChangeSignature> onChangedSignal;
+		jai::signal_emitter<ChangeSignature> onChangedSignal;
 	};
 
 	// PropertyRegistry implementation

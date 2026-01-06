@@ -4,7 +4,7 @@
 #include <SDL.h>
 #include <memory>
 #include "MV/Render/points.h"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 
 namespace MV{
 	struct ExclusiveTapAction{
@@ -39,10 +39,10 @@ namespace MV{
 		TapDevice();
 
 		typedef void CallbackSignature(TapDevice&);
-		typedef std::shared_ptr<Receiver<CallbackSignature>> SignalType;
+		typedef std::shared_ptr<jai::receiver<CallbackSignature>> SignalType;
 
 		typedef void TouchCallbackSignature(const MV::Point<int> &center, float zoom, float radians);
-		typedef std::shared_ptr<Receiver<TouchCallbackSignature>> TouchSignalType;
+		typedef std::shared_ptr<jai::receiver<TouchCallbackSignature>> TouchSignalType;
 
 		void update();
 
@@ -67,51 +67,51 @@ namespace MV{
 		MV::Point<int> oldMousePosition;
 		MV::Point<int> touchPosition;
 
-		void updateButtonState(bool &oldState, bool newState, Signal<CallbackSignature> &onDown, Signal<CallbackSignature> &onUp, Signal<CallbackSignature> &onDownEnd, Signal<CallbackSignature> &onUpEnd);
+		void updateButtonState(bool &oldState, bool newState, jai::signal_emitter<CallbackSignature> &onDown, jai::signal_emitter<CallbackSignature> &onUp, jai::signal_emitter<CallbackSignature> &onDownEnd, jai::signal_emitter<CallbackSignature> &onUpEnd);
 
-		Signal<CallbackSignature> onLeftMouseDownSignal;
-		Signal<CallbackSignature> onLeftMouseUpSignal;
+		jai::signal_emitter<CallbackSignature> onLeftMouseDownSignal;
+		jai::signal_emitter<CallbackSignature> onLeftMouseUpSignal;
 
-		Signal<CallbackSignature> onLeftMouseDownEndSignal;
-		Signal<CallbackSignature> onLeftMouseUpEndSignal;
+		jai::signal_emitter<CallbackSignature> onLeftMouseDownEndSignal;
+		jai::signal_emitter<CallbackSignature> onLeftMouseUpEndSignal;
 
-		Signal<CallbackSignature> onRightMouseDownSignal;
-		Signal<CallbackSignature> onRightMouseUpSignal;
+		jai::signal_emitter<CallbackSignature> onRightMouseDownSignal;
+		jai::signal_emitter<CallbackSignature> onRightMouseUpSignal;
 
-		Signal<CallbackSignature> onRightMouseDownEndSignal;
-		Signal<CallbackSignature> onRightMouseUpEndSignal;
+		jai::signal_emitter<CallbackSignature> onRightMouseDownEndSignal;
+		jai::signal_emitter<CallbackSignature> onRightMouseUpEndSignal;
 
-		Signal<CallbackSignature> onMiddleMouseDownSignal;
-		Signal<CallbackSignature> onMiddleMouseUpSignal;
+		jai::signal_emitter<CallbackSignature> onMiddleMouseDownSignal;
+		jai::signal_emitter<CallbackSignature> onMiddleMouseUpSignal;
 
-		Signal<CallbackSignature> onMiddleMouseDownEndSignal;
-		Signal<CallbackSignature> onMiddleMouseUpEndSignal;
+		jai::signal_emitter<CallbackSignature> onMiddleMouseDownEndSignal;
+		jai::signal_emitter<CallbackSignature> onMiddleMouseUpEndSignal;
 
-		Signal<CallbackSignature> onMoveSignal;
+		jai::signal_emitter<CallbackSignature> onMoveSignal;
 
-		Signal<TouchCallbackSignature> onPinchZoomSignal;
+		jai::signal_emitter<TouchCallbackSignature> onPinchZoomSignal;
 	public:
-		SignalRegister<CallbackSignature> onLeftMouseDown;
-		SignalRegister<CallbackSignature> onLeftMouseUp;
+		jai::signal<CallbackSignature> onLeftMouseDown;
+		jai::signal<CallbackSignature> onLeftMouseUp;
 
-		SignalRegister<CallbackSignature> onLeftMouseDownEnd;
-		SignalRegister<CallbackSignature> onLeftMouseUpEnd;
+		jai::signal<CallbackSignature> onLeftMouseDownEnd;
+		jai::signal<CallbackSignature> onLeftMouseUpEnd;
 
-		SignalRegister<CallbackSignature> onRightMouseDown;
-		SignalRegister<CallbackSignature> onRightMouseUp;
+		jai::signal<CallbackSignature> onRightMouseDown;
+		jai::signal<CallbackSignature> onRightMouseUp;
 
-		SignalRegister<CallbackSignature> onRightMouseDownEnd;
-		SignalRegister<CallbackSignature> onRightMouseUpEnd;
+		jai::signal<CallbackSignature> onRightMouseDownEnd;
+		jai::signal<CallbackSignature> onRightMouseUpEnd;
 
-		SignalRegister<CallbackSignature> onMiddleMouseDown;
-		SignalRegister<CallbackSignature> onMiddleMouseUp;
+		jai::signal<CallbackSignature> onMiddleMouseDown;
+		jai::signal<CallbackSignature> onMiddleMouseUp;
 
-		SignalRegister<CallbackSignature> onMiddleMouseDownEnd;
-		SignalRegister<CallbackSignature> onMiddleMouseUpEnd;
+		jai::signal<CallbackSignature> onMiddleMouseDownEnd;
+		jai::signal<CallbackSignature> onMiddleMouseUpEnd;
 
-		SignalRegister<CallbackSignature> onMove;
+		jai::signal<CallbackSignature> onMove;
 
-		SignalRegister<TouchCallbackSignature> onPinchZoom;
+		jai::signal<TouchCallbackSignature> onPinchZoom;
 	};
 }
 

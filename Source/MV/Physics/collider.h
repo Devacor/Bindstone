@@ -444,21 +444,21 @@ namespace MV {
 			friend RotationJointAttributes;
 			friend ContactListener;
 			
-			Signal<void(CollisionParameters)> onCollisionStartSignal;
-			Signal<void(CollisionParameters)> onCollisionEndSignal;
-			Signal<void(size_t, CollisionParameters, const Point<> &)> onContactStartSignal;
-			Signal<void(size_t, CollisionParameters)> onContactEndSignal;
-			Signal<void(bool, CollisionParameters)> onCollisionKilledSignal; //first param true if A is destroyed otherwise B
-			Signal<void(bool, size_t, CollisionParameters)> onContactKilledSignal; //first param true if A is destroyed otherwise B
-			Signal<void(CollisionParameters, const Point<> &, bool&)> onShouldCollideSignal;
+			jai::signal_emitter<void(CollisionParameters)> onCollisionStartSignal;
+			jai::signal_emitter<void(CollisionParameters)> onCollisionEndSignal;
+			jai::signal_emitter<void(size_t, CollisionParameters, const Point<> &)> onContactStartSignal;
+			jai::signal_emitter<void(size_t, CollisionParameters)> onContactEndSignal;
+			jai::signal_emitter<void(bool, CollisionParameters)> onCollisionKilledSignal; //first param true if A is destroyed otherwise B
+			jai::signal_emitter<void(bool, size_t, CollisionParameters)> onContactKilledSignal; //first param true if A is destroyed otherwise B
+			jai::signal_emitter<void(CollisionParameters, const Point<> &, bool&)> onShouldCollideSignal;
 		public:
-			SignalRegister<void(CollisionParameters)> onCollisionStart;
-			SignalRegister<void(CollisionParameters)> onCollisionEnd;
-			SignalRegister<void(size_t, CollisionParameters, const Point<> &)> onContactStart;
-			SignalRegister<void(size_t, CollisionParameters)> onContactEnd;
-			SignalRegister<void(bool, CollisionParameters)> onCollisionKilled; //first param true if A is destroyed otherwise B
-			SignalRegister<void(bool, size_t, CollisionParameters)> onContactKilled; //first param true if A is destroyed otherwise B
-			SignalRegister<void(CollisionParameters, const Point<> &, bool&)> onShouldCollide;
+			jai::signal<void(CollisionParameters)> onCollisionStart;
+			jai::signal<void(CollisionParameters)> onCollisionEnd;
+			jai::signal<void(size_t, CollisionParameters, const Point<> &)> onContactStart;
+			jai::signal<void(size_t, CollisionParameters)> onContactEnd;
+			jai::signal<void(bool, CollisionParameters)> onCollisionKilled; //first param true if A is destroyed otherwise B
+			jai::signal<void(bool, size_t, CollisionParameters)> onContactKilled; //first param true if A is destroyed otherwise B
+			jai::signal<void(CollisionParameters, const Point<> &, bool&)> onShouldCollide;
 
 			ComponentDerivedAccessors(Collider);
 

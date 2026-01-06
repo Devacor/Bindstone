@@ -368,7 +368,7 @@ namespace MV {
 
 			JAI_DELETED_PROPERTY((std::shared_ptr<TextureHandle>), ourTexture);
 
-			std::map<size_t, TextureHandle::SignalType::SharedType> textureSizeSignals;
+			std::map<size_t, TextureHandle::SignalType::shared_type> textureSizeSignals;
 
 			JAI_PROPERTY((GLenum), drawType, GL_TRIANGLES);
 

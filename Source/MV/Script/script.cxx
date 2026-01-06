@@ -14,7 +14,7 @@
 
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/scopeGuard.hpp"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include "chaiscript/chaiscript.hpp"
 #include "chaiscript/utility/utility.hpp"
 
@@ -103,36 +103,38 @@ namespace MV {
 
 	template <typename T>
 	void hookReceiver(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::fun(&Receiver<T>::block), "block");
-		a_script.add(chaiscript::fun(&Receiver<T>::blocked), "blocked");
-		a_script.add(chaiscript::fun(&Receiver<T>::unblock), "unblock");
-		a_script.add(chaiscript::fun(&Receiver<T>::hasScript), "hasScript");
-		a_script.add(chaiscript::fun(&Receiver<T>::script), "script");
+		a_script.add(chaiscript::fun(&jai::receiver<T>::block), "block");
+		a_script.add(chaiscript::fun(&jai::receiver<T>::blocked), "blocked");
+		a_script.add(chaiscript::fun(&jai::receiver<T>::unblock), "unblock");
+		a_script.add(chaiscript::fun(&jai::receiver<T>::has_script), "hasScript");
+		a_script.add(chaiscript::fun(&jai::receiver<T>::script), "script");
 
-		a_script.add(chaiscript::fun([](typename Receiver<T>::SharedType& a_pointer) {a_pointer.reset(); }), "reset");
+		a_script.add(chaiscript::fun([](typename jai::receiver<T>::shared_type& a_pointer) {a_pointer.reset(); }), "reset");
 	}
 
 	template <typename T>
 	void hookSignal(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(Signal<T>::*)(const std::string&, std::function<T>)>(&Signal<T>::connect)), "connect");
-		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(Signal<T>::*)(const std::string&, const std::string&)>(&Signal<T>::connect)), "connect");
-		a_script.add(chaiscript::fun(static_cast<void(Signal<T>::*)(const std::string&)>(&Signal<T>::disconnect)), "disconnect");
-		a_script.add(chaiscript::fun(static_cast<void(Signal<T>::*)(std::shared_ptr<Receiver<T>>)>(&Signal<T>::disconnect)), "disconnect");
-		a_script.add(chaiscript::fun(&Signal<T>::connection), "connection");
-		a_script.add(chaiscript::fun(&Signal<T>::connected), "connected");
+		// Hook signal_emitter (internal emitter type)
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<jai::receiver<T>>(jai::signal_emitter<T>::*)(const std::string&, std::function<T>)>(&jai::signal_emitter<T>::connect)), "connect");
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<jai::receiver<T>>(jai::signal_emitter<T>::*)(const std::string&, const std::string&)>(&jai::signal_emitter<T>::connect)), "connect");
+		a_script.add(chaiscript::fun(static_cast<void(jai::signal_emitter<T>::*)(const std::string&)>(&jai::signal_emitter<T>::disconnect)), "disconnect");
+		a_script.add(chaiscript::fun(static_cast<void(jai::signal_emitter<T>::*)(std::shared_ptr<jai::receiver<T>>)>(&jai::signal_emitter<T>::disconnect)), "disconnect");
+		a_script.add(chaiscript::fun(&jai::signal_emitter<T>::connection), "connection");
+		a_script.add(chaiscript::fun(&jai::signal_emitter<T>::connected), "connected");
 
-		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(SignalRegister<T>::*)(const std::string&, std::function<T>)>(&SignalRegister<T>::connect)), "connect");
-		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(SignalRegister<T>::*)(const std::string&, const std::string&)>(&SignalRegister<T>::connect)), "connect");
-		a_script.add(chaiscript::fun(static_cast<void(SignalRegister<T>::*)(const std::string&)>(&SignalRegister<T>::disconnect)), "disconnect");
-		a_script.add(chaiscript::fun(static_cast<void(SignalRegister<T>::*)(std::shared_ptr<Receiver<T>>)>(&SignalRegister<T>::disconnect)), "disconnect");
-		a_script.add(chaiscript::fun(&SignalRegister<T>::connection), "connection");
-		a_script.add(chaiscript::fun(&SignalRegister<T>::connected), "connected");
+		// Hook signal (public wrapper type)
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<jai::receiver<T>>(jai::signal<T>::*)(const std::string&, std::function<T>)>(&jai::signal<T>::connect)), "connect");
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<jai::receiver<T>>(jai::signal<T>::*)(const std::string&, const std::string&)>(&jai::signal<T>::connect)), "connect");
+		a_script.add(chaiscript::fun(static_cast<void(jai::signal<T>::*)(const std::string&)>(&jai::signal<T>::disconnect)), "disconnect");
+		a_script.add(chaiscript::fun(static_cast<void(jai::signal<T>::*)(std::shared_ptr<jai::receiver<T>>)>(&jai::signal<T>::disconnect)), "disconnect");
+		a_script.add(chaiscript::fun(&jai::signal<T>::connection), "connection");
+		a_script.add(chaiscript::fun(&jai::signal<T>::connected), "connected");
 	}
 
 	template <typename T>
 	class ScriptSignalRegistrar {
 	public:
-		typedef MV::Signal<T> OurSignalType;
+		typedef jai::signal_emitter<T> OurSignalType;
 		ScriptSignalRegistrar() {
 			ScriptImplementation::template addRegistrationMethod<OurSignalType>([&](chaiscript::ChaiScript& a_scriptEngine, const MV::Services&){
 				hookSignal<T>(a_scriptEngine);

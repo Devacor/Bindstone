@@ -83,7 +83,9 @@ namespace jai {
             }
         }
 
-        val.cpp_bound_ptr_ = static_cast<void*>(target);
+        // Use const_cast since cpp_bound_ptr_ is type-erased storage
+        // Constness is handled at the call site via make_value overloads
+        val.cpp_bound_ptr_ = const_cast<void*>(static_cast<const void*>(target));
         return val;
     }
 

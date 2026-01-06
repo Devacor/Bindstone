@@ -175,9 +175,66 @@ namespace jai {
 
         // Convenient script_value creation methods
         // Usage: engine->make_value(42) instead of script_value(42, engine)
+        // For primitive types (int, float, bool, char, string, string literals) - direct construction
         template<typename T>
+        requires (std::is_arithmetic_v<std::remove_cvref_t<T>> ||
+                  std::is_same_v<std::remove_cvref_t<T>, script_string> ||
+                  std::is_same_v<std::remove_cvref_t<T>, std::string> ||
+                  std::is_convertible_v<T, const char*> ||  // Handles const char*, const char[N], etc.
+                  std::is_same_v<std::remove_cvref_t<T>, std::monostate>)
         script_value make_value(T&& value) {
             return script_value(std::forward<T>(value), this);
+        }
+
+        // For non-primitive lvalue references - use convert_reference_with_registry (defined in engine_impl.hpp)
+        template<typename T>
+        requires (!std::is_arithmetic_v<std::remove_cvref_t<T>> &&
+                  !std::is_same_v<std::remove_cvref_t<T>, script_string> &&
+                  !std::is_same_v<std::remove_cvref_t<T>, std::string> &&
+                  !std::is_convertible_v<T, const char*> &&  // Exclude string literals and char pointers
+                  !std::is_same_v<std::remove_cvref_t<T>, std::monostate> &&
+                  std::is_lvalue_reference_v<T>)
+        script_value make_value(T&& value);  // Implemented in engine_impl.hpp
+
+        // For non-primitive rvalue references (class types passed by value)
+        // Uses convert_custom_type_with_registry to handle the conversion
+        template<typename T>
+        requires (!std::is_arithmetic_v<std::remove_cvref_t<T>> &&
+                  !std::is_same_v<std::remove_cvref_t<T>, script_string> &&
+                  !std::is_same_v<std::remove_cvref_t<T>, std::string> &&
+                  !std::is_convertible_v<T, const char*> &&
+                  !std::is_same_v<std::remove_cvref_t<T>, std::monostate> &&
+                  !std::is_pointer_v<std::remove_cvref_t<T>> &&
+                  std::is_rvalue_reference_v<T&&> &&
+                  !std::is_lvalue_reference_v<T>)
+        script_value make_value(T&& value);  // Implemented in engine_impl.hpp
+
+        // For shared_ptr types - convert to script object
+        template<typename T>
+        script_value make_value(const std::shared_ptr<T>& value) {
+            if (!value) {
+                return script_value(std::monostate{}, this);
+            }
+            return make_object(value);
+        }
+
+        template<typename T>
+        script_value make_value(std::shared_ptr<T>&& value) {
+            if (!value) {
+                return script_value(std::monostate{}, this);
+            }
+            return make_object(std::move(value));
+        }
+
+        // For raw pointer types - create non-owning bound reference
+        // This handles signals that emit raw pointers like void(T*, int)
+        template<typename T>
+        requires (!std::is_same_v<T, char> && !std::is_same_v<T, const char>)  // Exclude char* (handled as strings)
+        script_value make_value(T* value) {
+            if (!value) {
+                return script_value(std::monostate{}, this);
+            }
+            return script_value::make_cpp_bound(value, this);
         }
 
         // Create null/void value

@@ -36,23 +36,23 @@ namespace MV {
 		class Spine;
 		class AnimationTrack {
 			friend Spine;
-			Signal<void(AnimationTrack &)> onDisposeSignal;
-			Signal<void(AnimationTrack &)> onStartSignal;
-			Signal<void(AnimationTrack &)> onEndSignal;
-			Signal<void(AnimationTrack &, int)> onCompleteSignal;
-			Signal<void(AnimationTrack &, const AnimationEventData &)> onEventSignal;
+			jai::signal_emitter<void(AnimationTrack &)> onDisposeSignal;
+			jai::signal_emitter<void(AnimationTrack &)> onStartSignal;
+			jai::signal_emitter<void(AnimationTrack &)> onEndSignal;
+			jai::signal_emitter<void(AnimationTrack &, int)> onCompleteSignal;
+			jai::signal_emitter<void(AnimationTrack &, const AnimationEventData &)> onEventSignal;
 
 			friend void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 		public:
-			SignalRegister<void(AnimationTrack &)> onDispose;
-			SignalRegister<void(AnimationTrack &)> onStart;
-			SignalRegister<void(AnimationTrack &)> onEnd;
-			SignalRegister<void(AnimationTrack &, int)> onComplete;
-			SignalRegister<void(AnimationTrack &, const AnimationEventData &)> onEvent;
+			jai::signal<void(AnimationTrack &)> onDispose;
+			jai::signal<void(AnimationTrack &)> onStart;
+			jai::signal<void(AnimationTrack &)> onEnd;
+			jai::signal<void(AnimationTrack &, int)> onComplete;
+			jai::signal<void(AnimationTrack &, const AnimationEventData &)> onEvent;
 
-			typedef Signal<void(AnimationTrack &)>::SharedReceiverType BasicSignal;
-			typedef Signal<void(AnimationTrack &, int)>::SharedReceiverType LoopSignal;
-			typedef Signal<void(AnimationTrack &, const AnimationEventData &)>::SharedReceiverType EventSignal;
+			typedef jai::signal<void(AnimationTrack &)>::shared_receiver_type BasicSignal;
+			typedef jai::signal<void(AnimationTrack &, int)>::shared_receiver_type LoopSignal;
+			typedef jai::signal<void(AnimationTrack &, const AnimationEventData &)>::shared_receiver_type EventSignal;
 
 			std::map<std::string, BasicSignal> basicSignals;
 			std::map<std::string, LoopSignal> loopSignals;
@@ -106,17 +106,17 @@ namespace MV {
 			friend Node;
 			friend void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
-			Signal<void(std::shared_ptr<Spine>, int)> onStartSignal;
-			Signal<void(std::shared_ptr<Spine>, int)> onEndSignal;
-			Signal<void(std::shared_ptr<Spine>, int, int)> onCompleteSignal;
-			Signal<void(Spine*, int)> onDisposeSignal;
-			Signal<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEventSignal;
+			jai::signal_emitter<void(std::shared_ptr<Spine>, int)> onStartSignal;
+			jai::signal_emitter<void(std::shared_ptr<Spine>, int)> onEndSignal;
+			jai::signal_emitter<void(std::shared_ptr<Spine>, int, int)> onCompleteSignal;
+			jai::signal_emitter<void(Spine*, int)> onDisposeSignal;
+			jai::signal_emitter<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEventSignal;
 		public:
-			SignalRegister<void(std::shared_ptr<Spine>, int)> onStart;
-			SignalRegister<void(std::shared_ptr<Spine>, int)> onEnd;
-			SignalRegister<void(std::shared_ptr<Spine>, int, int)> onComplete;
-			SignalRegister<void(Spine*, int)> onDispose;
-			SignalRegister<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEvent;
+			jai::signal<void(std::shared_ptr<Spine>, int)> onStart;
+			jai::signal<void(std::shared_ptr<Spine>, int)> onEnd;
+			jai::signal<void(std::shared_ptr<Spine>, int, int)> onComplete;
+			jai::signal<void(Spine*, int)> onDispose;
+			jai::signal<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEvent;
 
 			struct FileBundle : public jai::property_owner<FileBundle> {
 				FileBundle(const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale = 1.0f);

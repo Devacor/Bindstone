@@ -4,6 +4,7 @@
 #include <memory>
 #include <map>
 #include "editorDefines.h"
+#include <jaiscript/signals/signal.hpp>
 
 class EditorControls;
 class EditableNode;
@@ -22,10 +23,10 @@ class EditableParallax;
 
 class EditorPanel {
 protected:
-	MV::Signal<void(const std::string &)> onNameChangeSignal;
+	jai::signal_emitter<void(const std::string &)> onNameChangeSignal;
 
 public:
-	MV::SignalRegister<void(const std::string &)> onNameChange;
+	jai::signal<void(const std::string &)> onNameChange;
 	EditorPanel(EditorControls &a_panel);
 	virtual ~EditorPanel();
 	virtual void cancelInput();

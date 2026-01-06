@@ -14,14 +14,14 @@ namespace MV {
 			typedef void PaletteSignalSignture(std::shared_ptr<Palette>);
 
 		private:
-			Signal<PaletteSignalSignture> onColorChangeSignal;
-			Signal<PaletteSignalSignture> onSwatchClickedSignal;
+			jai::signal_emitter<PaletteSignalSignture> onColorChangeSignal;
+			jai::signal_emitter<PaletteSignalSignture> onSwatchClickedSignal;
 
 		public:
 			//void (std::shared_ptr<Palette>)
-			SignalRegister<PaletteSignalSignture> onColorChange;
+			jai::signal<PaletteSignalSignture> onColorChange;
 			//void (std::shared_ptr<Palette>)
-			SignalRegister<PaletteSignalSignture> onSwatchClicked;
+			jai::signal<PaletteSignalSignture> onSwatchClicked;
 
 			DrawableDerivedAccessorsNoColor(Palette)
 

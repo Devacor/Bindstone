@@ -3,11 +3,12 @@
 
 #include "clickable.h"
 #include "text.h"
+#include <jaiscript/properties.hpp>
 
 namespace MV {
 	namespace Scene {
 
-		class Button : public Clickable {
+		class Button : public jai::property_owner<Button, Clickable> {
 			friend cereal::access;
 			friend Node;
 		public:
@@ -42,20 +43,18 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
-				);
-				reflection().save(archive);
+				archive(cereal::make_nvp("activeView", activeView.get()));
+				archive(cereal::make_nvp("idleView", idleView.get()));
+				archive(cereal::make_nvp("disabledView", disabledView.get()));
+				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) {
-					reflection().load(archive, {"activeView", "idleView", "disabledView"});
-				}
-				archive(
-					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
-				);
+				archive(cereal::make_nvp("activeView", activeView.get()));
+				archive(cereal::make_nvp("idleView", idleView.get()));
+				archive(cereal::make_nvp("disabledView", disabledView.get()));
+				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
 			}
 
 			template <class Archive>
@@ -85,9 +84,9 @@ namespace MV {
 			std::shared_ptr<Node> currentView;
 
 			//Clone is a no-op because it is manually managed in the cloneHelper
-			MV_PROPERTY((std::shared_ptr<Node>), activeView);
-			MV_PROPERTY((std::shared_ptr<Node>), idleView);
-			MV_PROPERTY((std::shared_ptr<Node>), disabledView);
+			JAI_PROPERTY((std::shared_ptr<Node>), activeView, nullptr, [](auto&, auto&) {});
+			JAI_PROPERTY((std::shared_ptr<Node>), idleView, nullptr, [](auto&, auto&) {});
+			JAI_PROPERTY((std::shared_ptr<Node>), disabledView, nullptr, [](auto&, auto&) {});
 		};
 	}
 }

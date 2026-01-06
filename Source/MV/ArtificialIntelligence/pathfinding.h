@@ -9,6 +9,7 @@
 #include <list>
 #include <queue>
 #include <memory>
+#include <chrono>
 
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/scopeGuard.hpp"
@@ -194,6 +195,31 @@ namespace MV {
 			return usingCorners;
 		}
 
+		// Pathfinding budget management - amortizes pathfinding costs across frames
+		static constexpr int64_t FRAME_NODE_BUDGET = 1000;  // Max A* nodes to search per frame
+		static constexpr double BUDGET_RESET_INTERVAL = 1.0 / 60.0;  // ~16.67ms
+
+		void tickBudget() const {
+			auto now = std::chrono::steady_clock::now();
+			double elapsed = std::chrono::duration<double>(now - lastBudgetReset).count();
+			if (elapsed >= BUDGET_RESET_INTERVAL) {
+				nodesUsedThisFrame = 0;
+				lastBudgetReset = now;
+			}
+		}
+
+		bool hasBudget() const {
+			return nodesUsedThisFrame < FRAME_NODE_BUDGET;
+		}
+
+		int64_t remainingBudget() const {
+			return std::max(int64_t(0), FRAME_NODE_BUDGET - nodesUsedThisFrame);
+		}
+
+		void consumeBudget(int64_t nodes) const {
+			nodesUsedThisFrame += nodes;
+		}
+
 	private:
 		Map();
 		Map(const Size<int> &a_size, float a_defaultCost, bool a_useCorners);
@@ -232,6 +258,10 @@ namespace MV {
 		bool usingCorners;
 
 		std::vector<std::vector<MapNode>> squares;
+
+		// Mutable for budget tracking (allows const methods to update frame state)
+		mutable std::chrono::steady_clock::time_point lastBudgetReset = std::chrono::steady_clock::now();
+		mutable int64_t nodesUsedThisFrame = 0;
 	};
 
 	class TemporaryCost {
@@ -663,18 +693,20 @@ namespace MV {
 
 		void updateObservedNodes();
 
-		void recalculate() {
+		void recalculate(int64_t searchLimit = DEFAULT_SEARCH_LIMIT) {
 			receivers.clear();
 			costs.clear();
 
 			unblockMap();
-			ourPath = std::make_shared<Path>(map, cast<int>(ourPosition), cast<int>(ourGoal), acceptableDistance, unitSize, maxNodesToSearch);
+			ourPath = std::make_shared<Path>(map, cast<int>(ourPosition), cast<int>(ourGoal), acceptableDistance, unitSize, searchLimit);
 			calculatedPath = ourPath->path();
 			blockMap();
-			
+
 			currentPathIndex = !calculatedPath.empty() && cast<int>(ourPosition) == calculatedPath[0].position() ? 1 : 0;
 			updateObservedNodes();
 			dirtyPath = false;
+			blockedAtPathIndex = -1;  // Clear blockage tracking after recalculation
+			blockedSignalFired = false;
 		}
 
 		bool canPlaceOnMapAtCurrentPosition() {
@@ -757,7 +789,29 @@ namespace MV {
 		PointPrecision acceptableDistance = 0.0f;
 
 		bool dirtyPath = true;
-		const int64_t maxNodesToSearch = 200;
+
+		// Deferred recalculation with urgency-based prioritization
+		static constexpr int RECALC_URGENCY_THRESHOLD = 3;  // Recalc when blockage within N nodes
+		static constexpr int64_t DEFAULT_SEARCH_LIMIT = 200;
+
+		int blockedAtPathIndex = -1;  // Earliest known blockage in path (-1 = none)
+		bool blockedSignalFired = false;  // Prevent repeated blocked signals
+
+		void markPathBlockedAt(int pathIndex) {
+			if (blockedAtPathIndex < 0 || pathIndex < blockedAtPathIndex) {
+				blockedAtPathIndex = pathIndex;
+			}
+		}
+
+		int urgency() const {
+			if (blockedAtPathIndex < 0) return INT_MAX;
+			return blockedAtPathIndex - static_cast<int>(currentPathIndex);
+		}
+
+		bool needsUrgentRecalculation() const {
+			return blockedAtPathIndex >= 0 && urgency() <= RECALC_URGENCY_THRESHOLD;
+		}
+
 		int activeUpdate = 0;
 
 		bool footprintDisabled = false;

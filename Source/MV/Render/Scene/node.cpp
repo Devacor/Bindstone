@@ -6,6 +6,55 @@
 #include "cereal/archives/adapters.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Node
+static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
+	[](jai::dynamic_binder<MV::Scene::Node>& builder, const MV::Services&) {
+	builder.auto_bind();
+
+	// Core node methods
+	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)()>(&MV::Scene::Node::make));
+	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::make));
+	builder.method("makeOrGet", &MV::Scene::Node::makeOrGet);
+	builder.method("removeFromParent", &MV::Scene::Node::removeFromParent);
+	builder.method("clear", &MV::Scene::Node::clear);
+	builder.method("root", &MV::Scene::Node::root);
+	builder.method("has", &MV::Scene::Node::has);
+	builder.method("hasParent", &MV::Scene::Node::hasParent);
+	builder.method("size", &MV::Scene::Node::size);
+	builder.method("empty", &MV::Scene::Node::empty);
+	builder.method("task", &MV::Scene::Node::task);
+
+	// Id
+	builder.method("id", static_cast<std::string(MV::Scene::Node::*)() const>(&MV::Scene::Node::id));
+	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::id));
+
+	// Depth
+	builder.method("depth", static_cast<MV::PointPrecision(MV::Scene::Node::*)() const>(&MV::Scene::Node::depth));
+	builder.method("depth", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(MV::PointPrecision)>(&MV::Scene::Node::depth));
+
+	// Position
+	builder.method("position", static_cast<MV::Point<>(MV::Scene::Node::*)() const>(&MV::Scene::Node::position));
+	builder.method("position", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const MV::Point<>&)>(&MV::Scene::Node::position));
+
+	// Visibility
+	builder.method("visible", static_cast<bool(MV::Scene::Node::*)() const>(&MV::Scene::Node::visible));
+	builder.method("visible", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(bool)>(&MV::Scene::Node::visible));
+	builder.method("show", &MV::Scene::Node::show);
+	builder.method("hide", &MV::Scene::Node::hide);
+
+	// Bounds
+	builder.method("bounds", &MV::Scene::Node::bounds);
+	builder.method("worldBounds", &MV::Scene::Node::worldBounds);
+	builder.method("screenBounds", &MV::Scene::Node::screenBounds);
+
+	builder.method("clone", &MV::Scene::Node::clone);
+});
 
 CEREAL_CLASS_VERSION(MV::Scene::Node, 2);
 

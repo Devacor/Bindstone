@@ -2,8 +2,55 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+#include <jaiscript/serialization/archive.hpp>
+#include "MV/Render/mv_jai_serialization.hpp"
 
 #include "MV/Utility/log.h"
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Drawable
+static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable("Drawable",
+	[](jai::dynamic_binder<MV::Scene::Drawable>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Component>();
+	builder.auto_bind();
+
+	// Visibility
+	builder.method("visible", &MV::Scene::Drawable::visible);
+	builder.method("show", &MV::Scene::Drawable::show);
+	builder.method("hide", &MV::Scene::Drawable::hide);
+
+	// Color
+	builder.method("color", static_cast<MV::Color(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::color));
+	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const MV::Color&)>(&MV::Scene::Drawable::color));
+	builder.method("colors", &MV::Scene::Drawable::colors);
+
+	// Shader/Material
+	builder.method("shader", static_cast<std::string(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::shader));
+	builder.method("shader", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const std::string&)>(&MV::Scene::Drawable::shader));
+	builder.method("material", static_cast<std::shared_ptr<MV::Material>(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::material));
+	builder.method("material", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::Material>)>(&MV::Scene::Drawable::material));
+
+	// Texture
+	builder.method("texture", static_cast<std::shared_ptr<MV::TextureHandle>(MV::Scene::Drawable::*)(size_t) const>(&MV::Scene::Drawable::texture));
+	builder.method("texture", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::TextureHandle>, size_t)>(&MV::Scene::Drawable::texture));
+	builder.method("clearTexture", &MV::Scene::Drawable::clearTexture);
+	builder.method("clearTextures", &MV::Scene::Drawable::clearTextures);
+
+	// Blend mode
+	builder.method("blend", static_cast<MV::BlendMode(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::blend));
+	builder.method("blend", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(MV::BlendMode)>(&MV::Scene::Drawable::blend));
+
+	// Points
+	builder.method("pointSize", &MV::Scene::Drawable::pointSize);
+	builder.method("getPoints", &MV::Scene::Drawable::getPoints);
+
+	// Anchors
+	builder.method("anchors", &MV::Scene::Drawable::anchors);
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
 CEREAL_CLASS_VERSION(MV::Scene::Drawable, 4);
@@ -262,8 +309,8 @@ namespace MV {
 		}
 
 		Drawable::Drawable(const std::weak_ptr<Node> &a_owner) :
-			ourAnchors(propertyManager, "anchors", {this}),
-			Component(a_owner) {
+			jai::property_owner<Drawable, Component>(a_owner),
+			ourAnchors(property_mgr, "anchors", {this}) {
 			points->resize(4);
 		}
 
@@ -499,6 +546,35 @@ namespace MV {
 			} else {
 				ourOffset.clear();
 			}
+		}
+
+		// JaiScript serialization for Anchors
+		void save(jai::serialization::archive_writer& ar, const Anchors& anchors) {
+			// Save parent ID if we have a parent
+			std::string parentId;
+			if (auto lockedParent = anchors.parentReference.lock()) {
+				parentId = lockedParent->id();
+			}
+			ar.write_string(parentId);
+
+			// Save the anchor data using MV serialization functions
+			MV::save(ar, anchors.parentAnchors);
+			MV::save(ar, anchors.ourOffset);
+			MV::save(ar, anchors.pivotPercent);
+			ar.write_bool(anchors.applyingPosition);
+		}
+
+		void load(jai::serialization::archive_reader& ar, Anchors& anchors) {
+			// Load parent ID for later reconnection
+			anchors.parentIdLoaded = ar.read_string();
+
+			// Load the anchor data using MV serialization functions
+			MV::load(ar, anchors.parentAnchors);
+			MV::load(ar, anchors.ourOffset);
+			MV::load(ar, anchors.pivotPercent);
+			anchors.applyingPosition = ar.read_bool();
+
+			// Parent reconnection happens during postLoadInitialize()
 		}
 	}
 }

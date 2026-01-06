@@ -1191,17 +1191,17 @@ namespace MV {
 		return false;
 	}
 
-	void Material::apply(Shader& shader, Scene::Drawable& drawable) const {
+	void Material::apply(Shader& shader, const MaterialContext& context) const {
 		// Apply default textures
 		for (const auto& [slot, tex] : defaultTextures) {
 			if (tex) {
-				shader.set("texture" + std::to_string(slot), tex, slot, false);
+				shader.set("texture" + std::to_string(slot), tex, static_cast<int>(slot), false);
 			}
 		}
-		
+
 		// Call user-defined apply function
 		if (applyFunction) {
-			applyFunction(shader, drawable);
+			applyFunction(shader, context);
 		}
 	}
 

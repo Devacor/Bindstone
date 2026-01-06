@@ -2,10 +2,34 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
 
 #include "MV/Utility/visitor.hpp"
 
 #include "text.h"
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Button
+static jai::registrar<MV::Scene::Button, MV::Services> _hookButton("Button",
+	[](jai::dynamic_binder<MV::Scene::Button>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Clickable>();
+	builder.auto_bind();
+
+	// View nodes
+	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::activeNode));
+	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::activeNode));
+	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::idleNode));
+	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::idleNode));
+	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::disabledNode));
+	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::disabledNode));
+
+	// Text
+	builder.method("text", static_cast<std::string(MV::Scene::Button::*)() const>(&MV::Scene::Button::text));
+	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::string&)>(&MV::Scene::Button::text));
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Button);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenebutton);
@@ -15,7 +39,7 @@ namespace MV {
 	namespace Scene {
 
 		Button::Button(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
-			Clickable(a_owner, a_mouse) {
+			jai::property_owner<Button, Clickable>(a_owner, a_mouse) {
 			onEnabled.connect(guid(), [&](const std::shared_ptr<Clickable> &a_node) {
 				if (!inPressEvent()) {
 					setCurrentView(idleView);

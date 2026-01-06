@@ -19,6 +19,7 @@
 #include "MV/Utility/visitor.hpp"
 #include "MV/Utility/services.hpp"
 #include "MV/Utility/properties.hpp"
+#include <jaiscript/properties.hpp>
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
@@ -142,7 +143,8 @@ namespace MV {
 			std::shared_ptr<T> wrappedComponent;
 		};
 
-		class Component : public std::enable_shared_from_this<Component>, public PropertyOwner {
+		class Component : public std::enable_shared_from_this<Component>,
+		                  public jai::property_owner<Component> {
 			friend Node;
 			friend cereal::access;
 
@@ -181,7 +183,7 @@ namespace MV {
 
 			SafeComponent<Component> clone(const std::shared_ptr<Node> &a_parent) {
 				auto result = SafeComponent<Component>(a_parent, cloneImplementation(a_parent));
-				reflection().cloneToTarget(result->reflection());
+				reflection().clone_to_target(result->reflection());
 				return result;
 			}
 
@@ -256,16 +258,14 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				reflection().save(archive);
+				archive(cereal::make_nvp("componentId", componentId.get()));
+				archive(cereal::make_nvp("componentOwner", componentOwner.get()));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) {
-					reflection().load(archive, {"componentId", "componentOwner"});
-				} else {
-					reflection().load(archive);
-				}
+				archive(cereal::make_nvp("componentId", componentId.get()));
+				archive(cereal::make_nvp("componentOwner", componentOwner.get()));
 				if (accumulatedDelta == 0.0) {
 					accumulatedDelta = MV::randomNumber(0.0f, 1.0f); //avoid awkward synchronization
 				}
@@ -285,9 +285,9 @@ namespace MV {
 			bool allowSerialize = true;
 
 			std::unique_ptr<Task> rootTask;
-			MV_PROPERTY((std::string), componentId);
+			JAI_PROPERTY((std::string), componentId);
 			//does not clone.
-			MV_PROPERTY((std::weak_ptr<Node>), componentOwner, [](auto&, auto&){});
+			JAI_PROPERTY((std::weak_ptr<Node>), componentOwner, [](auto&, auto&){});
 		};
 	}
 }

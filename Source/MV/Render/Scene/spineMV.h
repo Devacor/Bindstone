@@ -4,6 +4,7 @@
 #include "node.h"
 #include "drawable.h"
 #include "spine/AnimationState.h"
+#include <jaiscript/properties.hpp>
 
 struct spSlot;
 struct spSkeleton;
@@ -100,7 +101,7 @@ namespace MV {
 			spTrackEntry *recentTrack = nullptr;
 		};
 		
-		class Spine : public Drawable{
+		class Spine : public jai::property_owner<Spine, Drawable> {
 			friend cereal::access;
 			friend Node;
 			friend void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
@@ -117,45 +118,41 @@ namespace MV {
 			SignalRegister<void(Spine*, int)> onDispose;
 			SignalRegister<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEvent;
 
-			struct FileBundle : public PropertyOwner {
+			struct FileBundle : public jai::property_owner<FileBundle> {
 				FileBundle(const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale = 1.0f);
 
 				FileBundle();
-				
+
 				// Add copy constructor and assignment operator
-				FileBundle(const FileBundle& other) : PropertyOwner(other) {
-					// PropertyOwner copy constructor handles property cloning
+				FileBundle(const FileBundle& other) : jai::property_owner<FileBundle>(other) {
+					// property_owner copy constructor handles property cloning
 				}
-				
+
 				FileBundle& operator=(const FileBundle& other) {
 					if (this != &other) {
-						PropertyOwner::operator=(other);
+						jai::property_owner<FileBundle>::operator=(other);
 					}
 					return *this;
 				}
 
-				MV_PROPERTY((std::string), skeletonFile, "");
-				MV_PROPERTY((std::string), atlasFile, "");
-				MV_PROPERTY((float), loadScale, 1.0f);
+				JAI_PROPERTY((std::string), skeletonFile, "");
+				JAI_PROPERTY((std::string), atlasFile, "");
+				JAI_PROPERTY((float), loadScale, 1.0f);
 
 			private:
 				friend cereal::access;
 				template <class Archive>
 				void save(Archive & archive, std::uint32_t const) const {
-					reflection().save(archive);
+					archive(cereal::make_nvp("skeletonFile", skeletonFile.get()));
+					archive(cereal::make_nvp("atlasFile", atlasFile.get()));
+					archive(cereal::make_nvp("loadScale", loadScale.get()));
 				}
-				
+
 				template <class Archive>
 				void load(Archive & archive, std::uint32_t const version) {
-					if (version == 0) {
-						reflection().load(archive, {
-							"skeletonFile",
-							"atlasFile",
-							"loadScale"
-						});
-					} else {
-						reflection().load(archive);
-					}
+					archive(cereal::make_nvp("skeletonFile", skeletonFile.get()));
+					archive(cereal::make_nvp("atlasFile", atlasFile.get()));
+					archive(cereal::make_nvp("loadScale", loadScale.get()));
 				}
 			};
 

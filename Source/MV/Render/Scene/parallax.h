@@ -5,7 +5,7 @@
 
 namespace MV {
 	namespace Scene {
-		class Parallax : public Component {
+		class Parallax : public jai::property_owner<Parallax, Component> {
 			friend Node;
 			friend cereal::access;
 
@@ -75,17 +75,15 @@ namespace MV {
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				if (version <= 2) {
-					std::vector<std::string> propertyKeys;
-					propertyKeys.push_back("enabled");
+					archive(cereal::make_nvp("enabled", isEnabled));
 					if(version <= 1){
-						propertyKeys.push_back("space");
+						archive(cereal::make_nvp("space", space)); // Deleted property - reads and discards
 					}
-					propertyKeys.push_back("translateRatio");
-					propertyKeys.push_back("localOffset");
+					archive(cereal::make_nvp("translateRatio", ourTranslateRatio));
+					archive(cereal::make_nvp("localOffset", ourLocalOffset));
 					if(version > 1){
-						propertyKeys.push_back("zoomOffset");
+						archive(cereal::make_nvp("zoomOffset", ourZoomOffset));
 					}
-					reflection().load(archive, propertyKeys);
 				}
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
@@ -110,13 +108,13 @@ namespace MV {
 
 			Point<> absolutePosition() const;
 
-			MV_NAMED_PROPERTY((bool), "enabled", isEnabled, false);
+			JAI_NAMED_PROPERTY((bool), "enabled", isEnabled, false);
 			bool needsUpdate = false;
 
-			MV_NAMED_PROPERTY((Point<>), "translateRatio", ourTranslateRatio);
-			MV_NAMED_PROPERTY((Point<>), "localOffset", ourLocalOffset);
-			MV_NAMED_PROPERTY((Point<>), "zoomOffset", ourZoomOffset);
-			MV_DELETED_PROPERTY((int32_t), space);
+			JAI_NAMED_PROPERTY((Point<>), "translateRatio", ourTranslateRatio);
+			JAI_NAMED_PROPERTY((Point<>), "localOffset", ourLocalOffset);
+			JAI_NAMED_PROPERTY((Point<>), "zoomOffset", ourZoomOffset);
+			JAI_DELETED_PROPERTY((int32_t), space);
 			Node::BasicReceiverType parentObserver;
 			Draw2D::CameraRecieveType cameraObserver;
 		};

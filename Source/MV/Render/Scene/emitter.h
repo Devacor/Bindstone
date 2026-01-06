@@ -3,7 +3,7 @@
 
 #include "sprite.h"
 #include "MV/Utility/threadPool.hpp"
-#include "MV/Utility/properties.hpp"
+#include <jaiscript/properties.hpp>
 #include <atomic>
 
 namespace MV {
@@ -174,14 +174,14 @@ namespace MV {
 			Point<> gravityConstant;
 		};
 
-		struct EmitterSpawnProperties : public PropertyOwner {
-			MV_PROPERTY((uint32_t), maximumParticles, std::numeric_limits<uint32_t>::max());
+		struct EmitterSpawnProperties : public jai::property_owner<EmitterSpawnProperties> {
+			JAI_PROPERTY((uint32_t), maximumParticles, std::numeric_limits<uint32_t>::max());
 
-			MV_PROPERTY((float), minimumSpawnRate, 0.0f);
-			MV_PROPERTY((float), maximumSpawnRate, 1.0f);
+			JAI_PROPERTY((float), minimumSpawnRate, 0.0f);
+			JAI_PROPERTY((float), maximumSpawnRate, 1.0f);
 
-			MV_PROPERTY((Point<>), minimumPosition);
-			MV_PROPERTY((Point<>), maximumPosition);
+			JAI_PROPERTY((Point<>), minimumPosition);
+			JAI_PROPERTY((Point<>), maximumPosition);
 			std::function<Point<>()> getPosition;
 
 			inline void minimumDirectionDeg(AxisAngles a_min) { minimumDirection = toRadians(a_min); }
@@ -190,8 +190,8 @@ namespace MV {
 			inline void maximumDirectionDeg(AxisAngles a_max) { maximumDirection = toRadians(a_max); }
 			inline AxisAngles maximumDirectionDeg() { return toDegrees(*maximumDirection); }
 
-			MV_PROPERTY((AxisAngles), minimumDirection);
-			MV_PROPERTY((AxisAngles), maximumDirection);
+			JAI_PROPERTY((AxisAngles), minimumDirection);
+			JAI_PROPERTY((AxisAngles), maximumDirection);
 			std::function<AxisAngles()> getDirection;
 
 			inline void minimumRotationDeg(AxisAngles a_min) { minimumRotation = toRadians(a_min); }
@@ -199,13 +199,13 @@ namespace MV {
 
 			inline void maximumRotationDeg(AxisAngles a_max) { maximumRotation = toRadians(a_max); }
 			inline AxisAngles maximumRotationDeg() { return toDegrees(*maximumRotation); }
-			
-			MV_PROPERTY((AxisAngles), minimumRotation);
-			MV_PROPERTY((AxisAngles), maximumRotation);
+
+			JAI_PROPERTY((AxisAngles), minimumRotation);
+			JAI_PROPERTY((AxisAngles), maximumRotation);
 			std::function<AxisAngles()> getRotation;
 
-			MV_PROPERTY((ParticleChangeValues), minimum);
-			MV_PROPERTY((ParticleChangeValues), maximum);
+			JAI_PROPERTY((ParticleChangeValues), minimum);
+			JAI_PROPERTY((ParticleChangeValues), maximum);
 
 			std::function<AxisAngles()> getRotationChange;
 			std::function<AxisAngles()> getRateOfChange;
@@ -220,28 +220,37 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				reflection().save(archive);
+				archive(cereal::make_nvp("maximumParticles", maximumParticles.get()));
+				archive(cereal::make_nvp("minimumSpawnRate", minimumSpawnRate.get()));
+				archive(cereal::make_nvp("maximumSpawnRate", maximumSpawnRate.get()));
+				archive(cereal::make_nvp("minimumPosition", minimumPosition.get()));
+				archive(cereal::make_nvp("maximumPosition", maximumPosition.get()));
+				archive(cereal::make_nvp("minimumDirection", minimumDirection.get()));
+				archive(cereal::make_nvp("maximumDirection", maximumDirection.get()));
+				archive(cereal::make_nvp("minimumRotation", minimumRotation.get()));
+				archive(cereal::make_nvp("maximumRotation", maximumRotation.get()));
+				archive(cereal::make_nvp("minimum", minimum.get()));
+				archive(cereal::make_nvp("maximum", maximum.get()));
 			}
-			
+
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version < 2) {
-					reflection().load(archive, {
-						"maximumParticles",
-						"minimumSpawnRate", "maximumSpawnRate",
-						"minimumPosition", "maximumPosition",
-						"minimumDirection", "maximumDirection",
-						"minimumRotation", "maximumRotation",
-						"minimum", "maximum"
-					});
-					if (version < 1) {
-						toRadiansInPlace(*minimumDirection);
-						toRadiansInPlace(*maximumDirection);
-						toRadiansInPlace(*minimumRotation);
-						toRadiansInPlace(*maximumRotation);
-					}
-				} else {
-					reflection().load(archive);
+				archive(cereal::make_nvp("maximumParticles", maximumParticles.get()));
+				archive(cereal::make_nvp("minimumSpawnRate", minimumSpawnRate.get()));
+				archive(cereal::make_nvp("maximumSpawnRate", maximumSpawnRate.get()));
+				archive(cereal::make_nvp("minimumPosition", minimumPosition.get()));
+				archive(cereal::make_nvp("maximumPosition", maximumPosition.get()));
+				archive(cereal::make_nvp("minimumDirection", minimumDirection.get()));
+				archive(cereal::make_nvp("maximumDirection", maximumDirection.get()));
+				archive(cereal::make_nvp("minimumRotation", minimumRotation.get()));
+				archive(cereal::make_nvp("maximumRotation", maximumRotation.get()));
+				archive(cereal::make_nvp("minimum", minimum.get()));
+				archive(cereal::make_nvp("maximum", maximum.get()));
+				if (version < 1) {
+					toRadiansInPlace(*minimumDirection);
+					toRadiansInPlace(*maximumDirection);
+					toRadiansInPlace(*minimumRotation);
+					toRadiansInPlace(*maximumRotation);
 				}
 				dirty = true;
 			}
@@ -249,7 +258,7 @@ namespace MV {
 
 		EmitterSpawnProperties loadEmitterProperties(const std::string &a_file);
 
-		class Emitter : public Drawable {
+		class Emitter : public jai::property_owner<Emitter, Drawable> {
 			friend Node;
 			friend cereal::access;
 		public:
@@ -285,24 +294,21 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				archive(
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				archive(cereal::make_nvp("spawnProperties", spawnProperties.get()));
+				archive(cereal::make_nvp("relativeNodePosition", relativeNodePosition.get()));
+				archive(cereal::make_nvp("relativeParentCount", relativeParentCount.get()));
+				archive(cereal::make_nvp("spawnParticles", spawnParticles.get()));
+				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version < 2) {
-					reflection().load(archive, {
-						"spawnProperties",
-						"spawnParticles", 
-						"relativeParentCount",
-						"relativeNodePosition"
-					});
-				}
-				
+				archive(cereal::make_nvp("spawnProperties", spawnProperties.get()));
+				archive(cereal::make_nvp("relativeNodePosition", relativeNodePosition.get()));
+				archive(cereal::make_nvp("relativeParentCount", relativeParentCount.get()));
+				archive(cereal::make_nvp("spawnParticles", spawnParticles.get()));
 				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-				
+
 				if (*relativeParentCount >= 0) {
 					(*relativeNodePosition).reset();
 				}
@@ -374,7 +380,7 @@ namespace MV {
 
 			double accumulatedTimeDelta = 0.0f;
 
-			MV_PROPERTY((EmitterSpawnProperties), spawnProperties);
+			JAI_PROPERTY((EmitterSpawnProperties), spawnProperties);
 
 			size_t emitterThreads;
 
@@ -389,9 +395,9 @@ namespace MV {
 
 			std::vector<ThreadData> threadData;
 
-			MV_PROPERTY((std::weak_ptr<MV::Scene::Node>), relativeNodePosition);
-			MV_PROPERTY((int32_t), relativeParentCount, -1);
-			MV_PROPERTY((bool), spawnParticles, true);
+			JAI_PROPERTY((std::weak_ptr<MV::Scene::Node>), relativeNodePosition);
+			JAI_PROPERTY((int32_t), relativeParentCount, -1);
+			JAI_PROPERTY((bool), spawnParticles, true);
 
 			static const double MAX_TIME_STEP;
 			static const int MAX_PARTICLES_PER_FRAME = 2500;

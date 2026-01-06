@@ -3,11 +3,12 @@
 
 #include "sprite.h"
 #include "MV/Interface/tapDevice.h"
+#include <jaiscript/properties.hpp>
 
 namespace MV {
 	namespace Scene {
 
-		class Clipped : public Sprite {
+		class Clipped : public jai::property_owner<Clipped, Sprite> {
 			friend Node;
 			friend cereal::access;
 
@@ -50,19 +51,20 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
-				);
+				archive(cereal::make_nvp("refreshShaderId", refreshShaderId.get()));
+				archive(cereal::make_nvp("capturedBounds", capturedBounds.get()));
+				archive(cereal::make_nvp("capturedOffset", capturedOffset.get()));
+				archive(cereal::make_nvp("forceRefreshEveryFrame", forceRefreshEveryFrame.get()));
+				archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) {
-					reflection().load(archive, {"refreshShaderId", "capturedBounds", "capturedOffset", "forceRefreshEveryFrame"});
-				}
-				archive(
-					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
-				);
+				archive(cereal::make_nvp("refreshShaderId", refreshShaderId.get()));
+				archive(cereal::make_nvp("capturedBounds", capturedBounds.get()));
+				archive(cereal::make_nvp("capturedOffset", capturedOffset.get()));
+				archive(cereal::make_nvp("forceRefreshEveryFrame", forceRefreshEveryFrame.get()));
+				archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
 			}
 
 			template <class Archive>
@@ -91,12 +93,12 @@ namespace MV {
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
 			std::shared_ptr<Framebuffer> framebuffer;
 
-			MV_PROPERTY((std::string), refreshShaderId, PREMULTIPLY_ID, [](auto&, auto&){});
-			MV_PROPERTY((BoxAABB<>), capturedBounds);
-			MV_PROPERTY((Point<>), capturedOffset);
+			JAI_PROPERTY((std::string), refreshShaderId, PREMULTIPLY_ID, [](auto&, auto&){});
+			JAI_PROPERTY((BoxAABB<>), capturedBounds);
+			JAI_PROPERTY((Point<>), capturedOffset);
 			Point<> prevLocalPoint{};
 			bool dirtyTexture = true;
-			MV_PROPERTY((bool), forceRefreshEveryFrame, false);
+			JAI_PROPERTY((bool), forceRefreshEveryFrame, false);
 			Node::BasicReceiverType dirtyObserveSignal;
 		};
 	}

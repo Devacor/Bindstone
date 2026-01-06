@@ -2,8 +2,24 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
 
 #include "text.h"
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Scroller
+static jai::registrar<MV::Scene::Scroller, MV::Services> _hookScroller("Scroller",
+	[](jai::dynamic_binder<MV::Scene::Scroller>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Clickable>();
+	builder.auto_bind();
+
+	// Content
+	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Scroller::*)() const>(&MV::Scene::Scroller::content));
+	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Scroller>(MV::Scene::Scroller::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Scroller::content));
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Scroller);
 CEREAL_CLASS_VERSION(MV::Scene::Scroller, 1);
@@ -13,7 +29,7 @@ namespace MV {
 	namespace Scene {
 
 		Scroller::Scroller(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
-			Clickable(a_owner, a_mouse) {
+			jai::property_owner<Scroller, Clickable>(a_owner, a_mouse) {
 			stopEatingTouches();
 			
 			appendClickPriority = 1000;

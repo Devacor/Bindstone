@@ -3,6 +3,37 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Component
+static jai::registrar<MV::Scene::Component, MV::Services> _hookComponent("Component",
+	[](jai::dynamic_binder<MV::Scene::Component>& builder, const MV::Services&) {
+	builder.auto_bind();
+
+	// Id
+	builder.method("id", static_cast<std::string(MV::Scene::Component::*)() const>(&MV::Scene::Component::id));
+	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(const std::string&)>(&MV::Scene::Component::id));
+
+	// Bounds
+	builder.method("bounds", static_cast<MV::BoxAABB<>(MV::Scene::Component::*)()>(&MV::Scene::Component::bounds));
+	builder.method("bounds", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(const MV::BoxAABB<>&)>(&MV::Scene::Component::bounds));
+	builder.method("screenBounds", static_cast<MV::BoxAABB<int>(MV::Scene::Component::*)()>(&MV::Scene::Component::screenBounds));
+	builder.method("worldBounds", static_cast<MV::BoxAABB<>(MV::Scene::Component::*)()>(&MV::Scene::Component::worldBounds));
+
+	// Serialization
+	builder.method("serializable", static_cast<bool(MV::Scene::Component::*)() const>(&MV::Scene::Component::serializable));
+	builder.method("serializable", static_cast<std::shared_ptr<MV::Scene::Component>(MV::Scene::Component::*)(bool)>(&MV::Scene::Component::serializable));
+
+	// Owner and lifecycle
+	builder.method("owner", &MV::Scene::Component::owner);
+	builder.method("ownerIsAlive", &MV::Scene::Component::ownerIsAlive);
+	builder.method("detach", &MV::Scene::Component::detach);
+	builder.method("task", &MV::Scene::Component::task);
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Component);
 CEREAL_CLASS_VERSION(MV::Scene::Component, 1);

@@ -4,6 +4,34 @@
 #include "MV/Utility/generalUtility.h"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for Emitter
+static jai::registrar<MV::Scene::Emitter, MV::Services> _hookEmitter("Emitter",
+	[](jai::dynamic_binder<MV::Scene::Emitter>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Drawable>();
+	builder.auto_bind();
+
+	// Relative emission
+	builder.method("relativeEmission", static_cast<std::weak_ptr<MV::Scene::Node>(MV::Scene::Emitter::*)() const>(&MV::Scene::Emitter::relativeEmission));
+	builder.method("relativeEmission", static_cast<std::shared_ptr<MV::Scene::Emitter>(MV::Scene::Emitter::*)(std::shared_ptr<MV::Scene::Node>)>(&MV::Scene::Emitter::relativeEmission));
+	builder.method("removeRelativeEmission", &MV::Scene::Emitter::removeRelativeEmission);
+	builder.method("makeRelativeToParent", &MV::Scene::Emitter::makeRelativeToParent);
+
+	// Properties
+	builder.method("properties", static_cast<const MV::Scene::EmitterSpawnProperties&(MV::Scene::Emitter::*)() const>(&MV::Scene::Emitter::properties));
+	builder.method("properties", static_cast<std::shared_ptr<MV::Scene::Emitter>(MV::Scene::Emitter::*)(const MV::Scene::EmitterSpawnProperties&)>(&MV::Scene::Emitter::properties));
+
+	// Enable/disable
+	builder.method("enabled", &MV::Scene::Emitter::enabled);
+	builder.method("disabled", &MV::Scene::Emitter::disabled);
+	builder.method("enable", &MV::Scene::Emitter::enable);
+	builder.method("disable", &MV::Scene::Emitter::disable);
+});
 
 CEREAL_REGISTER_TYPE(MV::Scene::Emitter);
 CEREAL_CLASS_VERSION(MV::Scene::ParticleChangeValues, 2);
@@ -360,7 +388,7 @@ namespace MV {
 		}
 
 		Emitter::Emitter(const std::weak_ptr<Node> &a_owner, ThreadPool &a_pool) :
-			Drawable(a_owner),
+			jai::property_owner<Emitter, Drawable>(a_owner),
 			pool(a_pool),
 			emitterThreads(a_pool.threads()),
 			threadData(emitterThreads),
@@ -435,7 +463,7 @@ namespace MV {
 				auto emitterSpace = relativeNodePosition->expired() ? ourOwner : relativeNodePosition->lock();
 				shaderProgram->set("transformation", ourRenderer.cameraProjectionMatrix(ourOwner->cameraId()) * emitterSpace->worldTransform());
 				if (userMaterialSettings) {
-					try { userMaterialSettings(shaderProgram); } catch (std::exception &e) { MV::error("Emitter::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
+					try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Emitter::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
 				}
 
 				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices->size()), GL_UNSIGNED_INT, &vertexIndices[0]);
@@ -444,7 +472,7 @@ namespace MV {
 				glDisableVertexAttribArray(1);
 				glDisableVertexAttribArray(2);
 				glUseProgram(0);
-				if (blendModePreset != DEFAULT) {
+				if (blendModePreset != BLEND_DEFAULT) {
 					ourOwner->renderer().defaultBlendFunction();
 				}
 			}

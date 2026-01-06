@@ -1,5 +1,48 @@
 #include "pathfinding.h"
 #include "cereal/archives/json.hpp"
+#include <jaiscript/properties/property_cereal.hpp>
+
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// JaiScript binding for PathNode
+static jai::registrar<MV::PathNode, MV::Services> _hookPathNode("PathNode",
+	[](jai::dynamic_binder<MV::PathNode>& builder, const MV::Services&) {
+	builder.auto_bind();
+	builder.constructor<const MV::Point<int>&, float>();
+	builder.method("position", &MV::PathNode::position);
+	builder.method("cost", &MV::PathNode::cost);
+});
+
+// JaiScript binding for NavigationAgent
+static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent("NavigationAgent",
+	[](jai::dynamic_binder<MV::NavigationAgent>& builder, const MV::Services&) {
+	builder.auto_bind();
+
+	builder.method("pathfinding", &MV::NavigationAgent::pathfinding);
+	builder.method("stop", &MV::NavigationAgent::stop);
+	builder.method("path", &MV::NavigationAgent::path);
+	builder.method("hasFootprint", &MV::NavigationAgent::hasFootprint);
+	builder.method("disableFootprint", &MV::NavigationAgent::disableFootprint);
+	builder.method("enableFootprint", &MV::NavigationAgent::enableFootprint);
+
+	// Overloaded speed
+	builder.method("speed", static_cast<MV::PointPrecision(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::speed));
+	builder.method("speed", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(MV::PointPrecision)>(&MV::NavigationAgent::speed));
+
+	// Overloaded goal
+	builder.method("goal", static_cast<MV::Point<MV::PointPrecision>(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::goal));
+	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&)>(&MV::NavigationAgent::goal));
+	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&)>(&MV::NavigationAgent::goal));
+	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&, MV::PointPrecision)>(&MV::NavigationAgent::goal));
+	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&, MV::PointPrecision)>(&MV::NavigationAgent::goal));
+
+	// Overloaded position
+	builder.method("position", static_cast<MV::Point<MV::PointPrecision>(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::position));
+	builder.method("position", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&)>(&MV::NavigationAgent::position));
+	builder.method("position", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&)>(&MV::NavigationAgent::position));
+});
 
 namespace MV {
 
@@ -432,10 +475,19 @@ namespace MV {
 	}
 
 	void NavigationAgent::update(double a_dt) {
+		// Tick the map's pathfinding budget (idempotent per frame via chrono check)
+		map->tickBudget();
+
 		if (waitingForPlacement) {
 			if (canPlaceOnMapAtCurrentPosition()) {
-				waitingForPlacement = false;
 				blockMap();
+				// Only clear waitingForPlacement if blockMap actually succeeded
+				// (another agent may have blocked the cell between our check and blockMap)
+				if (isBlocking) {
+					waitingForPlacement = false;
+				} else {
+					return;
+				}
 			} else {
 				return;
 			}
@@ -504,26 +556,53 @@ namespace MV {
 	}
 
 	bool NavigationAgent::attemptToRecalculate() {
-		if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
-			recalculate();
+		// Determine if we need recalculation
+		bool mustRecalc = dirtyPath || calculatedPath.empty() ||
+		                  (calculatedPath.size() > 1 && currentPathIndex >= calculatedPath.size());
+		bool urgentRecalc = needsUrgentRecalculation();
+
+		// Attempt recalculation if needed
+		if (mustRecalc || urgentRecalc) {
+			if (!map->hasBudget()) {
+				// No budget - if urgent, we must stop; otherwise can keep moving toward distant blockage
+				return !urgentRecalc && !mustRecalc;
+			}
+
+			int64_t searchLimit = std::min(map->remainingBudget(), DEFAULT_SEARCH_LIMIT);
+			recalculate(searchLimit);
+			map->consumeBudget(searchLimit);
 		}
-		if (calculatedPath.size() == 1 && calculatedPath[0].position() != cast<int>(ourGoal)) {
-			markDirty();
-			auto self = shared_from_this();
-			onBlockedSignal(self);
-		}
-		if (!dirtyPath && calculatedPath.size() > (currentPathIndex + 1)) {
-			unblockMap();
-			if (!map->clearedForSize(calculatedPath[currentPathIndex + 1].position(), unitSize)) {
-				blockMap();
-				markDirty();
-				auto self = shared_from_this();
-				onBlockedSignal(self);
-			} else {
-				blockMap();
+
+		// Check if recalculation resulted in fully blocked state (path is just current position)
+		if (calculatedPath.size() <= 1) {
+			if (calculatedPath.empty() || calculatedPath[0].position() != cast<int>(ourGoal)) {
+				if (!blockedSignalFired) {
+					blockedSignalFired = true;
+					onBlockedSignal(shared_from_this());
+				}
+				dirtyPath = true;  // Will retry when budget available
+				return false;
 			}
 		}
-		return !dirtyPath;
+
+		// Verify next step is clear (real-time collision check)
+		if (calculatedPath.size() > currentPathIndex + 1) {
+			auto nextPos = calculatedPath[currentPathIndex + 1].position();
+			unblockMap();
+			bool nextBlocked = !map->clearedForSize(nextPos, unitSize);
+			blockMap();
+
+			if (nextBlocked) {
+				markPathBlockedAt(static_cast<int>(currentPathIndex + 1));
+				// If this is now urgent and we have no budget, stop
+				if (needsUrgentRecalculation() && !map->hasBudget()) {
+					onBlockedSignal(shared_from_this());
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	void NavigationAgent::updateObservedNodes() {
@@ -540,12 +619,13 @@ namespace MV {
 			costs.push_back(TemporaryCost(map, calculatedPath[i].position(), temporaryCostAmount));
 
 			auto& mapNode = map->get(calculatedPath[i].position());
+			int pathIndex = static_cast<int>(i);  // Capture path index for blockage tracking
 
 			if(unitSize <= 1) {
 				auto receiver = mapNode.onBlock.connect([=](const std::shared_ptr<Map> &a_map, const Point<int> &a_position) {
 					if (!activeUpdate && !overlaps(a_position)) {
 						blockedNodeObservers.emplace_back(this, a_map, a_position, pathId);
-						markDirty();
+						markPathBlockedAt(pathIndex);  // Track blockage location instead of immediate dirty
 					}
 				});
 				receivers.push_back(receiver);
@@ -553,7 +633,7 @@ namespace MV {
 				auto receiver = mapNode.onClearanceChange.connect([=](const std::shared_ptr<Map> &a_map, const Point<int> &a_position) {
 					if (!activeUpdate && size() <= a_map->get(a_position).clearance() && !overlaps(a_position)) {
 						blockedNodeObservers.emplace_back(this, a_map, a_position, pathId);
-						markDirty();
+						markPathBlockedAt(pathIndex);  // Track blockage location instead of immediate dirty
 					}
 				});
 				receivers.push_back(receiver);

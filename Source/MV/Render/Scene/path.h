@@ -3,11 +3,12 @@
 
 #include "drawable.h"
 #include "MV/ArtificialIntelligence/pathfinding.h"
+#include <jaiscript/properties.hpp>
 
 namespace MV {
 	namespace Scene {
 		class PathAgent;
-		class PathMap : public Drawable {
+		class PathMap : public jai::property_owner<PathMap, Drawable> {
 			friend Node;
 			friend PathAgent;
 			friend cereal::access;
@@ -41,7 +42,7 @@ namespace MV {
 			}
 
 			Size<> cellSize() const {
-				return cellDimensions;
+				return cellDimensions.get();
 			}
 
 			Size<int> gridSize() const {
@@ -57,28 +58,28 @@ namespace MV {
 			}
 
 			MapNode& nodeFromLocal(const Point<> &a_location) {
-				auto gridTile = MV::cast<int>((a_location - topLeftOffset) / toPoint(cellDimensions));
+				auto gridTile = MV::cast<int>((a_location - topLeftOffset) / toPoint(cellDimensions.get()));
 				return map->get(gridTile);
 			}
 
 			Point<> gridFromLocal(const Point<> &a_location) {
-				return (a_location - topLeftOffset) / toPoint(cellDimensions);
+				return (a_location - topLeftOffset) / toPoint(cellDimensions.get());
 			}
 
 			Point<> localFromGrid(const Point<int> &a_location) {
-				return ((MV::cast<PointPrecision>(a_location) + MV::point(0.5f, 0.5f)) * toPoint(cellDimensions)) + topLeftOffset;
+				return ((MV::cast<PointPrecision>(a_location) + MV::point(0.5f, 0.5f)) * toPoint(cellDimensions.get())) + topLeftOffset;
 			}
 
 			Point<> localFromGrid(const Point<> &a_location) {
-				return (a_location * toPoint(cellDimensions)) + topLeftOffset;
+				return (a_location * toPoint(cellDimensions.get())) + topLeftOffset;
 			}
 
 			PointPrecision localFromGrid(PointPrecision a_gridSize) {
-				return ((cellDimensions.width + cellDimensions.height) / 2.0f) * a_gridSize;
+				return ((cellDimensions->width + cellDimensions->height) / 2.0f) * a_gridSize;
 			}
 
 			PointPrecision gridFromLocal(PointPrecision a_localSize) {
-				return a_localSize / ((cellDimensions.width + cellDimensions.height) / 2.0f);
+				return a_localSize / ((cellDimensions->width + cellDimensions->height) / 2.0f);
 			}
 
 			bool inBounds(Point<int> a_location) const {
@@ -143,9 +144,9 @@ namespace MV {
 			template <class Archive>
 			void save(Archive & a_archive, std::uint32_t const /*version*/) const {
 				a_archive(
-					cereal::make_nvp("map", map),
-					cereal::make_nvp("offset", topLeftOffset),
-					cereal::make_nvp("cellDimensions", cellDimensions),
+					cereal::make_nvp("map", map.get()),
+					cereal::make_nvp("offset", topLeftOffset.get()),
+					cereal::make_nvp("cellDimensions", cellDimensions.get()),
 					cereal::make_nvp("Component", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -153,9 +154,9 @@ namespace MV {
 			template <class Archive>
 			void load(Archive & a_archive, std::uint32_t const version) {
 				a_archive(
-					cereal::make_nvp("map", map),
-					cereal::make_nvp("offset", topLeftOffset),
-					cereal::make_nvp("cellDimensions", cellDimensions),
+					cereal::make_nvp("map", map.get()),
+					cereal::make_nvp("offset", topLeftOffset.get()),
+					cereal::make_nvp("cellDimensions", cellDimensions.get()),
 					cereal::make_nvp("Component", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -186,13 +187,14 @@ namespace MV {
 			static const Color staticBlockedDebugTile;
 			static const Color regularBlockedDebugTile;
 
-			std::shared_ptr<Map> map;
-			MV::Point<> topLeftOffset;
-			MV::Size<PointPrecision> cellDimensions;
+			// Clone is handled manually in cloneHelper
+			JAI_PROPERTY((std::shared_ptr<Map>), map, nullptr, [](auto&, auto&) {});
+			JAI_PROPERTY((MV::Point<>), topLeftOffset, {}, [](auto&, auto&) {});
+			JAI_PROPERTY((MV::Size<PointPrecision>), cellDimensions, {}, [](auto&, auto&) {});
 		};
 
 
-		class PathAgent : public Component {
+		class PathAgent : public jai::property_owner<PathAgent, Component> {
 			friend Node;
 			friend cereal::access;
 		public:
@@ -332,23 +334,23 @@ namespace MV {
 
 		protected:
 			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition, int a_unitSize = 1) :
-				Component(a_owner),
-				map(a_map),
-				agent(NavigationAgent::make(a_map->map, a_gridPosition, a_unitSize)),
+				jai::property_owner<PathAgent, Component>(a_owner),
 				onArrive(onArriveSignal),
 				onBlocked(onBlockedSignal),
 				onStop(onStopSignal),
 				onStart(onStartSignal){
+				map = a_map;
+				agent = NavigationAgent::make(a_map->map.get(), a_gridPosition, a_unitSize);
 			}
 
 			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition, int a_unitSize = 1) :
-				Component(a_owner),
-				map(a_map),
-				agent(NavigationAgent::make(a_map->map, a_gridPosition, a_unitSize)),
+				jai::property_owner<PathAgent, Component>(a_owner),
 				onArrive(onArriveSignal),
 				onBlocked(onBlockedSignal),
 				onStop(onStopSignal),
 				onStart(onStartSignal) {
+				map = a_map;
+				agent = NavigationAgent::make(a_map->map.get(), a_gridPosition, a_unitSize);
 			}
 			
 			virtual void updateImplementation(double a_dt) override {
@@ -368,8 +370,8 @@ namespace MV {
 			template <class Archive>
 			void save(Archive & a_archive, std::uint32_t const /*version*/) const {
 				a_archive(
-					cereal::make_nvp("map", map),
-					cereal::make_nvp("agent", agent),
+					cereal::make_nvp("map", map.get()),
+					cereal::make_nvp("agent", agent.get()),
 					cereal::make_nvp("Component", cereal::base_class<Component>(this))
 				);
 			}
@@ -377,8 +379,8 @@ namespace MV {
 			template <class Archive>
 			void load(Archive & a_archive, std::uint32_t const /*version*/) {
 				a_archive(
-					cereal::make_nvp("map", map),
-					cereal::make_nvp("agent", agent),
+					cereal::make_nvp("map", map.get()),
+					cereal::make_nvp("agent", agent.get()),
 					cereal::make_nvp("Component", cereal::base_class<Component>(this))
 				);
 			}
@@ -406,17 +408,16 @@ namespace MV {
 		private:
 			//only for loading
 			PathAgent(const std::weak_ptr<Node> &a_owner) :
-				Component(a_owner),
-				map(nullptr),
-				agent(nullptr),
+				jai::property_owner<PathAgent, Component>(a_owner),
 				onArrive(onArriveSignal),
 				onBlocked(onBlockedSignal),
 				onStop(onStopSignal),
 				onStart(onStartSignal) {
 			}
 			std::vector<NavigationAgent::SharedReceiverType> agentPassthroughSignals;
-			std::shared_ptr<PathMap> map;
-			std::shared_ptr<NavigationAgent> agent;
+			// Clone is handled manually in cloneHelper
+			JAI_PROPERTY((std::shared_ptr<PathMap>), map, nullptr, [](auto&, auto&) {});
+			JAI_PROPERTY((std::shared_ptr<NavigationAgent>), agent, nullptr, [](auto&, auto&) {});
 		};
 	}
 }

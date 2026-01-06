@@ -2,6 +2,110 @@
 #include <cmath>
 #include <algorithm>
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+// Helper function to hook Point types
+template<typename T>
+void hookPointType(jai::dynamic_binder<MV::Point<T>>& builder) {
+	builder.auto_bind();
+	builder.constructor<>();
+	builder.constructor<T, T>();
+	builder.constructor<T, T, T>();
+
+	builder.property("x", &MV::Point<T>::x);
+	builder.property("y", &MV::Point<T>::y);
+	builder.property("z", &MV::Point<T>::z);
+
+	builder.method("set", static_cast<MV::Point<T>&(MV::Point<T>::*)(T, T)>(&MV::Point<T>::set));
+	builder.method("set", static_cast<MV::Point<T>&(MV::Point<T>::*)(T, T, T)>(&MV::Point<T>::set));
+	builder.method("atOrigin", &MV::Point<T>::atOrigin);
+	builder.method("magnitude", &MV::Point<T>::magnitude);
+	builder.method("normalized", &MV::Point<T>::normalized);
+	builder.method("clear", &MV::Point<T>::clear);
+}
+
+// JaiScript binding for Point<float>
+static jai::registrar<MV::Point<MV::PointPrecision>, MV::Services> _hookPoint("Point",
+	[](jai::dynamic_binder<MV::Point<MV::PointPrecision>>& builder, const MV::Services&) {
+	hookPointType(builder);
+});
+
+// JaiScript binding for Point<int>
+static jai::registrar<MV::Point<int>, MV::Services> _hookPointi("Pointi",
+	[](jai::dynamic_binder<MV::Point<int>>& builder, const MV::Services&) {
+	hookPointType(builder);
+});
+
+// Helper function to hook Size types
+template<typename T>
+void hookSizeType(jai::dynamic_binder<MV::Size<T>>& builder) {
+	builder.auto_bind();
+	builder.constructor<>();
+	builder.constructor<T, T>();
+	builder.constructor<T, T, T>();
+
+	builder.property("width", &MV::Size<T>::width);
+	builder.property("height", &MV::Size<T>::height);
+	builder.property("depth", &MV::Size<T>::depth);
+
+	builder.method("set", static_cast<MV::Size<T>&(MV::Size<T>::*)(T, T)>(&MV::Size<T>::set));
+	builder.method("set", static_cast<MV::Size<T>&(MV::Size<T>::*)(T, T, T)>(&MV::Size<T>::set));
+}
+
+// JaiScript binding for Size<float>
+static jai::registrar<MV::Size<MV::PointPrecision>, MV::Services> _hookSize("Size",
+	[](jai::dynamic_binder<MV::Size<MV::PointPrecision>>& builder, const MV::Services&) {
+	hookSizeType(builder);
+});
+
+// JaiScript binding for Size<int>
+static jai::registrar<MV::Size<int>, MV::Services> _hookSizei("Sizei",
+	[](jai::dynamic_binder<MV::Size<int>>& builder, const MV::Services&) {
+	hookSizeType(builder);
+});
+
+// JaiScript binding for Color
+static jai::registrar<MV::Color, MV::Services> _hookColor("Color",
+	[](jai::dynamic_binder<MV::Color>& builder, const MV::Services&) {
+	builder.auto_bind();
+
+	builder.constructor<>();
+	builder.constructor<uint32_t>();
+	builder.constructor<uint32_t, bool>();
+	builder.constructor<float, float, float>();
+	builder.constructor<float, float, float, float>();
+	builder.constructor<int, int, int>();
+	builder.constructor<int, int, int, int>();
+
+	builder.property("R", &MV::Color::R);
+	builder.property("G", &MV::Color::G);
+	builder.property("B", &MV::Color::B);
+	builder.property("A", &MV::Color::A);
+
+	builder.method("normalize", &MV::Color::normalize);
+	builder.method("hex", static_cast<uint32_t(MV::Color::*)() const>(&MV::Color::hex));
+	builder.method("hex", static_cast<MV::Color&(MV::Color::*)(uint32_t, bool)>(&MV::Color::hex));
+
+	builder.method("hsv", static_cast<MV::Color::HSV(MV::Color::*)() const>(&MV::Color::hsv));
+	builder.method("hsv", static_cast<MV::Color&(MV::Color::*)(MV::Color::HSV)>(&MV::Color::hsv));
+
+	builder.method("set", static_cast<MV::Color&(MV::Color::*)(float, float, float, float)>(&MV::Color::set));
+	builder.method("set", static_cast<MV::Color&(MV::Color::*)(int, int, int, int)>(&MV::Color::set));
+});
+
+// JaiScript binding for TexturePoint
+static jai::registrar<MV::TexturePoint, MV::Services> _hookTexturePoint("TexturePoint",
+	[](jai::dynamic_binder<MV::TexturePoint>& builder, const MV::Services&) {
+	builder.auto_bind();
+	builder.constructor<>();
+	builder.constructor<MV::PointPrecision, MV::PointPrecision>();
+
+	builder.property("textureX", &MV::TexturePoint::textureX);
+	builder.property("textureY", &MV::TexturePoint::textureY);
+});
+
 namespace MV {
 	/*************************\
 	| ---------Color--------- |

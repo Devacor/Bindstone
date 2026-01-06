@@ -9,7 +9,7 @@
 #include <algorithm>
 
 #include "MV/Utility/require.hpp"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Utility/exactType.hpp"
 
 #include "cereal/cereal.hpp"
@@ -88,16 +88,16 @@ namespace MV {
 
 	class Task {
 	private:
-		Signal<void(Task&)> onStartSignal;
-		Signal<void(Task&)> onFinishSignal;
-		Signal<void(Task&)> onFinishAllSignal;
-		Signal<void(Task&)> onSuspendSignal;
-		Signal<void(Task&)> onResumeSignal;
-		Signal<void(Task&)> onCancelSignal;
-		Signal<void(Task&)> onCancelAllSignal;
-		Signal<void(Task&)> onCancelPrestartSignal;
+		jai::signal_emitter<void(Task&)> onStartSignal;
+		jai::signal_emitter<void(Task&)> onFinishSignal;
+		jai::signal_emitter<void(Task&)> onFinishAllSignal;
+		jai::signal_emitter<void(Task&)> onSuspendSignal;
+		jai::signal_emitter<void(Task&)> onResumeSignal;
+		jai::signal_emitter<void(Task&)> onCancelSignal;
+		jai::signal_emitter<void(Task&)> onCancelAllSignal;
+		jai::signal_emitter<void(Task&)> onCancelPrestartSignal;
 
-		Signal<void(Task&, std::exception &)> onExceptionSignal;
+		jai::signal_emitter<void(Task&, std::exception &)> onExceptionSignal;
 
 	public:
 		Task(ExactType<bool> a_infinite = false, ExactType<bool> a_blocking = true, ExactType<bool> a_blockParentCompletion = true) :
@@ -112,14 +112,14 @@ namespace MV {
 		}
 
 		Task(const std::string &a_name, std::function<bool(Task&, double)> a_task, ExactType<bool> a_blocking = true, ExactType<bool> a_blockParentCompletion = true) :
-			Task(a_name, Receiver<bool(Task&, double)>::make(a_task), a_blocking, a_blockParentCompletion) {
+			Task(a_name, jai::receiver<bool(Task&, double)>::make(a_task), a_blocking, a_blockParentCompletion) {
 		}
 
 		Task(const std::string &a_name, std::function<void(Task&)> a_task, ExactType<bool> a_blocking = true, ExactType<bool> a_blockParentCompletion = true) :
-			Task(a_name, Receiver<bool(Task&, double)>::make([a_task](Task& a_self, double a_dt) {a_task(a_self); return false;}), a_blocking, a_blockParentCompletion) {
+			Task(a_name, jai::receiver<bool(Task&, double)>::make([a_task](Task& a_self, double a_dt) {a_task(a_self); return false;}), a_blocking, a_blockParentCompletion) {
 		}
 
-		Task(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, ExactType<bool> a_blocking = true, ExactType<bool> a_blockParentCompletion = true) :
+		Task(const std::string &a_name, const jai::receiver<bool(Task&, double)>::shared_type &a_task, ExactType<bool> a_blocking = true, ExactType<bool> a_blockParentCompletion = true) :
 			taskName(a_name),
 			task(a_task),
 			block(a_blocking),
@@ -283,7 +283,7 @@ namespace MV {
 			return *this;
 		}
 
-		Task& now(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, ExactType<bool> a_blockParentCompletion = true) {
+		Task& now(const std::string &a_name, const jai::receiver<bool(Task&, double)>::shared_type &a_task, ExactType<bool> a_blockParentCompletion = true) {
 			return now(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 		}
 
@@ -316,7 +316,7 @@ namespace MV {
 			return *this;
 		}
 
-		Task& then(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, ExactType<bool> a_blockParentCompletion = true) {
+		Task& then(const std::string &a_name, const jai::receiver<bool(Task&, double)>::shared_type &a_task, ExactType<bool> a_blockParentCompletion = true) {
 			return then(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 		}
 
@@ -350,7 +350,7 @@ namespace MV {
 			return *this;
 		}
 
-		Task& thenAlso(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, ExactType<bool> a_blockParentCompletion = true) {
+		Task& thenAlso(const std::string &a_name, const jai::receiver<bool(Task&, double)>::shared_type &a_task, ExactType<bool> a_blockParentCompletion = true) {
 			return thenAlso(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 		}
 
@@ -383,7 +383,7 @@ namespace MV {
 			return *this;
 		}
 
-		Task& also(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, ExactType<bool> a_blockParentCompletion = true) {
+		Task& also(const std::string &a_name, const jai::receiver<bool(Task&, double)>::shared_type &a_task, ExactType<bool> a_blockParentCompletion = true) {
 			return also(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 		}
 
@@ -423,7 +423,7 @@ namespace MV {
 			return *this;
 		}
 
-		Task& after(const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, ExactType<bool> a_blockParentCompletion = true) {
+		Task& after(const std::string &a_reference, const std::string &a_name, const jai::receiver<bool(Task&, double)>::shared_type &a_task, ExactType<bool> a_blockParentCompletion = true) {
 			return after(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 		}
 
@@ -461,7 +461,7 @@ namespace MV {
 			return *this;
 		}
 
-		Task& before(const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, ExactType<bool> a_blockParentCompletion = true) {
+		Task& before(const std::string &a_reference, const std::string &a_name, const jai::receiver<bool(Task&, double)>::shared_type &a_task, ExactType<bool> a_blockParentCompletion = true) {
 			return before(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 		}
 
@@ -542,15 +542,15 @@ namespace MV {
 			return nullptr;
 		}
 
-		SignalRegister<void(Task&)> onStart;
-		SignalRegister<void(Task&)> onFinish;
-		SignalRegister<void(Task&)> onFinishAll;
-		SignalRegister<void(Task&)> onSuspend;
-		SignalRegister<void(Task&)> onResume;
-		SignalRegister<void(Task&)> onCancel;
-		SignalRegister<void(Task&)> onCancelAll;
-		SignalRegister<void(Task&)> onCancelPrestart;
-		SignalRegister<void(Task&, std::exception &)> onException;
+		jai::signal<void(Task&)> onStart;
+		jai::signal<void(Task&)> onFinish;
+		jai::signal<void(Task&)> onFinishAll;
+		jai::signal<void(Task&)> onSuspend;
+		jai::signal<void(Task&)> onResume;
+		jai::signal<void(Task&)> onCancel;
+		jai::signal<void(Task&)> onCancelAll;
+		jai::signal<void(Task&)> onCancelPrestart;
+		jai::signal<void(Task&, std::exception &)> onException;
 
 		template <class Archive>
 		void load(Archive & archive, std::uint32_t const /*version*/) {
@@ -587,10 +587,10 @@ namespace MV {
 				CEREAL_NVP(childrenBlockingOurCompletionCount)
 			);
 			if (optionalAction) {
-				task = MV::Receiver<bool(Task&,double)>::make([&](Task& a_self, double a_dt) -> bool {return a_self.optionalAction->update(a_self, a_dt); });
+				task = jai::receiver<bool(Task&,double)>::make([&](Task& a_self, double a_dt) -> bool {return a_self.optionalAction->update(a_self, a_dt); });
 				optionalAction->initialize(this);
 			} else if (!task || task->invalid()) {
-				task = MV::Receiver<bool(Task&, double)>::make([&](Task&, double) -> bool {return true; });
+				task = jai::receiver<bool(Task&, double)>::make([&](Task&, double) -> bool {return true; });
 			}
 		}
 
@@ -635,7 +635,7 @@ namespace MV {
 
 		void handleCallbackException(std::exception &a_e) {
 			std::cerr << "Task [" << name() << "]:" << a_e.what() << std::endl;
-			if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+			if (onExceptionSignal.cull_dead_observers() == 0) { throw; }
 			onExceptionSignal(*this, a_e);
 		}
 
@@ -890,7 +890,7 @@ namespace MV {
 			onFinishAllSignal.block();
 		}
 
-		Receiver<bool(Task&, double)>::SharedType task;
+		jai::receiver<bool(Task&, double)>::shared_type task;
 
 		std::list<std::shared_ptr<Task>> parallelTasks;
 		std::list<std::shared_ptr<Task>> sequentialTasks;

@@ -3,6 +3,7 @@
 #include <numeric>
 #include <regex>
 
+#include "MV/Utility/scopeGuard.hpp"
 #include "cereal/archives/adapters.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"

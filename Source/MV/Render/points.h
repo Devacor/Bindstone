@@ -15,23 +15,10 @@
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
 
-// Forward declarations and concepts for JaiScript serialization
+// Forward declarations for JaiScript serialization (non-template overloads used to avoid dependency on JaiScript headers)
 namespace jai { namespace serialization {
 	class archive_writer;
 	class archive_reader;
-
-	// Concept for symmetric serialization - uses serialize(name, value) API
-	template<typename T>
-	concept jai_archive = requires(T& ar, float& f) {
-		ar.serialize("test", f);
-	};
-
-	// Concepts for asymmetric save/load when behavior differs between read/write
-	template<typename T>
-	concept jai_writer = requires(T& ar) { ar.write_float32(0.0f); };
-
-	template<typename T>
-	concept jai_reader = requires(T& ar) { { ar.read_float32() } -> std::same_as<float>; };
 } }
 
 namespace MV {
@@ -70,11 +57,9 @@ namespace MV {
 			archive(CEREAL_NVP(textureX), CEREAL_NVP(textureY));
 		}
 
-		// JaiScript serialization (concept disambiguates from cereal)
-		void serialize(jai::serialization::jai_archive auto& ar) {
-			ar.serialize("textureX", textureX);
-			ar.serialize("textureY", textureY);
-		}
+		// JaiScript serialization (non-template overloads)
+		void save(jai::serialization::archive_writer& ar) const;
+		void load(jai::serialization::archive_reader& ar);
 
 		PointPrecision textureX, textureY;
 	};
@@ -112,21 +97,9 @@ namespace MV {
 			normalize();
 		}
 
-		// JaiScript serialization - asymmetric (normalize only on load)
-		void save(jai::serialization::jai_writer auto& ar) const {
-			ar.serialize("R", R);
-			ar.serialize("G", G);
-			ar.serialize("B", B);
-			ar.serialize("A", A);
-		}
-
-		void load(jai::serialization::jai_reader auto& ar) {
-			ar.serialize("R", R);
-			ar.serialize("G", G);
-			ar.serialize("B", B);
-			ar.serialize("A", A);
-			normalize();
-		}
+		// JaiScript serialization (non-template overloads)
+		void save(jai::serialization::archive_writer& ar) const;
+		void load(jai::serialization::archive_reader& ar);
 
 		[[nodiscard]] uint32_t hex() const;
 		Color& hex(uint32_t a_hex, bool a_allowFullAlpha = false);
@@ -229,12 +202,9 @@ namespace MV {
 			archive(CEREAL_NVP(width), CEREAL_NVP(height), CEREAL_NVP(depth));
 		}
 
-		// JaiScript serialization (concept disambiguates from cereal)
-		void serialize(jai::serialization::jai_archive auto& ar) {
-			ar.serialize("width", width);
-			ar.serialize("height", height);
-			ar.serialize("depth", depth);
-		}
+		// JaiScript serialization (non-template overloads)
+		void save(jai::serialization::archive_writer& ar) const;
+		void load(jai::serialization::archive_reader& ar);
 
 		T width, height, depth;
 	};
@@ -326,12 +296,9 @@ namespace MV {
 			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
 		}
 
-		// JaiScript serialization (concept disambiguates from cereal)
-		void serialize(jai::serialization::jai_archive auto& ar) {
-			ar.serialize("x", x);
-			ar.serialize("y", y);
-			ar.serialize("z", z);
-		}
+		// JaiScript serialization (non-template overloads)
+		void save(jai::serialization::archive_writer& ar) const;
+		void load(jai::serialization::archive_reader& ar);
 
 		[[nodiscard]] Point<PointPrecision> normalized() const {
 			PointPrecision length = magnitude();
@@ -387,12 +354,9 @@ namespace MV {
 			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
 		}
 
-		// JaiScript serialization (concept disambiguates from cereal)
-		void serialize(jai::serialization::jai_archive auto& ar) {
-			ar.serialize("x", x);
-			ar.serialize("y", y);
-			ar.serialize("z", z);
-		}
+		// JaiScript serialization (non-template overloads)
+		void save(jai::serialization::archive_writer& ar) const;
+		void load(jai::serialization::archive_reader& ar);
 
 		PointPrecision x, y, z;
 	};
@@ -1590,6 +1554,32 @@ namespace MV {
 		}
 		return *this;
 	}
+
+	// ============================================================================
+	// JaiScript serialization free function overloads (for ADL dispatch)
+	// ============================================================================
+	// Declarations only - definitions in points.cpp where archive.hpp is included.
+	// These are found via ADL when archive.hpp's write_custom/read_custom
+	// fall back to free function lookup.
+
+	void save(jai::serialization::archive_writer& ar, const TexturePoint& v);
+	void load(jai::serialization::archive_reader& ar, TexturePoint& v);
+
+	void save(jai::serialization::archive_writer& ar, const Color& v);
+	void load(jai::serialization::archive_reader& ar, Color& v);
+
+	void save(jai::serialization::archive_writer& ar, const Scale& v);
+	void load(jai::serialization::archive_reader& ar, Scale& v);
+
+	void save(jai::serialization::archive_writer& ar, const Point<PointPrecision>& v);
+	void load(jai::serialization::archive_reader& ar, Point<PointPrecision>& v);
+	void save(jai::serialization::archive_writer& ar, const Point<int>& v);
+	void load(jai::serialization::archive_reader& ar, Point<int>& v);
+
+	void save(jai::serialization::archive_writer& ar, const Size<PointPrecision>& v);
+	void load(jai::serialization::archive_reader& ar, Size<PointPrecision>& v);
+	void save(jai::serialization::archive_writer& ar, const Size<int>& v);
+	void load(jai::serialization::archive_reader& ar, Size<int>& v);
 
 } // namespace MV
 

@@ -5,6 +5,7 @@
 
 #include <jaiscript/signals/signal.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/engine_impl.hpp>
 #include <jaiscript/core/value.hpp>
 #include <iostream>
 #include <sstream>

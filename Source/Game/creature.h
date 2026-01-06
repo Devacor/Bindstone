@@ -5,7 +5,7 @@
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
 #include "MV/Utility/generalUtility.h"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include <string>
 #include <memory>
 #include "MV/ArtificialIntelligence/pathfinding.h"
@@ -163,12 +163,12 @@ private:
 	float stunDuration = 0.0f;
 	float rootDuration = 0.0f;
 
-	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> arriveReceiver;
-	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> blockedReceiver;
-	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> stopReceiver;
+	std::shared_ptr<jai::receiver<void(std::shared_ptr<Creature>)>> arriveReceiver;
+	std::shared_ptr<jai::receiver<void(std::shared_ptr<Creature>)>> blockedReceiver;
+	std::shared_ptr<jai::receiver<void(std::shared_ptr<Creature>)>> stopReceiver;
 
-	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> selfDeathReceiver;
-	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> targetDeathReceiver;
+	std::shared_ptr<jai::receiver<void(std::shared_ptr<Creature>)>> selfDeathReceiver;
+	std::shared_ptr<jai::receiver<void(std::shared_ptr<Creature>)>> targetDeathReceiver;
 };
 
 struct CreatureNetworkState {
@@ -255,19 +255,19 @@ class Creature : public MV::Scene::Component {
 	friend MV::Script;
 public:
 	typedef void CallbackSignature(std::shared_ptr<Creature>);
-	typedef MV::SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
+	typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
 
 protected:
-	MV::Signal<CallbackSignature> onStatusSignal;
-	MV::Signal<void(std::shared_ptr<Creature>, int)> onHealthChangeSignal;
-	MV::Signal<CallbackSignature> onDeathSignal;
-	MV::Signal<CallbackSignature> onFallSignal;
+	jai::signal_emitter<CallbackSignature> onStatusSignal;
+	jai::signal_emitter<void(std::shared_ptr<Creature>, int)> onHealthChangeSignal;
+	jai::signal_emitter<CallbackSignature> onDeathSignal;
+	jai::signal_emitter<CallbackSignature> onFallSignal;
 
 public:
-	MV::SignalRegister<CallbackSignature> onStatus;
-	MV::SignalRegister<void(std::shared_ptr<Creature>, int)> onHealthChange;
-	MV::SignalRegister<CallbackSignature> onDeath;
-	MV::SignalRegister<CallbackSignature> onFall;
+	jai::signal<CallbackSignature> onStatus;
+	jai::signal<void(std::shared_ptr<Creature>, int)> onHealthChange;
+	jai::signal<CallbackSignature> onDeath;
+	jai::signal<CallbackSignature> onFall;
 
 	ComponentDerivedAccessors(Creature)
 
@@ -322,16 +322,16 @@ class ServerCreature : public Creature {
 	friend MV::Script;
 private:
 
-	MV::Signal<CallbackSignature> onArriveSignal;
-	MV::Signal<CallbackSignature> onBlockedSignal;
-	MV::Signal<CallbackSignature> onStopSignal;
-	MV::Signal<CallbackSignature> onStartSignal;
+	jai::signal_emitter<CallbackSignature> onArriveSignal;
+	jai::signal_emitter<CallbackSignature> onBlockedSignal;
+	jai::signal_emitter<CallbackSignature> onStopSignal;
+	jai::signal_emitter<CallbackSignature> onStartSignal;
 
 public:
-	MV::SignalRegister<CallbackSignature> onArrive;
-	MV::SignalRegister<CallbackSignature> onBlocked;
-	MV::SignalRegister<CallbackSignature> onStop;
-	MV::SignalRegister<CallbackSignature> onStart;
+	jai::signal<CallbackSignature> onArrive;
+	jai::signal<CallbackSignature> onBlocked;
+	jai::signal<CallbackSignature> onStop;
+	jai::signal<CallbackSignature> onStart;
 
 	ComponentDerivedAccessors(ServerCreature)
 

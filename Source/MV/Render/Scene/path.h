@@ -12,8 +12,17 @@ namespace MV {
 			friend Node;
 			friend PathAgent;
 			friend cereal::access;
+			friend class jai::access;
 
 		public:
+			// JaiScript serialization - must be public for trait detection
+			static void load_and_construct(jai::serialization::archive_reader& ar,
+			                               jai::serialization::construct<PathMap>& c) {
+				c(std::shared_ptr<Node>(), Size<int>());
+				c->property_mgr.load(ar);
+				c->initialize();
+			}
+
 			DrawableDerivedAccessorsNoShowHide(PathMap)
 
 
@@ -199,18 +208,18 @@ namespace MV {
 			friend cereal::access;
 		public:
 			typedef void CallbackSignature(std::shared_ptr<PathAgent>);
-			typedef SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
+			typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
 		private:
-			Signal<CallbackSignature> onArriveSignal;
-			Signal<CallbackSignature> onBlockedSignal;
-			Signal<CallbackSignature> onStopSignal;
-			Signal<CallbackSignature> onStartSignal;
+			jai::signal_emitter<CallbackSignature> onArriveSignal;
+			jai::signal_emitter<CallbackSignature> onBlockedSignal;
+			jai::signal_emitter<CallbackSignature> onStopSignal;
+			jai::signal_emitter<CallbackSignature> onStartSignal;
 
 		public:
-			SignalRegister<CallbackSignature> onArrive;
-			SignalRegister<CallbackSignature> onBlocked;
-			SignalRegister<CallbackSignature> onStop;
-			SignalRegister<CallbackSignature> onStart;
+			jai::signal<CallbackSignature> onArrive;
+			jai::signal<CallbackSignature> onBlocked;
+			jai::signal<CallbackSignature> onStop;
+			jai::signal<CallbackSignature> onStart;
 
 			ComponentDerivedAccessors(PathMap)
 

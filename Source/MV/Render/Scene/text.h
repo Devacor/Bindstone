@@ -17,12 +17,12 @@ namespace MV {
 
 		private:
 
-			Signal<TextSignalSignature> onChangeSignal;
-			Signal<TextSignalSignature> onEnterSignal;
+			jai::signal_emitter<TextSignalSignature> onChangeSignal;
+			jai::signal_emitter<TextSignalSignature> onEnterSignal;
 
 		public:
-			SignalRegister<TextSignalSignature> onChange;
-			SignalRegister<TextSignalSignature> onEnter;
+			jai::signal<TextSignalSignature> onChange;
+			jai::signal<TextSignalSignature> onEnter;
 
 			DrawableDerivedAccessors(Text)
 

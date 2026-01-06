@@ -13,8 +13,9 @@
 
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/scopeGuard.hpp"
-#include "MV/Utility/signal.hpp"
+#include <jaiscript/signals/signal.hpp>
 #include "MV/Render/points.h"
+#include <jaiscript/serialization/construct.hpp>
 
 namespace MV {
 
@@ -22,25 +23,29 @@ namespace MV {
 	class TemporaryCost;
 	class MapNode {
 		friend TemporaryCost;
+		friend Map;  // For sparse serialization access to travelCost/staticBlockedSemaphore
 		friend cereal::access;
+		// JaiScript serialization free functions (for ADL dispatch)
+		friend void save(jai::serialization::archive_writer& ar, const MapNode& v);
+		friend void load(jai::serialization::archive_reader& ar, MapNode& v);
 	public:
 		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
-		typedef SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
+		typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
 	private:
-		Signal<CallbackSignature> onBlockSignal;
-		Signal<CallbackSignature> onUnblockSignal;
-		Signal<CallbackSignature> onStaticBlockSignal;
-		Signal<CallbackSignature> onStaticUnblockSignal;
-		Signal<CallbackSignature> onCostChangeSignal;
-		mutable Signal<CallbackSignature> onClearanceChangeSignal;
+		jai::signal_emitter<CallbackSignature> onBlockSignal;
+		jai::signal_emitter<CallbackSignature> onUnblockSignal;
+		jai::signal_emitter<CallbackSignature> onStaticBlockSignal;
+		jai::signal_emitter<CallbackSignature> onStaticUnblockSignal;
+		jai::signal_emitter<CallbackSignature> onCostChangeSignal;
+		mutable jai::signal_emitter<CallbackSignature> onClearanceChangeSignal;
 
 	public:
-		SignalRegister<CallbackSignature> onBlock;
-		SignalRegister<CallbackSignature> onUnblock;
-		SignalRegister<CallbackSignature> onStaticBlock;
-		SignalRegister<CallbackSignature> onStaticUnblock;
-		SignalRegister<CallbackSignature> onCostChange;
-		SignalRegister<CallbackSignature> onClearanceChange;
+		jai::signal<CallbackSignature> onBlock;
+		jai::signal<CallbackSignature> onUnblock;
+		jai::signal<CallbackSignature> onStaticBlock;
+		jai::signal<CallbackSignature> onStaticUnblock;
+		jai::signal<CallbackSignature> onCostChange;
+		jai::signal<CallbackSignature> onClearanceChange;
 
 		MapNode(Map& a_grid, const Point<int> &a_location, float a_cost, bool a_useCorners);
 		MapNode(const MapNode &a_rhs);
@@ -96,6 +101,23 @@ namespace MV {
 		template <class Archive>
 		void load(Archive & archive);
 
+		// JaiScript serialization (non-template for reliable trait detection)
+		// Note: map pointer is NOT serialized - Map::load_and_construct sets it after deserializing squares
+		void save(jai::serialization::archive_writer& ar) const {
+			ar("location", location);
+			ar("useCorners", useCorners);
+			ar("travelCost", travelCost);
+			ar("staticBlockedSemaphore", staticBlockedSemaphore);
+		}
+
+		void load(jai::serialization::archive_reader& ar) {
+			ar("location", location);
+			ar("useCorners", useCorners);
+			ar("travelCost", travelCost);
+			ar("staticBlockedSemaphore", staticBlockedSemaphore);
+			// map pointer set by Map::load_and_construct after deserializing squares
+		}
+
 		void calculateClearance() const;
 
 		void registerCalculateClearanceCallbacks() const;
@@ -131,23 +153,44 @@ namespace MV {
 
 	class Map : public std::enable_shared_from_this<Map> {
 		friend cereal::access;
+		friend class jai::access;  // JaiScript serialization support (like cereal::access)
 	public:
+		// JaiScript serialization - must be public for trait detection
+		void save(jai::serialization::archive_writer& ar) const {
+			ar("usingCorners", usingCorners);
+			ar("squares", squares);  // Generic vector<vector<MapNode>> serialization
+		}
+
+		static void load_and_construct(jai::serialization::archive_reader& ar,
+		                               jai::serialization::construct<Map>& c) {
+			c();  // Default construct via jai::access friend
+			ar("usingCorners", c->usingCorners);
+			ar("squares", c->squares);  // Generic vector<vector<MapNode>> deserialization
+			// Set map pointer for all nodes (not serialized, unlike cereal's weak_ptr approach)
+			for (auto& column : c->squares) {
+				for (auto& node : column) {
+					node.map = c.operator->();
+				}
+			}
+			c->hookUpObservation();
+		}
+
 		typedef void CallbackSignature(std::shared_ptr<Map>, const Point<int> &);
-		typedef SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
+		typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
 	private:
-		Signal<CallbackSignature> onBlockSignal;
-		Signal<CallbackSignature> onUnblockSignal;
-		Signal<CallbackSignature> onStaticBlockSignal;
-		Signal<CallbackSignature> onStaticUnblockSignal;
-		Signal<CallbackSignature> onCostChangeSignal;
-		Signal<CallbackSignature> onClearanceChangeSignal;
+		jai::signal_emitter<CallbackSignature> onBlockSignal;
+		jai::signal_emitter<CallbackSignature> onUnblockSignal;
+		jai::signal_emitter<CallbackSignature> onStaticBlockSignal;
+		jai::signal_emitter<CallbackSignature> onStaticUnblockSignal;
+		jai::signal_emitter<CallbackSignature> onCostChangeSignal;
+		jai::signal_emitter<CallbackSignature> onClearanceChangeSignal;
 	public:
-		SignalRegister<CallbackSignature> onBlock;
-		SignalRegister<CallbackSignature> onUnblock;
-		SignalRegister<CallbackSignature> onStaticBlock;
-		SignalRegister<CallbackSignature> onStaticUnblock;
-		SignalRegister<CallbackSignature> onCostChange;
-		SignalRegister<CallbackSignature> onClearanceChange;
+		jai::signal<CallbackSignature> onBlock;
+		jai::signal<CallbackSignature> onUnblock;
+		jai::signal<CallbackSignature> onStaticBlock;
+		jai::signal<CallbackSignature> onStaticUnblock;
+		jai::signal<CallbackSignature> onCostChange;
+		jai::signal<CallbackSignature> onClearanceChange;
 
 		static std::shared_ptr<Map> make(const Size<int> &a_size, bool a_useCorners = false) {
 			return std::shared_ptr<Map>(new Map(a_size, 1.0f, a_useCorners));
@@ -453,18 +496,18 @@ namespace MV {
 		friend cereal::access;
 	public:
 		typedef void CallbackSignature(std::shared_ptr<NavigationAgent>);
-		typedef SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
+		typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
 	private:
-		Signal<CallbackSignature> onArriveSignal;
-		Signal<CallbackSignature> onBlockedSignal;
-		Signal<CallbackSignature> onStopSignal;
-		Signal<CallbackSignature> onStartSignal;
+		jai::signal_emitter<CallbackSignature> onArriveSignal;
+		jai::signal_emitter<CallbackSignature> onBlockedSignal;
+		jai::signal_emitter<CallbackSignature> onStopSignal;
+		jai::signal_emitter<CallbackSignature> onStartSignal;
 
 	public:
-		SignalRegister<CallbackSignature> onArrive;
-		SignalRegister<CallbackSignature> onBlocked;
-		SignalRegister<CallbackSignature> onStop;
-		SignalRegister<CallbackSignature> onStart;
+		jai::signal<CallbackSignature> onArrive;
+		jai::signal<CallbackSignature> onBlocked;
+		jai::signal<CallbackSignature> onStop;
+		jai::signal<CallbackSignature> onStart;
 
 		static std::shared_ptr<NavigationAgent> make(const std::shared_ptr<Map> &a_map, const Point<int> &a_newPosition = Point<int>(), int a_unitSize = 1, bool a_offsetCenterByHalf = true){
 			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_newPosition, a_unitSize, a_offsetCenterByHalf));
@@ -879,6 +922,10 @@ namespace MV {
 			calculateClearance();
 		}
 	}
+
+	// JaiScript serialization free functions for ADL dispatch
+	inline void save(jai::serialization::archive_writer& ar, const MapNode& v) { v.save(ar); }
+	inline void load(jai::serialization::archive_reader& ar, MapNode& v) { v.load(ar); }
 }
 
 #endif

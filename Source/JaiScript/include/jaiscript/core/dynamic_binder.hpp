@@ -67,6 +67,8 @@ enum class delegation_type {
 
 // Forward declarations
 class class_definition;
+template<typename T> class signal_emitter;
+template<typename T> class signal;
 
 // ============================================================================
 // observable_property_ref<T> - Script-side reference to an observable property
@@ -790,8 +792,16 @@ public:
 
     // Add a parent class (appends to existing parents)
     // Returns true if successful, false if diamond inheritance would be created
+    // Idempotent: adding the same parent twice is a no-op (returns true)
     [[nodiscard]] bool add_parent(std::shared_ptr<class_definition> parent) {
         if (!parent) return true;
+
+        // Check if this parent is already registered (idempotent - safe to call twice)
+        for (const auto& existing : parent_classes_) {
+            if (existing.get() == parent.get()) {
+                return true;  // Already registered, nothing to do
+            }
+        }
 
         // Temporarily add the parent
         parent_classes_.push_back(parent);
@@ -1601,6 +1611,17 @@ namespace dynamic_binder_validation {
     template<typename... Args>
     struct is_std_container<std::unordered_set<Args...>> : std::true_type {};
 
+    // Helper to detect if a type is a signal type (jai::signal_emitter, jai::signal)
+    // Signal types are internal callback mechanisms and don't need registration validation
+    template<typename T>
+    struct is_signal_type : std::false_type {};
+
+    template<typename Sig>
+    struct is_signal_type<signal_emitter<Sig>> : std::true_type {};
+
+    template<typename Sig>
+    struct is_signal_type<signal<Sig>> : std::true_type {};
+
     // Helper to unwrap smart pointers to get the inner type
     // For std::shared_ptr<T>, std::weak_ptr<T>, std::unique_ptr<T> -> extracts T
     // For other types -> returns the type as-is
@@ -1641,7 +1662,7 @@ namespace dynamic_binder_validation {
 
     // Helper to determine if a type needs registration validation
     // Returns true for types that should be registered with dynamic_binder
-    // Returns false for primitives, std::string, STL containers, and script_value
+    // Returns false for primitives, std::string, STL containers, signal types, and script_value
     // IMPORTANT: Smart pointers are unwrapped - we validate the inner type
     template<typename T>
     constexpr bool needs_registration_check() {
@@ -1650,6 +1671,7 @@ namespace dynamic_binder_validation {
         return !std::is_fundamental_v<inner_type> &&
                !std::is_same_v<inner_type, std::string> &&
                !is_std_container<inner_type>::value &&
+               !is_signal_type<inner_type>::value &&
                !std::is_same_v<inner_type, script_value> &&
                std::is_class_v<inner_type>;
     }
@@ -2212,29 +2234,32 @@ private:
             throw runtime_error("Engine no longer exists");
         });
 
-        class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (args.size() < 2) {
-                throw runtime_error("Property setter requires 'this' and value");
-            }
+        // Only create setter for copy-assignable types
+        if constexpr (std::is_copy_assignable_v<P>) {
+            class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+                if (args.size() < 2) {
+                    throw runtime_error("Property setter requires 'this' and value");
+                }
 
-            // Extract the C++ object from the first argument (this)
-            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
-            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
+                // Extract the C++ object from the first argument (this)
+                // Handles both class_instance wrappers and cpp_bound values (for method chaining)
+                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
-            // Special case: if P is script_value, don't convert
-            if constexpr (std::is_same_v<P, script_value>) {
-                // deref() returns *this if not a reference, so this handles both cases
-                (cpp_obj->*member).deref() = args[1].clone();
-            } else {
-                cpp_obj->*member = args[1].as<P>();
-            }
-            return script_value(std::monostate{}, engine_ptr); // null
-        });
+                // Special case: if P is script_value, don't convert
+                if constexpr (std::is_same_v<P, script_value>) {
+                    // deref() returns *this if not a reference, so this handles both cases
+                    (cpp_obj->*member).deref() = args[1].clone();
+                } else {
+                    cpp_obj->*member = args[1].as<P>();
+                }
+                return script_value(std::monostate{}, engine_ptr); // null
+            });
 
-        // Register field_id -> setter_id mapping for fast runtime lookup
-        uint64_t field_id = engine_.symbolize(name);
-        uint64_t setter_id = engine_.symbolize("_set_" + name);
-        class_def_->register_property_setter(field_id, setter_id);
+            // Register field_id -> setter_id mapping for fast runtime lookup
+            uint64_t field_id = engine_.symbolize(name);
+            uint64_t setter_id = engine_.symbolize("_set_" + name);
+            class_def_->register_property_setter(field_id, setter_id);
+        }
 
         // Register bound_cpp_vector<T> if this property is a std::vector
         if constexpr (is_specialization_v<P, std::vector>) {
@@ -2424,6 +2449,8 @@ public:
         auto base_def = engine_.get_class_definition_by_type(std::type_index(typeid(Base)));
         if (base_def) {
             // Use add_parent to append (validates for diamond inheritance)
+            // add_parent is idempotent (returns true if already registered)
+            // but returns false for true diamond inheritance
             if (!class_def_->add_parent(base_def)) {
                 throw std::runtime_error("Diamond inheritance detected: class '" + class_name_ +
                     "' would have multiple paths to the same base class");

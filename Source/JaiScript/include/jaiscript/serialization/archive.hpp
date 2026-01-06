@@ -21,6 +21,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <string>
 #include <vector>
+#include <array>
 #include <memory>
 #include <map>
 
@@ -63,6 +64,11 @@ class json_archive_reader;
 
 // Base tag type for all JaiScript archives (used for SFINAE disambiguation from cereal)
 struct archive_base {};
+
+// NOTE: Types that need JaiScript serialization should use non-template overloads:
+//   void save(archive_writer& ar) const;
+//   void load(archive_reader& ar);
+// This avoids the need for concepts and template constraints.
 
 // Archive writer interface
 class archive_writer : public archive_base {
@@ -222,6 +228,24 @@ public:
     template<typename T>
     void operator()(const char* name, const T& value) {
         serialize(name, value);
+    }
+
+    // ============================================================================
+    // Array element serialization (no property name) - for use inside begin_array/end_array
+    // ============================================================================
+
+    // Write a primitive element (no name)
+    template<typename T>
+    std::enable_if_t<std::is_arithmetic_v<T> || std::is_same_v<T, std::string>>
+    write_element(const T& value) {
+        write_primitive(value);
+    }
+
+    // Write a custom type element (no name) - calls T::save(archive) or save(archive, T) via ADL
+    template<typename T>
+    std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>>
+    write_element(const T& value) {
+        write_custom(value);
     }
 
 protected:
@@ -569,6 +593,24 @@ public:
         serialize(name, value);
     }
 
+    // ============================================================================
+    // Array element deserialization (no property name) - for use inside begin_array/end_array
+    // ============================================================================
+
+    // Read a primitive element (no name)
+    template<typename T>
+    std::enable_if_t<std::is_arithmetic_v<T> || std::is_same_v<T, std::string>>
+    read_element(T& value) {
+        read_primitive(value);
+    }
+
+    // Read a custom type element (no name) - calls T::load(archive) or load(archive, T) via ADL
+    template<typename T>
+    std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>>
+    read_element(T& value) {
+        read_custom(value);
+    }
+
 protected:
     uint32_t version_ = 0;
 
@@ -652,6 +694,55 @@ private:
     std::map<std::string, class_metadata> classes_;
     std::map<std::type_index, std::string> type_to_class_name_;
 };
+
+// ============================================================================
+// Generic STL container serialization support
+// ============================================================================
+// These free functions enable automatic serialization of std::vector<T> and
+// std::array<T, N> for any T that has save/load support (member or free function).
+
+// --- std::vector ---
+template<typename T>
+void save(archive_writer& ar, const std::vector<T>& vec) {
+    ar.begin_array(vec.size());
+    for (const auto& elem : vec) {
+        ar.write_element(elem);
+    }
+    ar.end_array();
+}
+
+template<typename T>
+void load(archive_reader& ar, std::vector<T>& vec) {
+    size_t size = ar.begin_array();
+    vec.resize(size);
+    for (size_t i = 0; i < size; ++i) {
+        ar.read_element(vec[i]);
+    }
+    ar.end_array();
+}
+
+// --- std::array (compile-time size, no size serialization needed) ---
+template<typename T, std::size_t N>
+void save(archive_writer& ar, const std::array<T, N>& arr) {
+    ar.begin_array(N);
+    for (const auto& elem : arr) {
+        ar.write_element(elem);
+    }
+    ar.end_array();
+}
+
+template<typename T, std::size_t N>
+void load(archive_reader& ar, std::array<T, N>& arr) {
+    size_t size = ar.begin_array();
+    if (size != N) {
+        throw serialization_error("Array size mismatch: expected " + std::to_string(N) +
+                                  ", got " + std::to_string(size));
+    }
+    for (size_t i = 0; i < N; ++i) {
+        ar.read_element(arr[i]);
+    }
+    ar.end_array();
+}
 
 } // namespace serialization
 } // namespace jai

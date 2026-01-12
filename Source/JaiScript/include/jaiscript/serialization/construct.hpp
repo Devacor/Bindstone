@@ -7,7 +7,13 @@
 
 namespace jai {
 
-// Friend class for serialization access (like cereal::access)
+// Forward declarations for construct types
+namespace serialization {
+	template<typename T> class construct;
+	template<typename T> class construct_unique;
+}
+
+// Friend class for serialization access
 class access {
 public:
 	template<typename T, typename... Args>
@@ -18,11 +24,25 @@ public:
 	static std::unique_ptr<T> make_unique(Args&&... args) {
 		return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 	}
+
+	// Forward to T::load_and_construct - allows access to private methods via friendship
+	// Templated on Archive to work with CRTP-based archives
+	template<typename Archive, typename T>
+	static auto load_and_construct(Archive& ar, serialization::construct<T>& c)
+		-> decltype(T::load_and_construct(ar, c)) {
+		return T::load_and_construct(ar, c);
+	}
+
+	template<typename Archive, typename T>
+	static auto load_and_construct(Archive& ar, serialization::construct_unique<T>& c)
+		-> decltype(T::load_and_construct(ar, c)) {
+		return T::load_and_construct(ar, c);
+	}
 };
 
 namespace serialization {
 
-	// construct<T> - for load_and_construct pattern (like cereal::construct)
+	// construct<T> - for load_and_construct pattern (types without default constructors)
 	template<typename T>
 	class construct {
 		std::shared_ptr<T>& ptr_ref_;

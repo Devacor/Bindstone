@@ -92,6 +92,23 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		}
 	});
 
+	auto saveJaiButton = makeButton(grid, panel.services(), "SaveJai", buttonSize, U8_STR("Save Jai"));
+	saveJaiButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->saveJai("Prefabs/" + controls->elementToEdit->id() + ".jai", MV::Services::instance(), controls->elementToEdit->id());
+	});
+
+	auto loadJaiButton = makeButton(grid, panel.services(), "LoadJai", buttonSize, U8_STR("Load Jai"));
+	loadJaiButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		if (MV::fileExistsAbsolute("Prefabs/" + controls->elementToEdit->id() + ".jai")) {
+			auto newNode = MV::Scene::Node::loadJai("Prefabs/" + controls->elementToEdit->id() + ".jai", panel.services());
+
+			auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.services().get<MV::TapDevice>());
+
+			panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
+			panel.services().get<Editor>()->sceneUpdated();
+		}
+	});
+
 	auto copyButton = makeButton(grid, panel.services(), "Copy", buttonSize, U8_STR("Copy"));
 	copyButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->clone();
@@ -1661,6 +1678,7 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 	auto saveButton = makeButton(grid, panel.services(), "Save", MV::size(110.0f, 27.0f), U8_STR("Save"));
 	auto loadButton = makeButton(grid, panel.services(), "Load", MV::size(110.0f, 27.0f), U8_STR("Load"));
+	auto loadCerealButton = makeButton(grid, panel.services(), "LoadCereal", MV::size(110.0f, 27.0f), U8_STR("Load Cereal"));
 	panel.updateBoxHeader(grid->bounds().width());
 	//panel.updateBoxHeader(grid->component<MV::Scene::Grid>()->bounds().width());
 
@@ -1681,6 +1699,17 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 
 	loadButton->onAccept.connect("load", [&](std::shared_ptr<MV::Scene::Clickable>){
 		auto newRoot = MV::Scene::Node::load(fileName->text(), panel.services(), false);
+		panel.root(newRoot);
+		newRoot->postLoadStep();
+		std::cout << "\n____\n";
+		std::cout << "\nRecalculateLocalBounds: " << MV::Scene::Node::recalculateLocalBoundsCalls;
+		std::cout << "\nRecalculateChildBounds: " << MV::Scene::Node::recalculateChildBoundsCalls;
+		std::cout << "\nRecalculateMatrixBounds: " << MV::Scene::Node::recalculateMatrixCalls;
+		std::cout << "\n____\n";
+	});
+
+	loadCerealButton->onAccept.connect("loadCereal", [&](std::shared_ptr<MV::Scene::Clickable>){
+		auto newRoot = MV::Scene::Node::loadCereal(fileName->text(), panel.services(), false);
 		panel.root(newRoot);
 		newRoot->postLoadStep();
 		std::cout << "\n____\n";

@@ -22,9 +22,10 @@ public:
 	virtual void execute(LobbyGameConnectionState*) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const) {
-		archive(CEREAL_NVP(objects), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(objects));
+		NetworkAction::serialize(archive);
 	}
 
 	//private:
@@ -33,13 +34,11 @@ public:
 
 inline std::string makeSynchronizeNetworkString(BindstoneNetworkObjectPool &a_networkObjectPool) {
 	auto updated = a_networkObjectPool.updated();
-	if (!updated.empty()) { 
+	if (!updated.empty()) {
 		return makeNetworkString<SynchronizeAction>(updated);
 	} else {
 		return "";
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_synchronizeaction);
 
 #endif

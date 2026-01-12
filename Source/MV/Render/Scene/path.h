@@ -4,6 +4,7 @@
 #include "drawable.h"
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
@@ -15,9 +16,12 @@ namespace MV {
 			friend class jai::access;
 
 		public:
-			// JaiScript serialization - must be public for trait detection
-			static void load_and_construct(jai::serialization::archive_reader& ar,
-			                               jai::serialization::construct<PathMap>& c) {
+			// JaiScript serialization - must be public for trait detection (templated for CRTP archives)
+			// Using requires clause to hide from Cereal's trait detection
+			template<typename Archive>
+			static void load_and_construct(Archive& ar,
+			                               jai::serialization::construct<PathMap>& c)
+				requires jai::serialization::jai_archive<Archive> {
 				c(std::shared_ptr<Node>(), Size<int>());
 				c->property_mgr.load(ar);
 				c->initialize();
@@ -150,27 +154,37 @@ namespace MV {
 
 			void repositionDebugDrawPoints();
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & a_archive, std::uint32_t const /*version*/) const {
-				a_archive(
-					cereal::make_nvp("map", map.get()),
-					cereal::make_nvp("offset", topLeftOffset.get()),
-					cereal::make_nvp("cellDimensions", cellDimensions.get()),
-					cereal::make_nvp("Component", cereal::base_class<Drawable>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(a_archive);
+					Drawable::save(a_archive, 0);
+				} else {
+					a_archive(
+						cereal::make_nvp("map", map.get()),
+						cereal::make_nvp("offset", topLeftOffset.get()),
+						cereal::make_nvp("cellDimensions", cellDimensions.get()),
+						cereal::make_nvp("Component", cereal::base_class<Drawable>(this))
+					);
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & a_archive, std::uint32_t const version) {
-				a_archive(
-					cereal::make_nvp("map", map.get()),
-					cereal::make_nvp("offset", topLeftOffset.get()),
-					cereal::make_nvp("cellDimensions", cellDimensions.get()),
-					cereal::make_nvp("Component", cereal::base_class<Drawable>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(a_archive);
+					Drawable::load(a_archive, 0);
+				} else {
+					a_archive(
+						cereal::make_nvp("map", map.get()),
+						cereal::make_nvp("offset", topLeftOffset.get()),
+						cereal::make_nvp("cellDimensions", cellDimensions.get()),
+						cereal::make_nvp("Component", cereal::base_class<Drawable>(this))
+					);
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & a_archive, cereal::construct<PathMap> &a_construct, std::uint32_t const version) {
 				a_construct(std::shared_ptr<Node>(), Size<int>());
 				a_construct->load(a_archive, version);
@@ -376,25 +390,35 @@ namespace MV {
 				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & a_archive, std::uint32_t const /*version*/) const {
-				a_archive(
-					cereal::make_nvp("map", map.get()),
-					cereal::make_nvp("agent", agent.get()),
-					cereal::make_nvp("Component", cereal::base_class<Component>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(a_archive);
+					Component::save(a_archive, 0);
+				} else {
+					a_archive(
+						cereal::make_nvp("map", map.get()),
+						cereal::make_nvp("agent", agent.get()),
+						cereal::make_nvp("Component", cereal::base_class<Component>(this))
+					);
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & a_archive, std::uint32_t const /*version*/) {
-				a_archive(
-					cereal::make_nvp("map", map.get()),
-					cereal::make_nvp("agent", agent.get()),
-					cereal::make_nvp("Component", cereal::base_class<Component>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(a_archive);
+					Component::load(a_archive, 0);
+				} else {
+					a_archive(
+						cereal::make_nvp("map", map.get()),
+						cereal::make_nvp("agent", agent.get()),
+						cereal::make_nvp("Component", cereal::base_class<Component>(this))
+					);
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & a_archive, cereal::construct<PathAgent> &a_construct, std::uint32_t const version) {
 				a_construct(std::shared_ptr<Node>());
 				a_construct->load(a_archive, version);

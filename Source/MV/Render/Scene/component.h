@@ -20,6 +20,7 @@
 #include "MV/Utility/services.hpp"
 #include "MV/Utility/properties.hpp"
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
@@ -256,22 +257,30 @@ namespace MV {
 			Component(const Component& a_rhs) = delete;
 			Component& operator=(const Component& a_rhs) = delete;
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(cereal::make_nvp("componentId", componentId.get()));
-				archive(cereal::make_nvp("componentOwner", componentOwner.get()));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(archive);
+				} else {
+					archive(cereal::make_nvp("componentId", componentId.get()));
+					archive(cereal::make_nvp("componentOwner", componentOwner.get()));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				archive(cereal::make_nvp("componentId", componentId.get()));
-				archive(cereal::make_nvp("componentOwner", componentOwner.get()));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(archive);
+				} else {
+					archive(cereal::make_nvp("componentId", componentId.get()));
+					archive(cereal::make_nvp("componentOwner", componentOwner.get()));
+				}
 				if (accumulatedDelta == 0.0) {
 					accumulatedDelta = MV::randomNumber(0.0f, 1.0f); //avoid awkward synchronization
 				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Component> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);
@@ -286,8 +295,11 @@ namespace MV {
 
 			std::unique_ptr<Task> rootTask;
 			JAI_PROPERTY((std::string), componentId);
-			//does not clone.
-			JAI_PROPERTY((std::weak_ptr<Node>), componentOwner, [](auto&, auto&){});
+			//does not clone - use explicit std::function to avoid SFINAE issues with forward-declared Node
+			JAI_PROPERTY((std::weak_ptr<Node>), componentOwner,
+				std::function<void(jai::property<std::weak_ptr<Node>>&, jai::property<std::weak_ptr<Node>>&)>{
+					[](jai::property<std::weak_ptr<Node>>&, jai::property<std::weak_ptr<Node>>&){}
+				});
 		};
 	}
 }

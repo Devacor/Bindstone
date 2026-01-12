@@ -48,7 +48,7 @@ void Game::initializeClientConnection() {
 	std::string gameServerAddress = MV::explode(MV::fileContents("ServerConfig/gameServerAddress.config"), [](char c) {return c == '\n'; })[0];
 
 	ourLobbyClient = MV::Client::make(MV::Url{ gameServerAddress }, [=](const std::string &a_message) {
-		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
+		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, gameData.managers().services);
 		value->execute(*this);
 	}, [=](const std::string &a_dcreason) {
 		MV::info("Disconnected [", gameServerAddress, "]: ", a_dcreason);

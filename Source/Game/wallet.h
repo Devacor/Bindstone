@@ -2,6 +2,7 @@
 #define __MV_WALLET_H__
 
 #include <jaiscript/signals/signal.hpp>
+#include <jaiscript/serialization/archive.hpp>
 #include "cereal/cereal.hpp"
 #include <string>
 #include <array>
@@ -42,12 +43,15 @@ public:
 	bool hasEnough(CurrencyType a_type, int64_t a_amount) const;
 	bool hasEnough(const Wallet& a_cost) const;
 
-	template <class Archive>
-	void serialize(Archive & archive) {
-		archive(
-			CEREAL_NVP(values)
-		);
+	template<class Archive>
+	void serialize(Archive& archive) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(JAI_NVP(values));
+		} else {
+			archive(CEREAL_NVP(values));
+		}
 	}
+
 private:
 	std::vector<int64_t> values = { 0, 0, 0 };
 	std::array<std::string, TOTAL> names = { "Gold", "Sweat", "Blood" };

@@ -14,6 +14,7 @@
 #include "cereal/cereal.hpp"
 #include "cereal/archives/adapters.hpp"
 #include "cereal/access.hpp"
+#include <jaiscript/serialization/archive.hpp>
 #include "MV/Script/script.h"
 
 namespace MV {
@@ -144,7 +145,7 @@ namespace MV {
 			return scriptEnginePointer;
 		}
 	private:
-		template <class Archive>
+		template<class Archive>
 		void save(Archive & archive, std::uint32_t const /*version*/) const {
 			archive(
 				cereal::make_nvp("parameterNames", orderedParameterNames),
@@ -152,7 +153,7 @@ namespace MV {
 			);
 		}
 
-		template <class Archive>
+		template<class Archive>
 		void load(Archive & archive, std::uint32_t const /*version*/) {
 			archive(
 				cereal::make_nvp("parameterNames", orderedParameterNames),
@@ -442,7 +443,7 @@ namespace MV {
 		}
 
 	private:
-		template <class Archive>
+		template<class Archive>
 		void save(Archive & archive, std::uint32_t const /*version*/) const {
 			std::vector< std::shared_ptr<Receiver<T>> > scriptObservers;
 			std::map<std::string, std::shared_ptr<Receiver<T>>> ownedScriptObservers;
@@ -463,7 +464,7 @@ namespace MV {
 			);
 		}
 
-		template <class Archive>
+		template<class Archive>
 		void load(Archive & archive, std::uint32_t const /*version*/) {
 			std::vector< std::shared_ptr<Receiver<T>> > scriptObservers;
 			std::map<std::string, std::shared_ptr<Receiver<T>>> ownedScriptObservers;

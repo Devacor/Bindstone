@@ -25,7 +25,7 @@ namespace MV {
 			BoxAABB<float> slice;
 			std::shared_ptr<TextureDefinition> texture;
 
-			template <class Archive>
+			template<class Archive>
 			void serialize(Archive & archive, std::uint32_t const a_version) {
 				archive(CEREAL_NVP(id), CEREAL_NVP(bounds));
 				if (a_version > 0) {
@@ -114,7 +114,7 @@ namespace MV {
 
 		bool dirty;
 
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
 			if(packedTexture.expired()){
 				packedTexture.reset();
@@ -125,7 +125,7 @@ namespace MV {
 			archive(CEREAL_NVP(packedTexture), CEREAL_NVP(shapes), CEREAL_NVP(maximumExtent), CEREAL_NVP(contentExtent), CEREAL_NVP(containers), CEREAL_NVP(consolidatedTexture));
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<TexturePack> &construct, std::uint32_t const version){
 			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 			auto* renderer = services.get<MV::Draw2D>();
@@ -162,12 +162,12 @@ namespace MV {
 			texturePack(a_texturePack){
 		}
 
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(CEREAL_NVP(texturePack), cereal::make_nvp("base", cereal::base_class<DynamicTextureDefinition>(this)));
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<PackedTextureDefinition> &construct, std::uint32_t const /*version*/){
 			std::shared_ptr<TexturePack> texturePack;
 			archive(cereal::make_nvp("texturePack", texturePack));

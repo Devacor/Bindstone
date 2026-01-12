@@ -7,11 +7,15 @@
 #include "cereal/archives/adapters.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include <jaiscript/properties/property_cereal.hpp>
+#include "MV/Serialization/property_cereal.hpp"
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
+
+// JaiScript serialization support
+#include "MV/Serialization/serialize.h"
+#include <jaiscript/properties/property_serialization.hpp>
 
 // JaiScript binding for Node
 static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
@@ -69,10 +73,10 @@ namespace MV {
 			self(a_self) {
 
 			if(self->myParent){
-				auto foundSelf = std::find(self->myParent->childNodes.begin(), self->myParent->childNodes.end(), self);
-				MV::require<MV::PointerException>(foundSelf != self->myParent->childNodes.end(), "Failed to re-sort: [", self->id(), "]");
-				originalIndex = std::distance(self->myParent->childNodes.begin(), foundSelf);
-				self->myParent->childNodes.erase(foundSelf);
+				auto foundSelf = std::find(self->myParent->childNodes->begin(), self->myParent->childNodes->end(), self);
+				MV::require<MV::PointerException>(foundSelf != self->myParent->childNodes->end(), "Failed to re-sort: [", self->id(), "]");
+				originalIndex = std::distance(self->myParent->childNodes->begin(), foundSelf);
+				self->myParent->childNodes->erase(foundSelf);
 			}
 		}
 
@@ -80,7 +84,7 @@ namespace MV {
 			if (!inserted) {
 				inserted = true;
 				if (self->myParent) {
-					int64_t newIndex = std::distance(self->myParent->childNodes.begin(), insertSorted(self->myParent->childNodes, self));
+					int64_t newIndex = std::distance(self->myParent->childNodes->begin(), insertSorted(self->myParent->childNodes.get(), self));
 					return originalIndex != newIndex;
 				}
 			}
@@ -106,13 +110,13 @@ namespace MV {
 		void Node::draw() {
 			if (allowDraw) {
 				bool allowChildrenToDraw = true;
-				for (size_t i = 0; i < childComponents.size();++i) {
+				for (size_t i = 0; i < childComponents->size();++i) {
 					allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
 					drawChildren();
 				}
-				for (size_t i = 0; i < childComponents.size(); ++i) {
+				for (size_t i = 0; i < childComponents->size(); ++i) {
 					childComponents[i]->endDraw();
 				}
 			}
@@ -120,7 +124,7 @@ namespace MV {
 
 		void Node::drawChildren() {
 			if (allowDraw) {
-				for (size_t i = 0;i < childNodes.size();++i) {
+				for (size_t i = 0;i < childNodes->size();++i) {
 					childNodes[i]->draw();
 				}
 			}
@@ -133,13 +137,13 @@ namespace MV {
 				temporaryWorldMatrixTransform = a_overrideParentMatrix;
 				temporaryWorldMatrixTransform *= localTransform();
 				bool allowChildrenToDraw = true;
-				for (size_t i = 0; i < childComponents.size();++i) {
+				for (size_t i = 0; i < childComponents->size();++i) {
 					allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
 					drawChildren(worldTransform());
 				}
-				for (size_t i = 0; i < childComponents.size(); ++i) {
+				for (size_t i = 0; i < childComponents->size(); ++i) {
 					childComponents[i]->endDraw();
 				}
 			}
@@ -147,7 +151,7 @@ namespace MV {
 
 		void Node::drawChildren(const TransformMatrix &a_overrideParentMatrix) {
 			if (allowDraw) {
-				for (size_t i = 0; i < childNodes.size(); ++i) {
+				for (size_t i = 0; i < childNodes->size(); ++i) {
 					childNodes[i]->draw(a_overrideParentMatrix);
 				}
 			}
@@ -157,10 +161,10 @@ namespace MV {
 			auto selfReference = shared_from_this(); //keep us alive no matter the update step
 			allowChangeCallNeeded = true;
 			if (allowUpdate || a_force) {
-				for (size_t i = 0; i < childComponents.size(); ++i) {
+				for (size_t i = 0; i < childComponents->size(); ++i) {
 					childComponents[i]->update(a_delta);
 				}
-				for (size_t i = 0; i < childNodes.size(); ++i) {
+				for (size_t i = 0; i < childNodes->size(); ++i) {
 					childNodes[i]->update(a_delta);
 				}
 				if (rootTask) {
@@ -216,6 +220,27 @@ namespace MV {
 			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
 
 			std::shared_ptr<Node> result = MV::fromBinaryString<std::shared_ptr<Node>>(contents, a_services);
+			if (!a_newNodeId.empty()) {
+				result->id(a_newNodeId);
+			}
+			return result;
+		}
+
+		std::shared_ptr<Node> Node::loadCereal(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep) {
+			return loadCereal(a_filename, a_services, "", a_doPostLoadStep);
+		}
+
+		std::shared_ptr<Node> Node::loadCereal(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
+			auto contents = fileContents(a_filename);
+			require<ResourceException>(!contents.empty(), "File not found for Node::loadCereal: ", a_filename);
+			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
+
+			std::stringstream stream(contents);
+			std::shared_ptr<Node> result;
+			{
+				cereal::JSONInputArchive archive(stream);
+				archive(result);
+			}
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
 			}
@@ -284,6 +309,80 @@ namespace MV {
 			return toAdd;
 		}
 
+		// ============================================================
+		// JaiScript Serialization Implementation
+		// ============================================================
+		// Uses property_owner pattern - Node inherits from jai::property_owner<Node>
+		// which provides property_mgr for automatic serialization of JAI_PROPERTY fields
+
+		std::shared_ptr<Node> Node::saveJai(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile) {
+			return saveJai(a_filename, a_services, a_renameNodeToFile ? fileNameFromPath(a_filename) : nodeId.get());
+		}
+
+		std::shared_ptr<Node> Node::saveJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_newId) {
+			auto self = shared_from_this();
+
+			// Temporarily update id and clear parent for root serialization
+			std::string oldId = nodeId.get();
+			auto oldParent = myParent;
+			SCOPE_EXIT{ nodeId = oldId; myParent = oldParent; };
+			nodeId = a_newId;
+			myParent = nullptr;
+
+			// Filter non-serializable children and swap into properties
+			auto originalChildNodes = childNodes.get();
+			auto originalChildComponents = childComponents.get();
+
+			std::vector<std::shared_ptr<Node>> filteredChildren;
+			std::copy_if(originalChildNodes.begin(), originalChildNodes.end(),
+				std::back_inserter(filteredChildren),
+				[](const auto& child) { return child->serializable(); });
+
+			std::vector<std::shared_ptr<Component>> filteredComponents;
+			std::copy_if(originalChildComponents.begin(), originalChildComponents.end(),
+				std::back_inserter(filteredComponents),
+				[](const auto& comp) { return comp->serializable(); });
+
+			// Temporarily replace with filtered versions
+			childNodes = filteredChildren;
+			childComponents = filteredComponents;
+			SCOPE_EXIT{
+				childNodes = originalChildNodes;
+				childComponents = originalChildComponents;
+			};
+
+			// Serialize using property_mgr
+			writeToFile(a_filename, MV::toJson(*this, a_services));
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::loadJai(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep) {
+			return loadJai(a_filename, a_services, "", a_doPostLoadStep);
+		}
+
+		std::shared_ptr<Node> Node::loadJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
+			auto contents = fileContents(a_filename);
+			require<ResourceException>(!contents.empty(), "File not found for Node::loadJai: ", a_filename);
+
+			auto result = MV::fromJson<std::shared_ptr<Node>>(contents, a_services);
+
+			if (!a_newNodeId.empty()) {
+				result->id(a_newNodeId);
+			}
+
+			if (a_doPostLoadStep) {
+				result->postLoadStep();
+			}
+			return result;
+		}
+
+		std::shared_ptr<Node> Node::loadChildJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId) {
+			auto toAdd = Node::loadJai(a_filename, a_services, a_newNodeId, false);
+			add(toAdd);
+			toAdd->postLoadStep();
+			return toAdd;
+		}
+
 		std::shared_ptr<Node> Node::make(const std::string &a_id) {
 			auto toAdd = Node::make(draw2d, a_id);
 			add(toAdd);
@@ -303,9 +402,9 @@ namespace MV {
 				remove(a_child->id(), false);
 				a_child->removeFromParent();
 				if(a_overrideSortDepth){
-					a_child->sortDepth = (childNodes.empty()) ? 0.0f : childNodes[childNodes.size() - 1]->sortDepth + 1.0f;
+					a_child->sortDepth = (childNodes->empty()) ? 0.0f : childNodes[childNodes->size() - 1]->sortDepth + 1.0f;
 				}
-				insertSorted(childNodes, a_child);
+				insertSorted(childNodes.get(), a_child);
 				a_child->myParent = this;
 				if (a_child->ourCameraId != ourCameraId) {
 					a_child->cameraIdInternal(ourCameraId);
@@ -326,42 +425,42 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::remove(const std::string &a_id, bool a_throw) {
-			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child){
+			auto foundNode = std::find_if(childNodes->begin(), childNodes->end(), [&](const std::shared_ptr<Node> &a_child){
 				return a_child->id() == a_id;
 			});
-			if(foundNode != childNodes.end()){
+			if(foundNode != childNodes->end()){
 				auto self = shared_from_this();
 				auto child = *foundNode;
-				childNodes.erase(foundNode);
+				childNodes->erase(foundNode);
 				child->onRemoveSignal(child);
 				onChildRemoveSignal(self, child);
 				return child;
 			}
-			require<ResourceException>(!a_throw, "Failed to remove: [", a_id, "] from parent node: [", nodeId, "]");
+			require<ResourceException>(!a_throw, "Failed to remove: [", a_id, "] from parent node: [", nodeId.get(), "]");
 			return nullptr;
 		}
 
 		std::shared_ptr<Node> Node::remove(const std::shared_ptr<Node> &a_child, bool a_throw) {
-			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_ourChild){
+			auto foundNode = std::find_if(childNodes->begin(), childNodes->end(), [&](const std::shared_ptr<Node> &a_ourChild){
 				return a_ourChild == a_child;
 			});
-			if(foundNode != childNodes.end()){
+			if(foundNode != childNodes->end()){
 				auto self = shared_from_this();
 				auto child = *foundNode;
-				childNodes.erase(foundNode);
+				childNodes->erase(foundNode);
 				child->onRemoveSignal(child);
 				onChildRemoveSignal(self, child);
 				return child;
 			}
-			require<ResourceException>(!a_throw, "Failed to remove: [", a_child->id(), "] from parent node: [", nodeId, "]");
+			require<ResourceException>(!a_throw, "Failed to remove: [", a_child->id(), "] from parent node: [", nodeId.get(), "]");
 			return nullptr;
 		}
 
 		std::shared_ptr<Node> Node::clear() {
 			auto self = shared_from_this();
-			while(!childNodes.empty()){
-				auto childToRemove = *childNodes.begin();
-				childNodes.erase(childNodes.begin());
+			while(!childNodes->empty()){
+				auto childToRemove = *childNodes->begin();
+				childNodes->erase(childNodes->begin());
 				childToRemove->onRemoveSignal(childToRemove);
 				onChildRemoveSignal(self, childToRemove);
 			}
@@ -392,15 +491,15 @@ namespace MV {
 					return currentParent->shared_from_this();
 				}
 			}
-			require<ResourceException>(!a_throw, "Failed to getParent: [", a_id, "] from child node: [", nodeId, "]");
+			require<ResourceException>(!a_throw, "Failed to getParent: [", a_id, "] from child node: [", nodeId.get(), "]");
 			return nullptr;
 		}
 
 		std::shared_ptr<Node> Node::get(const std::string &a_id, bool a_throw) {
-			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child){
+			auto foundNode = std::find_if(childNodes->begin(), childNodes->end(), [&](const std::shared_ptr<Node> &a_child){
 				return a_child->id() == a_id;
 			});
-			if(foundNode != childNodes.end()){
+			if(foundNode != childNodes->end()){
 				return *foundNode;
 			}
 			for(auto&& child : childNodes){
@@ -409,25 +508,25 @@ namespace MV {
 					return found;
 				}
 			}
-			require<ResourceException>(!a_throw, "Failed to get: [", a_id, "] from parent node: [", nodeId, "]");
+			require<ResourceException>(!a_throw, "Failed to get: [", a_id, "] from parent node: [", nodeId.get(), "]");
 			return nullptr;
 		}
 		std::shared_ptr<Node> Node::getImmediate(const std::string &a_id, bool a_throw) {
-			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child) {
+			auto foundNode = std::find_if(childNodes->begin(), childNodes->end(), [&](const std::shared_ptr<Node> &a_child) {
 				return a_child->id() == a_id;
 			});
-			if (foundNode != childNodes.end()) {
+			if (foundNode != childNodes->end()) {
 				return *foundNode;
 			}
-			require<ResourceException>(!a_throw, "Failed to get: [", a_id, "] from parent node: [", nodeId, "]");
+			require<ResourceException>(!a_throw, "Failed to get: [", a_id, "] from parent node: [", nodeId.get(), "]");
 			return nullptr;
 		}
 
 		bool Node::has(const std::string &a_id) const {
-			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child) {
+			auto foundNode = std::find_if(childNodes->begin(), childNodes->end(), [&](const std::shared_ptr<Node> &a_child) {
 				return a_child->id() == a_id;
 			});
-			if (foundNode != childNodes.end()) {
+			if (foundNode != childNodes->end()) {
 				return true;
 			}
 			for (auto&& child : childNodes) {
@@ -440,10 +539,10 @@ namespace MV {
 		}
 
 		bool Node::hasImmediate(const std::string &a_id) const {
-			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child) {
+			auto foundNode = std::find_if(childNodes->begin(), childNodes->end(), [&](const std::shared_ptr<Node> &a_child) {
 				return a_child->id() == a_id;
 			});
-			return foundNode != childNodes.end();
+			return foundNode != childNodes->end();
 		}
 
 		std::shared_ptr<Node> Node::id(const std::string &a_id) {
@@ -531,7 +630,7 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::alpha(PointPrecision a_alpha) {
 			auto self = shared_from_this();
-			auto originalAlpha = nodeAlpha;
+			auto originalAlpha = nodeAlpha.get();
 			nodeAlpha = a_alpha;
 			recalculateAlpha();
 			if (!equals(originalAlpha, a_alpha)) {
@@ -588,9 +687,9 @@ namespace MV {
 				if (dirtyChildBounds) {
 					recalculateChildBounds();
 				}
-				if(!localBounds.empty() && !localChildBounds.empty()){
+				if(!localBounds->empty() && !localChildBounds->empty()){
 					return BoxAABB<>(localChildBounds).expandWith(localBounds);
-				} else if(!localChildBounds.empty()){
+				} else if(!localChildBounds->empty()){
 					return localChildBounds;
 				}
 			}
@@ -613,16 +712,16 @@ namespace MV {
 		void Node::recalculateLocalBounds() {
 			recalculateLocalBoundsCalls++;
 			auto self = shared_from_this();
-			auto oldBounds = localBounds;
+			auto oldBounds = localBounds.get();
 			{
 				dirtyLocalBounds = false;
 
-				if (!childComponents.empty()) {
+				if (!childComponents->empty()) {
 					localBounds = childComponents[0]->bounds();
-					for (size_t i = 1; i < childComponents.size(); ++i) {
+					for (size_t i = 1; i < childComponents->size(); ++i) {
 						auto componentBounds = childComponents[i]->bounds();
 						if (!componentBounds.empty()) {
-							localBounds.expandWith(componentBounds);
+							localBounds->expandWith(componentBounds);
 						}
 					}
 				}
@@ -630,7 +729,7 @@ namespace MV {
 					localBounds = BoxAABB<>();
 				}
 			}
-			if (localBounds != oldBounds) {
+			if (localBounds.get() != oldBounds) {
 				markParentBoundsDirty();
 			}
 		}
@@ -639,13 +738,13 @@ namespace MV {
 			recalculateChildBoundsCalls++;
 			{
 				dirtyChildBounds = false;
-				if (!childNodes.empty()) {
+				if (!childNodes->empty()) {
 					localChildBounds = childNodes[0]->bounds();
-					for (size_t i = 1; i < childNodes.size(); ++i) {
+					for (size_t i = 1; i < childNodes->size(); ++i) {
 						if (childNodes[i]->selfVisible()) {
 							auto nodeBounds = childNodes[i]->bounds();
 							if (!nodeBounds.empty()) {
-								localChildBounds.expandWith(nodeBounds);
+								localChildBounds->expandWith(nodeBounds);
 							}
 						}
 					}
@@ -669,7 +768,7 @@ namespace MV {
 				}
 
 				if (scaleTo != 1.0f) {
-					localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
+					localMatrixTransform.scale(scaleTo->x, scaleTo->y, scaleTo->z);
 				}
 
 				markParentBoundsDirty();
@@ -690,7 +789,6 @@ namespace MV {
 
 		Node::Node(Draw2D &a_draw2d, const std::string &a_id) :
 			draw2d(a_draw2d),
-			nodeId(a_id),
 			onEnable(onEnableSignal),
 			onDisable(onDisableSignal),
 			onShow(onShowSignal),
@@ -714,6 +812,7 @@ namespace MV {
 			onAttach(onAttachSignal),
 			onDetach(onDetachSignal){
 
+			nodeId = a_id;
 			worldMatrixTransform.makeIdentity();
 			auto blockOnChange = std::make_shared<bool>(false);
 			onAdd.connect("SELF", [&, blockOnChange](const std::shared_ptr<Node> &a_self) {
@@ -938,7 +1037,7 @@ namespace MV {
 				localMatrixTransform.setRotationXYZ(rotateTo);
 			}
 			if (scaleTo != 1.0f) {
-				localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
+				localMatrixTransform.scale(scaleTo->x, scaleTo->y, scaleTo->z);
 			}
 
 			if (myParent) {
@@ -1048,10 +1147,10 @@ namespace MV {
 		}
 
 		MV::AxisAngles Node::worldRotationRad() const {
-			auto accumulatedRotation = rotateTo;
+			auto accumulatedRotation = rotateTo.get();
 			const Node* current = this;
 			while ( (current = current->myParent) ) {
-				accumulatedRotation += current->rotateTo;
+				accumulatedRotation += current->rotateTo.get();
 			}
 			return accumulatedRotation;
 		}
@@ -1060,7 +1159,7 @@ namespace MV {
 			auto accumulatedRotation = a_newAngle;
 			const Node* current = this;
 			while ( (current = current->myParent) ) {
-				accumulatedRotation -= current->rotateTo;
+				accumulatedRotation -= current->rotateTo.get();
 			}
 			return rotationRad(accumulatedRotation);
 		}
@@ -1074,10 +1173,10 @@ namespace MV {
 		}
 
 		MV::Scale Node::worldScale() const {
-			auto accumulatedScale = scaleTo;
+			auto accumulatedScale = scaleTo.get();
 			const Node* current = this;
 			while ( (current = current->myParent) ) {
-				accumulatedScale *= current->scaleTo;
+				accumulatedScale *= current->scaleTo.get();
 			}
 			return accumulatedScale;
 		}
@@ -1086,7 +1185,7 @@ namespace MV {
 			auto accumulatedScale = a_newScale;
 			const Node* current = this;
 			while ( (current = current->myParent) ) {
-				accumulatedScale /= current->scaleTo;
+				accumulatedScale /= current->scaleTo.get();
 			}
 			return scale(accumulatedScale);
 		}
@@ -1161,7 +1260,7 @@ namespace MV {
 
 			for (auto&& childNode : childNodes) {
 				if (childNode->serializable()) {
-					result->childNodes.push_back(childNode->cloneInternal(result));
+					result->childNodes->push_back(childNode->cloneInternal(result));
 				}
 			}
 
@@ -1205,7 +1304,7 @@ namespace MV {
 
 			for (auto&& childNode : childNodes) {
 				if (childNode->serializable()) {
-					result->childNodes.push_back(childNode->cloneInternal(result));
+					result->childNodes->push_back(childNode->cloneInternal(result));
 				}
 			}
 

@@ -6,6 +6,7 @@
 #include <variant>
 #include <map>
 #include "cereal/cereal.hpp"
+#include <jaiscript/serialization/archive.hpp>
 #include "MV/Utility/exactType.hpp"
 
 namespace MV {
@@ -148,10 +149,36 @@ namespace MV {
 			return value.index() == 0;
 		}
 
-		template <class Archive>
-		void serialize(Archive & archive) {
-			archive(CEREAL_NVP(value));
+		template<class Archive>
+		void serialize(Archive& archive) {
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				if constexpr (jai::serialization::is_save<Archive>) {
+					// JaiScript save - need manual variant handling
+					int typeIndex = static_cast<int>(value.index());
+					archive.serialize("type", typeIndex);
+					std::visit([&archive](const auto& v) {
+						using T = std::decay_t<decltype(v)>;
+						if constexpr (!std::is_same_v<T, std::monostate>) {
+							archive.serialize("value", v);
+						}
+					}, value);
+				} else {
+					// JaiScript load
+					int typeIndex = 0;
+					archive.serialize("type", typeIndex);
+					switch (typeIndex) {
+						case 0: value = std::monostate{}; break;
+						case 1: { bool v; archive.serialize("value", v); value = v; break; }
+						case 2: { int64_t v; archive.serialize("value", v); value = v; break; }
+						case 3: { double v; archive.serialize("value", v); value = v; break; }
+						case 4: { std::string v; archive.serialize("value", v); value = v; break; }
+					}
+				}
+			} else {
+				archive(CEREAL_NVP(value));
+			}
 		}
+
 	private:
 		std::variant<std::monostate, bool, int64_t, double, std::string> value;
 	};
@@ -229,49 +256,72 @@ namespace MV {
 			return value;
 		}
 
-		template <typename ArchiveType,
-			typename std::enable_if_t<std::is_base_of<cereal::detail::OutputArchiveBase, ArchiveType>::value>* = nullptr>
-			ArchiveType & serialize(ArchiveType & a_archive, const std::string & a_archivedName, bool a_force = false) {
-			bool hasValue = modified || a_force;
-			a_archive(cereal::make_nvp(a_archivedName + "_has_value", hasValue));
-			if (hasValue) {
-				a_archive(cereal::make_nvp(a_archivedName, value));
+		// Named serialization (with field name)
+		template <typename ArchiveType>
+		auto& serialize(ArchiveType& a_archive, const std::string& a_archivedName, bool a_force = false) {
+			if constexpr (jai::serialization::jai_archive<ArchiveType>) {
+				if constexpr (jai::serialization::is_save<ArchiveType>) {
+					bool hasValue = modified || a_force;
+					a_archive.serialize((a_archivedName + "_has_value").c_str(), hasValue);
+					if (hasValue) {
+						a_archive.serialize(a_archivedName.c_str(), value);
+					}
+					modified = false;
+				} else {
+					a_archive.serialize((a_archivedName + "_has_value").c_str(), modified);
+					if (modified) {
+						a_archive.serialize(a_archivedName.c_str(), value);
+					}
+				}
+			} else if constexpr (std::is_base_of_v<cereal::detail::OutputArchiveBase, ArchiveType>) {
+				bool hasValue = modified || a_force;
+				a_archive(cereal::make_nvp(a_archivedName + "_has_value", hasValue));
+				if (hasValue) {
+					a_archive(cereal::make_nvp(a_archivedName, value));
+				}
+				modified = false;
+			} else {
+				a_archive(cereal::make_nvp(a_archivedName + "_has_value", modified));
+				if (modified) {
+					a_archive(cereal::make_nvp(a_archivedName, value));
+				}
 			}
-			modified = false;
 			return a_archive;
 		}
 
-		template <typename ArchiveType,
-			typename std::enable_if_t<std::is_base_of<cereal::detail::InputArchiveBase, ArchiveType>::value>* = nullptr>
-			ArchiveType & serialize(ArchiveType & a_archive, const std::string & a_archivedName, bool a_doNothing = false) {
-			a_archive(cereal::make_nvp(a_archivedName + "_has_value", modified));
-			if (modified) {
-				a_archive(cereal::make_nvp(a_archivedName, value));
+		// Unnamed serialization (binary style)
+		template <typename ArchiveType>
+		auto& serialize(ArchiveType& a_archive, MV::ExactType<bool> a_force = false) {
+			if constexpr (jai::serialization::jai_archive<ArchiveType>) {
+				if constexpr (jai::serialization::is_save<ArchiveType>) {
+					bool hasValue = modified || static_cast<bool>(a_force);
+					a_archive.serialize("has_value", hasValue);
+					if (hasValue) {
+						a_archive.serialize("value", value);
+					}
+					modified = false;
+				} else {
+					a_archive.serialize("has_value", modified);
+					if (modified) {
+						a_archive.serialize("value", value);
+					}
+				}
+			} else if constexpr (std::is_base_of_v<cereal::detail::OutputArchiveBase, ArchiveType>) {
+				bool hasValue = modified || static_cast<bool>(a_force);
+				a_archive(hasValue);
+				if (hasValue) {
+					a_archive(value);
+				}
+				modified = false;
+			} else {
+				a_archive(modified);
+				if (modified) {
+					a_archive(value);
+				}
 			}
 			return a_archive;
 		}
 
-		template <typename ArchiveType,
-			typename std::enable_if_t<std::is_base_of<cereal::detail::OutputArchiveBase, ArchiveType>::value>* = nullptr>
-			ArchiveType & serialize(ArchiveType & a_archive, MV::ExactType<bool> a_force = false) {
-			bool hasValue = modified || a_force;
-			a_archive(hasValue);
-			if (hasValue) {
-				a_archive(value);
-			}
-			modified = false;
-			return a_archive;
-		}
-
-		template <typename ArchiveType,
-			typename std::enable_if_t<std::is_base_of<cereal::detail::InputArchiveBase, ArchiveType>::value>* = nullptr>
-			ArchiveType & serialize(ArchiveType & a_archive, MV::ExactType<bool> a_doNothing = false) {
-			a_archive(modified);
-			if (modified) {
-				a_archive(value);
-			}
-			return a_archive;
-		}
 	private:
 		static inline std::map<size_t, bool> scriptHookedUp = std::map<size_t, bool>();
 		bool modified = true;

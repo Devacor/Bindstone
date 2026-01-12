@@ -101,7 +101,7 @@ namespace MV {
 		typedef std::map<std::string, std::shared_ptr<CharacterDefinition>> CachedGlyphs;
 		CachedGlyphs cachedGlyphs;
 
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive) const {
 			archive(
 				CEREAL_NVP(identifier),
@@ -111,7 +111,7 @@ namespace MV {
 			);
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<FontDefinition> &construct, std::uint32_t const){
 			construct();
 			archive(
@@ -186,14 +186,14 @@ namespace MV {
 
 		Draw2D& renderer(){return render;}
 	private:
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(
 				CEREAL_NVP(loadedFonts)
 			);
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct, std::uint32_t const version){
 			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 			auto* renderer = services.get<MV::Draw2D>();
@@ -400,7 +400,7 @@ namespace MV {
 			return *this;
 		}
 	private:
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const a_version) {
 			if (a_version > 0) {
 				archive(
@@ -417,7 +417,7 @@ namespace MV {
 			);
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<FormattedText> &construct, std::uint32_t const a_version) {
 			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 			auto* library = services.get<MV::TextLibrary>();

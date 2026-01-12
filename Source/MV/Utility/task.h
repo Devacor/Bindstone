@@ -16,6 +16,7 @@
 #include "cereal/access.hpp"
 #include "cereal/archives/adapters.hpp"
 #include "cereal/types/polymorphic.hpp"
+#include <jaiscript/serialization/archive.hpp>
 
 #include "MV/Script/script.h"
 
@@ -52,9 +53,21 @@ namespace MV {
 		}
 
 	protected:
-		template <class Archive>
+		// One-parameter forwarder for JaiScript method detection
+		// Using return-type SFINAE to hide from Cereal's trait detection
+		template<class Archive>
+		auto serialize(Archive & archive) -> std::enable_if_t<jai::serialization::jai_archive<Archive>> {
+			serialize(archive, 0);
+		}
+
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {
-			archive(0);
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				int dummy = 0;
+				archive(jai::serialization::make_nvp("_base", dummy));
+			} else {
+				archive(0);
+			}
 		}
 
 		virtual bool handleExceptions(){
@@ -76,9 +89,21 @@ namespace MV {
 		virtual bool update(Task& a_self, double a_dt) override { return infinite; }
 
 	protected:
-		template <class Archive>
+		// One-parameter forwarder for JaiScript method detection
+		// Using return-type SFINAE to hide from Cereal's trait detection
+		template<class Archive>
+		auto serialize(Archive & archive) -> std::enable_if_t<jai::serialization::jai_archive<Archive>> {
+			serialize(archive, 0);
+		}
+
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {
-			archive(CEREAL_NVP(infinite), cereal::make_nvp("ActionBase", cereal::base_class<ActionBase>(this)));
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive(JAI_NVP(infinite));
+				ActionBase::serialize(archive, 0);
+			} else {
+				archive(CEREAL_NVP(infinite), cereal::make_nvp("ActionBase", cereal::base_class<ActionBase>(this)));
+			}
 		}
 
 	private:
@@ -552,40 +577,74 @@ namespace MV {
 		jai::signal<void(Task&)> onCancelPrestart;
 		jai::signal<void(Task&, std::exception &)> onException;
 
-		template <class Archive>
+		template<class Archive>
 		void load(Archive & archive, std::uint32_t const /*version*/) {
-			archive(
-				CEREAL_NVP(task),
-				CEREAL_NVP(onStartSignal),
-				CEREAL_NVP(onFinishSignal),
-				CEREAL_NVP(onFinishAllSignal),
-				CEREAL_NVP(onFinishAllSignal),
-				CEREAL_NVP(onSuspendSignal),
-				CEREAL_NVP(onResumeSignal),
-				CEREAL_NVP(onCancelSignal),
-				CEREAL_NVP(onExceptionSignal),
-				CEREAL_NVP(sequentialTasks),
-				CEREAL_NVP(parallelTasks),
-				CEREAL_NVP(taskName),
-				CEREAL_NVP(totalTime),
-				CEREAL_NVP(totalLocalTime),
-				CEREAL_NVP(deltaInterval),
-				CEREAL_NVP(localDeltaInterval),
-				CEREAL_NVP(lastCalledInterval),
-				CEREAL_NVP(lastCalledLocalInterval),
-				CEREAL_NVP(currentStep),
-				CEREAL_NVP(currentLocalStep),
-				CEREAL_NVP(maxUpdates),
-				CEREAL_NVP(block),
-				CEREAL_NVP(suspended),
-				CEREAL_NVP(ourTaskStarted),
-				CEREAL_NVP(ourTaskComplete),
-				CEREAL_NVP(blockParentCompletion),
-				CEREAL_NVP(alwaysRunChildren),
-				CEREAL_NVP(mostRecentCreated),
-				CEREAL_NVP(optionalAction),
-				CEREAL_NVP(childrenBlockingOurCompletionCount)
-			);
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive(
+					JAI_NVP(task),
+					JAI_NVP(onStartSignal),
+					JAI_NVP(onFinishSignal),
+					JAI_NVP(onFinishAllSignal),
+					JAI_NVP(onSuspendSignal),
+					JAI_NVP(onResumeSignal),
+					JAI_NVP(onCancelSignal),
+					JAI_NVP(onExceptionSignal),
+					JAI_NVP(sequentialTasks),
+					JAI_NVP(parallelTasks),
+					JAI_NVP(taskName),
+					JAI_NVP(totalTime),
+					JAI_NVP(totalLocalTime),
+					JAI_NVP(deltaInterval),
+					JAI_NVP(localDeltaInterval),
+					JAI_NVP(lastCalledInterval),
+					JAI_NVP(lastCalledLocalInterval),
+					JAI_NVP(currentStep),
+					JAI_NVP(currentLocalStep),
+					JAI_NVP(maxUpdates),
+					JAI_NVP(block),
+					JAI_NVP(suspended),
+					JAI_NVP(ourTaskStarted),
+					JAI_NVP(ourTaskComplete),
+					JAI_NVP(blockParentCompletion),
+					JAI_NVP(alwaysRunChildren),
+					JAI_NVP(mostRecentCreated),
+					JAI_NVP(optionalAction),
+					JAI_NVP(childrenBlockingOurCompletionCount)
+				);
+			} else {
+				archive(
+					CEREAL_NVP(task),
+					CEREAL_NVP(onStartSignal),
+					CEREAL_NVP(onFinishSignal),
+					CEREAL_NVP(onFinishAllSignal),
+					CEREAL_NVP(onFinishAllSignal),
+					CEREAL_NVP(onSuspendSignal),
+					CEREAL_NVP(onResumeSignal),
+					CEREAL_NVP(onCancelSignal),
+					CEREAL_NVP(onExceptionSignal),
+					CEREAL_NVP(sequentialTasks),
+					CEREAL_NVP(parallelTasks),
+					CEREAL_NVP(taskName),
+					CEREAL_NVP(totalTime),
+					CEREAL_NVP(totalLocalTime),
+					CEREAL_NVP(deltaInterval),
+					CEREAL_NVP(localDeltaInterval),
+					CEREAL_NVP(lastCalledInterval),
+					CEREAL_NVP(lastCalledLocalInterval),
+					CEREAL_NVP(currentStep),
+					CEREAL_NVP(currentLocalStep),
+					CEREAL_NVP(maxUpdates),
+					CEREAL_NVP(block),
+					CEREAL_NVP(suspended),
+					CEREAL_NVP(ourTaskStarted),
+					CEREAL_NVP(ourTaskComplete),
+					CEREAL_NVP(blockParentCompletion),
+					CEREAL_NVP(alwaysRunChildren),
+					CEREAL_NVP(mostRecentCreated),
+					CEREAL_NVP(optionalAction),
+					CEREAL_NVP(childrenBlockingOurCompletionCount)
+				);
+			}
 			if (optionalAction) {
 				task = jai::receiver<bool(Task&,double)>::make([&](Task& a_self, double a_dt) -> bool {return a_self.optionalAction->update(a_self, a_dt); });
 				optionalAction->initialize(this);
@@ -594,40 +653,74 @@ namespace MV {
 			}
 		}
 
-		template <class Archive>
+		template<class Archive>
 		void save(Archive & archive, std::uint32_t const /*version*/) const {
-			archive(
-				CEREAL_NVP(task),
-				CEREAL_NVP(onStartSignal),
-				CEREAL_NVP(onFinishSignal),
-				CEREAL_NVP(onFinishAllSignal),
-				CEREAL_NVP(onFinishAllSignal),
-				CEREAL_NVP(onSuspendSignal),
-				CEREAL_NVP(onResumeSignal),
-				CEREAL_NVP(onCancelSignal),
-				CEREAL_NVP(onExceptionSignal),
-				CEREAL_NVP(sequentialTasks),
-				CEREAL_NVP(parallelTasks),
-				CEREAL_NVP(taskName),
-				CEREAL_NVP(totalTime),
-				CEREAL_NVP(totalLocalTime),
-				CEREAL_NVP(deltaInterval),
-				CEREAL_NVP(localDeltaInterval),
-				CEREAL_NVP(lastCalledInterval),
-				CEREAL_NVP(lastCalledLocalInterval),
-				CEREAL_NVP(currentStep),
-				CEREAL_NVP(currentLocalStep),
-				CEREAL_NVP(maxUpdates),
-				CEREAL_NVP(block),
-				CEREAL_NVP(suspended),
-				CEREAL_NVP(ourTaskStarted),
-				CEREAL_NVP(ourTaskComplete),
-				CEREAL_NVP(blockParentCompletion),
-				CEREAL_NVP(alwaysRunChildren),
-				CEREAL_NVP(mostRecentCreated),
-				CEREAL_NVP(optionalAction),
-				CEREAL_NVP(childrenBlockingOurCompletionCount)
-			);
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive(
+					JAI_NVP(task),
+					JAI_NVP(onStartSignal),
+					JAI_NVP(onFinishSignal),
+					JAI_NVP(onFinishAllSignal),
+					JAI_NVP(onSuspendSignal),
+					JAI_NVP(onResumeSignal),
+					JAI_NVP(onCancelSignal),
+					JAI_NVP(onExceptionSignal),
+					JAI_NVP(sequentialTasks),
+					JAI_NVP(parallelTasks),
+					JAI_NVP(taskName),
+					JAI_NVP(totalTime),
+					JAI_NVP(totalLocalTime),
+					JAI_NVP(deltaInterval),
+					JAI_NVP(localDeltaInterval),
+					JAI_NVP(lastCalledInterval),
+					JAI_NVP(lastCalledLocalInterval),
+					JAI_NVP(currentStep),
+					JAI_NVP(currentLocalStep),
+					JAI_NVP(maxUpdates),
+					JAI_NVP(block),
+					JAI_NVP(suspended),
+					JAI_NVP(ourTaskStarted),
+					JAI_NVP(ourTaskComplete),
+					JAI_NVP(blockParentCompletion),
+					JAI_NVP(alwaysRunChildren),
+					JAI_NVP(mostRecentCreated),
+					JAI_NVP(optionalAction),
+					JAI_NVP(childrenBlockingOurCompletionCount)
+				);
+			} else {
+				archive(
+					CEREAL_NVP(task),
+					CEREAL_NVP(onStartSignal),
+					CEREAL_NVP(onFinishSignal),
+					CEREAL_NVP(onFinishAllSignal),
+					CEREAL_NVP(onFinishAllSignal),
+					CEREAL_NVP(onSuspendSignal),
+					CEREAL_NVP(onResumeSignal),
+					CEREAL_NVP(onCancelSignal),
+					CEREAL_NVP(onExceptionSignal),
+					CEREAL_NVP(sequentialTasks),
+					CEREAL_NVP(parallelTasks),
+					CEREAL_NVP(taskName),
+					CEREAL_NVP(totalTime),
+					CEREAL_NVP(totalLocalTime),
+					CEREAL_NVP(deltaInterval),
+					CEREAL_NVP(localDeltaInterval),
+					CEREAL_NVP(lastCalledInterval),
+					CEREAL_NVP(lastCalledLocalInterval),
+					CEREAL_NVP(currentStep),
+					CEREAL_NVP(currentLocalStep),
+					CEREAL_NVP(maxUpdates),
+					CEREAL_NVP(block),
+					CEREAL_NVP(suspended),
+					CEREAL_NVP(ourTaskStarted),
+					CEREAL_NVP(ourTaskComplete),
+					CEREAL_NVP(blockParentCompletion),
+					CEREAL_NVP(alwaysRunChildren),
+					CEREAL_NVP(mostRecentCreated),
+					CEREAL_NVP(optionalAction),
+					CEREAL_NVP(childrenBlockingOurCompletionCount)
+				);
+			}
 		}
 
 	private:

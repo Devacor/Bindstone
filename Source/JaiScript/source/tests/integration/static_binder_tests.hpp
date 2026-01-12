@@ -94,13 +94,16 @@ public:
     }
 
     // Composable serialization - calls property_mgr internally
-    void save(serialization::archive_writer& ar) const {
+    // Templated on Archive for CRTP-based archive support
+    template<typename Archive>
+    void save(Archive& ar) const {
         // Save all JAI_PROPERTY properties
         property_mgr.save(ar);
         // Could add custom data here if needed (but not session_id - transient)
     }
 
-    void load(serialization::archive_reader& ar) {
+    template<typename Archive>
+    void load(Archive& ar) {
         // Load all JAI_PROPERTY properties
         property_mgr.load(ar);
         // Could load custom data here if needed
@@ -116,14 +119,16 @@ struct GameConfig {
     double round_time = 300.0;
 };
 
-// Free functions for serialization (ADL)
-inline void save(serialization::archive_writer& ar, const GameConfig& cfg) {
+// Free functions for serialization (ADL) - templated for CRTP archives
+template<typename Archive>
+inline void save(Archive& ar, const GameConfig& cfg) {
     ar.serialize("max_players", cfg.max_players);
     ar.serialize("friendly_fire", cfg.friendly_fire);
     ar.serialize("round_time", cfg.round_time);
 }
 
-inline void load(serialization::archive_reader& ar, GameConfig& cfg) {
+template<typename Archive>
+inline void load(Archive& ar, GameConfig& cfg) {
     ar.serialize("max_players", cfg.max_players);
     ar.serialize("friendly_fire", cfg.friendly_fire);
     ar.serialize("round_time", cfg.round_time);

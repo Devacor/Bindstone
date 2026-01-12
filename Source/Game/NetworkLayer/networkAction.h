@@ -31,19 +31,20 @@ public:
 	virtual void execute(LobbyGameConnectionState*) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(LobbyGameConnectionState);"); }
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(0);
+	template<class Archive>
+	void serialize(Archive& archive) {
+		int dummy = 0;
+		archive(jai::serialization::make_nvp("_base", dummy));
 	}
 
 	std::string toNetworkString() {
-		return MV::toBinaryStringCast<NetworkAction>(shared_from_this());
+		return MV::toBinaryStringCast<NetworkAction>(shared_from_this(), MV::Services::instance());
 	}
 };
 
 template <typename T, typename ... Args>
 std::string makeNetworkString(Args && ... args) {
-	return MV::toBinaryStringCast<NetworkAction>(std::make_shared<T>(std::forward<Args>(args)...));
+	return MV::toBinaryStringCast<NetworkAction>(std::make_shared<T>(std::forward<Args>(args)...), MV::Services::instance());
 }
 
 #endif

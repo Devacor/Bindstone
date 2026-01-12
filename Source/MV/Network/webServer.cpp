@@ -4,7 +4,7 @@
 
 #include "cereal/cereal.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include <jaiscript/properties/property_cereal.hpp>
+#include "MV/Serialization/property_cereal.hpp"
 
 namespace MV {
 

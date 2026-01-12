@@ -4,6 +4,7 @@
 #include "node.h"
 #include "MV/Render/mv_jai_serialization_fwd.hpp"  // Forward decls for Anchors friend declarations
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 #define DrawableDerivedAccessorsShowHide(ComponentType) \
 	std::shared_ptr<ComponentType> show() { \
@@ -67,9 +68,12 @@ namespace MV {
 			friend cereal::access;
 			friend Drawable;
 			friend jai::property<Anchors>;
-			// JaiScript serialization support
-			friend void save(jai::serialization::archive_writer& ar, const Anchors& anchors);
-			friend void load(jai::serialization::archive_reader& ar, Anchors& anchors);
+			// JaiScript serialization support (templated for CRTP archives)
+			// Using requires clause to hide from Cereal's trait detection
+			template<typename Archive>
+			friend void save(Archive& ar, const Anchors& anchors) requires jai::serialization::jai_archive<Archive>;
+			template<typename Archive>
+			friend void load(Archive& ar, Anchors& anchors) requires jai::serialization::jai_archive<Archive>;
 
 		public:
 			Anchors(Drawable* a_self);
@@ -125,10 +129,10 @@ namespace MV {
 			bool applyingPosition = false;
 
 			template <class Archive>
-			void save(Archive& archive, std::uint32_t const /*version*/) const;
+			void save(Archive& archive, std::uint32_t const /*version*/) const requires jai::serialization::not_jai_archive<Archive>;
 
-			template <class Archive>
-			void load(Archive& archive, std::uint32_t const /*version*/) {
+			template<class Archive>
+			void load(Archive& archive, std::uint32_t const /*version*/) requires jai::serialization::not_jai_archive<Archive> {
 				archive(
 					cereal::make_nvp("parent", parentReference),
 					cereal::make_nvp("parentId", parentIdLoaded),
@@ -144,6 +148,12 @@ namespace MV {
 			void postLoadInitialize();
 			void registerWithParent();
 		};
+
+		// JaiScript serialization free functions for Anchors - using requires clause to hide from Cereal
+		template<typename Archive>
+		void save(Archive& ar, const Anchors& anchors) requires jai::serialization::jai_archive<Archive>;
+		template<typename Archive>
+		void load(Archive& ar, Anchors& anchors) requires jai::serialization::jai_archive<Archive>;
 
 		class Drawable : public jai::property_owner<Drawable, Component> {
 			friend Anchors;
@@ -194,7 +204,7 @@ namespace MV {
 
 			//encapsulated to enforce bounds refreshing.
 			const DrawPoint& point(size_t a_index) const {
-				return points[a_index];
+				return (*points)[a_index];
 			}
 
 			size_t pointSize() const {
@@ -202,8 +212,8 @@ namespace MV {
 			}
 
 			std::shared_ptr<Drawable> setPoint(size_t a_index, const DrawPoint& a_value) {
-				bool needRefresh = points[a_index].point() != a_value.point();
-				points[a_index] = a_value;
+				bool needRefresh = (*points)[a_index].point() != a_value.point();
+				(*points)[a_index] = a_value;
 				if (needRefresh) {
 					refreshBounds();
 				}
@@ -211,8 +221,8 @@ namespace MV {
 			}
 
 			std::shared_ptr<Drawable> setPoint(size_t a_index, const Color& a_value) {
-				if (points[a_index].color() != a_value) {
-					points[a_index] = a_value;
+				if ((*points)[a_index].color() != a_value) {
+					(*points)[a_index] = a_value;
 					dirtyVertexBuffer = true;
 				}
 				return std::static_pointer_cast<Drawable>(shared_from_this());
@@ -220,7 +230,7 @@ namespace MV {
 
 			//returns a copy of the points list, intentionally not a reference to enforce bounds refreshing.
 			std::vector<DrawPoint> getPoints() const {
-				return points;
+				return (*points);
 			}
 
 			//fine to just pass back a reference, changing the index order doesn't impact the bounding box logic.
@@ -296,40 +306,53 @@ namespace MV {
 
 			virtual void refreshBounds();
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
-				points.serialize_enabled(serializePoints());
-				vertexIndices.serialize_enabled(serializePoints());
-				archive(cereal::make_nvp("anchors", ourAnchors));
-				archive(cereal::make_nvp("shouldDraw", shouldDraw.get()));
-				archive(cereal::make_nvp("textures", ourTextures.get()));
-				archive(cereal::make_nvp("shaderProgramId", shaderProgramId.get()));
-				archive(cereal::make_nvp("localBounds", localBounds.get()));
-				archive(cereal::make_nvp("drawType", drawType.get()));
-				archive(cereal::make_nvp("vertexIndices", vertexIndices.get()));
-				archive(cereal::make_nvp("points", points.get()));
-				archive(cereal::make_nvp("blendMode", blendModePreset.get()));
-				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					// property_mgr.save() handles all JAI_PROPERTY fields including points/vertexIndices
+					// Note: JaiScript always serializes all properties - the serializePoints() conditional
+					// only applies to Cereal for backward compatibility with derived classes like Spine
+					property_mgr.save(archive);
+					Component::save(archive, 0);
+				} else {
+					archive(cereal::make_nvp("anchors", ourAnchors.get()));
+					archive(cereal::make_nvp("shouldDraw", shouldDraw.get()));
+					archive(cereal::make_nvp("textures", ourTextures.get()));
+					archive(cereal::make_nvp("shaderProgramId", shaderProgramId.get()));
+					archive(cereal::make_nvp("localBounds", localBounds.get()));
+					archive(cereal::make_nvp("drawType", drawType.get()));
+					if (serializePoints()) {
+						archive(cereal::make_nvp("vertexIndices", vertexIndices.get()));
+						archive(cereal::make_nvp("points", points.get()));
+					}
+					archive(cereal::make_nvp("blendMode", blendModePreset.get()));
+					archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				points.serialize_enabled(serializePoints());
-				vertexIndices.serialize_enabled(serializePoints());
-				// Current version - load all properties
-				archive(cereal::make_nvp("anchors", ourAnchors));
-				archive(cereal::make_nvp("shouldDraw", shouldDraw.get()));
-				archive(cereal::make_nvp("textures", ourTextures.get()));
-				archive(cereal::make_nvp("shaderProgramId", shaderProgramId.get()));
-				archive(cereal::make_nvp("localBounds", localBounds.get()));
-				archive(cereal::make_nvp("drawType", drawType.get()));
-				archive(cereal::make_nvp("vertexIndices", vertexIndices.get()));
-				archive(cereal::make_nvp("points", points.get()));
-				archive(cereal::make_nvp("blendMode", blendModePreset.get()));
-				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					// property_mgr.load() handles all JAI_PROPERTY fields including points/vertexIndices
+					property_mgr.load(archive);
+					Component::load(archive, 0);
+				} else {
+					archive(cereal::make_nvp("anchors", ourAnchors.get()));
+					archive(cereal::make_nvp("shouldDraw", shouldDraw.get()));
+					archive(cereal::make_nvp("textures", ourTextures.get()));
+					archive(cereal::make_nvp("shaderProgramId", shaderProgramId.get()));
+					archive(cereal::make_nvp("localBounds", localBounds.get()));
+					archive(cereal::make_nvp("drawType", drawType.get()));
+					if (serializePoints()) {
+						archive(cereal::make_nvp("vertexIndices", vertexIndices.get()));
+						archive(cereal::make_nvp("points", points.get()));
+					}
+					archive(cereal::make_nvp("blendMode", blendModePreset.get()));
+					archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive& archive, cereal::construct<Drawable>& construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);
@@ -403,7 +426,7 @@ namespace MV {
 		};
 
 		template <class Archive>
-		void Anchors::save(Archive& archive, std::uint32_t const /*version*/) const {
+		void Anchors::save(Archive& archive, std::uint32_t const /*version*/) const requires jai::serialization::not_jai_archive<Archive> {
 			auto selfShared = std::static_pointer_cast<Drawable>(selfReference->shared_from_this());
 			bool parentCanUseId = !parentReference.expired() && parentReference.lock() == selfReference->owner()->componentInParents(parentReference.lock()->id(), false, true).self();
 			archive(
@@ -415,6 +438,25 @@ namespace MV {
 				cereal::make_nvp("applyingPosition", applyingPosition)
 			);
 		}
+
+		// JaiScript serialization implementations for Anchors (using requires clause)
+		template<typename Archive>
+		void save(Archive& ar, const Anchors& anchors) requires jai::serialization::jai_archive<Archive> {
+			// For JaiScript, serialize simplified version (no parentId lookup complexity)
+			ar(jai::serialization::make_nvp("anchors", anchors.parentAnchors));
+			ar(jai::serialization::make_nvp("offset", anchors.ourOffset));
+			ar(jai::serialization::make_nvp("pivot", anchors.pivotPercent));
+			ar(jai::serialization::make_nvp("applyingPosition", anchors.applyingPosition));
+		}
+
+		template<typename Archive>
+		void load(Archive& ar, Anchors& anchors) requires jai::serialization::jai_archive<Archive> {
+			ar(jai::serialization::make_nvp("anchors", anchors.parentAnchors));
+			ar(jai::serialization::make_nvp("offset", anchors.ourOffset));
+			ar(jai::serialization::make_nvp("pivot", anchors.pivotPercent));
+			ar(jai::serialization::make_nvp("applyingPosition", anchors.applyingPosition));
+		}
+
 	}
 }
 

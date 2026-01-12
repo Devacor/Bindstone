@@ -2,6 +2,10 @@
 
 // Cereal serialization support for jai::property<T>
 // Include this header when using jai::property with cereal archives
+//
+// This file lives in MV (not JaiScript) because JaiScript is designed
+// to be dependency-free. This provides the bridge between jai::property
+// and Cereal archives for MV types.
 
 #include <jaiscript/properties/property.hpp>
 

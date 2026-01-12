@@ -12,7 +12,7 @@ namespace jai {
     class engine;
     
     // Serialization support for JaiScript
-    // This is designed to be implemented externally (e.g., with Cereal)
+    // This is designed to be implemented externally
     // to keep JaiScript dependency-free
     
     class ISerializer {
@@ -32,20 +32,12 @@ namespace jai {
             objectSerializers_[type_name] = {
                 // Serializer function
                 [](const void* ptr, std::vector<uint8_t>& out) {
-                    // implementation would use Cereal here:
-                    // std::stringstream ss;
-                    // cereal::BinaryOutputArchive ar(ss);
-                    // ar(*static_cast<const T*>(ptr));
-                    // Copy ss to out
+                    // Implement serialization for type T to binary data
+                    // Copy result to out
                 },
                 // Deserializer function
                 [](const std::vector<uint8_t>& data) -> std::shared_ptr<void> {
-                    // implementation would use Cereal here:
-                    // std::stringstream ss(data);
-                    // cereal::BinaryInputArchive ar(ss);
-                    // auto obj = std::make_shared<T>();
-                    // ar(*obj);
-                    // return obj;
+                    // Implement deserialization from binary data to type T
                     return nullptr; // Placeholder
                 }
             };
@@ -70,23 +62,19 @@ namespace jai {
         return result;
     }
     
-    // Example of how this would be used with Cereal in Bindstone:
+    // Example of how this would be used in external code:
     /*
-    class CerealJaiScriptSerializer : public jai::ISerializer {
+    class CustomJaiScriptSerializer : public jai::ISerializer {
         template<typename T>
-        void registerCerealType(const std::string& name) {
+        void registerCustomType(const std::string& name) {
             registerType<T>(name);
-            // The actual serialization would use Cereal archives
+            // Implement actual serialization using your chosen binary format
         }
-        
+
         std::vector<uint8_t> serializescript_value(const script_value& value) override {
-            std::stringstream ss;
-            {
-                cereal::BinaryOutputArchive ar(ss);
-                // Serialize based on value.type()
-                // For objects, look up type_name in registry
-            }
-            // Convert stringstream to vector<uint8_t>
+            // Serialize based on value.type()
+            // For objects, look up type_name in registry
+            // Return binary data
         }
     };
     */

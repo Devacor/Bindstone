@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "MV/Render/matrix.hpp"
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 
@@ -133,8 +134,12 @@ namespace MV {
 		}
 
 		template <class Archive>
-		void serialize(Archive & archive){
-			archive(CEREAL_NVP(minPoint), CEREAL_NVP(maxPoint));
+		void serialize(Archive & ar){
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				ar(JAI_NVP(minPoint), JAI_NVP(maxPoint));
+			} else {
+				ar(CEREAL_NVP(minPoint), CEREAL_NVP(maxPoint));
+			}
 		}
 
 		Point<T> minPoint, maxPoint;

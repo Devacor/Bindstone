@@ -6,6 +6,7 @@
 #include "Game/Interface/guiFactories.h"
 #include "MV/Utility/generalUtility.h"
 #include <jaiscript/signals/signal.hpp>
+#include <jaiscript/serialization/archive.hpp>
 #include <string>
 #include <memory>
 #include "MV/ArtificialIntelligence/pathfinding.h"
@@ -38,21 +39,19 @@ struct CreatureData {
 
 	bool isServer = false;
 
-	template <class Archive>
-	void serialize(Archive & archive) {
-		archive(
-			CEREAL_NVP(id),
-			CEREAL_NVP(name),
-			CEREAL_NVP(description),
-			CEREAL_NVP(moveSpeed),
-			CEREAL_NVP(actionSpeed),
-			CEREAL_NVP(castSpeed),
-			CEREAL_NVP(health),
-			CEREAL_NVP(defense),
-			CEREAL_NVP(will),
-			CEREAL_NVP(strength),
-			CEREAL_NVP(ability)
-		);
+	template<class Archive>
+	void serialize(Archive& archive) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(JAI_NVP(id), JAI_NVP(name), JAI_NVP(description),
+				JAI_NVP(moveSpeed), JAI_NVP(actionSpeed), JAI_NVP(castSpeed),
+				JAI_NVP(health), JAI_NVP(defense), JAI_NVP(will),
+				JAI_NVP(strength), JAI_NVP(ability));
+		} else {
+			archive(CEREAL_NVP(id), CEREAL_NVP(name), CEREAL_NVP(description),
+				CEREAL_NVP(moveSpeed), CEREAL_NVP(actionSpeed), CEREAL_NVP(castSpeed),
+				CEREAL_NVP(health), CEREAL_NVP(defense), CEREAL_NVP(will),
+				CEREAL_NVP(strength), CEREAL_NVP(ability));
+		}
 	}
 
 	StandardScriptMethods<Creature>& script(MV::Script&a_script) const {
@@ -71,7 +70,7 @@ class Catalog {
 	friend cereal::access;
 	friend MV::Script;
 public:
-	Catalog<DataType>(const std::string &a_catalogType, bool a_isServer, std::uint32_t a_serializeVersion = 0) :
+	Catalog<DataType>(const std::string &a_catalogType, bool a_isServer) :
 		isServer(a_isServer) {
 
 		std::string path = "Catalogs/"s + a_catalogType + ".json"s;
@@ -80,7 +79,7 @@ public:
 
 		std::stringstream stream(contents);
 		cereal::JSONInputArchive archive(stream);
-		serialize(archive, a_serializeVersion);
+		serialize(archive);
 	}
 
 	const DataType& data(const std::string &a_id) const {
@@ -97,11 +96,13 @@ private:
 	Catalog< DataType>() {
 	}
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			cereal::make_nvp("data", dataCollection)
-		);
+	template<class Archive>
+	void serialize(Archive& archive) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(jai::serialization::make_nvp("data", dataCollection));
+		} else {
+			archive(cereal::make_nvp("data", dataCollection));
+		}
 		for (auto&& item : dataCollection) {
 			item.isServer = isServer;
 		}
@@ -236,18 +237,42 @@ struct CreatureNetworkState {
 		}
 	}
 
-	template <class Archive>
-	void serialize(Archive& archive, std::uint32_t const /*version*/) {
-		creatureTypeId.serialize(archive, "creatureTypeId");
-		health.serialize(archive, "health");
-		animationName.serialize(archive, "animationName");
-		archive(
-			cereal::make_nvp("animationTime", animationTime),
-			cereal::make_nvp("animationLoops", animationLoops)
-		);
-		buildingSlot.serialize(archive, "slot");
-		position.serialize(archive, "position");
-		variables.serialize(archive, "variables");
+	template<class Archive>
+	void serialize(Archive& archive) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			if constexpr (jai::serialization::is_save<Archive>) {
+				// JaiScript save - force all delta variables to serialize
+				const_cast<MV::DeltaVariable<std::string>&>(creatureTypeId).serialize(archive, "creatureTypeId", true);
+				const_cast<MV::DeltaVariable<int32_t>&>(health).serialize(archive, "health", true);
+				const_cast<MV::DeltaVariable<std::string>&>(animationName).serialize(archive, "animationName", true);
+				archive.serialize("animationTime", animationTime);
+				archive.serialize("animationLoops", animationLoops);
+				const_cast<MV::DeltaVariable<int32_t>&>(buildingSlot).serialize(archive, "slot", true);
+				const_cast<MV::DeltaVariable<MV::Point<MV::PointPrecision>>&>(position).serialize(archive, "position", true);
+				const_cast<MV::DeltaVariable<std::map<std::string, MV::DynamicVariable>>&>(variables).serialize(archive, "variables", true);
+			} else {
+				// JaiScript load
+				creatureTypeId.serialize(archive, "creatureTypeId");
+				health.serialize(archive, "health");
+				animationName.serialize(archive, "animationName");
+				archive.serialize("animationTime", animationTime);
+				archive.serialize("animationLoops", animationLoops);
+				buildingSlot.serialize(archive, "slot");
+				position.serialize(archive, "position");
+				variables.serialize(archive, "variables");
+			}
+		} else {
+			creatureTypeId.serialize(archive, "creatureTypeId");
+			health.serialize(archive, "health");
+			animationName.serialize(archive, "animationName");
+			archive(
+				cereal::make_nvp("animationTime", animationTime),
+				cereal::make_nvp("animationLoops", animationLoops)
+			);
+			buildingSlot.serialize(archive, "slot");
+			position.serialize(archive, "position");
+			variables.serialize(archive, "variables");
+		}
 	}
 };
 

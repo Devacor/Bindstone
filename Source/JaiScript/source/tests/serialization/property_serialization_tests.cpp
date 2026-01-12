@@ -5,6 +5,7 @@
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/serialization/serialization_metadata.hpp>  // For any_archive_reader
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/dynamic_binder_serialization.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -106,7 +107,8 @@ public:
     resource_manager* manager = nullptr;
 
     // Constructor that takes both context and archive
-    archive_aware_object(resource_manager* mgr, serialization::archive_reader& ar)
+    // Uses any_archive_reader for type-erased polymorphic interface
+    archive_aware_object(resource_manager* mgr, serialization::any_archive_reader& ar)
         : manager(mgr) {
         // Can do complex initialization based on archive metadata
         // Don't set computed_value here - let it be loaded from archive
@@ -128,7 +130,7 @@ public:
     JAI_PROPERTY((int), value, 0);
 
     // Migration hook to handle renamed field
-    void post_deserialize(serialization::archive_reader& ar) override {
+    void post_deserialize(serialization::any_archive_reader& ar) override {
         // Try to read the old field name if it exists
         if (ar.has_property("old_name")) {
             // The property was already consumed during load
@@ -153,7 +155,7 @@ public:
     // Non-serialized computed property
     int area = 0;
 
-    void post_deserialize(serialization::archive_reader& ar) override {
+    void post_deserialize(serialization::any_archive_reader& ar) override {
         // Compute area after loading dimensions
         area = width.get() * height.get();
     }
@@ -165,7 +167,7 @@ public:
     JAI_PROPERTY((int), score, 0);
     JAI_PROPERTY((std::string), category, "");
 
-    void post_deserialize(serialization::archive_reader& ar) override {
+    void post_deserialize(serialization::any_archive_reader& ar) override {
         // Clamp score to valid range
         if (score.get() < 0) {
             score = 0;
@@ -1380,7 +1382,9 @@ public:
             json_reader.begin_object(type_name, version);
 
             // Construct with both context and archive
-            archive_aware_object loaded(&new_mgr, json_reader);
+            // Wrap json_reader in type-erased any_archive_reader for polymorphic interface
+            serialization::any_archive_reader any_reader(json_reader);
+            archive_aware_object loaded(&new_mgr, any_reader);
             loaded.property_mgr.load(json_reader);
             json_reader.end_object();
 

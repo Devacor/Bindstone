@@ -3,12 +3,6 @@
 #include "Game/player.h"
 #include "MV/Serialization/serialize.h"
 
-CEREAL_REGISTER_TYPE(MatchedResponse);
-CEREAL_REGISTER_TYPE(ServerDetails);
-CEREAL_REGISTER_TYPE(IllegalResponse);
-CEREAL_REGISTER_TYPE(LoginResponse);
-CEREAL_REGISTER_TYPE(MessageAction);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_clientactions);
 
 void LoginResponse::execute(Game& a_game) {
 	std::cout << "Login: [" << message << "] Success: [" << (success ? "true" : "false") << "]" << std::endl;
@@ -17,7 +11,7 @@ void LoginResponse::execute(Game& a_game) {
 
 std::shared_ptr<LocalPlayer> LoginResponse::loadedPlayer() {
 	if (!playerObject && !player.empty()) {
-		playerObject = MV::fromJson<std::shared_ptr<LocalPlayer>>(player);
+		playerObject = MV::fromJson<std::shared_ptr<LocalPlayer>>(player, MV::Services::instance());
 	}
 	return playerObject;
 }

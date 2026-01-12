@@ -27,9 +27,10 @@ public:
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(handle), CEREAL_NVP(email), CEREAL_NVP(password), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(handle), JAI_NVP(email), JAI_NVP(password));
+		NetworkAction::serialize(archive);
 	}
 
 	static std::string makeSaveString();
@@ -70,9 +71,10 @@ public:
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(identifier), CEREAL_NVP(password), CEREAL_NVP(saveHash), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(identifier), JAI_NVP(password), JAI_NVP(saveHash));
+		NetworkAction::serialize(archive);
 	}
 
 	std::string identifier;
@@ -89,11 +91,10 @@ public:
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			cereal::make_nvp("type", type),
-			cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(type));
+		NetworkAction::serialize(archive);
 	}
 
 	std::string type;
@@ -107,12 +108,10 @@ public:
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		NetworkAction::serialize(archive);
 	}
 };
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_accountactions);
 
 #endif

@@ -106,7 +106,7 @@ namespace MV {
 				return &world;
 			}
 		protected:
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				archive(
 					cereal::make_nvp("gravityX", world.GetGravity().x),
@@ -115,12 +115,12 @@ namespace MV {
 				);
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
 				MV::require<MV::ResourceException>(false, "Cannot properly load an environment, must load_and_construct. This might happen if you derive from environment wrongly.");
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Environment> &construct, std::uint32_t const /*version*/) {
 				b2Vec2 loadedGravity;
 				archive(
@@ -222,7 +222,7 @@ namespace MV {
 			CollisionBodyAttributes& allowSleep();
 			CollisionBodyAttributes& disallowSleep();
 
-			template <class Archive>
+			template<class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				syncronize();
 				archive(
@@ -304,7 +304,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version);
+			void serialize(Archive & archive, std::uint32_t const version) requires jai::serialization::not_jai_archive<Archive>;
 
 		private:
 			void initialize(const std::shared_ptr<Collider> &a_lhs, const std::shared_ptr<Collider> &a_rhs, Point<> a_offset);
@@ -401,7 +401,7 @@ namespace MV {
 				return *this;
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					cereal::make_nvp("restitution", details.restitution),
@@ -578,7 +578,7 @@ namespace MV {
 			void attachInternal(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 			void attachInternal(const std::vector<Point<>> &a_points, const Point<> &a_offset = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				collisionAttributes.syncronize();
 				archive(
@@ -594,12 +594,12 @@ namespace MV {
 				);
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
 				MV::require<MV::ResourceException>(false, "Cannot properly load a collider with load... Must be load_and_construct. Might implement if ever derived from.");
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Collider> &construct) {
 				CollisionBodyAttributes collisionAttributes;
 				std::shared_ptr<Environment> world;
@@ -651,7 +651,7 @@ namespace MV {
 				std::vector<Point<>> points;
 				CollisionPartAttributes attributes;
 
-				template <class Archive>
+				template<class Archive>
 				void serialize(Archive & archive, std::uint32_t const /*version*/) {
 					archive(
 						cereal::make_nvp("type", shapeType),
@@ -740,7 +740,7 @@ namespace MV {
 		};
 
 		template <class Archive>
-		void RotationJointAttributes::serialize(Archive & archive, std::uint32_t const /*version*/) {
+		void RotationJointAttributes::serialize(Archive & archive, std::uint32_t const /*version*/) requires jai::serialization::not_jai_archive<Archive> {
 			worldPosition = Point<>();
 			if (joint) {
 				jointDef.motorSpeed = joint->GetMotorSpeed();

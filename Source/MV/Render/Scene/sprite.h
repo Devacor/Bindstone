@@ -5,6 +5,7 @@
 #include "cereal/access.hpp"
 #include "cereal/types/memory.hpp"
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 #define SpriteDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessors(ComponentType) \
@@ -50,19 +51,29 @@ namespace MV {
 				appendQuadVertexIndices(*vertexIndices, 0);
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
-				archive(cereal::make_nvp("subdivisions", ourSubdivisions.get()));
-				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(archive);
+					Drawable::save(archive, 0);
+				} else {
+					archive(cereal::make_nvp("subdivisions", ourSubdivisions.get()));
+					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				archive(cereal::make_nvp("subdivisions", ourSubdivisions.get()));
-				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(archive);
+					Drawable::load(archive, 0);
+				} else {
+					archive(cereal::make_nvp("subdivisions", ourSubdivisions.get()));
+					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive& archive, cereal::construct<Sprite>& construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);

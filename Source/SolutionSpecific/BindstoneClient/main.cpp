@@ -14,6 +14,8 @@
 #include "Game/NetworkLayer/synchronizeAction.h"
 #include "MV/Network/networkObject.h"
 
+#include "JaiScript/stdlib/stdlib.hpp"
+
 #include <fstream>
 
 #include "glm/mat4x4.hpp"
@@ -23,11 +25,19 @@ struct Base {
 
 	template <class Archive>
 	void save(Archive & archive, std::uint32_t const) const {
-		archive(CEREAL_NVP(baseMember));
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive("baseMember", baseMember);
+		} else {
+			archive(CEREAL_NVP(baseMember));
+		}
 	}
 	template <class Archive>
 	void load(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(baseMember));
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive("baseMember", baseMember);
+		} else {
+			archive(CEREAL_NVP(baseMember));
+		}
 	}
 	template <class Archive>
 	static void load_and_construct(Archive & archive, cereal::construct<Base> &construct, std::uint32_t const version) {
@@ -41,15 +51,25 @@ struct Base {
 struct Derived1 : public Base {
 	template <class Archive>
 	void save(Archive & archive, std::uint32_t const) const {
-		archive(CEREAL_NVP(derived1Member),
-			cereal::make_nvp("Base", cereal::base_class<Base>(this))
-		);
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive("derived1Member", derived1Member);
+			Base::save(archive, 0);
+		} else {
+			archive(CEREAL_NVP(derived1Member),
+				cereal::make_nvp("Base", cereal::base_class<Base>(this))
+			);
+		}
 	}
 	template <class Archive>
 	void load(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(derived1Member),
-			cereal::make_nvp("Base", cereal::base_class<Base>(this))
-		);
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive("derived1Member", derived1Member);
+			Base::load(archive, 0);
+		} else {
+			archive(CEREAL_NVP(derived1Member),
+				cereal::make_nvp("Base", cereal::base_class<Base>(this))
+			);
+		}
 	}
 	template <class Archive>
 	static void load_and_construct(Archive & archive, cereal::construct<Base> &construct, std::uint32_t const version) {
@@ -74,9 +94,16 @@ public:
 		std::cout << "A: DESTROY " << name << "\n";
 	}
 
+	template<class Archive> requires jai::serialization::jai_archive<Archive>
+	void serialize(Archive& archive) { serialize(archive, 0); }
+
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const) {
-		archive(CEREAL_NVP(name));
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(JAI_NVP(name));
+		} else {
+			archive(CEREAL_NVP(name));
+		}
 	}
 
 	std::string name;
@@ -94,9 +121,16 @@ public:
 		id = a_other->id;
 	}
 
+	template<class Archive> requires jai::serialization::jai_archive<Archive>
+	void serialize(Archive& archive) { serialize(archive, 0); }
+
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const) {
-		archive(CEREAL_NVP(id));
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(JAI_NVP(id));
+		} else {
+			archive(CEREAL_NVP(id));
+		}
 	}
 
 	int id;
@@ -174,24 +208,29 @@ int main(int argc, char *argv[]) {
 	derived->baseMember = 5;
 	derived->derived1Member = 10;
 
-	auto saved = MV::toJson(derived);
-	auto loaded = MV::fromJson<std::shared_ptr<Derived1>>(saved);
+	auto testEngine = jai::engine::make();
+	jai::stdlib::register_all(*testEngine);
+	jai::bind_registrar<MV::Services>(*testEngine, MV::Services::instance());
+	MV::Services::instance().connect<jai::engine>(testEngine.get());
+
+	auto saved = MV::toJson(derived, MV::Services::instance());
+	auto loaded = MV::fromJson<std::shared_ptr<Derived1>>(saved, MV::Services::instance());
 
 	CreatureNetworkState stateSizeTest;
 	stateSizeTest.animationName = "idle";
 	stateSizeTest.creatureTypeId = "Life_T1";
 	stateSizeTest.position = MV::Point<>(0, 0, 0);
-	MV::info("Creature NetworkA DELTA SIZE: ", MV::toBinaryString(stateSizeTest).size());
+	MV::info("Creature NetworkA DELTA SIZE: ", MV::toBinaryString(stateSizeTest, MV::Services::instance()).size());
 
 	stateSizeTest.animationTime = 10.0;
 	stateSizeTest.position = MV::Point<>(0, 0, 0);
-	MV::info("Creature NetworkA DELTA SIZE POS: ", MV::toBinaryString(stateSizeTest).size());
+	MV::info("Creature NetworkA DELTA SIZE POS: ", MV::toBinaryString(stateSizeTest, MV::Services::instance()).size());
 
 	stateSizeTest.animationTime = 10.0;
-	MV::info("Creature NetworkA DELTA SIZE POS: ", MV::toBinaryString(stateSizeTest).size());
+	MV::info("Creature NetworkA DELTA SIZE POS: ", MV::toBinaryString(stateSizeTest, MV::Services::instance()).size());
 
 	stateSizeTest.animationLoops = true;
-	MV::info("Creature NetworkA DELTA SIZE NONE: ", MV::toBinaryString(stateSizeTest).size());
+	MV::info("Creature NetworkA DELTA SIZE NONE: ", MV::toBinaryString(stateSizeTest, MV::Services::instance()).size());
 
 	std::cout << "done saveload test.";
 
@@ -296,7 +335,7 @@ int main(int argc, char *argv[]) {
 	auto testShared = newObject->shared_from_this();
 	
 
-	pool2.synchronize(MV::fromJson<decltype(pool.updated())>(MV::toJson(pool.updated())));
+	pool2.synchronize(MV::fromJson<decltype(pool.updated())>(MV::toJson(pool.updated(), MV::Services::instance()), MV::Services::instance()));
 
 	newObject->modify()->name = "Unhappy!";
 

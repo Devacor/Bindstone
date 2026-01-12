@@ -13,12 +13,10 @@ public:
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(ourUrl),
-			CEREAL_NVP(ourPort),
-			cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(ourUrl), JAI_NVP(ourPort));
+		NetworkAction::serialize(archive);
 	}
 
 private:
@@ -28,7 +26,7 @@ private:
 
 class GameServerStateChange : public NetworkAction {
 public:
-	enum State { 
+	enum State {
 		OCCUPIED,
 		AVAILABLE
 	};
@@ -39,11 +37,10 @@ public:
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(ourState),
-			cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(ourState));
+		NetworkAction::serialize(archive);
 	}
 
 private:
@@ -60,11 +57,9 @@ struct AssignedPlayer {
 	std::shared_ptr<InGamePlayer> player;
 	int64_t secret = 0;
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(player),
-			CEREAL_NVP(secret));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(player), JAI_NVP(secret));
 	}
 };
 
@@ -77,12 +72,10 @@ public:
 	virtual void execute(GameServer& a_connection) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(left),
-			CEREAL_NVP(right),
-			cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(left), JAI_NVP(right));
+		NetworkAction::serialize(archive);
 	}
 
 private:
@@ -100,10 +93,12 @@ public:
 	virtual void execute(GameUserConnectionState*, GameServer &) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(secret), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(secret));
+		NetworkAction::serialize(archive);
 	}
+
 private:
 	int64_t secret = 0;
 };
@@ -111,17 +106,18 @@ private:
 class SuppliedInitialGameState : public NetworkAction {
 public:
 	SuppliedInitialGameState() {}
-	SuppliedInitialGameState(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right, const BindstoneNetworkObjectPool &a_pool) : 
-		left(a_left), 
-		right(a_right), 
+	SuppliedInitialGameState(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right, const BindstoneNetworkObjectPool &a_pool) :
+		left(a_left),
+		right(a_right),
 		pool(a_pool.all()) {
 	}
-	
+
 	virtual void execute(Game& a_connection) override;
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(left), CEREAL_NVP(right), CEREAL_NVP(pool), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(left), JAI_NVP(right), JAI_NVP(pool));
+		NetworkAction::serialize(archive);
 	}
 
 private:
@@ -139,9 +135,10 @@ public:
 	virtual void execute(GameUserConnectionState*a_gameUser, GameServer &a_game) override;
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(slot), CEREAL_NVP(id), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(slot), JAI_NVP(id));
+		NetworkAction::serialize(archive);
 	}
 
 	int32_t slot = 0;
@@ -158,16 +155,15 @@ public:
 #endif
 	virtual void execute(Game& a_connection) override;
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(left), CEREAL_NVP(right), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(left), JAI_NVP(right));
+		NetworkAction::serialize(archive);
 	}
 
 private:
 	std::shared_ptr<InGamePlayer> left;
 	std::shared_ptr<InGamePlayer> right;
 };
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_gameserveractions);
 
 #endif

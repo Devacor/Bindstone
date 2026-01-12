@@ -75,7 +75,7 @@ namespace MV {
 		template<typename T>
 		inline T* getValue(const std::string& key) const;
 
-		template <class Archive>
+		template<class Archive>
 		void save(Archive& ar) const {
 			std::vector<std::string> keys;
 			for (const auto& [name, prop] : properties) {
@@ -89,7 +89,7 @@ namespace MV {
 			}
 		}
 
-		template <class Archive>
+		template<class Archive>
 		void load(Archive& ar) {
 			std::vector<std::string> savedKeys;
 			ar(cereal::make_nvp("PropertyKeys", savedKeys));
@@ -102,7 +102,7 @@ namespace MV {
 			}
 		}
 
-		template <class Archive>
+		template<class Archive>
 		void load(Archive& ar, const std::vector<std::string>& a_optionalKeyOrderOverride,
 			const std::unordered_map<std::string, std::string>& a_optionalKeyRenameBindings = {}) {
 			std::vector<std::string> savedKeys;

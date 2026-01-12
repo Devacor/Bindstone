@@ -47,7 +47,7 @@ namespace MV {
 		void assemblePacks(const std::string &a_rootDirectory, Draw2D* a_renderer);
 		std::shared_ptr<TexturePack> assemblePack(const std::string &a_packPath, Draw2D* a_renderer);
 
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(CEREAL_NVP(texturePacks), CEREAL_NVP(fileDefinitions), CEREAL_NVP(dynamicDefinitions), CEREAL_NVP(surfaceDefinitions));
 		}

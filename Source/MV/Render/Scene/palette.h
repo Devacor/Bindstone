@@ -3,6 +3,7 @@
 
 #include "drawable.h"
 #include "MV/Interface/tapDevice.h"
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
@@ -83,35 +84,59 @@ namespace MV {
 			void acceptAlphaClick();
 			void acceptSwatchClick();
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					cereal::make_nvp("color", currentColor),
-					cereal::make_nvp("selectorPercentSize", selectorPercentSize),
-					cereal::make_nvp("selectorPercentPadding", selectorPercentPadding),
-					cereal::make_nvp("eatTouches", eatTouches),
-					cereal::make_nvp("globalClickPriority", globalClickPriority),
-					cereal::make_nvp("overrideClickPriority", overrideClickPriority),
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					archive(
+						jai::serialization::make_nvp("color", currentColor),
+						jai::serialization::make_nvp("selectorPercentSize", selectorPercentSize),
+						jai::serialization::make_nvp("selectorPercentPadding", selectorPercentPadding),
+						jai::serialization::make_nvp("eatTouches", eatTouches),
+						jai::serialization::make_nvp("globalClickPriority", globalClickPriority),
+						jai::serialization::make_nvp("overrideClickPriority", overrideClickPriority)
+					);
+					Drawable::save(archive, 0);
+				} else {
+					archive(
+						cereal::make_nvp("color", currentColor),
+						cereal::make_nvp("selectorPercentSize", selectorPercentSize),
+						cereal::make_nvp("selectorPercentPadding", selectorPercentPadding),
+						cereal::make_nvp("eatTouches", eatTouches),
+						cereal::make_nvp("globalClickPriority", globalClickPriority),
+						cereal::make_nvp("overrideClickPriority", overrideClickPriority),
+						cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
+					);
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
-				archive(
-					cereal::make_nvp("color", currentColor),
-					cereal::make_nvp("selectorPercentSize", selectorPercentSize),
-					cereal::make_nvp("selectorPercentPadding", selectorPercentPadding),
-					cereal::make_nvp("eatTouches", eatTouches),
-					cereal::make_nvp("globalClickPriority", globalClickPriority),
-					cereal::make_nvp("overrideClickPriority", overrideClickPriority),
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					archive(
+						jai::serialization::make_nvp("color", currentColor),
+						jai::serialization::make_nvp("selectorPercentSize", selectorPercentSize),
+						jai::serialization::make_nvp("selectorPercentPadding", selectorPercentPadding),
+						jai::serialization::make_nvp("eatTouches", eatTouches),
+						jai::serialization::make_nvp("globalClickPriority", globalClickPriority),
+						jai::serialization::make_nvp("overrideClickPriority", overrideClickPriority)
+					);
+					Drawable::load(archive, 0);
+				} else {
+					archive(
+						cereal::make_nvp("color", currentColor),
+						cereal::make_nvp("selectorPercentSize", selectorPercentSize),
+						cereal::make_nvp("selectorPercentPadding", selectorPercentPadding),
+						cereal::make_nvp("eatTouches", eatTouches),
+						cereal::make_nvp("globalClickPriority", globalClickPriority),
+						cereal::make_nvp("overrideClickPriority", overrideClickPriority),
+						cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
+					);
+				}
 			}
 
 			virtual void initialize() override;
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Palette> &construct, std::uint32_t const version) {
 				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* mouse = services.get<MV::TapDevice>();

@@ -277,7 +277,7 @@ namespace MV {
 		bool isShared;
 
 	private:
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
 			archive(
 				cereal::make_nvp("name", textureName),
@@ -319,12 +319,12 @@ namespace MV {
 
 	private:
 
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(CEREAL_NVP(powerTwo), CEREAL_NVP(repeat), CEREAL_NVP(pixel), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<FileTextureDefinition> &construct, std::uint32_t const /*version*/){
 			bool repeat = false;
 			bool pixel = false;
@@ -365,12 +365,12 @@ namespace MV {
 		virtual void reloadImplementation() override;
 
 	private:
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(CEREAL_NVP(backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<DynamicTextureDefinition> &construct, std::uint32_t const /*version*/){
 			construct("", Size<int>(), Color());
 			Color backgroundColor;
@@ -406,13 +406,13 @@ namespace MV {
 		void reloadImplementation() override;
 
 	private:
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 			//Must manually call setSurfaceGenerator; We can assume whatever owns this texture definition knows how to reconstitute it.
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<SurfaceTextureDefinition> &construct, std::uint32_t const /*version*/){
 			construct("", std::function<std::shared_ptr<OwnedSurface> ()>());
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
@@ -496,7 +496,7 @@ namespace MV {
 
 		void boundsNoSignal(const BoxAABB<int> &a_bounds);
 
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
 			if (version == 0) {
 				BoxAABB<int> oldIntegralBounds;
@@ -521,7 +521,7 @@ namespace MV {
 			}
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<TextureHandle> &construct, std::uint32_t const version){
 			std::shared_ptr<TextureDefinition> textureDefinition;
 			if(version == 0){

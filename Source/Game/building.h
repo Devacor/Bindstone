@@ -37,14 +37,13 @@ struct BuildTree {
 		return id;
 	}
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(id),
-			CEREAL_NVP(cost),
-			CEREAL_NVP(income),
-			CEREAL_NVP(upgrades)
-		);
+	template<class Archive>
+	void serialize(Archive& archive) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(JAI_NVP(id), JAI_NVP(cost), JAI_NVP(income), JAI_NVP(upgrades));
+		} else {
+			archive(CEREAL_NVP(id), CEREAL_NVP(cost), CEREAL_NVP(income), CEREAL_NVP(upgrades));
+		}
 	}
 };
 
@@ -52,12 +51,13 @@ struct SkinData {
 	std::string id;
 	std::vector<Wallet> costs;
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(id),
-			CEREAL_NVP(costs)
-		);
+	template<class Archive>
+	void serialize(Archive& archive) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(JAI_NVP(id), JAI_NVP(costs));
+		} else {
+			archive(CEREAL_NVP(id), CEREAL_NVP(costs));
+		}
 	}
 };
 
@@ -70,14 +70,13 @@ struct BuildingData {
 
 	bool isServer = false;
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(id),
-			CEREAL_NVP(skins),
-			CEREAL_NVP(costs),
-			CEREAL_NVP(game)
-		);
+	template<class Archive>
+	void serialize(Archive& archive) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(JAI_NVP(id), JAI_NVP(skins), JAI_NVP(costs), JAI_NVP(game));
+		} else {
+			archive(CEREAL_NVP(id), CEREAL_NVP(skins), CEREAL_NVP(costs), CEREAL_NVP(game));
+		}
 	}
 
 	StandardScriptMethods<Building>& script(MV::Script& a_script) const {
@@ -134,15 +133,25 @@ struct BuildingNetworkState {
 		std::cout << "Buildings don't die... >.>;" << std::endl;
 	}
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			cereal::make_nvp("slot", buildingSlot),
-			cereal::make_nvp("animationName", animationName),
-			cereal::make_nvp("animationLoops", animationLoops),
-			cereal::make_nvp("variables", variables),
-			cereal::make_nvp("buildTreeIndices", buildTreeIndices)
-		);
+	template<class Archive>
+	void serialize(Archive& archive) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive(
+				jai::serialization::make_nvp("slot", buildingSlot),
+				jai::serialization::make_nvp("animationName", animationName),
+				jai::serialization::make_nvp("animationLoops", animationLoops),
+				jai::serialization::make_nvp("variables", variables),
+				jai::serialization::make_nvp("buildTreeIndices", buildTreeIndices)
+			);
+		} else {
+			archive(
+				cereal::make_nvp("slot", buildingSlot),
+				cereal::make_nvp("animationName", animationName),
+				cereal::make_nvp("animationLoops", animationLoops),
+				cereal::make_nvp("variables", variables),
+				cereal::make_nvp("buildTreeIndices", buildTreeIndices)
+			);
+		}
 	}
 };
 

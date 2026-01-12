@@ -69,6 +69,7 @@ enum class delegation_type {
 class class_definition;
 template<typename T> class signal_emitter;
 template<typename T> class signal;
+template<typename T> class observable_property;
 
 // ============================================================================
 // observable_property_ref<T> - Script-side reference to an observable property
@@ -1562,11 +1563,12 @@ namespace dynamic_binder_detail {
     }
 
     // Archive-only factory registration (no context needed)
+    // Uses any_archive_reader for type-erased callback storage
     template<typename T, typename FactoryFunc>
-    std::function<script_value(serialization::archive_reader&, uint32_t)>
+    std::function<script_value(serialization::any_archive_reader&, uint32_t)>
     make_archive_only_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr) {
         return [factory = std::forward<FactoryFunc>(factory), class_name = std::move(class_name), engine_ptr]
-               (serialization::archive_reader& archive, uint32_t version) -> script_value {
+               (serialization::any_archive_reader& archive, uint32_t version) -> script_value {
             auto cpp_obj = factory(archive);
             return wrap_cpp_object<T>(cpp_obj, class_name, engine_ptr);
         };
@@ -1577,11 +1579,11 @@ namespace dynamic_binder_detail {
     // Implementations are provided in dynamic_binder_serialization.hpp which should be
     // included explicitly by code that uses these context-based factories.
     template<typename T, typename ContextType, typename FactoryFunc>
-    std::function<script_value(serialization::archive_reader&, uint32_t)>
+    std::function<script_value(serialization::any_archive_reader&, uint32_t)>
     make_context_only_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr);
 
     template<typename T, typename ContextType, typename FactoryFunc>
-    std::function<script_value(serialization::archive_reader&, uint32_t)>
+    std::function<script_value(serialization::any_archive_reader&, uint32_t)>
     make_context_archive_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr);
 }
 
@@ -2138,12 +2140,12 @@ public:
         
         // Also register serialization metadata
         auto& metadata = serialization_metadata_;
-        metadata.custom_construct = [constructor = std::forward<constructor_func>(constructor)](serialization::archive_reader& ar, uint32_t version) -> script_value {
+        metadata.custom_construct = [constructor = std::forward<constructor_func>(constructor)](serialization::any_archive_reader& ar, uint32_t version) -> script_value {
             // Convert archive data to script_value for the constructor
             // This is a simplified implementation - real version would need proper conversion
             script_value data = script_value(); // TODO: Convert archive to script_value
             T instance = constructor(data, version);
-            
+
             // TODO: Wrap in class_instance and return as script_value
             return script_value();
         };
@@ -2494,12 +2496,12 @@ public:
 
         // Dispatch to appropriate helper based on signature
         if constexpr (arg_count == 1) {
-            // Check if single arg is serialization::archive_reader& or context pointer
+            // Check if single arg is serialization::any_archive_reader& or context pointer
             using arg0_type = std::tuple_element_t<0, typename factory_traits::argument_types>;
 
-            // Check if the decayed type (without reference/pointer) is archive_reader
-            if constexpr (std::is_same_v<std::decay_t<arg0_type>, serialization::archive_reader>) {
-                // Archive-only factory: [](serialization::archive_reader& archive) -> std::shared_ptr<T>
+            // Check if the decayed type (without reference/pointer) is any_archive_reader
+            if constexpr (std::is_same_v<std::decay_t<arg0_type>, serialization::any_archive_reader>) {
+                // Archive-only factory: [](serialization::any_archive_reader& archive) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
                     dynamic_binder_detail::make_archive_only_factory<T>(
                         std::forward<FactoryFunc>(factory), class_name_, &engine_);
@@ -2516,14 +2518,14 @@ public:
             }
         } else if constexpr (arg_count == 2) {
             if constexpr (!std::is_void_v<ContextType>) {
-                // Context + archive factory: [](ContextType* ctx, serialization::archive_reader& archive) -> std::shared_ptr<T>
+                // Context + archive factory: [](ContextType* ctx, serialization::any_archive_reader& archive) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
                     dynamic_binder_detail::make_context_archive_factory<T, ContextType>(
                         std::forward<FactoryFunc>(factory), class_name_, &engine_);
             } else {
                 static_assert(!std::is_void_v<ContextType>,
                     "Context+archive factory requires a non-void ContextType template parameter. "
-                    "Use deserialization_factory<YourContextType>([](YourContextType* ctx, serialization::archive_reader& ar) { ... })");
+                    "Use deserialization_factory<YourContextType>([](YourContextType* ctx, serialization::any_archive_reader& ar) { ... })");
             }
         } else {
             static_assert(arg_count <= 2, "Deserialization factory must take 1 or 2 arguments");

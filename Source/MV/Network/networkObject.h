@@ -14,6 +14,7 @@
 #include "cereal/types/variant.hpp"
 #include "cereal/archives/portable_binary.hpp"
 #include "cereal/archives/json.hpp"
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 
@@ -102,12 +103,12 @@ namespace MV {
 			dirty = false;
 		}
 
-		template <class Archive>
-		void save(Archive & archive, std::uint32_t const ) const {
+		template<class Archive>
+		void save(Archive & archive) const {
 			archive(
-				cereal::make_nvp("id", synchronizeId),
-				cereal::make_nvp("local", local),
-				cereal::make_nvp("destroy", destroying)
+				jai::serialization::make_nvp("i", synchronizeId),
+				jai::serialization::make_nvp("l", local),
+				jai::serialization::make_nvp("d", destroying)
 			);
 
 			if constexpr (NetworkDetail::supportsPostSend<T>(nullptr)) {
@@ -117,12 +118,12 @@ namespace MV {
 			}
 		}
 
-		template <class Archive>
-		void load(Archive & archive, std::uint32_t const) {
+		template<class Archive>
+		void load(Archive & archive) {
 			archive(
-				cereal::make_nvp("id", synchronizeId),
-				cereal::make_nvp("local", local),
-				cereal::make_nvp("destroy", destroying)
+				jai::serialization::make_nvp("i", synchronizeId),
+				jai::serialization::make_nvp("l", local),
+				jai::serialization::make_nvp("d", destroying)
 			);
 			dirty = false;
 		}
@@ -192,11 +193,9 @@ namespace MV {
 			}
 		}
 
-		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const ) {
-			archive(
-				cereal::make_nvp("objects", objects)
-			);
+		template<class Archive>
+		void serialize(Archive & archive) {
+			archive(jai::serialization::make_nvp("o", objects));
 		}
 
 		std::vector<VariantType> updated() {

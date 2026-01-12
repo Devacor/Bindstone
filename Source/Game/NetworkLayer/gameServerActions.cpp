@@ -10,14 +10,6 @@
 #include "MV/Serialization/serialize.h"
 #include "Game/game.h"
 
-CEREAL_REGISTER_TYPE(RequestFullGameState);
-CEREAL_REGISTER_TYPE(RequestBuildingUpgrade);
-CEREAL_REGISTER_TYPE(SuppliedInitialGameState);
-CEREAL_REGISTER_TYPE(GetInitialGameState);
-CEREAL_REGISTER_TYPE(AssignPlayersToGame);
-CEREAL_REGISTER_TYPE(GameServerAvailable);
-CEREAL_REGISTER_TYPE(GameServerStateChange);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_gameserveractions);
 
 #ifdef BINDSTONE_SERVER
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {

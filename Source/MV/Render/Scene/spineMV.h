@@ -1,10 +1,11 @@
-#ifndef _MV_SCENE_SPINE_H_
+﻿#ifndef _MV_SCENE_SPINE_H_
 #define _MV_SCENE_SPINE_H_
 
 #include "node.h"
 #include "drawable.h"
 #include "spine/AnimationState.h"
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 struct spSlot;
 struct spSkeleton;
@@ -141,18 +142,26 @@ namespace MV {
 
 			private:
 				friend cereal::access;
-				template <class Archive>
+				template<class Archive>
 				void save(Archive & archive, std::uint32_t const) const {
-					archive(cereal::make_nvp("skeletonFile", skeletonFile.get()));
-					archive(cereal::make_nvp("atlasFile", atlasFile.get()));
-					archive(cereal::make_nvp("loadScale", loadScale.get()));
+					if constexpr (jai::serialization::jai_archive<Archive>) {
+						property_mgr.save(archive);
+					} else {
+						archive(cereal::make_nvp("skeletonFile", skeletonFile.get()));
+						archive(cereal::make_nvp("atlasFile", atlasFile.get()));
+						archive(cereal::make_nvp("loadScale", loadScale.get()));
+					}
 				}
 
-				template <class Archive>
+				template<class Archive>
 				void load(Archive & archive, std::uint32_t const version) {
-					archive(cereal::make_nvp("skeletonFile", skeletonFile.get()));
-					archive(cereal::make_nvp("atlasFile", atlasFile.get()));
-					archive(cereal::make_nvp("loadScale", loadScale.get()));
+					if constexpr (jai::serialization::jai_archive<Archive>) {
+						property_mgr.load(archive);
+					} else {
+						archive(cereal::make_nvp("skeletonFile", skeletonFile.get()));
+						archive(cereal::make_nvp("atlasFile", atlasFile.get()));
+						archive(cereal::make_nvp("loadScale", loadScale.get()));
+					}
 				}
 			};
 
@@ -218,25 +227,43 @@ namespace MV {
 			virtual bool preDraw();
 			virtual bool postDraw();
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const{
-				archive(
-					cereal::make_nvp("fileBundle", fileBundle),
-					cereal::make_nvp("slotsToNodes", slotsToNodes),
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(archive);
+					archive(
+						jai::serialization::make_nvp("fileBundle", fileBundle),
+						jai::serialization::make_nvp("slotsToNodes", slotsToNodes)
+					);
+					Drawable::save(archive, 0);
+				} else {
+					archive(
+						cereal::make_nvp("fileBundle", fileBundle),
+						cereal::make_nvp("slotsToNodes", slotsToNodes),
+						cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
+					);
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
-				archive(
-					cereal::make_nvp("fileBundle", fileBundle),
-					cereal::make_nvp("slotsToNodes", slotsToNodes),
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(archive);
+					archive(
+						jai::serialization::make_nvp("fileBundle", fileBundle),
+						jai::serialization::make_nvp("slotsToNodes", slotsToNodes)
+					);
+					Drawable::load(archive, 0);
+				} else {
+					archive(
+						cereal::make_nvp("fileBundle", fileBundle),
+						cereal::make_nvp("slotsToNodes", slotsToNodes),
+						cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
+					);
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Spine> &construct, std::uint32_t const version){
 				FileBundle fileBundle;
 				archive(
@@ -290,3 +317,5 @@ namespace MV {
 CEREAL_FORCE_DYNAMIC_INIT(mv_scenespine);
 
 #endif
+
+

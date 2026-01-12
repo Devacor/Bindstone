@@ -2,7 +2,7 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include <jaiscript/properties/property_cereal.hpp>
+#include "MV/Serialization/property_cereal.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Palette);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenepalette);

@@ -4,6 +4,7 @@
 #include "MV/Render/formattedText.h"
 #include "sprite.h"
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
@@ -200,21 +201,33 @@ namespace MV {
 			Text(Text&&) = delete;
 			Text& operator=(Text&&) = delete;
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
-				archive(cereal::make_nvp("formattedText", formattedText.get()));
-				archive(cereal::make_nvp("usingBoundsForLineHeight", usingBoundsForLineHeight.get()));
-				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(archive);
+					archive(jai::serialization::make_nvp("formattedText", formattedText.get()));
+					Drawable::save(archive, 0);
+				} else {
+					archive(cereal::make_nvp("formattedText", formattedText.get()));
+					archive(cereal::make_nvp("usingBoundsForLineHeight", usingBoundsForLineHeight.get()));
+					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				archive(cereal::make_nvp("formattedText", formattedText.get()));
-				archive(cereal::make_nvp("usingBoundsForLineHeight", usingBoundsForLineHeight.get()));
-				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(archive);
+					archive(jai::serialization::make_nvp("formattedText", formattedText.get()));
+					Drawable::load(archive, 0);
+				} else {
+					archive(cereal::make_nvp("formattedText", formattedText.get()));
+					archive(cereal::make_nvp("usingBoundsForLineHeight", usingBoundsForLineHeight.get()));
+					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive& archive, cereal::construct<Text>& construct, std::uint32_t const version) {
 				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* library = services.get<MV::TextLibrary>();
@@ -290,3 +303,4 @@ namespace MV {
 CEREAL_FORCE_DYNAMIC_INIT(mv_scenetext);
 
 #endif
+

@@ -24,8 +24,8 @@ namespace jai {
 	}
 
 	namespace serialization {
-		class archive_writer;
-		class archive_reader;
+		class any_archive_writer;
+		class any_archive_reader;
 	}
 
 	class property_manager {
@@ -76,10 +76,14 @@ namespace jai {
 		template<typename T>
 		inline T* get_value(const std::string& key) const;
 
-		// Serialization methods - implemented in property_serialization.hpp
-		// Forward declared here to avoid circular dependency
-		void save(serialization::archive_writer& ar) const;
-		void load(serialization::archive_reader& ar);
+		// Templated serialization methods
+		// Archive type is known at compile time (CRTP pattern)
+		// Internally wraps in any_archive_writer/reader for polymorphic property dispatch
+		template<typename Archive>
+		void save(Archive& ar) const;
+
+		template<typename Archive>
+		void load(Archive& ar);
 
 		inline void clone_to_target(property_manager& target) const;
 
@@ -243,18 +247,22 @@ namespace jai {
 			property_mgr.bind_to_engine(eng);
 		}
 
-		// Post-deserialization hook
-		virtual void post_deserialize(serialization::archive_reader& ar) {
+		// Post-deserialization hook (called after all objects are deserialized)
+		// Override in derived classes to resolve cross-references, update caches, etc.
+		// Uses type-erased archive for polymorphic dispatch
+		virtual void post_deserialize(serialization::any_archive_reader& ar) {
 			// Default: call base class hooks
 			if constexpr (sizeof...(Bases) > 0) {
 				(try_post_deserialize_base<Bases>(ar), ...);
 			}
 		}
 
-		// Load with hook
-		void load_with_hook(serialization::archive_reader& ar) {
+		// Load with hook (templated on concrete Archive type)
+		template<typename Archive>
+		void load_with_hook(Archive& ar) {
 			property_mgr.load(ar);
-			post_deserialize(ar);
+			serialization::any_archive_reader type_erased(ar);
+			post_deserialize(type_erased);
 		}
 
 	protected:
@@ -295,7 +303,7 @@ namespace jai {
 		void try_bind_base(...) {}
 
 		template<typename Base>
-		auto try_post_deserialize_base(serialization::archive_reader& ar)
+		auto try_post_deserialize_base(serialization::any_archive_reader& ar)
 			-> decltype(static_cast<Base*>(this)->post_deserialize(ar), void()) {
 			static_cast<Base*>(this)->post_deserialize(ar);
 		}

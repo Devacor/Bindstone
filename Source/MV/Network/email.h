@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include "MV/Utility/stringUtility.h"
+#include <jaiscript/serialization/convenience.hpp>
 #include <asio.hpp>
 #include <asio/ssl.hpp>
 #include <asio/ssl/stream.hpp>
@@ -234,8 +235,8 @@ namespace MV {
 			auto self = shared_from_this();
 			sendInternal("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
 				sendInternal("AUTH LOGIN\r\n", { 334 }, [this, self] {
-					sendInternal(cerealEncodeWrapper(credentials.name) + "\r\n", { 334 }, [this, self] {
-						sendInternal(cerealEncodeWrapper(credentials.password) + "\r\n", { 235 }, [this, self] {
+					sendInternal(jai::base64_encode(credentials.name) + "\r\n", { 334 }, [this, self] {
+						sendInternal(jai::base64_encode(credentials.password) + "\r\n", { 235 }, [this, self] {
 							sendMessageAndQuit();
 						});
 					});

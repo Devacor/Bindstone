@@ -7,19 +7,197 @@
 #include <functional>
 #include <memory>
 #include <cstdint>
+#include <typeindex>
 
 // Forward declarations to avoid circular dependencies
 namespace jai {
     class script_value;
-
-    namespace serialization {
-        class archive_writer;
-        class archive_reader;
-    }
 }
 
 namespace jai {
 namespace serialization {
+
+// ============================================================================
+// Type-Erased Archive Wrappers
+// ============================================================================
+// These wrap any concrete archive type for use in type-erased callbacks.
+// Uses function pointers (manual vtable) for minimal indirection.
+// Only used for dynamic/runtime polymorphism - static code uses CRTP directly.
+// See JAI_ARCHIVE_DEVIRTUALIZATION.md for design rationale.
+
+class any_archive_writer {
+    void* ptr_;
+    void (*write_property_name_)(void*, const std::string&);
+    void (*write_int8_)(void*, int8_t);
+    void (*write_int16_)(void*, int16_t);
+    void (*write_int32_)(void*, int32_t);
+    void (*write_int64_)(void*, int64_t);
+    void (*write_uint8_)(void*, uint8_t);
+    void (*write_uint16_)(void*, uint16_t);
+    void (*write_uint32_)(void*, uint32_t);
+    void (*write_uint64_)(void*, uint64_t);
+    void (*write_float32_)(void*, float);
+    void (*write_float64_)(void*, double);
+    void (*write_bool_)(void*, bool);
+    void (*write_string_)(void*, const std::string&);
+    void (*begin_object_)(void*, const std::string&, uint32_t);
+    void (*end_object_)(void*);
+    void (*begin_array_)(void*, size_t);
+    void (*end_array_)(void*);
+    void (*begin_map_)(void*, size_t);
+    void (*end_map_)(void*);
+    void (*write_map_key_)(void*, const std::string&);
+
+public:
+    template<typename Archive>
+    explicit any_archive_writer(Archive& ar)
+        : ptr_(&ar)
+        , write_property_name_([](void* p, const std::string& n) { static_cast<Archive*>(p)->write_property_name(n); })
+        , write_int8_([](void* p, int8_t v) { static_cast<Archive*>(p)->write_int8(v); })
+        , write_int16_([](void* p, int16_t v) { static_cast<Archive*>(p)->write_int16(v); })
+        , write_int32_([](void* p, int32_t v) { static_cast<Archive*>(p)->write_int32(v); })
+        , write_int64_([](void* p, int64_t v) { static_cast<Archive*>(p)->write_int64(v); })
+        , write_uint8_([](void* p, uint8_t v) { static_cast<Archive*>(p)->write_uint8(v); })
+        , write_uint16_([](void* p, uint16_t v) { static_cast<Archive*>(p)->write_uint16(v); })
+        , write_uint32_([](void* p, uint32_t v) { static_cast<Archive*>(p)->write_uint32(v); })
+        , write_uint64_([](void* p, uint64_t v) { static_cast<Archive*>(p)->write_uint64(v); })
+        , write_float32_([](void* p, float v) { static_cast<Archive*>(p)->write_float32(v); })
+        , write_float64_([](void* p, double v) { static_cast<Archive*>(p)->write_float64(v); })
+        , write_bool_([](void* p, bool v) { static_cast<Archive*>(p)->write_bool(v); })
+        , write_string_([](void* p, const std::string& v) { static_cast<Archive*>(p)->write_string(v); })
+        , begin_object_([](void* p, const std::string& t, uint32_t v) { static_cast<Archive*>(p)->begin_object(t, v); })
+        , end_object_([](void* p) { static_cast<Archive*>(p)->end_object(); })
+        , begin_array_([](void* p, size_t s) { static_cast<Archive*>(p)->begin_array(s); })
+        , end_array_([](void* p) { static_cast<Archive*>(p)->end_array(); })
+        , begin_map_([](void* p, size_t s) { static_cast<Archive*>(p)->begin_map(s); })
+        , end_map_([](void* p) { static_cast<Archive*>(p)->end_map(); })
+        , write_map_key_([](void* p, const std::string& k) { static_cast<Archive*>(p)->write_map_key(k); })
+    {}
+
+    void write_property_name(const std::string& name) { write_property_name_(ptr_, name); }
+    void write_int8(int8_t v) { write_int8_(ptr_, v); }
+    void write_int16(int16_t v) { write_int16_(ptr_, v); }
+    void write_int32(int32_t v) { write_int32_(ptr_, v); }
+    void write_int64(int64_t v) { write_int64_(ptr_, v); }
+    void write_uint8(uint8_t v) { write_uint8_(ptr_, v); }
+    void write_uint16(uint16_t v) { write_uint16_(ptr_, v); }
+    void write_uint32(uint32_t v) { write_uint32_(ptr_, v); }
+    void write_uint64(uint64_t v) { write_uint64_(ptr_, v); }
+    void write_float32(float v) { write_float32_(ptr_, v); }
+    void write_float64(double v) { write_float64_(ptr_, v); }
+    void write_bool(bool v) { write_bool_(ptr_, v); }
+    void write_string(const std::string& v) { write_string_(ptr_, v); }
+    void begin_object(const std::string& type, uint32_t version) { begin_object_(ptr_, type, version); }
+    void end_object() { end_object_(ptr_); }
+    void begin_array(size_t size) { begin_array_(ptr_, size); }
+    void end_array() { end_array_(ptr_); }
+    void begin_map(size_t size) { begin_map_(ptr_, size); }
+    void end_map() { end_map_(ptr_); }
+    void write_map_key(const std::string& key) { write_map_key_(ptr_, key); }
+};
+
+// Forward declare script_value for the reader
+class any_archive_reader {
+    void* ptr_;
+    bool (*seek_property_)(void*, const std::string&);
+    bool (*read_property_name_)(void*, std::string&);
+    int8_t (*read_int8_)(void*);
+    int16_t (*read_int16_)(void*);
+    int32_t (*read_int32_)(void*);
+    int64_t (*read_int64_)(void*);
+    uint8_t (*read_uint8_)(void*);
+    uint16_t (*read_uint16_)(void*);
+    uint32_t (*read_uint32_)(void*);
+    uint64_t (*read_uint64_)(void*);
+    float (*read_float32_)(void*);
+    double (*read_float64_)(void*);
+    bool (*read_bool_)(void*);
+    std::string (*read_string_)(void*);
+    bool (*begin_object_)(void*, std::string&, uint32_t&);
+    void (*end_object_)(void*);
+    size_t (*begin_array_)(void*);
+    void (*end_array_)(void*);
+    size_t (*begin_map_)(void*);
+    void (*end_map_)(void*);
+    bool (*read_map_key_)(void*, std::string&);
+    bool (*has_property_)(void*, const std::string&);
+    bool (*needs_property_keys_)(void*);
+    void* (*get_engine_)(void*);  // Returns engine*
+    void* (*get_user_context_)(void*, std::type_index);  // Returns user context by type_index
+
+public:
+    template<typename Archive>
+    explicit any_archive_reader(Archive& ar)
+        : ptr_(&ar)
+        , seek_property_([](void* p, const std::string& n) { return static_cast<Archive*>(p)->seek_property(n); })
+        , read_property_name_([](void* p, std::string& n) { return static_cast<Archive*>(p)->read_property_name(n); })
+        , read_int8_([](void* p) { return static_cast<Archive*>(p)->read_int8(); })
+        , read_int16_([](void* p) { return static_cast<Archive*>(p)->read_int16(); })
+        , read_int32_([](void* p) { return static_cast<Archive*>(p)->read_int32(); })
+        , read_int64_([](void* p) { return static_cast<Archive*>(p)->read_int64(); })
+        , read_uint8_([](void* p) { return static_cast<Archive*>(p)->read_uint8(); })
+        , read_uint16_([](void* p) { return static_cast<Archive*>(p)->read_uint16(); })
+        , read_uint32_([](void* p) { return static_cast<Archive*>(p)->read_uint32(); })
+        , read_uint64_([](void* p) { return static_cast<Archive*>(p)->read_uint64(); })
+        , read_float32_([](void* p) { return static_cast<Archive*>(p)->read_float32(); })
+        , read_float64_([](void* p) { return static_cast<Archive*>(p)->read_float64(); })
+        , read_bool_([](void* p) { return static_cast<Archive*>(p)->read_bool(); })
+        , read_string_([](void* p) { return static_cast<Archive*>(p)->read_string(); })
+        , begin_object_([](void* p, std::string& t, uint32_t& v) { return static_cast<Archive*>(p)->begin_object(t, v); })
+        , end_object_([](void* p) { static_cast<Archive*>(p)->end_object(); })
+        , begin_array_([](void* p) { return static_cast<Archive*>(p)->begin_array(); })
+        , end_array_([](void* p) { static_cast<Archive*>(p)->end_array(); })
+        , begin_map_([](void* p) { return static_cast<Archive*>(p)->begin_map(); })
+        , end_map_([](void* p) { static_cast<Archive*>(p)->end_map(); })
+        , read_map_key_([](void* p, std::string& k) { return static_cast<Archive*>(p)->read_map_key(k); })
+        , has_property_([](void* p, const std::string& n) { return static_cast<Archive*>(p)->has_property(n); })
+        , needs_property_keys_([](void*) { return Archive::needs_property_keys; })
+        , get_engine_([](void* p) { return static_cast<void*>(static_cast<Archive*>(p)->get_engine()); })
+        , get_user_context_([](void* p, std::type_index ti) -> void* {
+            auto& ar = *static_cast<Archive*>(p);
+            return ar.get_user_context_raw(ti);
+        })
+    {}
+
+    bool seek_property(const std::string& name) { return seek_property_(ptr_, name); }
+    bool read_property_name(std::string& name) { return read_property_name_(ptr_, name); }
+    int8_t read_int8() { return read_int8_(ptr_); }
+    int16_t read_int16() { return read_int16_(ptr_); }
+    int32_t read_int32() { return read_int32_(ptr_); }
+    int64_t read_int64() { return read_int64_(ptr_); }
+    uint8_t read_uint8() { return read_uint8_(ptr_); }
+    uint16_t read_uint16() { return read_uint16_(ptr_); }
+    uint32_t read_uint32() { return read_uint32_(ptr_); }
+    uint64_t read_uint64() { return read_uint64_(ptr_); }
+    float read_float32() { return read_float32_(ptr_); }
+    double read_float64() { return read_float64_(ptr_); }
+    bool read_bool() { return read_bool_(ptr_); }
+    std::string read_string() { return read_string_(ptr_); }
+    bool begin_object(std::string& type, uint32_t& version) { return begin_object_(ptr_, type, version); }
+    void end_object() { end_object_(ptr_); }
+    size_t begin_array() { return begin_array_(ptr_); }
+    void end_array() { end_array_(ptr_); }
+    size_t begin_map() { return begin_map_(ptr_); }
+    void end_map() { end_map_(ptr_); }
+    bool read_map_key(std::string& key) { return read_map_key_(ptr_, key); }
+    bool has_property(const std::string& name) { return has_property_(ptr_, name); }
+    bool needs_property_keys() { return needs_property_keys_(ptr_); }
+
+    // Get engine pointer (type-erased, caller must cast)
+    template<typename Engine>
+    Engine* get_engine() { return static_cast<Engine*>(get_engine_(ptr_)); }
+
+    // Get user context by type
+    template<typename ContextType>
+    ContextType* get_user_context() {
+        void* raw = get_user_context_(ptr_, std::type_index(typeid(ContextType)));
+        return static_cast<ContextType*>(raw);
+    }
+};
+
+// ============================================================================
+// Property and Class Metadata
+// ============================================================================
 
 // Serialization metadata for properties
 struct property_metadata {
@@ -41,10 +219,10 @@ struct property_metadata {
 
     // Direct serialization lambdas for runtime fallback (dynamic_binder-registered types)
     // These work with raw void* pointers to avoid needing script_value wrappers
-    // save: (const void* cpp_object, archive_writer&) -> saves the property value
-    // load: (void* cpp_object, archive_reader&) -> loads the property value
-    std::function<void(const void*, archive_writer&)> save;
-    std::function<void(void*, archive_reader&)> load;
+    // save: (const void* cpp_object, any_archive_writer&) -> saves the property value
+    // load: (void* cpp_object, any_archive_reader&) -> loads the property value
+    std::function<void(const void*, any_archive_writer&)> save;
+    std::function<void(void*, any_archive_reader&)> load;
 };
 
 // Class serialization metadata
@@ -53,9 +231,9 @@ struct class_metadata {
     uint32_t current_version = 1;
     std::vector<property_metadata> properties;
 
-    // Custom serialization functions (forward-declared types)
-    std::function<void(archive_writer&, const script_value&, uint32_t)> custom_save;
-    std::function<script_value(archive_reader&, uint32_t)> custom_construct;
+    // Custom serialization functions using type-erased archives
+    std::function<void(any_archive_writer&, const script_value&, uint32_t)> custom_save;
+    std::function<script_value(any_archive_reader&, uint32_t)> custom_construct;
 
     std::vector<std::string> get_property_names() const {
         std::vector<std::string> result;

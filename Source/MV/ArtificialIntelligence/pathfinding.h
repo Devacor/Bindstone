@@ -16,6 +16,7 @@
 #include <jaiscript/signals/signal.hpp>
 #include "MV/Render/points.h"
 #include <jaiscript/serialization/construct.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 
@@ -25,9 +26,7 @@ namespace MV {
 		friend TemporaryCost;
 		friend Map;  // For sparse serialization access to travelCost/staticBlockedSemaphore
 		friend cereal::access;
-		// JaiScript serialization free functions (for ADL dispatch)
-		friend void save(jai::serialization::archive_writer& ar, const MapNode& v);
-		friend void load(jai::serialization::archive_reader& ar, MapNode& v);
+		friend class jai::access;  // JaiScript serialization support
 	public:
 		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
 		typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
@@ -95,28 +94,12 @@ namespace MV {
 		static const int MAXIMUM_CLEARANCE = 8;
 	private:
 
-		template <class Archive>
-		void save(Archive & archive) const;
-
-		template <class Archive>
-		void load(Archive & archive);
-
-		// JaiScript serialization (non-template for reliable trait detection)
-		// Note: map pointer is NOT serialized - Map::load_and_construct sets it after deserializing squares
-		void save(jai::serialization::archive_writer& ar) const {
-			ar("location", location);
-			ar("useCorners", useCorners);
-			ar("travelCost", travelCost);
-			ar("staticBlockedSemaphore", staticBlockedSemaphore);
-		}
-
-		void load(jai::serialization::archive_reader& ar) {
-			ar("location", location);
-			ar("useCorners", useCorners);
-			ar("travelCost", travelCost);
-			ar("staticBlockedSemaphore", staticBlockedSemaphore);
-			// map pointer set by Map::load_and_construct after deserializing squares
-		}
+		// Versioned save/load for both Cereal and JaiScript
+		// Defined out-of-line after Map class because Cereal branch needs Map to be complete
+		template<class Archive>
+		void save(Archive& archive, std::uint32_t const version) const;
+		template<class Archive>
+		void load(Archive& archive, std::uint32_t const version);
 
 		void calculateClearance() const;
 
@@ -155,14 +138,12 @@ namespace MV {
 		friend cereal::access;
 		friend class jai::access;  // JaiScript serialization support (like cereal::access)
 	public:
-		// JaiScript serialization - must be public for trait detection
-		void save(jai::serialization::archive_writer& ar) const {
-			ar("usingCorners", usingCorners);
-			ar("squares", squares);  // Generic vector<vector<MapNode>> serialization
-		}
-
-		static void load_and_construct(jai::serialization::archive_reader& ar,
-		                               jai::serialization::construct<Map>& c) {
+		// JaiScript load_and_construct - must be public for trait detection
+		// Takes jai::serialization::construct (different from cereal::construct)
+		template<typename Archive>
+		static void load_and_construct(Archive& ar,
+		                               jai::serialization::construct<Map>& c)
+			requires jai::serialization::jai_archive<Archive> {
 			c();  // Default construct via jai::access friend
 			ar("usingCorners", c->usingCorners);
 			ar("squares", c->squares);  // Generic vector<vector<MapNode>> deserialization
@@ -271,24 +252,35 @@ namespace MV {
 
 		void hookUpObservation();
 
-		template <class Archive>
-		void save(Archive & archive, std::uint32_t const version) const {
-			archive(
-				CEREAL_NVP(usingCorners),
-				CEREAL_NVP(squares)
-			);
+		template<class Archive>
+		void save(Archive & archive, std::uint32_t const /*version*/) const {
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive("usingCorners", usingCorners);
+				archive("squares", squares);
+			} else {
+				archive(
+					CEREAL_NVP(usingCorners),
+					CEREAL_NVP(squares)
+				);
+			}
 		}
 
-		template <class Archive>
-		void load(Archive & archive, std::uint32_t const version) {
-			archive(
-				CEREAL_NVP(usingCorners),
-				CEREAL_NVP(squares)
-			);
+		template<class Archive>
+		void load(Archive & archive, std::uint32_t const /*version*/) {
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive("usingCorners", usingCorners);
+				archive("squares", squares);
+				// Note: map pointers for nodes are set in load_and_construct
+			} else {
+				archive(
+					CEREAL_NVP(usingCorners),
+					CEREAL_NVP(squares)
+				);
+			}
 			hookUpObservation();
 		}
 
-		template <class Archive>
+		template<class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<Map> &construct, std::uint32_t const /*version*/) {
 			construct();
 			archive(
@@ -692,33 +684,59 @@ namespace MV {
 			}
 		}
 
-		template <class Archive>
+		template<class Archive>
 		void save(Archive & archive, std::uint32_t const version) const {
-			archive(
-				CEREAL_NVP(ourPosition),
-				CEREAL_NVP(ourGoal),
-				CEREAL_NVP(ourSpeed),
-				CEREAL_NVP(acceptableDistance),
-				CEREAL_NVP(unitSize),
-				CEREAL_NVP(map),
-				CEREAL_NVP(footprintDisabled),
-				CEREAL_NVP(waitingForPlacement)
-			);
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive(
+					JAI_NVP(ourPosition),
+					JAI_NVP(ourGoal),
+					JAI_NVP(ourSpeed),
+					JAI_NVP(acceptableDistance),
+					JAI_NVP(unitSize),
+					JAI_NVP(map),
+					JAI_NVP(footprintDisabled),
+					JAI_NVP(waitingForPlacement)
+				);
+			} else {
+				archive(
+					CEREAL_NVP(ourPosition),
+					CEREAL_NVP(ourGoal),
+					CEREAL_NVP(ourSpeed),
+					CEREAL_NVP(acceptableDistance),
+					CEREAL_NVP(unitSize),
+					CEREAL_NVP(map),
+					CEREAL_NVP(footprintDisabled),
+					CEREAL_NVP(waitingForPlacement)
+				);
+			}
 		}
 
-		template <class Archive>
+		template<class Archive>
 		void load(Archive & archive, std::uint32_t const version) {
 			blockMap();
-			archive(
-				CEREAL_NVP(ourPosition),
-				CEREAL_NVP(ourGoal),
-				CEREAL_NVP(ourSpeed),
-				CEREAL_NVP(acceptableDistance),
-				CEREAL_NVP(unitSize),
-				CEREAL_NVP(map),
-				CEREAL_NVP(footprintDisabled),
-				CEREAL_NVP(waitingForPlacement)
-			);
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive(
+					JAI_NVP(ourPosition),
+					JAI_NVP(ourGoal),
+					JAI_NVP(ourSpeed),
+					JAI_NVP(acceptableDistance),
+					JAI_NVP(unitSize),
+					JAI_NVP(map),
+					JAI_NVP(footprintDisabled),
+					JAI_NVP(waitingForPlacement)
+				);
+			} else {
+				archive(
+					CEREAL_NVP(ourPosition),
+					CEREAL_NVP(ourGoal),
+					CEREAL_NVP(ourSpeed),
+					CEREAL_NVP(acceptableDistance),
+					CEREAL_NVP(unitSize),
+					CEREAL_NVP(map),
+					CEREAL_NVP(footprintDisabled),
+					CEREAL_NVP(waitingForPlacement)
+				);
+			}
 			unblockMap();
 		}
 
@@ -874,32 +892,47 @@ namespace MV {
 
 		int ourDebugId = 0;
 	};
-	
-	template <class Archive>
-	void MapNode::save(Archive & archive) const {
-		std::weak_ptr<Map> weakMap;
-		weakMap = map->shared_from_this();
-		archive(
-			CEREAL_NVP(location),
-			CEREAL_NVP(useCorners),
-			CEREAL_NVP(travelCost),
-			CEREAL_NVP(staticBlockedSemaphore),
-			cereal::make_nvp("map", weakMap)
-		);
+
+	// Out-of-line MapNode save/load - defined here because Cereal branch needs Map to be complete
+	template<class Archive>
+	void MapNode::save(Archive& archive, std::uint32_t const /*version*/) const {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive("location", location);
+			archive("useCorners", useCorners);
+			archive("travelCost", travelCost);
+			archive("staticBlockedSemaphore", staticBlockedSemaphore);
+		} else {
+			std::weak_ptr<Map> weakMap;
+			weakMap = map->shared_from_this();
+			archive(
+				CEREAL_NVP(location),
+				CEREAL_NVP(useCorners),
+				CEREAL_NVP(travelCost),
+				CEREAL_NVP(staticBlockedSemaphore),
+				cereal::make_nvp("map", weakMap)
+			);
+		}
 	}
 
-	
-	template <class Archive>
-	void MapNode::load(Archive & archive) {
-		std::weak_ptr<Map> weakMap;
-		archive(
-			CEREAL_NVP(location),
-			CEREAL_NVP(useCorners),
-			CEREAL_NVP(travelCost),
-			CEREAL_NVP(staticBlockedSemaphore),
-			cereal::make_nvp("map", weakMap)
-		);
-		map = weakMap.lock().get();
+	template<class Archive>
+	void MapNode::load(Archive& archive, std::uint32_t const /*version*/) {
+		if constexpr (jai::serialization::jai_archive<Archive>) {
+			archive("location", location);
+			archive("useCorners", useCorners);
+			archive("travelCost", travelCost);
+			archive("staticBlockedSemaphore", staticBlockedSemaphore);
+			// map pointer set by Map::load_and_construct after deserializing squares
+		} else {
+			std::weak_ptr<Map> weakMap;
+			archive(
+				CEREAL_NVP(location),
+				CEREAL_NVP(useCorners),
+				CEREAL_NVP(travelCost),
+				CEREAL_NVP(staticBlockedSemaphore),
+				cereal::make_nvp("map", weakMap)
+			);
+			map = weakMap.lock().get();
+		}
 	}
 
 	void MapNode::block() {
@@ -923,9 +956,6 @@ namespace MV {
 		}
 	}
 
-	// JaiScript serialization free functions for ADL dispatch
-	inline void save(jai::serialization::archive_writer& ar, const MapNode& v) { v.save(ar); }
-	inline void load(jai::serialization::archive_reader& ar, MapNode& v) { v.load(ar); }
 }
 
 #endif

@@ -185,6 +185,7 @@ add_test(NAME TypeSafetyTests COMMAND jaiscript_tests "Type Safety")
 add_test(NAME StdlibTests COMMAND jaiscript_tests "Stdlib")
 add_test(NAME SignalTests COMMAND jaiscript_tests "Signal")
 add_test(NAME ObservableTests COMMAND jaiscript_tests "Observable")
+add_test(NAME TemplateBinder COMMAND jaiscript_tests "Template Binder")
 
 # Create a separate executable target for static method tests only
 # This appears in VS dropdown for easy debugging

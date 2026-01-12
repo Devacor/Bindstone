@@ -3,6 +3,7 @@
 
 #include "clickable.h"
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
@@ -29,19 +30,29 @@ namespace MV {
 
 			void shiftContentByDelta(const MV::Point<int> & deltaPosition);
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				archive(cereal::make_nvp("contentView", contentView.get()));
-				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(archive);
+					Clickable::save(archive, 0);
+				} else {
+					archive(cereal::make_nvp("contentView", contentView.get()));
+					archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				archive(cereal::make_nvp("contentView", contentView.get()));
-				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(archive);
+					Clickable::load(archive, 0);
+				} else {
+					archive(cereal::make_nvp("contentView", contentView.get()));
+					archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Scroller> &construct, std::uint32_t const version) {
 				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* mouse = services.get<MV::TapDevice>();
@@ -82,3 +93,4 @@ namespace MV {
 CEREAL_FORCE_DYNAMIC_INIT(mv_scenescroller);
 
 #endif
+

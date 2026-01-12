@@ -9,10 +9,6 @@
 // Forward declarations to avoid circular dependencies
 namespace jai {
     class engine;
-    namespace serialization {
-        class archive_writer;
-        class archive_reader;
-    }
 }
 
 namespace jai {
@@ -45,8 +41,11 @@ struct static_property {
     constexpr static_property(const char* n, P T::* m) : name(n), member(m) {}
 
     // Direct serialization - called at compile-time dispatch
-    void save(serialization::archive_writer& ar, const T& obj) const;
-    void load(serialization::archive_reader& ar, T& obj) const;
+    // Templated on Archive to work with CRTP-based archives
+    template<typename Archive>
+    void save(Archive& ar, const T& obj) const;
+    template<typename Archive>
+    void load(Archive& ar, T& obj) const;
 };
 
 // Compile-time method descriptor
@@ -94,15 +93,17 @@ struct static_binder {
         return std::tuple_size_v<Methods>;
     }
 
-    // Save all properties
-    void save_all(serialization::archive_writer& ar, const T& obj) const {
+    // Save all properties (templated on Archive)
+    template<typename Archive>
+    void save_all(Archive& ar, const T& obj) const {
         std::apply([&](const auto&... props) {
             (props.save(ar, obj), ...);
         }, properties);
     }
 
-    // Load all properties
-    void load_all(serialization::archive_reader& ar, T& obj) const {
+    // Load all properties (templated on Archive)
+    template<typename Archive>
+    void load_all(Archive& ar, T& obj) const {
         std::apply([&](const auto&... props) {
             (props.load(ar, obj), ...);
         }, properties);
@@ -150,10 +151,12 @@ inline constexpr bool has_static_type_v = jai_static_type<T>::registered;
         static constexpr const char* name = Name; \
         static constexpr auto binder = jai::static_binder<Type>{} __VA_ARGS__; \
         \
-        static void save(jai::serialization::archive_writer& ar, const Type& obj) { \
+        template<typename Archive> \
+        static void save(Archive& ar, const Type& obj) { \
             binder.save_all(ar, obj); \
         } \
-        static void load(jai::serialization::archive_reader& ar, Type& obj) { \
+        template<typename Archive> \
+        static void load(Archive& ar, Type& obj) { \
             binder.load_all(ar, obj); \
         } \
         static void bind_to(jai::engine& eng) { \

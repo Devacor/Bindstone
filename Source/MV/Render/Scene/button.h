@@ -4,6 +4,7 @@
 #include "clickable.h"
 #include "text.h"
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
@@ -41,23 +42,33 @@ namespace MV {
 
 			void text(const std::shared_ptr<Node> &a_owner, const std::string &a_newValue);
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(cereal::make_nvp("activeView", activeView.get()));
-				archive(cereal::make_nvp("idleView", idleView.get()));
-				archive(cereal::make_nvp("disabledView", disabledView.get()));
-				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(archive);
+					Clickable::save(archive, 0);
+				} else {
+					archive(cereal::make_nvp("activeView", activeView.get()));
+					archive(cereal::make_nvp("idleView", idleView.get()));
+					archive(cereal::make_nvp("disabledView", disabledView.get()));
+					archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				archive(cereal::make_nvp("activeView", activeView.get()));
-				archive(cereal::make_nvp("idleView", idleView.get()));
-				archive(cereal::make_nvp("disabledView", disabledView.get()));
-				archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(archive);
+					Clickable::load(archive, 0);
+				} else {
+					archive(cereal::make_nvp("activeView", activeView.get()));
+					archive(cereal::make_nvp("idleView", idleView.get()));
+					archive(cereal::make_nvp("disabledView", disabledView.get()));
+					archive(cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Button> &construct, std::uint32_t const version) {
 				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* mouse = services.get<MV::TapDevice>();

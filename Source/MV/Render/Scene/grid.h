@@ -5,6 +5,7 @@
 #include "cereal/access.hpp"
 #include "cereal/types/utility.hpp"
 #include <jaiscript/properties.hpp>
+#include <jaiscript/serialization/archive.hpp>
 #include <vector>
 
 namespace MV {
@@ -71,37 +72,47 @@ namespace MV {
 
 			virtual void updateImplementation(double a_delta) override;
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const a_version) const {
 				if (dirtyGrid) {
 					const_cast<Grid*>(this)->layoutCells();
 				}
-				archive(cereal::make_nvp("topLeftOffset", topLeftOffset.get()));
-				archive(cereal::make_nvp("policy", policy.get()));
-				archive(cereal::make_nvp("maximumWidth", maximumWidth.get()));
-				archive(cereal::make_nvp("cellDimensions", cellDimensions.get()));
-				archive(cereal::make_nvp("cellPadding", cellPadding.get()));
-				archive(cereal::make_nvp("margins", margins.get()));
-				archive(cereal::make_nvp("cellColumns", cellColumns.get()));
-				archive(cereal::make_nvp("includeChildrenInChildSize", includeChildrenInChildSize.get()));
-				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(archive);
+					Drawable::save(archive, 0);
+				} else {
+					archive(cereal::make_nvp("topLeftOffset", topLeftOffset.get()));
+					archive(cereal::make_nvp("policy", policy.get()));
+					archive(cereal::make_nvp("maximumWidth", maximumWidth.get()));
+					archive(cereal::make_nvp("cellDimensions", cellDimensions.get()));
+					archive(cereal::make_nvp("cellPadding", cellPadding.get()));
+					archive(cereal::make_nvp("margins", margins.get()));
+					archive(cereal::make_nvp("cellColumns", cellColumns.get()));
+					archive(cereal::make_nvp("includeChildrenInChildSize", includeChildrenInChildSize.get()));
+					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			void load(Archive & archive, std::uint32_t const a_version) {
-				archive(cereal::make_nvp("topLeftOffset", topLeftOffset.get()));
-				archive(cereal::make_nvp("policy", policy.get()));
-				archive(cereal::make_nvp("maximumWidth", maximumWidth.get()));
-				archive(cereal::make_nvp("cellDimensions", cellDimensions.get()));
-				archive(cereal::make_nvp("cellPadding", cellPadding.get()));
-				archive(cereal::make_nvp("margins", margins.get()));
-				archive(cereal::make_nvp("cellColumns", cellColumns.get()));
-				archive(cereal::make_nvp("includeChildrenInChildSize", includeChildrenInChildSize.get()));
-				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(archive);
+					Drawable::load(archive, 0);
+				} else {
+					archive(cereal::make_nvp("topLeftOffset", topLeftOffset.get()));
+					archive(cereal::make_nvp("policy", policy.get()));
+					archive(cereal::make_nvp("maximumWidth", maximumWidth.get()));
+					archive(cereal::make_nvp("cellDimensions", cellDimensions.get()));
+					archive(cereal::make_nvp("cellPadding", cellPadding.get()));
+					archive(cereal::make_nvp("margins", margins.get()));
+					archive(cereal::make_nvp("cellColumns", cellColumns.get()));
+					archive(cereal::make_nvp("includeChildrenInChildSize", includeChildrenInChildSize.get()));
+					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				}
 				dirtyGrid = false;
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Grid> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);

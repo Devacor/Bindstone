@@ -55,7 +55,7 @@ public:
 	void enterGameServer(const std::string &gameServer, int64_t secret) {
 		std::cout << "Game Found: " << gameServer << " Secret: " << secret << std::endl;
 		ourGameClient = MV::Client::make(MV::Url{ gameServer }, [=](const std::string &a_message) {
-			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
+			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, managers().services);
 			value->execute(*this);
 		}, [=](const std::string &a_dcreason) {
 			MV::info("Disconnected: [", gameServer,"] ", a_dcreason);

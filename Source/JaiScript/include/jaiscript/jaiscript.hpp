@@ -40,22 +40,27 @@
 // 9. Class building system (depends on engine) - LAST!
 #include "core/dynamic_binder.hpp"
 
-// 10. AST and interpretation system (optional for advanced users)
+// 10. Static and template binding system
+#include "core/static_binder.hpp"
+#include "core/template_binder.hpp"
+
+// 11. AST and interpretation system (optional for advanced users)
 #include "detail/ast.hpp"
 #include "detail/lexer.hpp"
 #include "detail/parser.hpp"
 #include "detail/interpreter.hpp"
 #include "detail/interpreter_backend.hpp"
 
-// 11. JVM system (optional)
+// 12. JVM system (optional)
 // VM is being refactored - moved to LEGACY_VM
 // #include "jvm/bytecode.hpp"
 // #include "jvm/compiler.hpp"
 // #include "jvm/virtual_machine.hpp"
 // #include "jvm/vm_backend.hpp"
 
-// 12. Serialization (optional)
+// 13. Serialization
 #include "serialization/archive.hpp"
+#include "serialization/convenience.hpp"
 
 // Version information
 #define JAISCRIPT_VERSION_MAJOR 0

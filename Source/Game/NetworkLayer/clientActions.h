@@ -36,9 +36,10 @@ public:
 		std::cout << "Message Got: " << message << std::endl;
 	}
 #endif
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(message), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(message));
+		NetworkAction::serialize(archive);
 	}
 
 	std::string message;
@@ -51,9 +52,10 @@ public:
 
 	virtual void execute(Game& a_game) override;
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(message), CEREAL_NVP(player), CEREAL_NVP(success), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(message), JAI_NVP(player), JAI_NVP(success));
+		NetworkAction::serialize(archive);
 	}
 
 	//useful to do in C++.
@@ -75,9 +77,10 @@ public:
 
 	virtual void execute(Game& a_game) override;
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(message), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(message));
+		NetworkAction::serialize(archive);
 	}
 
 	std::string message;
@@ -97,9 +100,10 @@ public:
 	}
 #endif
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(forceClientVersion), CEREAL_NVP(configurationHashes), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(forceClientVersion), JAI_NVP(configurationHashes));
+		NetworkAction::serialize(archive);
 	}
 
 	int forceClientVersion = 1;
@@ -113,16 +117,15 @@ public:
 
 	virtual void execute(Game& a_game) override;
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(gameServer), CEREAL_NVP(port), CEREAL_NVP(secret), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(gameServer), JAI_NVP(port), JAI_NVP(secret));
+		NetworkAction::serialize(archive);
 	}
 
 	std::string gameServer;
 	uint16_t port = 0;
 	int64_t secret = 0;
 };
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_clientactions);
 
 #endif

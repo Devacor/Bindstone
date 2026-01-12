@@ -22,8 +22,8 @@ namespace jai {
 	template<typename T> class deleted_property;
 
 	namespace serialization {
-		class archive_writer;
-		class archive_reader;
+		class any_archive_writer;
+		class any_archive_reader;
 	}
 }
 
@@ -93,10 +93,11 @@ namespace jai {
 			return m_serialize_mode != serialize_mode::transient && m_allow_serialization;
 		}
 
-		// Serialization interface - uses JaiScript archives
-		// Forward declared to avoid circular dependency
-		virtual void save(class jai::serialization::archive_writer& ar) const = 0;
-		virtual void load(class jai::serialization::archive_reader& ar) = 0;
+		// Type-erased serialization interface (overloaded by archive type)
+		// Properties are "binding glue" - they just provide (name, value) to the archive
+		// Archive handles all serialization dispatch via any_archive_writer/reader
+		virtual void serialize(serialization::any_archive_writer& ar) const = 0;
+		virtual void serialize(serialization::any_archive_reader& ar) = 0;
 
 		virtual void clone_to_target(property_base& target) = 0;
 
@@ -540,9 +541,9 @@ namespace jai {
 			return m_value.end();
 		}
 
-		// Serialization methods - implemented in property_serialization.hpp
-		void save(serialization::archive_writer& ar) const override;
-		void load(serialization::archive_reader& ar) override;
+		// Serialization - implemented in property_serialization.hpp
+		void serialize(serialization::any_archive_writer& ar) const override;
+		void serialize(serialization::any_archive_reader& ar) override;
 
 		// Clone method
 		void set_custom_clone(std::function<void(property<T>&, property<T>&)> custom_clone) {
@@ -577,9 +578,9 @@ namespace jai {
 		const T& get() const = delete;
 		T& get() = delete;
 
-		// Serialization methods - implemented in property_serialization.hpp
-		void save(serialization::archive_writer& ar) const override;
-		void load(serialization::archive_reader& ar) override;
+		// Serialization - implemented in property_serialization.hpp
+		void serialize(serialization::any_archive_writer& ar) const override;
+		void serialize(serialization::any_archive_reader& ar) override;
 
 		void clone_to_target(property_base&) override {
 			// No-op

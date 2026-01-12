@@ -2,6 +2,7 @@
 #define _MV_SCENE_PARALLAX_H_
 
 #include "node.h"
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
@@ -67,28 +68,39 @@ namespace MV {
 
 			std::map<size_t, std::shared_ptr<TextureHandle>>::const_iterator disconnectTexture(size_t a_textureId);
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
-			}
-
-			template <class Archive>
-			void load(Archive & archive, std::uint32_t const version) {
-				if (version <= 2) {
-					archive(cereal::make_nvp("enabled", isEnabled));
-					if(version <= 1){
-						archive(cereal::make_nvp("space", space)); // Deleted property - reads and discards
-					}
-					archive(cereal::make_nvp("translateRatio", ourTranslateRatio));
-					archive(cereal::make_nvp("localOffset", ourLocalOffset));
-					if(version > 1){
-						archive(cereal::make_nvp("zoomOffset", ourZoomOffset));
-					}
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.save(archive);
+					Component::save(archive, 0);
+				} else {
+					archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 				}
-				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
 
-			template <class Archive>
+			template<class Archive>
+			void load(Archive & archive, std::uint32_t const version) {
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					property_mgr.load(archive);
+					Component::load(archive, 0);
+				} else {
+					if (version <= 2) {
+						archive(cereal::make_nvp("enabled", isEnabled.get()));
+						if(version <= 1){
+							int32_t discard;
+							archive(cereal::make_nvp("space", discard)); // Deleted property - reads and discards
+						}
+						archive(cereal::make_nvp("translateRatio", ourTranslateRatio.get()));
+						archive(cereal::make_nvp("localOffset", ourLocalOffset.get()));
+						if(version > 1){
+							archive(cereal::make_nvp("zoomOffset", ourZoomOffset.get()));
+						}
+					}
+					archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
+				}
+			}
+
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Parallax> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);

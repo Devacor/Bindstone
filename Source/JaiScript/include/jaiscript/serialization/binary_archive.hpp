@@ -9,132 +9,169 @@
 namespace jai {
 namespace serialization {
 
-// Binary archive writer - produces portable binary format
-class binary_archive_writer : public archive_writer {
+// Binary archive writer - produces portable binary format (CRTP, no virtual dispatch)
+class binary_archive_writer : public archive_writer_impl<binary_archive_writer> {
 public:
-    binary_archive_writer() : archive_writer() {}
-    explicit binary_archive_writer(std::vector<uint8_t>& buffer) : archive_writer(), buffer_(&buffer) {
+    binary_archive_writer() : archive_writer_impl<binary_archive_writer>() {}
+    explicit binary_archive_writer(std::vector<uint8_t>& buffer) : archive_writer_impl<binary_archive_writer>(), buffer_(&buffer) {
         buffer_->clear();
     }
-    explicit binary_archive_writer(engine* eng) : archive_writer(eng) {}
-    binary_archive_writer(std::vector<uint8_t>& buffer, engine* eng) : archive_writer(eng), buffer_(&buffer) {
+    explicit binary_archive_writer(engine* eng) : archive_writer_impl<binary_archive_writer>(eng) {}
+    binary_archive_writer(std::vector<uint8_t>& buffer, engine* eng) : archive_writer_impl<binary_archive_writer>(eng), buffer_(&buffer) {
         buffer_->clear();
     }
 
-    // Binary format REQUIRES explicit property keys array (no named fields)
-    bool needs_property_keys() const override { return true; }
+    // Binary format properties (compile-time constants, no virtual dispatch)
+    static constexpr bool needs_property_keys = true;
+    static constexpr bool is_text_format = false;
 
     // Get the serialized data
     const std::vector<uint8_t>& data() const { return owned_buffer_.empty() ? *buffer_ : owned_buffer_; }
     std::vector<uint8_t>& data() { return owned_buffer_.empty() ? *buffer_ : owned_buffer_; }
 
-    // Basic type serialization (little-endian for portability)
-    void write_int8(int8_t value) override {
+    // Basic type serialization (little-endian for portability) - non-virtual
+    void write_int8(int8_t value) {
         write_raw(&value, sizeof(value));
     }
-    
-    void write_int16(int16_t value) override {
+
+    void write_int16(int16_t value) {
         write_little_endian(value);
     }
-    
-    void write_int32(int32_t value) override {
+
+    void write_int32(int32_t value) {
         write_little_endian(value);
     }
-    
-    void write_int64(int64_t value) override {
+
+    void write_int64(int64_t value) {
         write_little_endian(value);
     }
-    
-    void write_uint8(uint8_t value) override {
+
+    void write_uint8(uint8_t value) {
         write_raw(&value, sizeof(value));
     }
-    
-    void write_uint16(uint16_t value) override {
+
+    void write_uint16(uint16_t value) {
         write_little_endian(value);
     }
-    
-    void write_uint32(uint32_t value) override {
+
+    void write_uint32(uint32_t value) {
         write_little_endian(value);
     }
-    
-    void write_uint64(uint64_t value) override {
+
+    void write_uint64(uint64_t value) {
         write_little_endian(value);
     }
-    
-    void write_float32(float value) override {
+
+    void write_float32(float value) {
         static_assert(sizeof(float) == 4, "float must be 32-bit");
         uint32_t bits;
         std::memcpy(&bits, &value, sizeof(bits));
         write_uint32(bits);
     }
-    
-    void write_float64(double value) override {
+
+    void write_float64(double value) {
         static_assert(sizeof(double) == 8, "double must be 64-bit");
         uint64_t bits;
         std::memcpy(&bits, &value, sizeof(bits));
         write_uint64(bits);
     }
-    
-    void write_bool(bool value) override {
+
+    void write_bool(bool value) {
         write_uint8(value ? 1 : 0);
     }
-    
-    void write_string(const std::string& value) override {
+
+    void write_string(const std::string& value) {
         write_uint32(static_cast<uint32_t>(value.size()));
         if (!value.empty()) {
             write_raw(value.data(), value.size());
         }
     }
-    
-    void write_binary(const void* data, size_t size) override {
+
+    void write_binary(const void* data, size_t size) {
         write_uint32(static_cast<uint32_t>(size));
         if (size > 0) {
             write_raw(data, size);
         }
     }
     
-    // Object/array structure
-    void begin_object(const std::string& type_name, uint32_t version) override {
+    // Object/array structure - non-virtual
+    // Buffered mode: collect properties during begin_object..end_object, then flush with sizes
+    void begin_object(const std::string& type_name, uint32_t version) {
         write_uint8(0x01); // Object marker
         write_string(type_name);
         write_uint32(version);
         set_version(version);
+
+        // Start buffering properties for this object
+        object_write_stack_.emplace_back();
     }
-    
-    void end_object() override {
+
+    void end_object() {
+        if (!object_write_stack_.empty()) {
+            // Save and pop state first so writes go to parent's buffer (or main buffer)
+            auto state = std::move(object_write_stack_.back());
+            object_write_stack_.pop_back();
+
+            // Write property count
+            write_uint32(static_cast<uint32_t>(state.properties.size()));
+
+            // Write all property names first
+            for (const auto& prop : state.properties) {
+                write_string(prop.name);
+            }
+
+            // Write all property sizes
+            for (const auto& prop : state.properties) {
+                write_uint32(static_cast<uint32_t>(prop.data.size()));
+            }
+
+            // Write all property values (raw bytes)
+            for (const auto& prop : state.properties) {
+                if (!prop.data.empty()) {
+                    write_raw(prop.data.data(), prop.data.size());
+                }
+            }
+        }
+
         write_uint8(0x02); // End object marker
     }
-    
-    void begin_array(size_t size) override {
+
+    // Write property name - buffers instead of writing directly
+    void write_property_name(const std::string& name) {
+        if (!object_write_stack_.empty()) {
+            // Start a new property in the buffer
+            object_write_stack_.back().properties.push_back({name, {}});
+            object_write_stack_.back().current_property_buffer = &object_write_stack_.back().properties.back().data;
+        } else {
+            // Not in buffered mode, write directly
+            write_string(name);
+        }
+    }
+
+    void begin_array(size_t size) {
         write_uint8(0x03); // Array marker
         write_uint32(static_cast<uint32_t>(size));
     }
-    
-    void end_array() override {
+
+    void end_array() {
         write_uint8(0x04); // End array marker
-    }
-    
-    void write_property_name(const std::string& name) override {
-        // In binary format, property names are optional (structure is implicit)
-        // We write them for debugging but they're not required for deserialization
-        write_string(name);
     }
 
     // Map serialization - Binary uses array of key-value pairs
-    void begin_map(size_t size) override {
+    void begin_map(size_t size) {
         write_uint8(0x05); // Map marker
         write_uint32(static_cast<uint32_t>(size));
     }
 
-    void end_map() override {
+    void end_map() {
         write_uint8(0x06); // End map marker
     }
 
-    void write_map_key(const std::string& key) override {
+    void write_map_key(const std::string& key) {
         write_string(key);
     }
 
-    void write_value(const script_value& value) override {
+    void write_value(const script_value& value) {
         // Track depth - throws on overflow (hard failure, no partial data)
         depth_guard guard(current_depth_);
 
@@ -311,22 +348,36 @@ public:
 private:
     std::vector<uint8_t>* buffer_ = nullptr;
     std::vector<uint8_t> owned_buffer_;
-    
+
+    // Buffered property write state
+    struct buffered_property { std::string name; std::vector<uint8_t> data; };
+    struct object_write_state {
+        std::vector<buffered_property> properties;
+        std::vector<uint8_t>* current_property_buffer = nullptr;
+    };
+    std::vector<object_write_state> object_write_stack_;
+
     std::vector<uint8_t>& get_buffer() {
         if (buffer_) return *buffer_;
         return owned_buffer_;
     }
-    
+
     void write_raw(const void* data, size_t size) {
-        auto& buf = get_buffer();
-        const uint8_t* bytes = static_cast<const uint8_t*>(data);
-        buf.insert(buf.end(), bytes, bytes + size);
+        // If buffering a property, write to property buffer instead
+        if (!object_write_stack_.empty() && object_write_stack_.back().current_property_buffer) {
+            auto* prop_buf = object_write_stack_.back().current_property_buffer;
+            const uint8_t* bytes = static_cast<const uint8_t*>(data);
+            prop_buf->insert(prop_buf->end(), bytes, bytes + size);
+        } else {
+            auto& buf = get_buffer();
+            const uint8_t* bytes = static_cast<const uint8_t*>(data);
+            buf.insert(buf.end(), bytes, bytes + size);
+        }
     }
-    
+
     template<typename T>
     void write_little_endian(T value) {
         static_assert(std::is_integral_v<T>, "Only for integral types");
-        
         uint8_t bytes[sizeof(T)];
         for (size_t i = 0; i < sizeof(T); ++i) {
             bytes[i] = static_cast<uint8_t>(value >> (i * 8));
@@ -335,147 +386,257 @@ private:
     }
 };
 
-// Binary archive reader
-class binary_archive_reader : public archive_reader {
+// Binary archive reader (CRTP, no virtual dispatch)
+class binary_archive_reader : public archive_reader_impl<binary_archive_reader> {
 public:
     // Engine is REQUIRED for binary reading since we need to create script_values
     explicit binary_archive_reader(const std::vector<uint8_t>& data, engine* eng)
-        : archive_reader(eng), data_(data), pos_(0) {
+        : archive_reader_impl<binary_archive_reader>(eng), data_(data), pos_(0) {
         if (!eng) {
             throw serialization_error("binary_archive_reader requires a valid engine reference");
         }
     }
 
     explicit binary_archive_reader(const void* data, size_t size, engine* eng)
-        : archive_reader(eng), data_(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size), pos_(0) {
+        : archive_reader_impl<binary_archive_reader>(eng), data_(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size), pos_(0) {
         if (!eng) {
             throw serialization_error("binary_archive_reader requires a valid engine reference");
         }
     }
 
-    virtual ~binary_archive_reader() = default;
+    ~binary_archive_reader() = default;
 
-    // Binary format REQUIRES explicit property keys array (no named fields)
-    bool needs_property_keys() const override { return true; }
+private:
+    // Object state for pre-read property access with offset-based seeking
+    struct property_location { size_t offset; uint32_t size; };
+    struct object_state {
+        std::map<std::string, size_t> property_name_to_index;       // Name -> index (for out-of-order access)
+        std::vector<std::string> property_order;                     // Property names in order
+        std::vector<property_location> property_locations;           // Offsets/sizes in same order (O(1) index access)
+        size_t next_sequential_index = 0;
+        size_t end_object_pos = 0;
+    };
+    std::vector<object_state> object_stack_;
+    const script_value* current_property_value_ = nullptr;  // For pre-read script_values (jai_object_type)
+    uint32_t seek_size_ = 0;    // Size of value to read (for validation)
 
-    // Basic type deserialization
-    int8_t read_int8() override {
+public:
+    // Binary format properties (compile-time constants, no virtual dispatch)
+    static constexpr bool needs_property_keys = true;
+    static constexpr bool is_text_format = false;
+
+    // Basic type deserialization - check pre-read property first, then fall back to stream
+    int8_t read_int8() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return static_cast<int8_t>(val.as<script_int>());
+        }
         int8_t value;
         read_raw(&value, sizeof(value));
         return value;
     }
-    
-    int16_t read_int16() override {
+
+    int16_t read_int16() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return static_cast<int16_t>(val.as<script_int>());
+        }
         return read_little_endian<int16_t>();
     }
-    
-    int32_t read_int32() override {
+
+    int32_t read_int32() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return static_cast<int32_t>(val.as<script_int>());
+        }
         return read_little_endian<int32_t>();
     }
-    
-    int64_t read_int64() override {
+
+    int64_t read_int64() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return val.is_float() ? static_cast<int64_t>(val.as<script_float>()) : val.as<script_int>();
+        }
         return read_little_endian<int64_t>();
     }
-    
-    uint8_t read_uint8() override {
+
+    uint8_t read_uint8() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return static_cast<uint8_t>(val.as<script_int>());
+        }
         uint8_t value;
         read_raw(&value, sizeof(value));
         return value;
     }
-    
-    uint16_t read_uint16() override {
+
+    uint16_t read_uint16() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return static_cast<uint16_t>(val.as<script_int>());
+        }
         return read_little_endian<uint16_t>();
     }
-    
-    uint32_t read_uint32() override {
+
+    uint32_t read_uint32() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return static_cast<uint32_t>(val.as<script_int>());
+        }
         return read_little_endian<uint32_t>();
     }
-    
-    uint64_t read_uint64() override {
+
+    uint64_t read_uint64() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return static_cast<uint64_t>(val.as<script_int>());
+        }
         return read_little_endian<uint64_t>();
     }
-    
-    float read_float32() override {
-        uint32_t bits = read_uint32();
+
+    float read_float32() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return val.is_int() ? static_cast<float>(val.as<script_int>()) : static_cast<float>(val.as<script_float>());
+        }
+        uint32_t bits = read_little_endian<uint32_t>();
         float value;
         std::memcpy(&value, &bits, sizeof(value));
         return value;
     }
-    
-    double read_float64() override {
-        uint64_t bits = read_uint64();
+
+    double read_float64() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return val.is_int() ? static_cast<double>(val.as<script_int>()) : val.as<script_float>();
+        }
+        uint64_t bits = read_little_endian<uint64_t>();
         double value;
         std::memcpy(&value, &bits, sizeof(value));
         return value;
     }
-    
-    bool read_bool() override {
-        return read_uint8() != 0;
+
+    bool read_bool() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return val.as<script_bool>();
+        }
+        return read_uint8_raw() != 0;
     }
-    
-    std::string read_string() override {
-        uint32_t size = read_uint32();
-        if (size == 0) return "";
-        
-        std::string result(size, '\0');
-        read_raw(result.data(), size);
-        return result;
+
+    std::string read_string() {
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return val.as<script_string>();
+        }
+        return read_string_raw();
     }
-    
-    std::vector<uint8_t> read_binary(size_t expected_size) override {
-        uint32_t size = read_uint32();
+
+    std::vector<uint8_t> read_binary(size_t expected_size) {
+        uint32_t size = read_little_endian<uint32_t>();
         std::vector<uint8_t> result(size);
         if (size > 0) {
             read_raw(result.data(), size);
         }
         return result;
     }
-    
-    // Object/array structure
-    bool begin_object(std::string& type_name, uint32_t& version) override {
+
+    // Object/array structure - reads new format: count, names[], sizes[], values[]
+    bool begin_object(std::string& type_name, uint32_t& version) {
         if (pos_ >= data_.size()) return false;
-        
-        uint8_t marker = read_uint8();
+
+        uint8_t marker = read_uint8_raw();
         if (marker != 0x01) {
             throw runtime_error("Expected object marker, got " + std::to_string(marker));
         }
-        
-        type_name = read_string();
-        version = read_uint32();
+
+        type_name = read_string_raw();
+        version = read_little_endian<uint32_t>();
         version_ = version;
+
+        // Read property count
+        uint32_t prop_count = read_little_endian<uint32_t>();
+
+        // Pre-read all properties for out-of-order access
+        object_stack_.emplace_back();
+        auto& state = object_stack_.back();
+
+        // Read all property names
+        state.property_order.reserve(prop_count);
+        for (uint32_t i = 0; i < prop_count; ++i) {
+            state.property_order.push_back(read_string_raw());
+        }
+
+        // Read all property sizes
+        std::vector<uint32_t> sizes;
+        sizes.reserve(prop_count);
+        for (uint32_t i = 0; i < prop_count; ++i) {
+            sizes.push_back(read_little_endian<uint32_t>());
+        }
+
+        // Record base position for values, calculate offsets
+        // Store in both vector (O(1) index) and map (O(log n) name lookup)
+        size_t values_base = pos_;
+        size_t offset = 0;
+        state.property_locations.reserve(prop_count);
+        for (uint32_t i = 0; i < prop_count; ++i) {
+            state.property_locations.push_back({values_base + offset, sizes[i]});
+            state.property_name_to_index[state.property_order[i]] = i;
+            offset += sizes[i];
+        }
+
+        // Skip past all values to find end_object marker position
+        state.end_object_pos = values_base + offset;
         return true;
     }
-    
-    void end_object() override {
-        uint8_t marker = read_uint8();
+
+    void end_object() {
+        if (!object_stack_.empty()) {
+            pos_ = object_stack_.back().end_object_pos;
+            object_stack_.pop_back();
+        }
+        uint8_t marker = read_uint8_raw();
         if (marker != 0x02) {
             throw runtime_error("Expected end object marker, got " + std::to_string(marker));
         }
+        current_property_value_ = nullptr;
     }
-    
-    size_t begin_array() override {
+
+    size_t begin_array() {
         uint8_t marker = read_uint8();
         if (marker != 0x03) {
             throw runtime_error("Expected array marker, got " + std::to_string(marker));
         }
         return read_uint32();
     }
-    
-    void end_array() override {
+
+    void end_array() {
         uint8_t marker = read_uint8();
         if (marker != 0x04) {
             throw runtime_error("Expected end array marker, got " + std::to_string(marker));
         }
     }
-    
-    bool read_property_name(std::string& name) override {
+
+    bool read_property_name(std::string& name) {
         if (pos_ >= data_.size()) return false;
         name = read_string();
         return true;
     }
 
     // Map deserialization - Binary reads from array of key-value pairs
-    size_t begin_map() override {
+    size_t begin_map() {
         if (pos_ >= data_.size()) return 0;
 
         uint8_t marker = read_uint8();
@@ -487,26 +648,180 @@ public:
         return size;
     }
 
-    void end_map() override {
+    void end_map() {
         uint8_t marker = read_uint8();
         if (marker != 0x06) {
             throw serialization_error("Expected end map marker (0x06)");
         }
     }
 
-    bool read_map_key(std::string& key) override {
+    bool read_map_key(std::string& key) {
         if (pos_ >= data_.size()) return false;
         key = read_string();
         return true;
     }
 
-    bool has_property(const std::string& name) override {
-        // In binary format, properties are stored in order
-        // This is a simplified implementation
+    bool has_property(const std::string& name) {
+        // Check in pre-read property name index
+        if (!object_stack_.empty()) {
+            return object_stack_.back().property_name_to_index.find(name) != object_stack_.back().property_name_to_index.end();
+        }
+        return false;
+    }
+
+    // Pre-read property access - returns count from current object context
+    size_t get_object_property_count() const {
+        if (object_stack_.empty()) return 0;
+        return object_stack_.back().property_order.size();
+    }
+
+    // Pre-read property access - returns names from current object context
+    const std::vector<std::string>& get_object_property_names() const {
+        if (object_stack_.empty()) {
+            static const std::vector<std::string> empty;
+            return empty;
+        }
+        return object_stack_.back().property_order;
+    }
+
+    // Efficient property access by index - O(1) direct vector access
+    // Returns true if successful, false if index out of range
+    // This is the fast path when iterating through properties in order
+    bool seek_property_by_index(size_t index) {
+        current_property_value_ = nullptr;
+        seek_size_ = 0;
+
+        if (object_stack_.empty()) return false;
+        auto& state = object_stack_.back();
+
+        if (index >= state.property_locations.size()) return false;
+
+        const auto& loc = state.property_locations[index];
+        pos_ = loc.offset;
+        seek_size_ = loc.size;
+        state.next_sequential_index = index + 1;
         return true;
     }
 
-    script_value read_value() override {
+    // Efficient property access by index with name validation
+    // Returns true if successful and name matches, false otherwise
+    bool seek_property_by_index(size_t index, const std::string& expected_name) {
+        current_property_value_ = nullptr;
+        seek_size_ = 0;
+
+        if (object_stack_.empty()) return false;
+        auto& state = object_stack_.back();
+
+        if (index >= state.property_locations.size()) return false;
+
+        // Validate the name matches what we expect
+        if (state.property_order[index] != expected_name) return false;
+
+        const auto& loc = state.property_locations[index];
+        pos_ = loc.offset;
+        seek_size_ = loc.size;
+        state.next_sequential_index = index + 1;
+        return true;
+    }
+
+    // Seek to a specific property by name using offset-based seeking
+    // Fast path: if properties are in saved order, sequential access works
+    // Slow path: fall back to map lookup for out-of-order access or versioning
+    bool seek_property(const std::string& name) {
+        current_property_value_ = nullptr;
+        seek_size_ = 0;
+
+        if (object_stack_.empty()) {
+            // Not in object context - binary format requires begin_object first
+            throw serialization_error("Binary seek_property called outside object context for '" + name + "'");
+        }
+
+        auto& state = object_stack_.back();
+
+        // Fast path: check if next sequential property matches
+        if (state.next_sequential_index < state.property_order.size()) {
+            const std::string& next_prop = state.property_order[state.next_sequential_index];
+            if (next_prop == name) {
+                // Sequential match - use O(1) index access
+                const auto& loc = state.property_locations[state.next_sequential_index];
+                pos_ = loc.offset;
+                seek_size_ = loc.size;
+                state.next_sequential_index++;
+                return true;
+            }
+        }
+
+        // Slow path: lookup by name in map (handles out-of-order access and versioning)
+        auto it = state.property_name_to_index.find(name);
+        if (it == state.property_name_to_index.end()) {
+            // Property not found - this is OK for versioning (new property in newer code)
+            return false;
+        }
+
+        // Seek to the property's offset using O(1) index access
+        const auto& loc = state.property_locations[it->second];
+        pos_ = loc.offset;
+        seek_size_ = loc.size;
+        return true;
+    }
+
+    script_value read_value() {
+        // If we have a pre-read property value, return it directly
+        if (current_property_value_) {
+            auto val = *current_property_value_;
+            current_property_value_ = nullptr;
+            return val;
+        }
+
+        // Otherwise read from stream using internal method
+        return read_value_internal();
+    }
+
+private:
+    std::vector<uint8_t> data_;
+    size_t pos_;
+
+    void read_raw(void* dest, size_t size) {
+        if (pos_ + size > data_.size()) {
+            throw runtime_error("Binary archive read past end of data");
+        }
+        std::memcpy(dest, data_.data() + pos_, size);
+        pos_ += size;
+    }
+
+    template<typename T>
+    T read_little_endian() {
+        static_assert(std::is_integral_v<T>, "Only for integral types");
+
+        uint8_t bytes[sizeof(T)];
+        read_raw(bytes, sizeof(T));
+
+        T value = 0;
+        for (size_t i = 0; i < sizeof(T); ++i) {
+            value |= static_cast<T>(bytes[i]) << (i * 8);
+        }
+        return value;
+    }
+
+    // Raw read methods that always read from stream (for pre-reading phase)
+    uint8_t read_uint8_raw() {
+        uint8_t value;
+        read_raw(&value, sizeof(value));
+        return value;
+    }
+
+    std::string read_string_raw() {
+        uint32_t size = read_little_endian<uint32_t>();
+        if (size == 0) return "";
+
+        std::string result(size, '\0');
+        read_raw(result.data(), size);
+        return result;
+    }
+
+    // Internal read_value that always reads from stream (used during pre-read phase)
+    // This is the same logic as read_value() but doesn't check current_property_value_
+    script_value read_value_internal() {
         // Track depth - throws on overflow (hard failure, no partial data)
         depth_guard guard(current_depth_);
 
@@ -517,7 +832,7 @@ public:
         }
 
         // Read type tag first
-        uint8_t type_tag = read_uint8();
+        uint8_t type_tag = read_uint8_raw();
         script_value_type vtype = static_cast<script_value_type>(type_tag);
 
         switch (vtype) {
@@ -525,61 +840,60 @@ public:
                 return script_value(std::monostate{}, eng);
 
             case script_value_type::jai_bool_type:
-                return script_value(read_bool(), eng);
+                return script_value(read_uint8_raw() != 0, eng);
 
             case script_value_type::jai_int_type:
-                return script_value(read_int64(), eng);
+                return script_value(read_little_endian<int64_t>(), eng);
 
-            case script_value_type::jai_float_type:
-                return script_value(read_float64(), eng);
+            case script_value_type::jai_float_type: {
+                uint64_t bits = read_little_endian<uint64_t>();
+                double value;
+                std::memcpy(&value, &bits, sizeof(value));
+                return script_value(value, eng);
+            }
 
             case script_value_type::jai_string_type:
-                return script_value(read_string(), eng);
+                return script_value(read_string_raw(), eng);
 
             case script_value_type::jai_char_type:
-                return script_value(static_cast<script_char>(read_uint8()), eng);
+                return script_value(static_cast<script_char>(read_uint8_raw()), eng);
 
             case script_value_type::jai_array_type: {
-                uint32_t size = read_uint32();
+                uint32_t size = read_little_endian<uint32_t>();
                 script_value array_val = script_value::make_array(nullptr, eng);
                 auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
 
                 for (uint32_t i = 0; i < size; ++i) {
-                    arr.push_back(read_value());  // Recursive deserialization
+                    arr.push_back(read_value_internal());
                 }
                 return array_val;
             }
 
             case script_value_type::jai_map_type: {
-                uint32_t size = read_uint32();
+                uint32_t size = read_little_endian<uint32_t>();
                 script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
 
                 for (uint32_t i = 0; i < size; ++i) {
-                    script_value key = read_value();
-                    script_value value = read_value();
+                    script_value key = read_value_internal();
+                    script_value value = read_value_internal();
                     map.insert_or_assign(key, value);
                 }
                 return map_val;
             }
 
             case script_value_type::jai_weak_ptr_type: {
-                // Read the shared_ptr ID this weak_ptr references
-                uint32_t id = read_uint32();
+                uint32_t id = read_little_endian<uint32_t>();
 
                 if (id == 0) {
-                    // Null or expired weak_ptr - create empty weak_ptr
                     script_value v(std::monostate{}, eng);
                     v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
                     v.storage_ = jai::weaker_ptr<script_value::object_holder>();
                     return v;
                 }
 
-                // Check if we've already reconstructed this object
                 script_value existing_obj = get_shared_ptr(id);
-
                 if (!existing_obj.is_invalid()) {
-                    // Object was already reconstructed, get its object_holder and create weak_ptr
                     auto obj_holder = existing_obj.get_object_holder();
                     if (obj_holder) {
                         script_value weak_val(std::monostate{}, eng);
@@ -589,94 +903,72 @@ public:
                     }
                 }
 
-                // First time seeing this ID - need to deserialize the object
-                script_value obj_val = read_value();  // Recursively read the object (already properly wrapped)
-
-                // Register the object for future references
+                script_value obj_val = read_value_internal();
                 register_shared_ptr(id, obj_val);
 
-                // Get the object_holder from the deserialized object
                 auto obj_holder = obj_val.get_object_holder();
                 if (!obj_holder) {
-                    // Object doesn't have an object_holder (shouldn't happen for valid objects)
                     throw std::runtime_error("Deserialized weak_ptr object has no object_holder");
                 }
 
-                // Create weak_ptr to the object_holder
                 script_value weak_val(std::monostate{}, eng);
                 weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
                 weak_val.storage_ = jai::weaker_ptr<script_value::object_holder>(obj_holder);
                 return weak_val;
             }
-            
-            case script_value_type::jai_object_type: {
-                // Read self-describing object: type name + version + property names array + values
-                std::string type_name = read_string();
-                uint32_t version = read_uint32();
-                uint32_t property_count = read_uint32();
 
-                // Read ALL property names first (binary format stores them separately)
+            case script_value_type::jai_object_type: {
+                std::string type_name = read_string_raw();
+                uint32_t version = read_little_endian<uint32_t>();
+                uint32_t property_count = read_little_endian<uint32_t>();
+
                 std::vector<std::string> property_names;
                 property_names.reserve(property_count);
                 for (uint32_t i = 0; i < property_count; ++i) {
-                    property_names.push_back(read_string());
+                    property_names.push_back(read_string_raw());
                 }
 
-                // Read ALL property values
                 std::vector<script_value> property_values;
                 property_values.reserve(property_count);
                 for (uint32_t i = 0; i < property_count; ++i) {
-                    property_values.push_back(read_value());
+                    property_values.push_back(read_value_internal());
                 }
 
-                // Build a map of pre-read properties for factory access
                 std::map<std::string, script_value> preread_props;
                 for (uint32_t i = 0; i < property_count; ++i) {
                     preread_props[property_names[i]] = property_values[i];
                 }
 
-                // Check if there's a custom factory for this type
-                // eng is already set at the start of read_value()
                 const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
                 if (metadata && metadata->custom_construct) {
-                    // Set pre-read properties so factory can access them via read_property
                     set_preread_properties(preread_props);
-
-                    // Use custom factory for construction with proper version
-                    script_value constructed_obj = metadata->custom_construct(*this, version);
-
-                    // Clear pre-read properties
+                    any_archive_reader any_ar(*this);
+                    script_value constructed_obj = metadata->custom_construct(any_ar, version);
                     clear_preread_properties();
 
-                    // Now hydrate the object's properties (all properties already read above)
                     auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
                     if (instance) {
                         auto class_def = instance->get_class_definition();
                         if (class_def) {
-                            // Set each property from pre-read values
                             auto class_eng = class_def->get_engine();
                             if (class_eng) {
                                 for (uint32_t i = 0; i < property_count; ++i) {
                                     const auto& prop_name = property_names[i];
                                     const auto& prop_value = property_values[i];
 
-                                    // Try to find setter
                                     uint64_t setter_id = class_eng->symbolize("_set_" + prop_name);
                                     auto setter = class_def->get_method(setter_id);
                                     if (setter.type() == script_value_type::jai_function_type) {
                                         try {
                                             std::vector<script_value> args = {constructed_obj, prop_value};
-                                            (void)setter.as_function()(args);  // Explicitly discard return value
+                                            (void)setter.as_function()(args);
                                         } catch (...) {
-                                            // Skip properties that fail to set
                                         }
                                     }
                                 }
 
-                                // Call post_deserialize hook if it exists
-                                // Pass both the object and the version number for migration logic
                                 uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
-                                auto post_deserialize = class_def->get_method(post_deserialize_id, false);  // Don't throw if not found
+                                auto post_deserialize = class_def->get_method(post_deserialize_id, false);
                                 if (post_deserialize.type() == script_value_type::jai_function_type) {
                                     try {
                                         std::vector<script_value> args = {
@@ -685,7 +977,6 @@ public:
                                         };
                                         (void)post_deserialize.as_function()(args);
                                     } catch (...) {
-                                        // Hook failed, but continue
                                     }
                                 }
                             }
@@ -695,52 +986,22 @@ public:
                     return constructed_obj;
                 }
 
-                // No custom factory - use default deserialization path
-                // Convert to map for reconstruction by from_binary
                 script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
 
-                // Add type information
                 map.insert_or_assign(script_value("_type_", eng), script_value(type_name, eng));
 
-                // Add properties in the order they were serialized
                 for (uint32_t i = 0; i < property_count; ++i) {
                     map.insert_or_assign(script_value(property_names[i], eng), property_values[i]);
                 }
 
-                return map_val;  // Return as map for reconstruction by from_binary
+                return map_val;
             }
-            
+
             default:
-                throw serialization_error("Unsupported type tag in binary deserialization: " + 
+                throw serialization_error("Unsupported type tag in binary deserialization: " +
                                         std::to_string(type_tag));
         }
-    }
-
-private:
-    std::vector<uint8_t> data_;
-    size_t pos_;
-    
-    void read_raw(void* dest, size_t size) {
-        if (pos_ + size > data_.size()) {
-            throw runtime_error("Binary archive read past end of data");
-        }
-        std::memcpy(dest, data_.data() + pos_, size);
-        pos_ += size;
-    }
-    
-    template<typename T>
-    T read_little_endian() {
-        static_assert(std::is_integral_v<T>, "Only for integral types");
-        
-        uint8_t bytes[sizeof(T)];
-        read_raw(bytes, sizeof(T));
-        
-        T value = 0;
-        for (size_t i = 0; i < sizeof(T); ++i) {
-            value |= static_cast<T>(bytes[i]) << (i * 8);
-        }
-        return value;
     }
 };
 

@@ -3,6 +3,7 @@
 
 #include "sprite.h"
 #include "MV/Interface/tapDevice.h"
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene {
@@ -27,19 +28,29 @@ namespace MV {
 
 			virtual void defaultDrawImplementation() override;
 
-			template <class Archive>
+			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					Sprite::save(archive, 0);
+				} else {
+					archive(
+						cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
+					);
+				}
 			}
 
-			template <class Archive>
-			void load(Archive & archive, std::uint32_t const version) {
-				save(archive, version);
+			template<class Archive>
+			void load(Archive & archive, std::uint32_t const /*version*/) {
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					Sprite::load(archive, 0);
+				} else {
+					archive(
+						cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
+					);
+				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Stencil> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);

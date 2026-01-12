@@ -9,33 +9,35 @@
 namespace jai {
 namespace serialization {
 
-class json_archive_writer : public archive_writer {
+// JSON archive writer (CRTP, no virtual dispatch)
+class json_archive_writer : public archive_writer_impl<json_archive_writer> {
 public:
-    json_archive_writer(int indent = 2) : archive_writer(), indent_(indent), current_depth_(0) {}
-    json_archive_writer(int indent, engine* eng) : archive_writer(eng), indent_(indent), current_depth_(0) {}
-    explicit json_archive_writer(engine* eng) : archive_writer(eng), indent_(2), current_depth_(0) {}
+    json_archive_writer(int indent = 2) : archive_writer_impl<json_archive_writer>(), indent_(indent), json_depth_(0) {}
+    json_archive_writer(int indent, engine* eng) : archive_writer_impl<json_archive_writer>(eng), indent_(indent), json_depth_(0) {}
+    explicit json_archive_writer(engine* eng) : archive_writer_impl<json_archive_writer>(eng), indent_(2), json_depth_(0) {}
 
-    // JSON doesn't need explicit property keys array (object keys are self-describing)
-    bool needs_property_keys() const override { return false; }
+    // JSON format properties (compile-time constants, no virtual dispatch)
+    static constexpr bool needs_property_keys = false;
+    static constexpr bool is_text_format = true;
 
-    // Basic type serialization
-    void write_int8(int8_t value) override { write_json_value(value); }
-    void write_int16(int16_t value) override { write_json_value(value); }
-    void write_int32(int32_t value) override { write_json_value(value); }
-    void write_int64(int64_t value) override { write_json_value(value); }
-    void write_uint8(uint8_t value) override { write_json_value(value); }
-    void write_uint16(uint16_t value) override { write_json_value(value); }
-    void write_uint32(uint32_t value) override { write_json_value(value); }
-    void write_uint64(uint64_t value) override { write_json_value(value); }
-    void write_float32(float value) override { write_json_value(value); }
-    void write_float64(double value) override { write_json_value(value); }
-    void write_bool(bool value) override { write_json_value(value); }
-    
-    void write_string(const std::string& value) override {
+    // Basic type serialization - non-virtual
+    void write_int8(int8_t value) { write_json_value(value); }
+    void write_int16(int16_t value) { write_json_value(value); }
+    void write_int32(int32_t value) { write_json_value(value); }
+    void write_int64(int64_t value) { write_json_value(value); }
+    void write_uint8(uint8_t value) { write_json_value(value); }
+    void write_uint16(uint16_t value) { write_json_value(value); }
+    void write_uint32(uint32_t value) { write_json_value(value); }
+    void write_uint64(uint64_t value) { write_json_value(value); }
+    void write_float32(float value) { write_json_value(value); }
+    void write_float64(double value) { write_json_value(value); }
+    void write_bool(bool value) { write_json_value(value); }
+
+    void write_string(const std::string& value) {
         write_json_value('"' + escape_json_string_local(value) + '"');
     }
-    
-    void write_binary(const void* data, size_t size) override {
+
+    void write_binary(const void* data, size_t size) {
         // Encode binary as base64 or hex string
         std::ostringstream oss;
         oss << '"';
@@ -46,9 +48,9 @@ public:
         oss << '"';
         write_json_value(oss.str());
     }
-    
-    // Object/array structure
-    void begin_object(const std::string& type_name, uint32_t version) override {
+
+    // Object/array structure - non-virtual
+    void begin_object(const std::string& type_name, uint32_t version) {
         // Only add comma if we're in an array (not object, since write_property_name handles that)
         if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
             oss_ << ',';
@@ -56,10 +58,10 @@ public:
         write_newline();
         write_indent();
         oss_ << '{';
-        current_depth_++;
+        json_depth_++;
         container_stack_.push(ContainerType::Object);
         first_in_container_.push(true);
-        
+
         // Write _type_ and _version_ metadata
         write_property_name("_type_");
         write_string(type_name);
@@ -68,9 +70,9 @@ public:
             write_uint32(version);
         }
     }
-    
-    void end_object() override {
-        current_depth_--;
+
+    void end_object() {
+        json_depth_--;
         container_stack_.pop();
         first_in_container_.pop();
         write_newline();
@@ -80,8 +82,8 @@ public:
             first_in_container_.top() = false;
         }
     }
-    
-    void begin_array(size_t size) override {
+
+    void begin_array(size_t size) {
         // Only add comma if we're in an array (not object, since write_property_name handles that)
         if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
             oss_ << ',';
@@ -89,13 +91,13 @@ public:
         write_newline();
         write_indent();
         oss_ << '[';
-        current_depth_++;
+        json_depth_++;
         container_stack_.push(ContainerType::Array);
         first_in_container_.push(true);
     }
-    
-    void end_array() override {
-        current_depth_--;
+
+    void end_array() {
+        json_depth_--;
         container_stack_.pop();
         first_in_container_.pop();
         write_newline();
@@ -105,8 +107,8 @@ public:
             first_in_container_.top() = false;
         }
     }
-    
-    void write_property_name(const std::string& name) override {
+
+    void write_property_name(const std::string& name) {
         if (!first_in_container_.top()) {
             oss_ << ',';
         }
@@ -117,7 +119,7 @@ public:
     }
 
     // Map serialization - JSON uses native object format
-    void begin_map(size_t size) override {
+    void begin_map(size_t size) {
         // Same as begin_array but we'll write it as an object
         if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
             oss_ << ',';
@@ -125,13 +127,13 @@ public:
         write_newline();
         write_indent();
         oss_ << '{';
-        current_depth_++;
+        json_depth_++;
         container_stack_.push(ContainerType::Object);
         first_in_container_.push(true);
     }
 
-    void end_map() override {
-        current_depth_--;
+    void end_map() {
+        json_depth_--;
         container_stack_.pop();
         first_in_container_.pop();
         write_newline();
@@ -142,7 +144,7 @@ public:
         }
     }
 
-    void write_map_key(const std::string& key) override {
+    void write_map_key(const std::string& key) {
         // Same as write_property_name
         if (!first_in_container_.top()) {
             oss_ << ',';
@@ -153,7 +155,7 @@ public:
         first_in_container_.top() = false;
     }
 
-    void write_value(const script_value& value) override {
+    void write_value(const script_value& value) {
         // Track depth - throws on overflow (hard failure, no partial data)
         depth_guard guard(current_depth_);
 
@@ -420,16 +422,16 @@ private:
     }
     
     int indent_;
-    int current_depth_;
+    int json_depth_;  // JSON nesting depth (separate from serialization depth tracking in base)
     std::ostringstream oss_;
     std::stack<ContainerType> container_stack_;
     std::stack<bool> first_in_container_;
-    
+
     bool in_container() const { return !container_stack_.empty(); }
-    
+
     void write_indent() {
         if (indent_ > 0) {
-            oss_ << std::string(current_depth_ * indent_, ' ');
+            oss_ << std::string(json_depth_ * indent_, ' ');
         }
     }
     
@@ -468,11 +470,12 @@ private:
     }
 };
 
-class json_archive_reader : public archive_reader {
+// JSON archive reader (CRTP, no virtual dispatch)
+class json_archive_reader : public archive_reader_impl<json_archive_reader> {
 public:
     // Engine is REQUIRED for JSON reading since we need to create script_values
     json_archive_reader(const std::string& json_string, engine* eng)
-        : archive_reader(eng), json_(json_string), pos_(0) {
+        : archive_reader_impl<json_archive_reader>(eng), json_(json_string), pos_(0) {
         if (!eng) {
             throw serialization_error("json_archive_reader requires a valid engine reference");
         }
@@ -481,26 +484,27 @@ public:
         path_stack_.push_back("");
     }
 
-    virtual ~json_archive_reader() = default;
+    ~json_archive_reader() = default;
 
-    // JSON doesn't need explicit property keys array (object keys are self-describing)
-    bool needs_property_keys() const override { return false; }
+    // JSON format properties (compile-time constants, no virtual dispatch)
+    static constexpr bool needs_property_keys = false;
+    static constexpr bool is_text_format = true;
 
-    // Basic type deserialization
-    int8_t read_int8() override { return static_cast<int8_t>(read_value().as<script_int>()); }
-    int16_t read_int16() override { return static_cast<int16_t>(read_value().as<script_int>()); }
-    int32_t read_int32() override { return static_cast<int32_t>(read_value().as<script_int>()); }
-    int64_t read_int64() override { return read_value().as<script_int>(); }
-    uint8_t read_uint8() override { return static_cast<uint8_t>(read_value().as<script_int>()); }
-    uint16_t read_uint16() override { return static_cast<uint16_t>(read_value().as<script_int>()); }
-    uint32_t read_uint32() override { return static_cast<uint32_t>(read_value().as<script_int>()); }
-    uint64_t read_uint64() override { return static_cast<uint64_t>(read_value().as<script_int>()); }
-    float read_float32() override { return static_cast<float>(read_value().as<script_float>()); }
-    double read_float64() override { return read_value().as<script_float>(); }
-    bool read_bool() override { return read_value().as<script_bool>(); }
-    std::string read_string() override { return read_value().as<script_string>(); }
-    
-    std::vector<uint8_t> read_binary(size_t size) override {
+    // Basic type deserialization - non-virtual
+    int8_t read_int8() { return static_cast<int8_t>(read_value().as<script_int>()); }
+    int16_t read_int16() { return static_cast<int16_t>(read_value().as<script_int>()); }
+    int32_t read_int32() { return static_cast<int32_t>(read_value().as<script_int>()); }
+    int64_t read_int64() { return read_value().as<script_int>(); }
+    uint8_t read_uint8() { return static_cast<uint8_t>(read_value().as<script_int>()); }
+    uint16_t read_uint16() { return static_cast<uint16_t>(read_value().as<script_int>()); }
+    uint32_t read_uint32() { return static_cast<uint32_t>(read_value().as<script_int>()); }
+    uint64_t read_uint64() { return static_cast<uint64_t>(read_value().as<script_int>()); }
+    float read_float32() { return static_cast<float>(read_value().as<script_float>()); }
+    double read_float64() { return read_value().as<script_float>(); }
+    bool read_bool() { return read_value().as<script_bool>(); }
+    std::string read_string() { return read_value().as<script_string>(); }
+
+    std::vector<uint8_t> read_binary(size_t size) {
         std::string hex_str = read_value().as<script_string>();
         std::vector<uint8_t> result;
         for (size_t i = 0; i < hex_str.length(); i += 2) {
@@ -510,9 +514,9 @@ public:
         }
         return result;
     }
-    
-    // Object/array structure
-    bool begin_object(std::string& type_name, uint32_t& version) override {
+
+    // Object/array structure - non-virtual
+    bool begin_object(std::string& type_name, uint32_t& version) {
         // Determine which value to check
         const script_value* value_to_check = nullptr;
 
@@ -570,14 +574,14 @@ public:
 
         return true;
     }
-    
-    void end_object() override {
+
+    void end_object() {
         if (!object_stack_.empty()) {
             object_stack_.pop();
         }
     }
-    
-    size_t begin_array() override {
+
+    size_t begin_array() {
         // Determine which value to check
         const script_value* value_to_check = nullptr;
 
@@ -609,14 +613,14 @@ public:
 
         return arr.size();
     }
-    
-    void end_array() override {
+
+    void end_array() {
         if (!array_stack_.empty()) {
             array_stack_.pop();
         }
     }
-    
-    bool read_property_name(std::string& name) override {
+
+    bool read_property_name(std::string& name) {
         if (object_stack_.empty()) {
             return false;
         }
@@ -639,7 +643,7 @@ public:
     }
 
     // Map deserialization - JSON reads from native object format
-    size_t begin_map() override {
+    size_t begin_map() {
         // Use same logic as begin_object but without type/version reading
         const script_value* value_to_check = nullptr;
 
@@ -668,13 +672,13 @@ public:
         return map.size();
     }
 
-    void end_map() override {
+    void end_map() {
         if (!object_stack_.empty()) {
             object_stack_.pop();
         }
     }
 
-    bool read_map_key(std::string& key) override {
+    bool read_map_key(std::string& key) {
         // Same as read_property_name but without filtering metadata
         if (object_stack_.empty()) {
             return false;
@@ -692,7 +696,7 @@ public:
         return false;
     }
 
-    bool has_property(const std::string& name) override {
+    bool has_property(const std::string& name) {
         if (object_stack_.empty()) {
             return false;
         }
@@ -706,8 +710,51 @@ public:
         const auto& obj_state = object_stack_.top();
         return obj_state.map.find(script_value(name, eng)) != obj_state.map.end();
     }
-    
-    script_value read_value() override {
+
+    // Seek to a specific property by name
+    // Fast path: if properties are in sorted order, sequential access works
+    // Slow path: fall back to map lookup for out-of-order access
+    bool seek_property(const std::string& name) {
+        if (object_stack_.empty()) {
+            return false;
+        }
+
+        // Get engine reference for creating script_values
+        auto eng = engine_ref_;
+        if (!eng) {
+            throw serialization_error("Engine reference expired during JSON deserialization");
+        }
+
+        auto& obj_state = object_stack_.top();
+
+        // Fast path: check if current iterator matches (skip metadata)
+        while (obj_state.current != obj_state.map.end()) {
+            const std::string& prop_name = obj_state.current->first.as_string();
+            if (prop_name == "_type_" || prop_name == "_version_") {
+                ++obj_state.current;
+                continue;
+            }
+            // Check if this is the property we want
+            if (prop_name == name) {
+                current_property_value_ = &obj_state.current->second;
+                ++obj_state.current;
+                return true;
+            }
+            // Not a match - properties are out of order, use slow path
+            break;
+        }
+
+        // Slow path: lookup by name in map
+        auto it = obj_state.map.find(script_value(name, eng));
+        if (it == obj_state.map.end()) {
+            return false;
+        }
+
+        current_property_value_ = &it->second;
+        return true;
+    }
+
+    script_value read_value() {
         // Track depth - throws on overflow (hard failure, no partial data)
         depth_guard guard(current_depth_);
 

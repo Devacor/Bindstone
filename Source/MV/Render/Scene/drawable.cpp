@@ -3,9 +3,8 @@
 #include "MV/Utility/scopeGuard.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include <jaiscript/properties/property_cereal.hpp>
+#include "MV/Serialization/property_cereal.hpp"
 #include <jaiscript/serialization/archive.hpp>
-#include "MV/Render/mv_jai_serialization.hpp"
 
 #include "MV/Utility/log.h"
 
@@ -549,33 +548,6 @@ namespace MV {
 			}
 		}
 
-		// JaiScript serialization for Anchors
-		void save(jai::serialization::archive_writer& ar, const Anchors& anchors) {
-			// Save parent ID if we have a parent
-			std::string parentId;
-			if (auto lockedParent = anchors.parentReference.lock()) {
-				parentId = lockedParent->id();
-			}
-			ar.write_string(parentId);
-
-			// Save the anchor data using MV serialization functions
-			MV::save(ar, anchors.parentAnchors);
-			MV::save(ar, anchors.ourOffset);
-			MV::save(ar, anchors.pivotPercent);
-			ar.write_bool(anchors.applyingPosition);
-		}
-
-		void load(jai::serialization::archive_reader& ar, Anchors& anchors) {
-			// Load parent ID for later reconnection
-			anchors.parentIdLoaded = ar.read_string();
-
-			// Load the anchor data using MV serialization functions
-			MV::load(ar, anchors.parentAnchors);
-			MV::load(ar, anchors.ourOffset);
-			MV::load(ar, anchors.pivotPercent);
-			anchors.applyingPosition = ar.read_bool();
-
-			// Parent reconnection happens during postLoadInitialize()
-		}
+		// JaiScript serialization for Anchors is now inline templated in drawable.h
 	}
 }

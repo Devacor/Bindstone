@@ -14,7 +14,7 @@ namespace MV {
 		virtual bool update(Task& a_self, double) override { return a_self.localElapsed() < seconds; }
 
 	protected:
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {
 			archive(CEREAL_NVP(seconds), cereal::make_nvp("ActionBase", cereal::base_class<ActionBase>(this)));
 		}
@@ -31,7 +31,7 @@ namespace MV {
 
 		bool update(Task&, double) override { return totalFrames++ < targetFrames; }
 	protected:
-		template <class Archive>
+		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {
 			archive(CEREAL_NVP(targetFrames), CEREAL_NVP(totalFrames), cereal::make_nvp("ActionBase", cereal::base_class<ActionBase>(this)));
 		}

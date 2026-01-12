@@ -8,11 +8,6 @@
 #include "Game/player.h"
 #include "MV/Serialization/serialize.h"
 
-CEREAL_REGISTER_TYPE(CreatePlayer);
-CEREAL_REGISTER_TYPE(LoginRequest);
-CEREAL_REGISTER_TYPE(FindMatchRequest);
-CEREAL_REGISTER_TYPE(ExpectedPlayersNoted);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_accountactions);
 
 #ifdef BINDSTONE_SERVER
 std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
@@ -103,12 +98,12 @@ std::string CreatePlayer::makeSaveString() {
 
 	newPlayer.wallet.add(Wallet::CurrencyType::SOFT, DEFAULT_SOFT_CURRENCY);
 	newPlayer.wallet.add(Wallet::CurrencyType::HARD, DEFAULT_HARD_CURRENCY);
-	return MV::toJsonInline(newPlayer);
+	return MV::toJsonInline(newPlayer, MV::Services::instance());
 }
 
 std::string CreatePlayer::makeServerSaveString() {
 	ServerPlayer newPlayer;
-	return MV::toJsonInline(newPlayer);
+	return MV::toJsonInline(newPlayer, MV::Services::instance());
 }
 
 #ifdef BINDSTONE_SERVER

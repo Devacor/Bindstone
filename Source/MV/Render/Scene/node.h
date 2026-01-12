@@ -7,8 +7,9 @@ namespace MV {
 
 	namespace Scene {
 
-		class Node : public std::enable_shared_from_this<Node> {
+		class Node : public jai::property_owner<Node>, public std::enable_shared_from_this<Node> {
 			friend cereal::access;
+			friend jai::access;
 			friend Component;
 
 			struct LoadOptions {
@@ -173,11 +174,22 @@ namespace MV {
 			static std::shared_ptr<Node> load(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
 			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
 
+			// Cereal-based load (matches save() format)
+			static std::shared_ptr<Node> loadCereal(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> loadCereal(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
+
 			std::shared_ptr<Node> save(const std::string &a_filename, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> save(const std::string &a_filename, const std::string &a_overrideId);
 
 			std::shared_ptr<Node> saveBinary(const std::string &a_filename, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> saveBinary(const std::string &a_filename, const std::string &a_overrideId);
+
+			// JaiScript serialization
+			std::shared_ptr<Node> saveJai(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile = true);
+			std::shared_ptr<Node> saveJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId);
+			static std::shared_ptr<Node> loadJai(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> loadJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
+			std::shared_ptr<Node> loadChildJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId = "");
 
 			std::shared_ptr<Node> make(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId = "");
 			std::shared_ptr<Node> loadChild(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId = "");
@@ -193,7 +205,7 @@ namespace MV {
 			SafeComponent<ComponentType> attach(std::shared_ptr<ComponentType> a_component) {
 				auto self = shared_from_this();
 				a_component->detach();
-				childComponents.push_back(a_component);
+				childComponents->push_back(a_component);
 				a_component->reattached(self);
 				onAttachSignal(a_component);
 				return SafeComponent<ComponentType>(self, a_component);
@@ -203,7 +215,7 @@ namespace MV {
 			SafeComponent<ComponentType> attach() {
 				auto self = shared_from_this();
 				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(self));
-				childComponents.push_back(newComponent);
+				childComponents->push_back(newComponent);
 				newComponent->initialize();
 				onAttachSignal(newComponent);
 				return SafeComponent<ComponentType>(self, newComponent);
@@ -213,7 +225,7 @@ namespace MV {
 			SafeComponent<ComponentType> attach(Args&&... a_arguments){
 				auto self = shared_from_this();
 				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(self, std::forward<Args>(a_arguments)...));
-				childComponents.push_back(newComponent);
+				childComponents->push_back(newComponent);
 				newComponent->initialize();
 				onAttachSignal(newComponent);
 				return SafeComponent<ComponentType>(self, newComponent);
@@ -223,11 +235,11 @@ namespace MV {
 			std::shared_ptr<Node> detach(bool a_exactType = true, bool a_throwIfNotFound = true) {
 				auto self = shared_from_this();
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
-				if (foundComponent != childComponents.end()) {
+				if (foundComponent != childComponents->end()) {
 					auto sharedComponent = (*foundComponent);
 					auto originalOwner = sharedComponent->componentOwner;
 					sharedComponent->detachImplementation();
-					childComponents.erase(foundComponent);
+					childComponents->erase(foundComponent);
 					onDetachSignal(sharedComponent);
 					if (sharedComponent->componentOwner.lock() == originalOwner.lock()) {
 						sharedComponent->componentOwner.reset();
@@ -239,12 +251,12 @@ namespace MV {
 			template<typename ComponentType>
 			std::shared_ptr<Node> detach(std::shared_ptr<ComponentType> a_component) {
 				auto self = shared_from_this();
-				auto found = std::find(childComponents.begin(), childComponents.end(), a_component);
-				if (found != childComponents.end()) {
+				auto found = std::find(childComponents->begin(), childComponents->end(), a_component);
+				if (found != childComponents->end()) {
 					auto sharedComponent = *found;
 					auto originalOwner = sharedComponent->componentOwner.get();
 					sharedComponent->detachImplementation();
-					childComponents.erase(found);
+					childComponents->erase(found);
 					onDetachSignal(a_component);
 					if (sharedComponent->componentOwner->lock() == originalOwner.lock()) {
 						sharedComponent->componentOwner->reset();
@@ -260,14 +272,14 @@ namespace MV {
 
 			std::shared_ptr<Node> detach(const std::string &a_componentId, bool a_throwIfNotFound = true) {
 				auto self = shared_from_this();
-				auto found = std::find_if(childComponents.begin(), childComponents.end(), [&](const std::shared_ptr<Component> &a_component) {
+				auto found = std::find_if(childComponents->begin(), childComponents->end(), [&](const std::shared_ptr<Component> &a_component) {
 					return a_component->id() == a_componentId;
 				});
-				if (found != childComponents.end()) {
+				if (found != childComponents->end()) {
 					auto sharedComponent = *found;
 					auto originalOwner = sharedComponent->componentOwner.get();
 					sharedComponent->detachImplementation();
-					childComponents.erase(found);
+					childComponents->erase(found);
 					onDetachSignal(sharedComponent);
 					if (sharedComponent->componentOwner->lock() == originalOwner.lock()) {
 						sharedComponent->componentOwner->reset();
@@ -281,7 +293,7 @@ namespace MV {
 			template<typename ComponentType>
 			SafeComponent<ComponentType> component(bool a_exactType = true, bool a_throwIfNotFound = true) const {
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
-				if (foundComponent != childComponents.end()) {
+				if (foundComponent != childComponents->end()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
 				}
 				return SafeComponent<ComponentType>(nullptr, nullptr);
@@ -334,7 +346,7 @@ namespace MV {
 			SafeComponent<ComponentType> componentInParents(bool a_exactType = true, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
 				if (a_includeSelf) {
 					std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, false);
-					if (foundComponent != childComponents.end()) {
+					if (foundComponent != childComponents->end()) {
 						return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
 					}
 				}
@@ -354,10 +366,10 @@ namespace MV {
 
 			template<typename ComponentType>
 			SafeComponent<ComponentType> componentInChildren(bool a_exactType = true, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
-				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = a_includeSelf ? componentIterator<ComponentType>(a_exactType, false) : childComponents.end();
-				if (foundComponent != childComponents.end()) {
+				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = a_includeSelf ? componentIterator<ComponentType>(a_exactType, false) : childComponents->end();
+				if (foundComponent != childComponents->end()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
-				} else if (!childNodes.empty()) {
+				} else if (!childNodes->empty()) {
 					for (auto&& childNode : childNodes) {
 						auto childComponent = childNode->componentInChildren<ComponentType>(a_exactType, false, true);
 						if (childComponent) {
@@ -381,10 +393,10 @@ namespace MV {
 
 			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> component(const std::string &a_componentId, bool a_throwIfNotFound = true) const {
-				auto found = std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
+				auto found = std::find_if(childComponents->cbegin(), childComponents->cend(), [&](const std::shared_ptr<Component> &a_component) {
 					return a_component->id() == a_componentId;
 				});
-				if (found != childComponents.cend()) {
+				if (found != childComponents->cend()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*found));
 				} else if (a_throwIfNotFound) {
 					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");
@@ -400,12 +412,12 @@ namespace MV {
 
 			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> componentInChildren(const std::string &a_componentId, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
-				auto found = a_includeSelf ? std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
+				auto found = a_includeSelf ? std::find_if(childComponents->cbegin(), childComponents->cend(), [&](const std::shared_ptr<Component> &a_component) {
 					return a_component->id() == a_componentId;
-				}) : childComponents.end();
-				if (found != childComponents.cend()) {
+				}) : childComponents->end();
+				if (found != childComponents->cend()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*found));
-				} else if (!childNodes.empty()) {
+				} else if (!childNodes->empty()) {
 					for (auto&& childNode : childNodes) {
 						auto childComponent = componentInChildren<ComponentType>(a_componentId, false);
 						if (childComponent) {
@@ -472,32 +484,32 @@ namespace MV {
 			bool hasImmediate(const std::string &a_id) const;
 
 			std::shared_ptr<Node> operator[](size_t a_index) const{
-				require<RangeException>(a_index < childNodes.size(), "Failed to get node at index: [", a_index, "] from parent node: [", nodeId, "]");
+				require<RangeException>(a_index < childNodes->size(), "Failed to get node at index: [", a_index, "] from parent node: [", nodeId.get(), "]");
 				return childNodes[a_index];
 			}
 
 			size_t size() const{
-				return childNodes.size();
+				return childNodes->size();
 			}
 
 			bool empty() const {
-				return childNodes.empty();
+				return childNodes->empty();
 			}
 
 			std::vector<std::shared_ptr<Node>>::iterator begin(){
-				return childNodes.begin();
+				return childNodes->begin();
 			}
 
 			std::vector<std::shared_ptr<Node>>::iterator end(){
-				return childNodes.end();
+				return childNodes->end();
 			}
 
 			std::vector<std::shared_ptr<Node>>::const_iterator cbegin() const{
-				return childNodes.cbegin();
+				return childNodes->cbegin();
 			}
 
 			std::vector<std::shared_ptr<Node>>::const_iterator cend() const{
-				return childNodes.cend();
+				return childNodes->cend();
 			}
 
 			std::string id() const{
@@ -549,7 +561,7 @@ namespace MV {
 			AxisAngles worldRotationRad() const;
 			std::shared_ptr<Node> worldRotationRad(const AxisAngles &a_newAngle);
 			AxisAngles rotation() const {
-				return toDegrees(rotateTo);
+				return toDegrees(rotateTo.get());
 			}
 			AxisAngles rotationRad() const{
 				return rotateTo;
@@ -557,10 +569,10 @@ namespace MV {
 			std::shared_ptr<Node> rotation(const AxisAngles &a_newRotation);
 			std::shared_ptr<Node> rotationRad(const AxisAngles &a_newRotation);
 			std::shared_ptr<Node> addRotation(const AxisAngles &a_incrementRotation) {
-				return rotationRad(rotateTo + toRadians(a_incrementRotation));
+				return rotationRad(rotateTo.get() + toRadians(a_incrementRotation));
 			}
 			std::shared_ptr<Node> addRotationRad(const AxisAngles &a_incrementRotation) {
-				return rotationRad(rotateTo + a_incrementRotation);
+				return rotationRad(rotateTo.get() + a_incrementRotation);
 			}
 
 			Scale scale() const{
@@ -800,13 +812,13 @@ namespace MV {
 			template<typename ComponentType>
 			std::vector<std::shared_ptr<Component>>::const_iterator componentIterator(bool a_exactType = true, bool a_throwIfNotFound = true) const {
 				if (a_exactType) {
-					for (auto currentComponent = childComponents.cbegin(); currentComponent != childComponents.cend(); ++currentComponent) {
+					for (auto currentComponent = childComponents->cbegin(); currentComponent != childComponents->cend(); ++currentComponent) {
 						if (typeid(*(*currentComponent)) == typeid(ComponentType)) {
 							return currentComponent;
 						}
 					}
 				} else {
-					for (auto currentComponent = childComponents.cbegin(); currentComponent != childComponents.cend(); ++currentComponent) {
+					for (auto currentComponent = childComponents->cbegin(); currentComponent != childComponents->cend(); ++currentComponent) {
 						auto castComponent = std::dynamic_pointer_cast<ComponentType>(*currentComponent);
 						if (castComponent) {
 							return currentComponent;
@@ -818,9 +830,9 @@ namespace MV {
 					for (auto&& currentComponent : childComponents) {
 						componentsString += std::string("\n") + typeid(*currentComponent).name();
 					}
-					require<ResourceException>(false, "Failed to locate component [", typeid(ComponentType).name(), "] in node: [", nodeId, "]\nComponents:", componentsString);
+					require<ResourceException>(false, "Failed to locate component [", typeid(ComponentType).name(), "] in node: [", nodeId.get(), "]\nComponents:", componentsString);
 				}
-				return childComponents.cend();
+				return childComponents->cend();
 			}
 
 			template<typename ... ComponentType>
@@ -859,15 +871,15 @@ namespace MV {
 
 			void fixChildOwnership();
 
-			template <class Archive>
+			template<class Archive>
 			void serialize(Archive & archive, std::uint32_t const version) {
 				std::vector<std::shared_ptr<Node>> filteredChildren;
-				std::copy_if(childNodes.begin(), childNodes.end(), std::back_inserter(filteredChildren), [](const auto &a_child){
+				std::copy_if(childNodes.get().begin(), childNodes.get().end(), std::back_inserter(filteredChildren), [](const auto &a_child){
 					return a_child->allowSerialize;
 				});
 				std::weak_ptr<Node> weakParent;
 				std::vector<std::shared_ptr<Component>> filteredChildComponents;
-				std::copy_if(childComponents.begin(), childComponents.end(), std::back_inserter(filteredChildComponents), [](const auto &a_child) {
+				std::copy_if(childComponents.get().begin(), childComponents.get().end(), std::back_inserter(filteredChildComponents), [](const auto &a_child) {
 					return a_child->allowSerialize;
 				});
 
@@ -882,37 +894,37 @@ namespace MV {
 				}
 
 				archive(
-					CEREAL_NVP(nodeId),
+					cereal::make_nvp("nodeId", nodeId.get()),
 					cereal::make_nvp("isRootNode", myParent == nullptr),
 					cereal::make_nvp("parent", weakParent),
-					CEREAL_NVP(allowDraw),
-					CEREAL_NVP(allowUpdate),
-					CEREAL_NVP(translateTo),
-					CEREAL_NVP(rotateTo),
-					CEREAL_NVP(scaleTo),
-					CEREAL_NVP(sortDepth),
-					CEREAL_NVP(nodeAlpha),
-					CEREAL_NVP(localBounds),
-					CEREAL_NVP(localChildBounds));
+					cereal::make_nvp("allowDraw", allowDraw.get()),
+					cereal::make_nvp("allowUpdate", allowUpdate.get()),
+					cereal::make_nvp("translateTo", translateTo.get()),
+					cereal::make_nvp("rotateTo", rotateTo.get()),
+					cereal::make_nvp("scaleTo", scaleTo.get()),
+					cereal::make_nvp("sortDepth", sortDepth.get()),
+					cereal::make_nvp("nodeAlpha", nodeAlpha.get()),
+					cereal::make_nvp("localBounds", localBounds.get()),
+					cereal::make_nvp("localChildBounds", localChildBounds.get()));
 				if (version > 0) {
-					archive(cereal::make_nvp("cameraId", ourCameraId));
+					archive(cereal::make_nvp("cameraId", ourCameraId.get()));
 				}
 				archive(
 					cereal::make_nvp("childNodes", filteredChildren),
 					cereal::make_nvp("childComponents", filteredChildComponents)
 				);
-				if (childNodes.empty() && !filteredChildren.empty()) {
+				if (childNodes.get().empty() && !filteredChildren.empty()) {
 					childNodes = filteredChildren;
 				}
-				if (childComponents.empty() && !filteredChildComponents.empty()) {
+				if (childComponents.get().empty() && !filteredChildComponents.empty()) {
 					childComponents = filteredChildComponents;
 				}
 				if (version < 2) {
-					rotateTo = toRadians(rotateTo);
+					rotateTo = toRadians(rotateTo.get());
 				}
 			}
 
-			template <class Archive>
+			template<class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const version) {
 				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* renderer = services.get<MV::Draw2D>();
@@ -924,32 +936,72 @@ namespace MV {
 				bool isRootNode = false;
 				std::weak_ptr<Node> weakParent;
 				archive(
-					cereal::make_nvp("isRootNode", isRootNode), 
+					cereal::make_nvp("isRootNode", isRootNode),
 					cereal::make_nvp("parent", weakParent));
 
 				if (auto lockedParent = weakParent.lock()) {
 					construct->myParent = lockedParent.get();
 				}
 				archive(
-					cereal::make_nvp("allowDraw", construct->allowDraw),
-					cereal::make_nvp("allowUpdate", construct->allowUpdate),
-					cereal::make_nvp("translateTo", construct->translateTo),
-					cereal::make_nvp("rotateTo", construct->rotateTo),
-					cereal::make_nvp("scaleTo", construct->scaleTo),
-					cereal::make_nvp("sortDepth", construct->sortDepth),
-					cereal::make_nvp("nodeAlpha", construct->nodeAlpha),
-					cereal::make_nvp("localBounds", construct->localBounds),
-					cereal::make_nvp("localChildBounds", construct->localChildBounds));
+					cereal::make_nvp("allowDraw", construct->allowDraw.get()),
+					cereal::make_nvp("allowUpdate", construct->allowUpdate.get()),
+					cereal::make_nvp("translateTo", construct->translateTo.get()),
+					cereal::make_nvp("rotateTo", construct->rotateTo.get()),
+					cereal::make_nvp("scaleTo", construct->scaleTo.get()),
+					cereal::make_nvp("sortDepth", construct->sortDepth.get()),
+					cereal::make_nvp("nodeAlpha", construct->nodeAlpha.get()),
+					cereal::make_nvp("localBounds", construct->localBounds.get()),
+					cereal::make_nvp("localChildBounds", construct->localChildBounds.get()));
 				if (version > 0) {
-					archive(cereal::make_nvp("cameraId", construct->ourCameraId));
+					archive(cereal::make_nvp("cameraId", construct->ourCameraId.get()));
 				}
 				archive(
-					cereal::make_nvp("childNodes", construct->childNodes),
-					cereal::make_nvp("childComponents", construct->childComponents)
+					cereal::make_nvp("childNodes", construct->childNodes.get()),
+					cereal::make_nvp("childComponents", construct->childComponents.get())
 				);
 				if (version < 2) {
-					toRadiansInPlace(construct->rotateTo);
+					toRadiansInPlace(construct->rotateTo.get());
 				}
+				if (doPostLoad && isRootNode) {
+					construct->postLoadStep();
+				}
+			}
+
+			// JaiScript version of load_and_construct (templated for CRTP archives)
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Node>& construct) {
+				MV::Services* services = ar.get_user_context<MV::Services>();
+				auto* renderer = services->get<MV::Draw2D>();
+				LoadOptions* options = services->get<LoadOptions>(false);
+				bool doPostLoad = options ? options->doPostLoad : true;
+
+				std::string nodeId;
+				ar.serialize("nodeId", nodeId);
+				construct(*renderer, nodeId);
+
+				bool isRootNode = false;
+				std::weak_ptr<Node> weakParent;
+				ar.serialize("isRootNode", isRootNode);
+				ar.serialize("parent", weakParent);
+
+				if (auto lockedParent = weakParent.lock()) {
+					construct->myParent = lockedParent.get();
+				}
+
+				// Serialize into the property objects directly (they have load() methods)
+				ar.serialize("allowDraw", construct->allowDraw);
+				ar.serialize("allowUpdate", construct->allowUpdate);
+				ar.serialize("translateTo", construct->translateTo);
+				ar.serialize("rotateTo", construct->rotateTo);
+				ar.serialize("scaleTo", construct->scaleTo);
+				ar.serialize("sortDepth", construct->sortDepth);
+				ar.serialize("nodeAlpha", construct->nodeAlpha);
+				ar.serialize("localBounds", construct->localBounds);
+				ar.serialize("localChildBounds", construct->localChildBounds);
+				ar.serialize("cameraId", construct->ourCameraId);
+				ar.serialize("childNodes", construct->childNodes);
+				ar.serialize("childComponents", construct->childComponents);
+
 				if (doPostLoad && isRootNode) {
 					construct->postLoadStep();
 				}
@@ -957,17 +1009,24 @@ namespace MV {
 
 			Draw2D &draw2d;
 
-			std::vector<std::shared_ptr<Node>> childNodes;
-			std::vector<std::shared_ptr<Component>> childComponents;
+			// Serializable properties (JAI_PROPERTY)
+			JAI_PROPERTY((std::vector<std::shared_ptr<Node>>), childNodes);
+			JAI_PROPERTY((std::vector<std::shared_ptr<Component>>), childComponents);
+			JAI_PROPERTY((std::string), nodeId);
+			JAI_PROPERTY((Scale), scaleTo);
+			JAI_PROPERTY((Point<>), translateTo);
+			JAI_PROPERTY((AxisAngles), rotateTo);
+			JAI_PROPERTY((BoxAABB<>), localBounds);
+			JAI_PROPERTY((BoxAABB<>), localChildBounds);
+			JAI_PROPERTY((PointPrecision), sortDepth, 0.0f);
+			JAI_PROPERTY((PointPrecision), nodeAlpha, 1.0f);
+			JAI_PROPERTY((bool), allowUpdate, true);
+			JAI_PROPERTY((bool), allowDraw, true);
+			JAI_PROPERTY((int32_t), ourCameraId, 0);
 
-			std::string nodeId;
-
+			// Non-serializable runtime state
 			bool onChangeCallNeeded = false;
 			bool allowChangeCallNeeded = true;
-
-			Scale scaleTo;
-			Point<> translateTo;
-			AxisAngles rotateTo;
 
 			bool localMatrixDirty = true;
 			bool worldMatrixDirty = true;
@@ -977,24 +1036,14 @@ namespace MV {
 			bool usingTemporaryMatrix = false;
 			TransformMatrix temporaryWorldMatrixTransform;
 
-			BoxAABB<> localBounds;
-			BoxAABB<> localChildBounds;
-
-			PointPrecision sortDepth = 0.0f;
-
 			Node* myParent = nullptr;
 
-			PointPrecision nodeAlpha = 1.0f;
 			mutable PointPrecision parentAccumulatedAlpha = 1.0f;
-			bool allowUpdate = true;
-			bool allowDraw = true;
 
 			bool inOnChange = false;
 
 			bool dirtyLocalBounds = false;
 			bool dirtyChildBounds = false;
-
-			int32_t ourCameraId = 0;
 		};
 
 		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node);

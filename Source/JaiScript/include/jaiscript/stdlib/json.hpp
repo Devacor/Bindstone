@@ -5,6 +5,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
+#include <jaiscript/serialization/convenience.hpp>
 #include <sstream>
 #include <iomanip>
 #include <cmath>
@@ -723,6 +724,106 @@ namespace stdlib {
             }
 
             return result;
+        });
+
+        // Base64 serialization functions
+        eng_ref.add_variadic_function("to_base64", [eng](const std::vector<script_value>& args) -> script_value {
+            if (args.size() != 1) {
+                throw runtime_error("to_base64 expects exactly 1 argument, got " + std::to_string(args.size()));
+            }
+
+            // Serialize to binary first
+            serialization::binary_archive_writer writer;
+            writer.write_value(args[0]);
+
+            // Then base64 encode
+            const auto& data = writer.data();
+            std::string binary_str(data.begin(), data.end());
+            return script_value(base64_encode(binary_str), eng);
+        });
+
+        eng_ref.add_function("from_base64", [eng](const std::string& base64_str) -> script_value {
+            // Decode base64 to binary
+            std::string binary_str = base64_decode(base64_str);
+            std::vector<uint8_t> data(binary_str.begin(), binary_str.end());
+
+            // Deserialize from binary
+            serialization::binary_archive_reader reader(data, eng);
+            script_value result = reader.read_value();
+
+            // Handle object reconstruction like from_binary
+            if (result.is_map()) {
+                const auto& map = result.as_map();
+                auto type_it = map.find(script_value("_type_", eng));
+                if (type_it != map.end() && type_it->second.is_string()) {
+                    std::string type_name = type_it->second.as_string();
+
+                    try {
+                        script_value instance = eng->execute(type_name + "()");
+
+                        for (const auto& [key, value] : map) {
+                            if (key.is_string() && key.as_string() != "_type_" && key.as_string() != "_version_") {
+                                std::string prop_name = key.as_string();
+                                std::string temp_var = "_base64_temp_" + prop_name;
+                                eng->add_global(temp_var, value);
+                                eng->add_global("_base64_obj", instance);
+
+                                eng->execute("_base64_obj." + prop_name + " = " + temp_var);
+                                instance = eng->get_variable("_base64_obj");
+
+                                eng->add_global(temp_var, script_value(std::monostate{}, eng));
+                            }
+                        }
+
+                        eng->add_global("_base64_obj", script_value(std::monostate{}, eng));
+
+                        // Call post_deserialize hook if it exists
+                        try {
+                            auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
+                            if (class_instance_ptr) {
+                                auto class_def = class_instance_ptr->get_class_definition();
+                                if (class_def) {
+                                    auto class_eng = class_def->get_engine();
+                                    if (class_eng) {
+                                        uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
+                                        script_value post_deserialize = class_def->get_method(post_deserialize_id, false);
+                                        if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                            script_int version = 1;
+                                            auto version_it = map.find(script_value("_version_", eng));
+                                            if (version_it != map.end() && version_it->second.is_int()) {
+                                                version = version_it->second.as<script_int>();
+                                            }
+
+                                            std::vector<script_value> args = {
+                                                instance,
+                                                script_value(version, eng)
+                                            };
+                                            (void)post_deserialize.as_function()(args);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (...) {
+                            // Hook failed, but continue
+                        }
+
+                        return instance;
+                    } catch (...) {
+                        // If object reconstruction fails, fall through to return as map
+                    }
+                }
+            }
+
+            return result;
+        });
+
+        // Raw base64 encoding/decoding (for strings, not serialization)
+        eng_ref.add_function("base64_encode", [eng](const std::string& input) -> script_value {
+            return script_value(base64_encode(input), eng);
+        });
+
+        eng_ref.add_function("base64_decode", [eng](const std::string& input) -> script_value {
+            return script_value(base64_decode(input), eng);
         });
     }
 

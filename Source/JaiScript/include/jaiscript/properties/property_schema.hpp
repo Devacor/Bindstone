@@ -14,10 +14,8 @@ namespace jai {
 // Forward declarations
 class property_base;
 
-namespace serialization {
-	class archive_writer;
-	class archive_reader;
-}
+// Note: Serialization uses CRTP-based archives (binary_archive_writer, json_archive_writer, etc.)
+// No forward declarations needed - they're template instantiated at use sites
 
 // ============================================================================
 // Property Metadata (stored once per type, not per instance)

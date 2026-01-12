@@ -19,8 +19,8 @@ namespace jai {
 //
 // On deserialization, the engine pointer is retrieved from user context.
 
-template<typename T>
-void save_receiver(serialization::archive_writer& ar, const receiver<T>& recv) {
+template<typename Archive, typename T>
+void save_receiver(Archive& ar, const receiver<T>& recv) {
 	ar.begin_object("receiver", 1);
 
 	// Parameter names
@@ -44,8 +44,8 @@ void save_receiver(serialization::archive_writer& ar, const receiver<T>& recv) {
 	ar.end_object();
 }
 
-template<typename T>
-std::shared_ptr<receiver<T>> load_receiver(serialization::archive_reader& ar) {
+template<typename T, typename Archive>
+std::shared_ptr<receiver<T>> load_receiver(Archive& ar) {
 	std::string type_name;
 	uint32_t version;
 	ar.begin_object(type_name, version);
@@ -88,8 +88,8 @@ std::shared_ptr<receiver<T>> load_receiver(serialization::archive_reader& ar) {
 //   - observers: array of receiver objects
 //   - owned_observers: map of id -> receiver objects
 
-template<typename T>
-void save_signal_emitter(serialization::archive_writer& ar, const signal_emitter<T>& sig) {
+template<typename Archive, typename T>
+void save_signal_emitter(Archive& ar, const signal_emitter<T>& sig) {
 	ar.begin_object("signal_emitter", 1);
 
 	// Parameter names (signal-level)
@@ -139,8 +139,8 @@ void save_signal_emitter(serialization::archive_writer& ar, const signal_emitter
 	ar.end_object();
 }
 
-template<typename T>
-void load_signal_emitter(serialization::archive_reader& ar, signal_emitter<T>& sig) {
+template<typename Archive, typename T>
+void load_signal_emitter(Archive& ar, signal_emitter<T>& sig) {
 	std::string type_name;
 	uint32_t version;
 	ar.begin_object(type_name, version);

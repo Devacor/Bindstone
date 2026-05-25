@@ -33,7 +33,29 @@ void interpreter::init_dispatch_table() {
 // Uses script_value::TYPEID_* constants for fast type checking
 // Returns checked_result for zero-allocation error handling
 checked_result<script_value> interpreter::handle_add(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        // Common fast path: neither operand is an object, no unwrapping needed
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            return make_value(left.unchecked_as_int() + right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            return make_value(lf + rf);
+        }
+        if (li_raw == script_value::TYPEID_STRING || ri_raw == script_value::TYPEID_STRING) {
+            return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -68,7 +90,25 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
 }
 
 checked_result<script_value> interpreter::handle_subtract(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            return make_value(left.unchecked_as_int() - right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            return make_value(lf - rf);
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for - operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -96,7 +136,25 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
 }
 
 checked_result<script_value> interpreter::handle_multiply(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            return make_value(left.unchecked_as_int() * right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            return make_value(lf * rf);
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for * operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -124,7 +182,31 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
 }
 
 checked_result<script_value> interpreter::handle_divide(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            if (right.unchecked_as_int() == 0) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+            }
+            return make_value(left.unchecked_as_int() / right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            if (rf == 0.0) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+            }
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            return make_value(lf / rf);
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for / operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -158,7 +240,31 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
 }
 
 checked_result<script_value> interpreter::handle_modulo(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            if (right.unchecked_as_int() == 0) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+            }
+            return make_value(left.unchecked_as_int() % right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            if (rf == 0.0) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+            }
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            return make_value(std::fmod(lf, rf));
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for % operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -192,7 +298,28 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
 }
 
 checked_result<script_value> interpreter::handle_less(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            return make_value(left.unchecked_as_int() < right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            return make_value(lf < rf);
+        }
+        if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
+            return make_value(left.unchecked_as_string() < right.unchecked_as_string());
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -224,7 +351,28 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
 }
 
 checked_result<script_value> interpreter::handle_less_equal(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            return make_value(left.unchecked_as_int() <= right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            return make_value(lf <= rf);
+        }
+        if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
+            return make_value(left.unchecked_as_string() <= right.unchecked_as_string());
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -256,7 +404,28 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
 }
 
 checked_result<script_value> interpreter::handle_greater(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            return make_value(left.unchecked_as_int() > right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            return make_value(lf > rf);
+        }
+        if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
+            return make_value(left.unchecked_as_string() > right.unchecked_as_string());
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -288,7 +457,28 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
 }
 
 checked_result<script_value> interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
-    // Try transparent wrapper unwrapping first for object types
+    // Fast path: check raw storage indices first to skip unwrapping for non-object types
+    const size_t li_raw = left.raw_storage_index();
+    const size_t ri_raw = right.raw_storage_index();
+
+    if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
+        ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
+        if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
+            return make_value(left.unchecked_as_int() >= right.unchecked_as_int());
+        }
+        if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
+            (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
+            script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
+            script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+            return make_value(lf >= rf);
+        }
+        if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
+            return make_value(left.unchecked_as_string() >= right.unchecked_as_string());
+        }
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
+    }
+
+    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -325,18 +515,8 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
         // For weak_ptr, null comparison checks if expired
         bool is_expired = false;
         if (left.is_weak_ptr()) {
-            if (left.is_weak_ptr()) {
-                auto weak_ptr = left.get_weak_ptr();
-                // Check if weak_ptr is expired (includes default-constructed)
-                is_expired = weak_ptr.expired();
-            } else if ((left.get_object_holder() != nullptr)) {
-                // weak_ptr_holder type - check if it contains an actual value
-                auto holder = left.get_object_holder();
-                is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
-            } else {
-                // Other cases - consider expired
-                is_expired = true;
-            }
+            auto weak_ptr = left.get_weak_ptr();
+            is_expired = weak_ptr.expired();
         } else {
             // right is weak_ptr
             if (right.is_weak_ptr()) {
@@ -418,18 +598,8 @@ checked_result<script_value> interpreter::handle_not_equal(const script_value& l
         // For weak_ptr, null comparison checks if expired
         bool is_expired = false;
         if (left.is_weak_ptr()) {
-            if (left.is_weak_ptr()) {
-                auto weak_ptr = left.get_weak_ptr();
-                // Check if weak_ptr is expired (includes default-constructed)
-                is_expired = weak_ptr.expired();
-            } else if ((left.get_object_holder() != nullptr)) {
-                // weak_ptr_holder type - check if it contains an actual value
-                auto holder = left.get_object_holder();
-                is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
-            } else {
-                // Other cases - consider expired
-                is_expired = true;
-            }
+            auto weak_ptr = left.get_weak_ptr();
+            is_expired = weak_ptr.expired();
         } else {
             // right is weak_ptr
             if (right.is_weak_ptr()) {
@@ -507,14 +677,22 @@ checked_result<script_value> interpreter::handle_left_shift(const script_value& 
     if (!left.is_int() || !right.is_int()) {
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Left shift requires integer operands");
     }
-    return make_value(left.unchecked_as_int() << right.unchecked_as_int());
+    auto shift_amount = right.unchecked_as_int();
+    if (shift_amount < 0 || shift_amount > 63) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Shift amount must be between 0 and 63");
+    }
+    return make_value(left.unchecked_as_int() << shift_amount);
 }
 
 checked_result<script_value> interpreter::handle_right_shift(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Right shift requires integer operands");
     }
-    return make_value(left.unchecked_as_int() >> right.unchecked_as_int());
+    auto shift_amount = right.unchecked_as_int();
+    if (shift_amount < 0 || shift_amount > 63) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Shift amount must be between 0 and 63");
+    }
+    return make_value(left.unchecked_as_int() >> shift_amount);
 }
 
 } // namespace jai

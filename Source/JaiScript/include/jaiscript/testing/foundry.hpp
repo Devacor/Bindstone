@@ -6,6 +6,7 @@
 #include <memory>
 #include <chrono>
 #include <string>
+#include <sstream>
 #include <format>
 #include <exception>
 #include <type_traits>
@@ -54,16 +55,7 @@ public:
     
     // Add a test
     void test(const std::string& name, std::function<void()> test_func) {
-        tests_.emplace_back(name, [this, test_func]() {
-            pre_test();
-            try {
-                test_func();
-                post_test();
-            } catch (...) {
-                post_test();  // Ensure cleanup on failure
-                throw;
-            }
-        });
+        tests_.emplace_back(name, test_func);
     }
     
     // Add a benchmark
@@ -228,11 +220,23 @@ private:
 template<typename T, typename U>
 void check_eq(const T& expected, const U& actual, const std::string& message = "") {
     if (!(expected == actual)) {
-        if (message.empty()) {
-            throw test_failure("Values do not match");
-        } else {
-            throw test_failure(message);
+        std::ostringstream oss;
+        if (!message.empty()) {
+            oss << message << " — ";
         }
+        oss << "Expected: ";
+        if constexpr (requires { oss << expected; }) {
+            oss << expected;
+        } else {
+            oss << "(non-printable)";
+        }
+        oss << ", Actual: ";
+        if constexpr (requires { oss << actual; }) {
+            oss << actual;
+        } else {
+            oss << "(non-printable)";
+        }
+        throw test_failure(oss.str());
     }
 }
 

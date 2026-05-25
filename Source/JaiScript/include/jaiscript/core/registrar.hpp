@@ -44,7 +44,8 @@ public:
     }
 
     void register_type(std::type_index ti, std::string_view name) {
-        type_names_[ti] = std::string(name);
+        auto& stored = type_names_[ti] = std::string(name);
+        name_to_type_[stored] = ti;
     }
 
     template<typename T>
@@ -64,6 +65,13 @@ public:
         return get_name(std::type_index(typeid(T)));
     }
 
+    [[nodiscard]] std::optional<std::type_index> get_type(const std::string& name) const {
+        if (auto it = name_to_type_.find(name); it != name_to_type_.end()) {
+            return *it->second;
+        }
+        return std::nullopt;
+    }
+
     [[nodiscard]] bool has_name(std::type_index ti) const {
         return type_names_.contains(ti);
     }
@@ -76,6 +84,7 @@ public:
 private:
     type_name_registry() = default;
     std::map<std::type_index, std::string> type_names_;
+    std::unordered_map<std::string, std::optional<std::type_index>> name_to_type_;
 };
 
 // ============================================================================
@@ -167,6 +176,7 @@ public:
     explicit registrar(const char* name) {
         std::string name_str(name);
         type_name_registry::instance().register_type<T>(name);
+        serialization::polymorphic_registry::try_auto_register<T>(name_str);
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [name_str](engine& eng, const Context&) {
@@ -182,6 +192,7 @@ public:
     registrar(const char* name, F&& configure) {
         std::string name_str(name);
         type_name_registry::instance().register_type<T>(name);
+        serialization::polymorphic_registry::try_auto_register<T>(name_str);
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [name_str, configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
@@ -202,6 +213,7 @@ public:
     explicit registrar(const char* name) {
         std::string name_str(name);
         type_name_registry::instance().register_type<T>(name);
+        serialization::polymorphic_registry::try_auto_register<T>(name_str);
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [name_str](engine& eng) {
@@ -217,6 +229,7 @@ public:
     registrar(const char* name, F&& configure) {
         std::string name_str(name);
         type_name_registry::instance().register_type<T>(name);
+        serialization::polymorphic_registry::try_auto_register<T>(name_str);
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [name_str, configure = std::forward<F>(configure)](engine& eng) {
@@ -324,5 +337,7 @@ inline void bind_registrar(engine& eng) {
 
 // Include dynamic_binder.hpp to make registrar lambdas work
 #include <jaiscript/core/dynamic_binder.hpp>
+// Include polymorphic registry for auto-registration of polymorphic types
+#include <jaiscript/serialization/polymorphic.hpp>
 
 #endif // __JAISCRIPT_CORE_REGISTRAR_HPP__

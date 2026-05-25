@@ -87,6 +87,10 @@ public:
         }
     }
 
+    void write_null() {
+        write_uint8(0x00); // Null marker
+    }
+
     void write_binary(const void* data, size_t size) {
         write_uint32(static_cast<uint32_t>(size));
         if (size > 0) {
@@ -96,6 +100,14 @@ public:
     
     // Object/array structure - non-virtual
     // Buffered mode: collect properties during begin_object..end_object, then flush with sizes
+    // No-argument version for inline objects (no type metadata)
+    void begin_object() {
+        write_uint8(0x01); // Object marker
+        write_string("");  // Empty type name
+        write_uint32(0);   // Version 0
+        object_write_stack_.emplace_back();
+    }
+
     void begin_object(const std::string& type_name, uint32_t version) {
         write_uint8(0x01); // Object marker
         write_string(type_name);
@@ -378,9 +390,11 @@ private:
     template<typename T>
     void write_little_endian(T value) {
         static_assert(std::is_integral_v<T>, "Only for integral types");
+        std::make_unsigned_t<T> uval;
+        std::memcpy(&uval, &value, sizeof(T));
         uint8_t bytes[sizeof(T)];
         for (size_t i = 0; i < sizeof(T); ++i) {
-            bytes[i] = static_cast<uint8_t>(value >> (i * 8));
+            bytes[i] = static_cast<uint8_t>(uval >> (i * 8));
         }
         write_raw(bytes, sizeof(T));
     }
@@ -544,6 +558,18 @@ public:
         return read_string_raw();
     }
 
+    bool peek_null() {
+        if (pos_ >= data_.size()) return false;
+        return data_[pos_] == 0x00;  // Null marker
+    }
+
+    void read_null() {
+        uint8_t marker = read_uint8_raw();
+        if (marker != 0x00) {
+            throw serialization_error("Expected null marker (0x00), got " + std::to_string(marker));
+        }
+    }
+
     std::vector<uint8_t> read_binary(size_t expected_size) {
         uint32_t size = read_little_endian<uint32_t>();
         std::vector<uint8_t> result(size);
@@ -554,6 +580,13 @@ public:
     }
 
     // Object/array structure - reads new format: count, names[], sizes[], values[]
+    // No-argument version for inline objects (discard type metadata)
+    bool begin_object() {
+        std::string type_name;
+        uint32_t version = 0;
+        return begin_object(type_name, version);
+    }
+
     bool begin_object(std::string& type_name, uint32_t& version) {
         if (pos_ >= data_.size()) return false;
 
@@ -615,15 +648,15 @@ public:
     }
 
     size_t begin_array() {
-        uint8_t marker = read_uint8();
+        uint8_t marker = read_uint8_raw();
         if (marker != 0x03) {
             throw runtime_error("Expected array marker, got " + std::to_string(marker));
         }
-        return read_uint32();
+        return read_little_endian<uint32_t>();
     }
 
     void end_array() {
-        uint8_t marker = read_uint8();
+        uint8_t marker = read_uint8_raw();
         if (marker != 0x04) {
             throw runtime_error("Expected end array marker, got " + std::to_string(marker));
         }
@@ -639,17 +672,17 @@ public:
     size_t begin_map() {
         if (pos_ >= data_.size()) return 0;
 
-        uint8_t marker = read_uint8();
+        uint8_t marker = read_uint8_raw();
         if (marker != 0x05) {
             throw serialization_error("Expected map marker (0x05)");
         }
 
-        uint32_t size = read_uint32();
+        uint32_t size = read_little_endian<uint32_t>();
         return size;
     }
 
     void end_map() {
-        uint8_t marker = read_uint8();
+        uint8_t marker = read_uint8_raw();
         if (marker != 0x06) {
             throw serialization_error("Expected end map marker (0x06)");
         }
@@ -796,11 +829,13 @@ private:
         uint8_t bytes[sizeof(T)];
         read_raw(bytes, sizeof(T));
 
-        T value = 0;
+        std::make_unsigned_t<T> value = 0;
         for (size_t i = 0; i < sizeof(T); ++i) {
-            value |= static_cast<T>(bytes[i]) << (i * 8);
+            value |= static_cast<std::make_unsigned_t<T>>(bytes[i]) << (i * 8);
         }
-        return value;
+        T result;
+        std::memcpy(&result, &value, sizeof(T));
+        return result;
     }
 
     // Raw read methods that always read from stream (for pre-reading phase)
@@ -810,10 +845,15 @@ private:
         return value;
     }
 
+    size_t remaining_bytes() const { return data_.size() > pos_ ? data_.size() - pos_ : 0; }
+
     std::string read_string_raw() {
         uint32_t size = read_little_endian<uint32_t>();
         if (size == 0) return "";
 
+        if (size > remaining_bytes()) {
+            throw runtime_error("Binary archive string size exceeds remaining data");
+        }
         std::string result(size, '\0');
         read_raw(result.data(), size);
         return result;
@@ -860,6 +900,9 @@ private:
 
             case script_value_type::jai_array_type: {
                 uint32_t size = read_little_endian<uint32_t>();
+                if (size > remaining_bytes()) {
+                    throw runtime_error("Binary archive array size exceeds remaining data");
+                }
                 script_value array_val = script_value::make_array(nullptr, eng);
                 auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
 
@@ -871,6 +914,9 @@ private:
 
             case script_value_type::jai_map_type: {
                 uint32_t size = read_little_endian<uint32_t>();
+                if (size > remaining_bytes()) {
+                    throw runtime_error("Binary archive map size exceeds remaining data");
+                }
                 script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
 
@@ -1003,6 +1049,14 @@ private:
                                         std::to_string(type_tag));
         }
     }
+};
+
+// Archive ID trait specializations for dispatch pattern
+template<> struct writer_archive_id_trait<binary_archive_writer> {
+    static constexpr writer_archive_id value = writer_archive_id::binary;
+};
+template<> struct reader_archive_id_trait<binary_archive_reader> {
+    static constexpr reader_archive_id value = reader_archive_id::binary;
 };
 
 } // namespace serialization

@@ -49,6 +49,8 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"fallthrough", token_type::fallthrough_keyword},
     {"include", token_type::include_keyword},
     {"import", token_type::import_keyword},
+    {"coroutine", token_type::coroutine_keyword},
+    {"yield", token_type::yield_keyword},
 };
 
 lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename)
@@ -335,9 +337,8 @@ token lexer::make_token(token_type type, std::string_view lexeme) {
 }
 
 token lexer::error_token(const std::string& message) {
-    // Error messages need to be stored - use static for now or intern
-    // For simplicity, we'll point to source_ range where error occurred
-    token token(token_type::error, std::string_view(message), current_location());
+    auto [id, view] = symbolizer_->intern_with_view(message);
+    token token(token_type::error, view, current_location());
     return token;
 }
 
@@ -345,31 +346,62 @@ token lexer::scan_number() {
     size_t start = current_;
     size_t startColumn = column_;
 
-    // Integer part
-    while (is_digit(peek())) {
-        advance();
-    }
-
     bool is_float = false;
+    bool is_hex = false;
+    bool is_binary = false;
 
-    // Look for decimal part
-    if (peek() == '.' && is_digit(peek_next())) {
-        is_float = true;
-        advance(); // Consume '.'
+    // Check for hex/binary prefix after leading 0
+    if (peek() == '0' && !is_at_end()) {
+        advance(); // consume '0'
+        if (peek() == 'x' || peek() == 'X') {
+            is_hex = true;
+            advance(); // consume 'x'/'X'
+            while (!is_at_end() && (is_digit(peek()) || (peek() >= 'a' && peek() <= 'f') || (peek() >= 'A' && peek() <= 'F'))) {
+                advance();
+            }
+        } else if (peek() == 'b' || peek() == 'B') {
+            is_binary = true;
+            advance(); // consume 'b'/'B'
+            while (!is_at_end() && (peek() == '0' || peek() == '1')) {
+                advance();
+            }
+        } else {
+            // Octal or plain 0 — continue with normal digit scanning
+            while (is_digit(peek())) {
+                advance();
+            }
+        }
+    } else {
+        // Regular integer part
         while (is_digit(peek())) {
             advance();
         }
     }
 
-    // Look for exponent
-    if (peek() == 'e' || peek() == 'E') {
-        is_float = true;
-        advance();
-        if (peek() == '+' || peek() == '-') {
-            advance();
+    if (!is_hex && !is_binary) {
+        // Look for decimal part
+        if (peek() == '.' && is_digit(peek_next())) {
+            is_float = true;
+            advance(); // Consume '.'
+            while (is_digit(peek())) {
+                advance();
+            }
         }
-        while (is_digit(peek())) {
+
+        // Look for exponent
+        if (peek() == 'e' || peek() == 'E') {
+            is_float = true;
             advance();
+            if (peek() == '+' || peek() == '-') {
+                advance();
+            }
+            if (!is_digit(peek())) {
+                std::string_view lexeme_view(source_.data() + start, current_ - start);
+                return error_token("Invalid number literal: exponent has no digits in '" + std::string(lexeme_view) + "'");
+            }
+            while (is_digit(peek())) {
+                advance();
+            }
         }
     }
 
@@ -383,25 +415,22 @@ token lexer::scan_number() {
     // Need temporary string for parsing (stod/stoll need null-terminated)
     std::string lexeme_str(lexeme_view);
 
-    if (is_float) {
-        tok.float_value = std::stod(lexeme_str);
-    } else {
-        // Handle different integer formats
-        if (lexeme_str.size() > 2 && lexeme_str[0] == '0') {
-            if (lexeme_str[1] == 'x' || lexeme_str[1] == 'X') {
-                // Hexadecimal
-                tok.int_value = std::stoll(lexeme_str.substr(2), nullptr, 16);
-            } else if (lexeme_str[1] == 'b' || lexeme_str[1] == 'B') {
-                // Binary
-                tok.int_value = std::stoll(lexeme_str.substr(2), nullptr, 2);
-            } else {
-                // Octal
-                tok.int_value = std::stoll(lexeme_str, nullptr, 8);
-            }
+    try {
+        if (is_float) {
+            tok.float_value = std::stod(lexeme_str);
+        } else if (is_hex) {
+            tok.int_value = std::stoll(lexeme_str, nullptr, 16);
+        } else if (is_binary) {
+            tok.int_value = std::stoll(lexeme_str.substr(2), nullptr, 2);
+        } else if (lexeme_str.size() > 1 && lexeme_str[0] == '0' && is_digit(lexeme_str[1])) {
+            tok.int_value = std::stoll(lexeme_str, nullptr, 8);
         } else {
-            // Decimal
             tok.int_value = std::stoll(lexeme_str);
         }
+    } catch (const std::out_of_range&) {
+        return error_token("Number literal out of range: '" + lexeme_str + "'");
+    } catch (const std::invalid_argument&) {
+        return error_token("Invalid number literal: '" + lexeme_str + "'");
     }
 
     return tok;
@@ -586,11 +615,13 @@ std::string token::to_string() const {
 }
 
 bool token::is_keyword() const {
-    return type >= token_type::bool_keyword && type <= token_type::import_keyword;
+    return type >= token_type::bool_keyword && type <= token_type::yield_keyword;
 }
 
 bool token::is_operator() const {
-    return type >= token_type::plus && type <= token_type::tilde;
+    return (type >= token_type::plus && type <= token_type::tilde) ||
+           type == token_type::left_shift || type == token_type::right_shift ||
+           type == token_type::spaceship;
 }
 
 bool token::is_literal() const {

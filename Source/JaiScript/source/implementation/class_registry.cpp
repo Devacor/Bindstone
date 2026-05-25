@@ -111,17 +111,13 @@ void class_registry::validate_class_hierarchy(const std::string& class_name) {
     // Check for circular inheritance in script classes
     std::set<std::string> visited;
     std::shared_ptr<class_definition> current = class_def;
-    
+
     while (current) {
         if (visited.count(current->get_name())) {
             throw std::runtime_error("Circular inheritance detected in class: " + class_name);
         }
         visited.insert(current->get_name());
-        
-        // Script classes inherit from class_definition, which doesn't expose parent_class_
-        // directly. We need to check if there's a parent by looking it up
-        // This is a limitation of the current API
-        break; // Can't traverse further without access to parent_class_
+        current = current->get_parent();
     }
 }
 

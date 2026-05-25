@@ -121,11 +121,13 @@ namespace jai {
             : type_info_(std::move(other.type_info_)),
               engine_(other.engine_),
               storage_(std::move(other.storage_)),
-              cpp_bound_ptr_(other.cpp_bound_ptr_) {
+              cpp_bound_ptr_(other.cpp_bound_ptr_),
+              cpp_bound_type_size_(other.cpp_bound_type_size_) {
             other.type_info_ = nullptr;
             other.engine_ = nullptr;
             other.storage_ = std::monostate{};
             other.cpp_bound_ptr_ = nullptr;
+            other.cpp_bound_type_size_ = 0;
         }
 
         script_value& operator=(script_value&& other) noexcept {
@@ -134,10 +136,12 @@ namespace jai {
                 engine_ = other.engine_;
                 storage_ = std::move(other.storage_);
                 cpp_bound_ptr_ = other.cpp_bound_ptr_;
+                cpp_bound_type_size_ = other.cpp_bound_type_size_;
                 other.type_info_ = nullptr;
                 other.engine_ = nullptr;
                 other.storage_ = std::monostate{};
                 other.cpp_bound_ptr_ = nullptr;
+                other.cpp_bound_type_size_ = 0;
             }
             return *this;
         }
@@ -149,9 +153,6 @@ namespace jai {
         // Explicit deep copy method
         script_value clone() const;
         
-        // Factory methods for complex types (deprecated - use engine-aware versions below)
-        static script_value make_array(type_info_ptr element_type);
-        static script_value make_map(type_info_ptr keyType, type_info_ptr valueType);
     public:
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env);
 
@@ -356,7 +357,21 @@ namespace jai {
 
         inline script_int unchecked_as_int() const noexcept {
             if (cpp_bound_ptr_) {
-                return static_cast<script_int>(*static_cast<const int*>(cpp_bound_ptr_));
+                const uint8_t size = cpp_bound_type_size_ & 0x7F;
+                if (cpp_bound_type_size_ & 0x80) {
+                    switch (size) {
+                        case 1: return static_cast<script_int>(*static_cast<const uint8_t*>(cpp_bound_ptr_));
+                        case 2: return static_cast<script_int>(*static_cast<const uint16_t*>(cpp_bound_ptr_));
+                        case 4: return static_cast<script_int>(*static_cast<const uint32_t*>(cpp_bound_ptr_));
+                        default: return static_cast<script_int>(*static_cast<const uint64_t*>(cpp_bound_ptr_));
+                    }
+                }
+                switch (size) {
+                    case 1: return static_cast<script_int>(*static_cast<const int8_t*>(cpp_bound_ptr_));
+                    case 2: return static_cast<script_int>(*static_cast<const int16_t*>(cpp_bound_ptr_));
+                    case 4: return static_cast<script_int>(*static_cast<const int32_t*>(cpp_bound_ptr_));
+                    default: return *static_cast<const script_int*>(cpp_bound_ptr_);
+                }
             }
             return *std::get_if<TYPEID_INT>(&storage_);
         }
@@ -368,7 +383,9 @@ namespace jai {
 
         inline script_float unchecked_as_float() const noexcept {
             if (cpp_bound_ptr_) {
-                return static_cast<script_float>(*static_cast<const double*>(cpp_bound_ptr_));
+                if ((cpp_bound_type_size_ & 0x7F) == sizeof(script_float))
+                    return *static_cast<const script_float*>(cpp_bound_ptr_);
+                return static_cast<script_float>(*static_cast<const float*>(cpp_bound_ptr_));
             }
             return *std::get_if<TYPEID_FLOAT>(&storage_);
         }
@@ -606,13 +623,12 @@ namespace jai {
             const script_value& val = deref();
             if (val.type() == script_value_type::jai_int_type) {
                 if (val.cpp_bound_ptr_) {
-                    return checked_result<script_int>(static_cast<script_int>(*static_cast<const int*>(val.cpp_bound_ptr_)));
+                    return checked_result<script_int>(val.unchecked_as_int());
                 }
                 return checked_result<script_int>(std::get<script_int>(val.storage_));
             } else if (val.type() == script_value_type::jai_float_type) {
-                // Float to int conversion with truncation (like C++)
                 if (val.cpp_bound_ptr_) {
-                    return checked_result<script_int>(static_cast<script_int>(*static_cast<const float*>(val.cpp_bound_ptr_)));
+                    return checked_result<script_int>(static_cast<script_int>(val.unchecked_as_float()));
                 }
                 return checked_result<script_int>(static_cast<script_int>(std::get<script_float>(val.storage_)));
             }
@@ -695,7 +711,7 @@ namespace jai {
             if constexpr (std::is_same_v<T, script_int>) {
                 const script_value& val = deref();
                 if (val.cpp_bound_ptr_) {
-                    return checked_result<T>(static_cast<script_int>(*static_cast<const int*>(val.cpp_bound_ptr_)));
+                    return checked_result<T>(val.unchecked_as_int());
                 }
                 if (val.type() == script_value_type::jai_int_type) {
                     return checked_result<T>(std::get<script_int>(val.storage_));
@@ -1424,6 +1440,7 @@ namespace jai {
         
         storage storage_;
         void* cpp_bound_ptr_ = nullptr;  // If non-null, this value is bound to a C++ variable
+        uint8_t cpp_bound_type_size_ = 0; // Low 7 bits: sizeof(T), bit 7: unsigned flag
         
     public:
         // Method to set engine pointer after construction
@@ -1592,6 +1609,7 @@ namespace jai {
         
     private:
         // Friends only for essential access patterns
+        friend class interpreter;  // For coroutine handle creation (object_holder access)
         template<typename T> friend class dynamic_binder;  // For make_cpp_object
         friend class serialization::binary_archive_writer;  // For storage_ access
         friend class serialization::binary_archive_reader;  // For storage_ access

@@ -16,6 +16,7 @@
 #endif
 
 #include <jaiscript/serialization/serialization_metadata.hpp>
+#include <jaiscript/serialization/traits.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/type_info.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -30,6 +31,7 @@
 #include <tuple>
 #include <utility>
 #include <concepts>
+#include <stack>
 
 namespace jai {
 
@@ -67,10 +69,79 @@ class binary_archive_writer;
 class binary_archive_reader;
 class json_archive_writer;
 class json_archive_reader;
+class polymorphic_registry;
 
 // Base tag type for all JaiScript archives (used for SFINAE type detection)
 struct archive_base {
     static constexpr bool is_jai_archive = true;
+};
+
+// ============================================================================
+// Access class for protected serialize/save/load methods
+// ============================================================================
+// Classes with protected serialization methods should add:
+//   friend class jai::serialization::access;
+// This is similar to Cereal's access pattern.
+//
+// Note: If a class already friends cereal::access and has a templated serialize method,
+// JaiScript archives will still work if:
+//   1. The class also friends jai::serialization::access, OR
+//   2. The serialize method is public
+class access {
+public:
+    // Standard serialization (non-versioned)
+    template<class Archive, class T>
+    static auto member_serialize(Archive& ar, T& t) -> decltype(t.serialize(ar)) {
+        return t.serialize(ar);
+    }
+
+    template<class Archive, class T>
+    static auto member_save(Archive& ar, const T& t) -> decltype(t.save(ar)) {
+        return t.save(ar);
+    }
+
+    template<class Archive, class T>
+    static auto member_load(Archive& ar, T& t) -> decltype(t.load(ar)) {
+        return t.load(ar);
+    }
+
+    // Versioned serialization (Cereal-compatible)
+    template<class Archive, class T>
+    static auto member_serialize(Archive& ar, T& t, std::uint32_t version) -> decltype(t.serialize(ar, version)) {
+        return t.serialize(ar, version);
+    }
+
+    template<class Archive, class T>
+    static auto member_save(Archive& ar, const T& t, std::uint32_t version) -> decltype(t.save(ar, version)) {
+        return t.save(ar, version);
+    }
+
+    template<class Archive, class T>
+    static auto member_load(Archive& ar, T& t, std::uint32_t version) -> decltype(t.load(ar, version)) {
+        return t.load(ar, version);
+    }
+
+    // load_and_construct support
+    template<class T, class Archive, class Construct>
+    static auto load_and_construct(Archive& ar, Construct& c) -> decltype(T::load_and_construct(ar, c)) {
+        return T::load_and_construct(ar, c);
+    }
+
+    template<class T, class Archive, class Construct>
+    static auto load_and_construct(Archive& ar, Construct& c, std::uint32_t version) -> decltype(T::load_and_construct(ar, c, version)) {
+        return T::load_and_construct(ar, c, version);
+    }
+
+    // Factory methods for construct<T> pattern
+    template<typename T, typename... Args>
+    static std::shared_ptr<T> make_shared(Args&&... args) {
+        return std::make_shared<T>(std::forward<Args>(args)...);
+    }
+
+    template<typename T, typename... Args>
+    static std::unique_ptr<T> make_unique(Args&&... args) {
+        return std::make_unique<T>(std::forward<Args>(args)...);
+    }
 };
 
 // Name-value pair for serialization
@@ -130,6 +201,20 @@ inline constexpr bool is_load = std::is_base_of_v<archive_base, std::decay_t<T>>
 // Derived classes implement I/O methods as regular (non-virtual) methods.
 // See JAI_ARCHIVE_DEVIRTUALIZATION.md for design rationale.
 
+// ============================================================================
+// Serialization Context - tracks whether we're writing property values or array elements
+// ============================================================================
+// This enables automatic wrapping decisions:
+// - In PropertyValue context: complex types are already inside an object, no wrapping needed
+// - In ArrayElement context: complex types need to be wrapped in begin_object/end_object
+enum class SerializationContext {
+    Root,           // Top-level, before any container
+    PropertyValue,  // After write_property_name, expecting a single value
+    ArrayElement,   // Inside an array, expecting sequence of values
+    MapValue,       // After write_map_key, expecting a single value
+    ObjectBody      // Inside an object body - don't wrap the next complex value
+};
+
 template<class Derived>
 class archive_writer_impl : public archive_base {
 public:
@@ -150,6 +235,9 @@ protected:
 
     // Depth tracking for recursion limit
     int current_depth_ = 0;
+
+    // Context tracking for automatic wrapping decisions
+    std::stack<SerializationContext> context_stack_;
 
     // RAII guard for depth tracking - throws on depth exceeded
     struct depth_guard {
@@ -199,9 +287,44 @@ protected:
 
 public:
     // Constructor that accepts engine pointer
-    explicit archive_writer_impl(engine* eng = nullptr) : engine_ref_(eng) {}
+    explicit archive_writer_impl(engine* eng = nullptr) : engine_ref_(eng) {
+        context_stack_.push(SerializationContext::Root);
+    }
 
     ~archive_writer_impl() = default;
+
+    // ============================================================================
+    // Context management - used by derived archives and serialization logic
+    // ============================================================================
+    SerializationContext current_context() const {
+        return context_stack_.empty() ? SerializationContext::Root : context_stack_.top();
+    }
+
+    void push_context(SerializationContext ctx) {
+        context_stack_.push(ctx);
+    }
+
+    void pop_context() {
+        if (!context_stack_.empty() && context_stack_.top() != SerializationContext::Root) {
+            context_stack_.pop();
+        }
+    }
+
+    // Complex types with save/serialize/property_mgr need object wrapping UNLESS
+    // we're already inside an object body that was created for this value.
+    // ObjectBody context means the object wrapper was already written externally.
+    bool needs_object_wrapper() const {
+        auto ctx = current_context();
+        return ctx != SerializationContext::ObjectBody;
+    }
+
+    // Transition from PropertyValue/MapValue context after writing a value
+    void consume_value_context() {
+        auto ctx = current_context();
+        if (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue) {
+            pop_context();
+        }
+    }
 
     // Set engine reference
     void set_engine(engine* eng) {
@@ -239,7 +362,9 @@ public:
     std::enable_if_t<std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>>
     serialize(const char* name, const T& value) {
         self()->write_property_name(name);
+        push_context(SerializationContext::PropertyValue);
         write_primitive(value);
+        consume_value_context();
     }
 
     // Serialize custom types (named)
@@ -247,7 +372,9 @@ public:
     std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_enum_v<T> && !std::is_same_v<T, std::string>>
     serialize(const char* name, const T& value) {
         self()->write_property_name(name);
-        write_custom(value);
+        push_context(SerializationContext::PropertyValue);
+        write_value(value);  // Use write_value which is context-aware
+        consume_value_context();
     }
 
     // operator() as alias for serialize()
@@ -262,7 +389,7 @@ public:
         serialize(nv.name, nv.value);
     }
 
-    // Variadic operator()
+    // Variadic operator() for jai::serialization::nvp
     template<typename T, typename... Rest>
     void operator()(const nvp<T>& first, const Rest&... rest) {
         serialize(first.name, first.value);
@@ -272,64 +399,139 @@ public:
     }
 
 private:
+    // Detection archive for SFINAE trait checking
+    // Must satisfy jai_archive concept so constrained methods (requires jai_archive<Archive>) are found
+    // Using this instead of Derived avoids CRTP completeness issues during instantiation
+    // Includes dummy operator() to allow SFINAE detection of serialize methods that call ar(...)
+    struct detection_archive_writer {
+        static constexpr bool is_jai_archive = true;
+        static constexpr bool is_text_format = false;
+
+        // Dummy operator() for SFINAE detection - accepts any arguments
+        template<typename... Args>
+        void operator()(Args&&...) const {}
+
+        // Dummy serialize for SFINAE detection
+        template<typename... Args>
+        void serialize(Args&&...) const {}
+    };
+
     // Helper traits for SFINAE
-    // First check for versioned save(Archive&, uint32_t) - for Cereal-compatible MV types
+    // Uses access::member_* to detect methods - works with protected methods that friend jai::serialization::access
+
+    // Check for versioned save(Archive&, uint32_t) - for Cereal-compatible MV types
     template<typename T, typename = void>
     struct has_versioned_save_method : std::false_type {};
     template<typename T>
-    struct has_versioned_save_method<T, std::void_t<decltype(std::declval<const T&>().save(std::declval<Derived&>(), std::uint32_t(0)))>> : std::true_type {};
+    struct has_versioned_save_method<T, std::void_t<decltype(access::member_save(std::declval<detection_archive_writer&>(), std::declval<const T&>(), std::uint32_t(0)))>> : std::true_type {};
 
-    // Then check for non-versioned save(Archive&) - for JaiScript-only types
+    // Check for non-versioned save(Archive&) - for JaiScript-only types
     template<typename T, typename = void>
     struct has_simple_save_method : std::false_type {};
     template<typename T>
-    struct has_simple_save_method<T, std::void_t<decltype(std::declval<const T&>().save(std::declval<Derived&>()))>> : std::true_type {};
+    struct has_simple_save_method<T, std::void_t<decltype(access::member_save(std::declval<detection_archive_writer&>(), std::declval<const T&>()))>> : std::true_type {};
 
     // Combined: has either versioned or simple save method
     template<typename T>
     struct has_save_method : std::bool_constant<has_versioned_save_method<T>::value || has_simple_save_method<T>::value> {};
 
-    // Check for serialize(Archive&) method
+    // Check for versioned serialize(Archive&, uint32_t) method
     template<typename T, typename = void>
-    struct has_serialize_method : std::false_type {};
+    struct has_versioned_serialize_method : std::false_type {};
     template<typename T>
-    struct has_serialize_method<T, std::void_t<decltype(std::declval<T&>().serialize(std::declval<Derived&>()))>> : std::true_type {};
+    struct has_versioned_serialize_method<T, std::void_t<decltype(access::member_serialize(std::declval<detection_archive_writer&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
+
+    // Check for non-versioned serialize(Archive&) method
+    template<typename T, typename = void>
+    struct has_simple_serialize_method : std::false_type {};
+    template<typename T>
+    struct has_simple_serialize_method<T, std::void_t<decltype(access::member_serialize(std::declval<detection_archive_writer&>(), std::declval<T&>()))>> : std::true_type {};
+
+    // Combined: has either versioned or simple serialize method
+    template<typename T>
+    struct has_serialize_method : std::bool_constant<has_versioned_serialize_method<T>::value || has_simple_serialize_method<T>::value> {};
 
     template<typename T, typename = void>
     struct has_property_mgr : std::false_type {};
     template<typename T>
     struct has_property_mgr<T, std::void_t<decltype(std::declval<T&>().property_mgr)>> : std::true_type {};
 
+    // Check for ADL-findable save(Archive&, const T&) function
+    template<typename T, typename = void>
+    struct has_adl_save : std::false_type {};
+    template<typename T>
+    struct has_adl_save<T, std::void_t<decltype(save(std::declval<detection_archive_writer&>(), std::declval<const T&>()))>> : std::true_type {};
+
+    // Check for ADL-findable serialize(Archive&, T&) function (works for both save and load)
+    template<typename T, typename = void>
+    struct has_adl_serialize : std::false_type {};
+    template<typename T>
+    struct has_adl_serialize<T, std::void_t<decltype(serialize(std::declval<detection_archive_writer&>(), std::declval<T&>()))>> : std::true_type {};
+
 public:
     // operator() for types with member save method
     // Prefers versioned save(Archive&, uint32_t), falls back to simple save(Archive&)
-    // Note: Does NOT wrap in begin_object/end_object - naming implies nesting
-    // ar(obj) = inline properties, ar("name", obj) = nested object
+    // Context-aware: wraps in begin_object/end_object when called from array/root context
+    // Uses access:: to support protected methods that friend jai::serialization::access
     template<typename T, std::enable_if_t<has_save_method<T>::value, int> = 0>
     void operator()(const T& obj) {
+        bool wrap = needs_object_wrapper();
+        if (wrap) {
+            self()->begin_object();
+            push_context(SerializationContext::ObjectBody);  // Prevent nested wrapping
+        }
         if constexpr (has_versioned_save_method<T>::value) {
-            obj.save(*self(), 0);  // Call versioned save with version=0
+            access::member_save(*self(), obj, 0);  // Call versioned save with version=0
         } else {
-            obj.save(*self());     // Call simple save
+            access::member_save(*self(), obj);     // Call simple save
+        }
+        if (wrap) {
+            pop_context();
+            self()->end_object();
         }
     }
 
     // operator() for types with serialize() method (but no save())
-    // Note: Does NOT wrap - consistent with save() types. Wrapping via ar("name", obj).
+    // Prefers versioned serialize(Archive&, uint32_t), falls back to simple serialize(Archive&)
+    // Context-aware: wraps in begin_object/end_object when called from array/root context
+    // Uses access:: to support protected methods that friend jai::serialization::access
     template<typename T, std::enable_if_t<
         !has_save_method<T>::value &&
         has_serialize_method<T>::value, int> = 0>
     void operator()(const T& obj) {
-        const_cast<T&>(obj).serialize(*self());
+        bool wrap = needs_object_wrapper();
+        if (wrap) {
+            self()->begin_object();
+            push_context(SerializationContext::ObjectBody);  // Prevent nested wrapping
+        }
+        if constexpr (has_versioned_serialize_method<T>::value) {
+            access::member_serialize(*self(), const_cast<T&>(obj), 0);  // Call versioned serialize with version=0
+        } else {
+            access::member_serialize(*self(), const_cast<T&>(obj));     // Call simple serialize
+        }
+        if (wrap) {
+            pop_context();
+            self()->end_object();
+        }
     }
 
     // operator() for property_owner types WITHOUT custom save() or serialize()
+    // Context-aware: wraps in begin_object/end_object when called from array/root context
     template<typename T, std::enable_if_t<
         !has_save_method<T>::value &&
         !has_serialize_method<T>::value &&
         has_property_mgr<T>::value, int> = 0>
     void operator()(const T& obj) {
+        bool wrap = needs_object_wrapper();
+        if (wrap) {
+            self()->begin_object();
+            push_context(SerializationContext::ObjectBody);  // Prevent nested wrapping
+        }
         obj.property_mgr.save(*self());
+        if (wrap) {
+            pop_context();
+            self()->end_object();
+        }
     }
 
     // operator() for primitives (arithmetic, enum, string)
@@ -340,7 +542,7 @@ public:
     }
 
     // operator() fallback for types without save(), serialize(), property_mgr, or primitives
-    // Uses ADL save() - no wrapping, consistent with other operator() overloads
+    // Handles STL containers and smart pointers directly (no ADL needed)
     template<typename T, std::enable_if_t<
         !has_save_method<T>::value &&
         !has_serialize_method<T>::value &&
@@ -349,11 +551,258 @@ public:
         !std::is_enum_v<T> &&
         !std::is_same_v<T, std::string>, int> = 0>
     void operator()(const T& value) {
-        save(*self(), value);  // ADL - no wrapping
+        using namespace serialization_traits;
+
+        // ====================================================================
+        // Smart pointers (must check before containers since they're iterable)
+        // ====================================================================
+        // shared_ptr: serialize as {"$id": N, "$val": {...}} or {"$id": N} if reference
+        // Polymorphic types get {"$id": N, "$type": "ConcreteType", "$val": {...}}
+        if constexpr (is_std_shared_ptr_v<T>) {
+            using elem_type = typename T::element_type;
+            if (!value) {
+                self()->write_null();
+            } else {
+                auto [id, is_new] = self()->get_or_assign_shared_id(value.get());
+                self()->begin_object();
+                push_context(SerializationContext::ObjectBody);
+                self()->serialize("$id", id);
+                if (is_new) {
+                    if constexpr (std::is_polymorphic_v<elem_type>) {
+                        const auto& actual_type = typeid(*value);
+                        if (actual_type != typeid(elem_type)) {
+                            auto* entry = polymorphic_registry::instance().find(std::type_index(actual_type));
+                            if (entry && entry->save_fn) {
+                                self()->serialize("$type", entry->name);
+                                self()->write_property_name("$val");
+                                push_context(SerializationContext::PropertyValue);
+                                self()->begin_object();
+                                push_context(SerializationContext::ObjectBody);
+                                any_archive_writer wrapper(*self());
+                                entry->save_fn(wrapper, value.get());
+                                pop_context();
+                                self()->end_object();
+                                pop_context();
+                            } else {
+                                self()->serialize("$val", *value);
+                            }
+                        } else {
+                            self()->serialize("$val", *value);
+                        }
+                    } else {
+                        self()->serialize("$val", *value);
+                    }
+                }
+                pop_context();
+                self()->end_object();
+            }
+        }
+        // weak_ptr: serialize as {"$ref": N} or null
+        else if constexpr (is_std_weak_ptr_v<T>) {
+            if (auto shared = value.lock()) {
+                uint32_t id = self()->lookup_shared_id(shared.get());
+                self()->begin_object();
+                push_context(SerializationContext::ObjectBody);
+                self()->serialize("$ref", id);
+                pop_context();
+                self()->end_object();
+            } else {
+                self()->write_null();
+            }
+        }
+        // unique_ptr: serialize as {"$val": {...}} or null
+        else if constexpr (is_std_unique_ptr_v<T>) {
+            if (!value) {
+                self()->write_null();
+            } else {
+                self()->begin_object();
+                push_context(SerializationContext::ObjectBody);
+                self()->serialize("$val", *value);
+                pop_context();
+                self()->end_object();
+            }
+        }
+        // ====================================================================
+        // Special containers (check before generic traits)
+        // ====================================================================
+        // std::pair - serialize as 2-element array
+        else if constexpr (is_std_pair_v<T>) {
+            self()->begin_array(2);
+            push_context(SerializationContext::ArrayElement);
+            write_element(value.first);
+            write_element(value.second);
+            pop_context();
+            self()->end_array();
+        }
+        // std::optional - serialize as [has_value, value?]
+        else if constexpr (is_std_optional_v<T>) {
+            self()->begin_array(value.has_value() ? 2 : 1);
+            push_context(SerializationContext::ArrayElement);
+            self()->write_bool(value.has_value());
+            if (value.has_value()) {
+                write_element(*value);
+            }
+            pop_context();
+            self()->end_array();
+        }
+        // std::variant - serialize as [index, value]
+        else if constexpr (is_std_variant_v<T>) {
+            self()->begin_array(2);
+            push_context(SerializationContext::ArrayElement);
+            write_element(static_cast<uint32_t>(value.index()));
+            std::visit([this](const auto& v) { write_element(v); }, value);
+            pop_context();
+            self()->end_array();
+        }
+        // std::tuple - serialize as array
+        else if constexpr (is_std_tuple_v<T>) {
+            constexpr auto size = std::tuple_size_v<T>;
+            self()->begin_array(size);
+            push_context(SerializationContext::ArrayElement);
+            std::apply([this](const auto&... args) { (write_element(args), ...); }, value);
+            pop_context();
+            self()->end_array();
+        }
+        // std::array - serialize as fixed-size array
+        else if constexpr (is_std_array_v<T>) {
+            constexpr auto N = array_size_v<T>;
+            self()->begin_array(N);
+            push_context(SerializationContext::ArrayElement);
+            for (const auto& elem : value) {
+                write_element(elem);
+            }
+            pop_context();
+            self()->end_array();
+        }
+        // ====================================================================
+        // Generic container handling (covers list, deque, vector, set, map, etc.)
+        // ====================================================================
+        // Map-like containers (std::map, std::unordered_map, std::multimap, etc.)
+        else if constexpr (is_map_like_v<T>) {
+            using K = typename T::key_type;
+            if constexpr (std::is_same_v<K, std::string>) {
+                // String keys: serialize as JSON object
+                self()->begin_map(value.size());
+                for (const auto& [key, val] : value) {
+                    self()->write_map_key(key);
+                    push_context(SerializationContext::MapValue);
+                    write_value(val);
+                    consume_value_context();
+                }
+                self()->end_map();
+            } else {
+                // Non-string keys: serialize as array of [key, value] pairs
+                self()->begin_array(value.size());
+                push_context(SerializationContext::ArrayElement);
+                for (const auto& [key, val] : value) {
+                    self()->begin_array(2);
+                    push_context(SerializationContext::ArrayElement);
+                    write_element(key);
+                    write_element(val);
+                    pop_context();
+                    self()->end_array();
+                }
+                pop_context();
+                self()->end_array();
+            }
+        }
+        // Set-like containers (std::set, std::unordered_set, std::multiset, etc.)
+        else if constexpr (is_set_like_v<T>) {
+            self()->begin_array(value.size());
+            push_context(SerializationContext::ArrayElement);
+            for (const auto& elem : value) {
+                write_element(elem);
+            }
+            pop_context();
+            self()->end_array();
+        }
+        // Sequence containers (std::vector, std::list, std::deque, std::forward_list)
+        else if constexpr (is_sequence_container_v<T>) {
+            // Use std::distance for forward_list which doesn't have size()
+            size_t count = 0;
+            if constexpr (requires { value.size(); }) {
+                count = value.size();
+            } else {
+                count = static_cast<size_t>(std::distance(std::begin(value), std::end(value)));
+            }
+            self()->begin_array(count);
+            push_context(SerializationContext::ArrayElement);
+            for (const auto& elem : value) {
+                write_element(elem);
+            }
+            pop_context();
+            self()->end_array();
+        }
+        // ====================================================================
+        // jai::property<T> - unwrap and serialize the underlying value
+        // ====================================================================
+        else if constexpr (is_jai_property_v<T>) {
+            write_value(value.get());
+        }
+        // ====================================================================
+        // Fallback: try ADL serialize(), then ADL save(), or provide compile-time error
+        // ====================================================================
+        else if constexpr (has_adl_serialize<T>::value) {
+            // ADL serialize functions write named properties, so wrap in object
+            bool wrap = needs_object_wrapper();
+            if (wrap) {
+                self()->begin_object();
+                push_context(SerializationContext::ObjectBody);
+            }
+            serialize(*self(), const_cast<T&>(value));
+            if (wrap) {
+                pop_context();
+                self()->end_object();
+            }
+        }
+        else if constexpr (has_adl_save<T>::value) {
+            // ADL save functions write named properties, so wrap in object
+            bool wrap = needs_object_wrapper();
+            if (wrap) {
+                self()->begin_object();
+                push_context(SerializationContext::ObjectBody);
+            }
+            save(*self(), value);
+            if (wrap) {
+                pop_context();
+                self()->end_object();
+            }
+        } else {
+            static_assert(has_adl_save<T>::value || has_adl_serialize<T>::value,
+                "Type is not serializable: no save() method, serialize() method, property_mgr, "
+                "or ADL save/serialize function found. "
+                "Options: (1) Add a save(Archive&) member method, "
+                "(2) Add a serialize(Archive&) member method, "
+                "(3) Inherit from property_owner<T>, "
+                "(4) Provide free save(Archive&, const T&) or serialize(Archive&, T&) function, "
+                "(5) Mark the property as transient if it shouldn't be serialized.");
+        }
     }
 
     // ============================================================================
-    // Array element serialization (no property name)
+    // Context-aware value writing
+    // ============================================================================
+    // write_value is the unified entry point for writing any value.
+    // It checks the current context and wraps complex types when needed:
+    // - In PropertyValue context: no wrapping (already inside an object)
+    // - In ArrayElement context: wrap complex types with begin_object/end_object
+    // - In Root context: wrap complex types (standalone serialization)
+
+    template<typename T>
+    void write_value(const T& value) {
+        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>) {
+            // Primitives never need wrapping
+            write_primitive(value);
+        }
+        else {
+            // All other types: delegate to operator() which handles context-aware wrapping
+            // for types with save/serialize/property_mgr, or manages container structure
+            (*self())(value);
+        }
+    }
+
+    // ============================================================================
+    // Array element serialization (legacy API, delegates to write_value)
     // ============================================================================
 
     template<typename T>
@@ -365,7 +814,8 @@ public:
     template<typename T>
     std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>>
     write_element(const T& value) {
-        write_custom(value);
+        // Delegate to write_value which handles context-aware wrapping
+        write_value(value);
     }
 
 private:
@@ -384,42 +834,28 @@ private:
         else if constexpr (std::is_same_v<T, double>) self()->write_float64(value);
         else if constexpr (std::is_same_v<T, bool>) self()->write_bool(value);
         else if constexpr (std::is_same_v<T, std::string>) self()->write_string(value);
-        else if constexpr (std::is_enum_v<T>) self()->write_int32(static_cast<std::underlying_type_t<T>>(value));
+        else if constexpr (std::is_enum_v<T>) write_primitive(static_cast<std::underlying_type_t<T>>(value));
         else if constexpr (std::is_integral_v<T>) self()->write_int64(static_cast<int64_t>(value));
         else if constexpr (std::is_floating_point_v<T>) self()->write_float64(static_cast<double>(value));
     }
 
 public:
-    // Helper: write custom type - calls through self() for non-virtual dispatch
-    // Detects versioned save(Archive&, uint32_t) first, then simple save(Archive&)
+    // Helper: write custom type - context-aware, delegates to write_value
+    // Uses access:: to support protected methods that friend jai::serialization::access
     // Made public for use by smart pointer serialization in property_serialization.hpp
     template<typename T>
     void write_custom(const T& value) {
-        if constexpr (requires { const_cast<T&>(value).save(*self(), std::uint32_t(0)); }) {
-            // Versioned save for Cereal-compatible types
-            self()->begin_object("", 0);
-            const_cast<T&>(value).save(*self(), 0);
-            self()->end_object();
-        }
-        else if constexpr (requires { const_cast<T&>(value).save(*self()); }) {
-            // Simple save for JaiScript-only types
-            self()->begin_object("", 0);
-            const_cast<T&>(value).save(*self());
-            self()->end_object();
-        }
-        else if constexpr (requires { const_cast<T&>(value).serialize(*self()); }) {
-            self()->begin_object("", 0);
-            const_cast<T&>(value).serialize(*self());
-            self()->end_object();
-        }
-        else if constexpr (requires { value.property_mgr; }) {
-            self()->begin_object("", 0);
-            value.property_mgr.save(*self());
-            self()->end_object();
-        }
-        else {
-            save(*self(), value);
-        }
+        // Delegate to write_value which is context-aware
+        write_value(value);
+    }
+
+    // Serialize content into an already-opened object (for use by to_json/to_binary)
+    // Pushes ObjectBody context so operator() doesn't wrap again
+    template<typename T>
+    void serialize_object_content(const T& value) {
+        push_context(SerializationContext::ObjectBody);
+        (*self())(value);
+        pop_context();
     }
 };
 
@@ -540,6 +976,22 @@ public:
         return id != 0 && cpp_shared_ptrs_.find(id) != cpp_shared_ptrs_.end();
     }
 
+    // Non-templated versions for type-erased any_archive_reader
+    std::shared_ptr<void> get_deserialized_shared_void(uint32_t id) const {
+        if (id == 0) return nullptr;
+        auto it = cpp_shared_ptrs_.find(id);
+        if (it != cpp_shared_ptrs_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
+    void register_deserialized_shared_void(uint32_t id, std::shared_ptr<void> ptr) {
+        if (id != 0 && ptr) {
+            cpp_shared_ptrs_[id] = std::move(ptr);
+        }
+    }
+
     // User context support
     template<typename ContextType>
     ContextType* get_user_context() const {
@@ -604,53 +1056,130 @@ public:
     }
 
 private:
-    // First check for versioned load(Archive&, uint32_t) - for Cereal-compatible MV types
+    // Detection archive for SFINAE trait checking
+    // Must satisfy jai_archive concept so constrained methods (requires jai_archive<Archive>) are found
+    // Using this instead of Derived avoids CRTP completeness issues during instantiation
+    // Includes dummy operator() to allow SFINAE detection of serialize methods that call ar(...)
+    struct detection_archive_reader {
+        static constexpr bool is_jai_archive = true;
+        static constexpr bool is_text_format = false;
+
+        // Dummy operator() for SFINAE detection - accepts any arguments
+        template<typename... Args>
+        void operator()(Args&&...) {}
+
+        // Dummy serialize for SFINAE detection
+        template<typename... Args>
+        void serialize(Args&&...) {}
+    };
+
+    // Helper traits for SFINAE
+    // Uses access::member_* to detect methods - works with protected methods that friend jai::serialization::access
+
+    // Check for versioned load(Archive&, uint32_t) - for Cereal-compatible MV types
     template<typename T, typename = void>
     struct has_versioned_load_method : std::false_type {};
     template<typename T>
-    struct has_versioned_load_method<T, std::void_t<decltype(std::declval<T&>().load(std::declval<Derived&>(), std::uint32_t(0)))>> : std::true_type {};
+    struct has_versioned_load_method<T, std::void_t<decltype(access::member_load(std::declval<detection_archive_reader&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
 
-    // Then check for non-versioned load(Archive&) - for JaiScript-only types
+    // Check for non-versioned load(Archive&) - for JaiScript-only types
     template<typename T, typename = void>
     struct has_simple_load_method : std::false_type {};
     template<typename T>
-    struct has_simple_load_method<T, std::void_t<decltype(std::declval<T&>().load(std::declval<Derived&>()))>> : std::true_type {};
+    struct has_simple_load_method<T, std::void_t<decltype(access::member_load(std::declval<detection_archive_reader&>(), std::declval<T&>()))>> : std::true_type {};
 
     // Combined: has either versioned or simple load method
     template<typename T>
     struct has_load_method : std::bool_constant<has_versioned_load_method<T>::value || has_simple_load_method<T>::value> {};
 
-    // Check for serialize(Archive&) method
+    // Check for versioned serialize(Archive&, uint32_t) method
     template<typename T, typename = void>
-    struct has_serialize_method : std::false_type {};
+    struct has_versioned_serialize_method : std::false_type {};
     template<typename T>
-    struct has_serialize_method<T, std::void_t<decltype(std::declval<T&>().serialize(std::declval<Derived&>()))>> : std::true_type {};
+    struct has_versioned_serialize_method<T, std::void_t<decltype(access::member_serialize(std::declval<detection_archive_reader&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
+
+    // Check for non-versioned serialize(Archive&) method
+    template<typename T, typename = void>
+    struct has_simple_serialize_method : std::false_type {};
+    template<typename T>
+    struct has_simple_serialize_method<T, std::void_t<decltype(access::member_serialize(std::declval<detection_archive_reader&>(), std::declval<T&>()))>> : std::true_type {};
+
+    // Combined: has either versioned or simple serialize method
+    template<typename T>
+    struct has_serialize_method : std::bool_constant<has_versioned_serialize_method<T>::value || has_simple_serialize_method<T>::value> {};
 
     template<typename T, typename = void>
     struct has_property_mgr : std::false_type {};
     template<typename T>
     struct has_property_mgr<T, std::void_t<decltype(std::declval<T&>().property_mgr)>> : std::true_type {};
 
+    // Check for static load_and_construct(Archive&, construct<T>&) method
+    template<typename T, typename = void>
+    struct has_load_and_construct : std::false_type {};
+    template<typename T>
+    struct has_load_and_construct<T, std::void_t<
+        decltype(T::load_and_construct(
+            std::declval<detection_archive_reader&>(),
+            std::declval<construct<T>&>()
+        ))
+    >> : std::true_type {};
+
+    // Check for ADL-findable load(Archive&, T&) function
+    template<typename T, typename = void>
+    struct has_adl_load : std::false_type {};
+    template<typename T>
+    struct has_adl_load<T, std::void_t<decltype(load(std::declval<detection_archive_reader&>(), std::declval<T&>()))>> : std::true_type {};
+
+    // Check for ADL-findable serialize(Archive&, T&) function (works for both save and load)
+    template<typename T, typename = void>
+    struct has_adl_serialize : std::false_type {};
+    template<typename T>
+    struct has_adl_serialize<T, std::void_t<decltype(serialize(std::declval<detection_archive_reader&>(), std::declval<T&>()))>> : std::true_type {};
+
+    // Helper to load variant alternatives by index
+    template<typename Variant, std::size_t I = 0>
+    void load_variant_by_index(Variant& v, std::size_t index) {
+        if constexpr (I < std::variant_size_v<Variant>) {
+            if (I == index) {
+                using T = std::variant_alternative_t<I, Variant>;
+                T val{};
+                read_element(val);
+                v = std::move(val);
+            } else {
+                load_variant_by_index<Variant, I + 1>(v, index);
+            }
+        } else {
+            throw serialization_error("Invalid variant index: " + std::to_string(index));
+        }
+    }
+
 public:
     // operator() for types with member load method
     // Prefers versioned load(Archive&, uint32_t), falls back to simple load(Archive&)
     // Note: Does NOT wrap - naming implies nesting. ar(obj) = inline, ar("name", obj) = nested.
+    // Uses access:: to support protected methods that friend jai::serialization::access
     template<typename T, std::enable_if_t<has_load_method<T>::value, int> = 0>
     void operator()(T& obj) {
         if constexpr (has_versioned_load_method<T>::value) {
-            obj.load(*self(), 0);  // Call versioned load with version=0
+            access::member_load(*self(), obj, 0);  // Call versioned load with version=0
         } else {
-            obj.load(*self());     // Call simple load
+            access::member_load(*self(), obj);     // Call simple load
         }
     }
 
     // operator() for types with serialize() method (but no load())
+    // Prefers versioned serialize(Archive&, uint32_t), falls back to simple serialize(Archive&)
     // Note: Does NOT wrap - consistent with load() types. Wrapping via ar("name", obj).
+    // Uses access:: to support protected methods that friend jai::serialization::access
     template<typename T, std::enable_if_t<
         !has_load_method<T>::value &&
         has_serialize_method<T>::value, int> = 0>
     void operator()(T& obj) {
-        obj.serialize(*self());
+        if constexpr (has_versioned_serialize_method<T>::value) {
+            access::member_serialize(*self(), obj, 0);  // Call versioned serialize with version=0
+        } else {
+            access::member_serialize(*self(), obj);     // Call simple serialize
+        }
     }
 
     // operator() for property_owner types WITHOUT custom load() or serialize()
@@ -670,7 +1199,7 @@ public:
     }
 
     // operator() fallback for types without load(), serialize(), property_mgr, or primitives
-    // Uses ADL load() - no wrapping, consistent with other operator() overloads
+    // Handles STL containers and smart pointers directly (no ADL needed)
     template<typename T, std::enable_if_t<
         !has_load_method<T>::value &&
         !has_serialize_method<T>::value &&
@@ -679,7 +1208,269 @@ public:
         !std::is_enum_v<T> &&
         !std::is_same_v<T, std::string>, int> = 0>
     void operator()(T& value) {
-        load(*self(), value);  // ADL - no wrapping
+        using namespace serialization_traits;
+
+        // std::vector
+        if constexpr (is_std_vector_v<T>) {
+            using elem_type = vector_element_t<T>;
+            size_t size = self()->begin_array();
+            value.clear();
+            value.reserve(size);
+            for (size_t i = 0; i < size; ++i) {
+                elem_type elem{};
+                read_element(elem);
+                value.push_back(std::move(elem));
+            }
+            self()->end_array();
+        }
+        // std::array
+        else if constexpr (is_std_array_v<T>) {
+            constexpr auto N = array_size_v<T>;
+            size_t size = self()->begin_array();
+            if (size != N) {
+                throw serialization_error("Array size mismatch: expected " + std::to_string(N) +
+                                          ", got " + std::to_string(size));
+            }
+            for (size_t i = 0; i < N; ++i) {
+                read_element(value[i]);
+            }
+            self()->end_array();
+        }
+        // std::map
+        else if constexpr (is_std_map_v<T>) {
+            using K = map_key_t<T>;
+            using V = map_value_t<T>;
+            value.clear();
+            if constexpr (std::is_same_v<K, std::string>) {
+                size_t size = self()->begin_map();
+                for (size_t i = 0; i < size; ++i) {
+                    std::string key;
+                    if (!self()->read_map_key(key)) break;
+                    V val{};
+                    read_element(val);
+                    value[key] = std::move(val);
+                }
+                self()->end_map();
+            } else {
+                size_t size = self()->begin_array();
+                for (size_t i = 0; i < size; ++i) {
+                    self()->begin_array();
+                    K key{};
+                    V val{};
+                    read_element(key);
+                    read_element(val);
+                    self()->end_array();
+                    value[std::move(key)] = std::move(val);
+                }
+                self()->end_array();
+            }
+        }
+        // std::unordered_map
+        else if constexpr (is_std_unordered_map_v<T>) {
+            using K = unordered_map_key_t<T>;
+            using V = unordered_map_value_t<T>;
+            value.clear();
+            if constexpr (std::is_same_v<K, std::string>) {
+                size_t size = self()->begin_map();
+                for (size_t i = 0; i < size; ++i) {
+                    std::string key;
+                    if (!self()->read_map_key(key)) break;
+                    V val{};
+                    read_element(val);
+                    value[key] = std::move(val);
+                }
+                self()->end_map();
+            } else {
+                size_t size = self()->begin_array();
+                for (size_t i = 0; i < size; ++i) {
+                    self()->begin_array();
+                    K key{};
+                    V val{};
+                    read_element(key);
+                    read_element(val);
+                    self()->end_array();
+                    value[std::move(key)] = std::move(val);
+                }
+                self()->end_array();
+            }
+        }
+        // std::pair
+        else if constexpr (is_std_pair_v<T>) {
+            self()->begin_array();
+            read_element(value.first);
+            read_element(value.second);
+            self()->end_array();
+        }
+        // std::shared_ptr - format: {"$id": N, "$val": {...}} or {"$id": N} or null
+        // Polymorphic: {"$id": N, "$type": "ConcreteType", "$val": {...}}
+        else if constexpr (is_std_shared_ptr_v<T>) {
+            using elem_type = shared_ptr_element_t<T>;
+            if (self()->peek_null()) {
+                self()->read_null();
+                value.reset();
+                return;
+            }
+            self()->begin_object();
+            uint32_t id{};
+            self()->serialize("$id", id);
+            if (self()->has_deserialized_shared(id)) {
+                value = self()->template get_deserialized_shared<elem_type>(id);
+            } else if constexpr (std::is_polymorphic_v<elem_type>) {
+                // Check for polymorphic type discriminator
+                std::string poly_type;
+                if (self()->has_property("$type")) {
+                    self()->serialize("$type", poly_type);
+                }
+                if (!poly_type.empty()) {
+                    auto* entry = polymorphic_registry::instance().find(poly_type);
+                    if (entry && entry->load_fn) {
+                        if (!self()->seek_property("$val")) {
+                            throw serialization_error("Expected '$val' for polymorphic shared_ptr");
+                        }
+                        self()->begin_object();
+                        any_archive_reader wrapper(*self());
+                        auto void_ptr = entry->load_fn(wrapper);
+                        value = std::static_pointer_cast<elem_type>(void_ptr);
+                        self()->end_object();
+                        self()->register_deserialized_shared(id, value);
+                    } else {
+                        throw serialization_error("Unknown polymorphic type: " + poly_type);
+                    }
+                } else if (self()->has_property("$val")) {
+                    if constexpr (has_load_and_construct<elem_type>::value) {
+                        if (!self()->seek_property("$val")) {
+                            throw serialization_error("Expected '$val' for shared_ptr with load_and_construct");
+                        }
+                        std::string type_name;
+                        uint32_t version = 0;
+                        self()->begin_object(type_name, version);
+                        construct<elem_type> c(value);
+                        access::template load_and_construct<elem_type>(*self(), c);
+                        self()->end_object();
+                        self()->register_deserialized_shared(id, value);
+                    } else if constexpr (std::is_default_constructible_v<elem_type>) {
+                        value = std::make_shared<elem_type>();
+                        self()->serialize("$val", *value);
+                        self()->register_deserialized_shared(id, value);
+                    } else {
+                        throw serialization_error("Cannot deserialize shared_ptr<T>: type is not default constructible and has no load_and_construct");
+                    }
+                }
+            } else if (self()->has_property("$val")) {
+                if constexpr (has_load_and_construct<elem_type>::value) {
+                    if (!self()->seek_property("$val")) {
+                        throw serialization_error("Expected '$val' for shared_ptr with load_and_construct");
+                    }
+                    std::string type_name;
+                    uint32_t version = 0;
+                    self()->begin_object(type_name, version);
+                    construct<elem_type> c(value);
+                    access::template load_and_construct<elem_type>(*self(), c);
+                    self()->end_object();
+                    self()->register_deserialized_shared(id, value);
+                } else if constexpr (std::is_default_constructible_v<elem_type>) {
+                    value = std::make_shared<elem_type>();
+                    self()->serialize("$val", *value);
+                    self()->register_deserialized_shared(id, value);
+                } else {
+                    throw serialization_error("Cannot deserialize shared_ptr<T>: type is not default constructible and has no load_and_construct");
+                }
+            }
+            self()->end_object();
+        }
+        // std::weak_ptr - format: {"$ref": N} or null
+        else if constexpr (is_std_weak_ptr_v<T>) {
+            using elem_type = weak_ptr_element_t<T>;
+            if (self()->peek_null()) {
+                self()->read_null();
+                value.reset();
+                return;
+            }
+            self()->begin_object();
+            uint32_t id{};
+            self()->serialize("$ref", id);
+            self()->end_object();
+            if (auto shared = self()->template get_deserialized_shared<elem_type>(id)) {
+                value = shared;
+            } else {
+                value.reset();
+            }
+        }
+        // std::unique_ptr - format: {"$val": {...}} or null
+        else if constexpr (is_std_unique_ptr_v<T>) {
+            using elem_type = unique_ptr_element_t<T>;
+            if (self()->peek_null()) {
+                self()->read_null();
+                value.reset();
+                return;
+            }
+            self()->begin_object();
+            if constexpr (std::is_default_constructible_v<elem_type>) {
+                value = std::make_unique<elem_type>();
+                self()->serialize("$val", *value);
+            } else {
+                throw serialization_error("Cannot deserialize unique_ptr<T>: type is not default constructible");
+            }
+            self()->end_object();
+        }
+        // std::optional
+        else if constexpr (is_std_optional_v<T>) {
+            using elem_type = optional_element_t<T>;
+            self()->begin_array();
+            bool has_value = self()->read_bool();
+            if (has_value) {
+                elem_type val{};
+                read_element(val);
+                value = std::move(val);
+            } else {
+                value = std::nullopt;
+            }
+            self()->end_array();
+        }
+        // std::variant
+        else if constexpr (is_std_variant_v<T>) {
+            self()->begin_array();
+            uint32_t index;
+            read_element(index);
+            load_variant_by_index(value, static_cast<std::size_t>(index));
+            self()->end_array();
+        }
+        // std::tuple
+        else if constexpr (is_std_tuple_v<T>) {
+            self()->begin_array();
+            std::apply([this](auto&... args) { (read_element(args), ...); }, value);
+            self()->end_array();
+        }
+        // jai::property<T>
+        else if constexpr (is_jai_property_v<T>) {
+            // Deserialize the underlying value (property name handled by caller)
+            using element_type = property_element_t<T>;
+            element_type temp{};
+            (*self())(temp);
+            value = std::move(temp);
+        }
+        // Fallback: try ADL serialize(), then ADL load(), or provide compile-time error
+        else if constexpr (has_adl_serialize<T>::value) {
+            // ADL serialize functions read named properties, so expect object wrapper
+            self()->begin_object();
+            serialize(*self(), value);
+            self()->end_object();
+        }
+        else if constexpr (has_adl_load<T>::value) {
+            // ADL load functions read named properties, so expect object wrapper
+            self()->begin_object();
+            load(*self(), value);
+            self()->end_object();
+        } else {
+            static_assert(has_adl_load<T>::value || has_adl_serialize<T>::value,
+                "Type is not deserializable: no load() method, serialize() method, property_mgr, "
+                "or ADL load/serialize function found. "
+                "Options: (1) Add a load(Archive&) member method, "
+                "(2) Add a serialize(Archive&) member method, "
+                "(3) Inherit from property_owner<T>, "
+                "(4) Provide free load(Archive&, T&) or serialize(Archive&, T&) function, "
+                "(5) Mark the property as transient if it shouldn't be serialized.");
+        }
     }
 
     // ============================================================================
@@ -695,7 +1486,19 @@ public:
     template<typename T>
     std::enable_if_t<!std::is_arithmetic_v<T> && !std::is_same_v<T, std::string>>
     read_element(T& value) {
-        read_custom(value);
+        // For custom types with serialize/load methods, expect object wrapper
+        // since their serialize() will read named properties.
+        // DON'T wrap smart pointers - they have their own array format,
+        // and their pointed-to object will be wrapped when read_element(*ptr) is called.
+        if constexpr (has_load_method<T>::value || has_serialize_method<T>::value ||
+                      has_property_mgr<T>::value) {
+            self()->begin_object();
+            (*self())(value);
+            self()->end_object();
+        } else {
+            // STL containers, smart pointers, variants, etc. handle their own structure
+            (*self())(value);
+        }
     }
 
 protected:
@@ -733,41 +1536,48 @@ private:
         else if constexpr (std::is_same_v<T, double>) value = self()->read_float64();
         else if constexpr (std::is_same_v<T, bool>) value = self()->read_bool();
         else if constexpr (std::is_same_v<T, std::string>) value = self()->read_string();
-        else if constexpr (std::is_enum_v<T>) value = static_cast<T>(self()->read_int32());
+        else if constexpr (std::is_enum_v<T>) { std::underlying_type_t<T> underlying; read_primitive(underlying); value = static_cast<T>(underlying); }
         else if constexpr (std::is_integral_v<T>) value = static_cast<T>(self()->read_int64());
         else if constexpr (std::is_floating_point_v<T>) value = static_cast<T>(self()->read_float64());
     }
 
 public:
     // Helper: read custom type - calls through self() for non-virtual dispatch
-    // Detects versioned load(Archive&, uint32_t) first, then simple load(Archive&)
+    // Uses access:: to support protected methods that friend jai::serialization::access
     // Made public for use by smart pointer serialization in property_serialization.hpp
     template<typename T>
     void read_custom(T& value) {
-        if constexpr (requires { value.load(*self(), std::uint32_t(0)); }) {
+        if constexpr (has_versioned_load_method<T>::value) {
             // Versioned load for Cereal-compatible types
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
-            value.load(*self(), version);
+            access::member_load(*self(), value, version);
             self()->end_object();
         }
-        else if constexpr (requires { value.load(*self()); }) {
+        else if constexpr (has_simple_load_method<T>::value) {
             // Simple load for JaiScript-only types
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
-            value.load(*self());
+            access::member_load(*self(), value);
             self()->end_object();
         }
-        else if constexpr (requires { value.serialize(*self()); }) {
+        else if constexpr (has_versioned_serialize_method<T>::value) {
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
-            value.serialize(*self());
+            access::member_serialize(*self(), value, version);
             self()->end_object();
         }
-        else if constexpr (requires { value.property_mgr; }) {
+        else if constexpr (has_simple_serialize_method<T>::value) {
+            std::string type_name;
+            uint32_t version;
+            self()->begin_object(type_name, version);
+            access::member_serialize(*self(), value);
+            self()->end_object();
+        }
+        else if constexpr (has_property_mgr<T>::value) {
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
@@ -775,7 +1585,8 @@ public:
             self()->end_object();
         }
         else {
-            load(*self(), value);
+            // Use operator() which handles STL containers and ADL fallback
+            (*self())(value);
         }
     }
 };
@@ -836,314 +1647,17 @@ private:
     std::map<std::type_index, std::string> type_to_class_name_;
 };
 
-// ============================================================================
-// Generic STL container serialization support
-// ============================================================================
-// These free functions enable automatic serialization of std::vector<T> and
-// std::array<T, N> for any T that has save/load support (member or free function).
-// All functions are templated on Archive to preserve concrete archive type.
-// See JAI_ARCHIVE_DEVIRTUALIZATION.md for design rationale.
-//
-// IMPORTANT: All functions use JAI_ONLY_ARCHIVE constraint to ensure they only
-// match JaiScript archives. This prevents conflicts with Cereal which also uses
-// ADL to find free save/load functions.
-
-// --- std::vector ---
-template<typename Archive, typename T, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const std::vector<T>& vec) {
-    ar.begin_array(vec.size());
-    for (const auto& elem : vec) {
-        ar.write_element(elem);
-    }
-    ar.end_array();
-}
-
-template<typename Archive, typename T, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, std::vector<T>& vec) {
-    size_t size = ar.begin_array();
-    vec.resize(size);
-    for (size_t i = 0; i < size; ++i) {
-        ar.read_element(vec[i]);
-    }
-    ar.end_array();
-}
-
-// --- std::array (compile-time size, no size serialization needed) ---
-template<typename Archive, typename T, std::size_t N, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const std::array<T, N>& arr) {
-    ar.begin_array(N);
-    for (const auto& elem : arr) {
-        ar.write_element(elem);
-    }
-    ar.end_array();
-}
-
-template<typename Archive, typename T, std::size_t N, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, std::array<T, N>& arr) {
-    size_t size = ar.begin_array();
-    if (size != N) {
-        throw serialization_error("Array size mismatch: expected " + std::to_string(N) +
-                                  ", got " + std::to_string(size));
-    }
-    for (size_t i = 0; i < N; ++i) {
-        ar.read_element(arr[i]);
-    }
-    ar.end_array();
-}
-
-// --- std::map (string keys use object format, other keys use array of pairs) ---
-template<typename Archive, typename K, typename V, typename C, typename A, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const std::map<K, V, C, A>& map) {
-    if constexpr (std::is_same_v<K, std::string>) {
-        // String keys: use map format (JSON object, binary map)
-        ar.begin_map(map.size());
-        for (const auto& [key, value] : map) {
-            ar.write_map_key(key);
-            ar.write_element(value);
-        }
-        ar.end_map();
-    } else {
-        // Non-string keys: serialize as array of pairs
-        ar.begin_array(map.size());
-        for (const auto& [key, value] : map) {
-            ar.begin_array(2);
-            ar.write_element(key);
-            ar.write_element(value);
-            ar.end_array();
-        }
-        ar.end_array();
-    }
-}
-
-template<typename Archive, typename K, typename V, typename C, typename A, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, std::map<K, V, C, A>& map) {
-    map.clear();
-    if constexpr (std::is_same_v<K, std::string>) {
-        // String keys: use map format
-        size_t size = ar.begin_map();
-        for (size_t i = 0; i < size; ++i) {
-            std::string key;
-            if (!ar.read_map_key(key)) break;
-            V value;
-            ar.read_element(value);
-            map[key] = std::move(value);
-        }
-        ar.end_map();
-    } else {
-        // Non-string keys: deserialize from array of pairs
-        size_t size = ar.begin_array();
-        for (size_t i = 0; i < size; ++i) {
-            ar.begin_array();
-            K key;
-            V value;
-            ar.read_element(key);
-            ar.read_element(value);
-            ar.end_array();
-            map[std::move(key)] = std::move(value);
-        }
-        ar.end_array();
-    }
-}
-
-// --- std::unordered_map (same serialization strategy as std::map) ---
-template<typename Archive, typename K, typename V, typename H, typename E, typename A, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const std::unordered_map<K, V, H, E, A>& map) {
-    if constexpr (std::is_same_v<K, std::string>) {
-        ar.begin_map(map.size());
-        for (const auto& [key, value] : map) {
-            ar.write_map_key(key);
-            ar.write_element(value);
-        }
-        ar.end_map();
-    } else {
-        ar.begin_array(map.size());
-        for (const auto& [key, value] : map) {
-            ar.begin_array(2);
-            ar.write_element(key);
-            ar.write_element(value);
-            ar.end_array();
-        }
-        ar.end_array();
-    }
-}
-
-template<typename Archive, typename K, typename V, typename H, typename E, typename A, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, std::unordered_map<K, V, H, E, A>& map) {
-    map.clear();
-    if constexpr (std::is_same_v<K, std::string>) {
-        size_t size = ar.begin_map();
-        for (size_t i = 0; i < size; ++i) {
-            std::string key;
-            if (!ar.read_map_key(key)) break;
-            V value;
-            ar.read_element(value);
-            map[key] = std::move(value);
-        }
-        ar.end_map();
-    } else {
-        size_t size = ar.begin_array();
-        for (size_t i = 0; i < size; ++i) {
-            ar.begin_array();
-            K key;
-            V value;
-            ar.read_element(key);
-            ar.read_element(value);
-            ar.end_array();
-            map[std::move(key)] = std::move(value);
-        }
-        ar.end_array();
-    }
-}
-
-// --- std::variant ---
-namespace stl_detail {
-    // Helper to save a variant by visiting it (templated on Archive)
-    template<typename Archive, typename... Ts>
-    struct variant_saver {
-        Archive& ar;
-
-        template<typename T>
-        void operator()(const T& value) {
-            ar.write_element(value);
-        }
-    };
-
-    // Helper to load variant alternatives by index (templated on Archive)
-    template<typename Archive, typename Variant, std::size_t I = 0>
-    void load_variant_by_index(Archive& ar, Variant& v, std::size_t index) {
-        if constexpr (I < std::variant_size_v<Variant>) {
-            if (I == index) {
-                using T = std::variant_alternative_t<I, Variant>;
-                T value;
-                ar.read_element(value);
-                v = std::move(value);
-            } else {
-                load_variant_by_index<Archive, Variant, I + 1>(ar, v, index);
-            }
-        } else {
-            throw serialization_error("Invalid variant index: " + std::to_string(index));
-        }
-    }
-}
-
-template<typename Archive, typename... Ts, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const std::variant<Ts...>& v) {
-    ar.begin_array(2);
-    // Write the type index
-    ar.write_element(static_cast<uint32_t>(v.index()));
-    // Write the value
-    std::visit(stl_detail::variant_saver<Archive, Ts...>{ar}, v);
-    ar.end_array();
-}
-
-template<typename Archive, typename... Ts, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, std::variant<Ts...>& v) {
-    ar.begin_array();
-    uint32_t index;
-    ar.read_element(index);
-    stl_detail::load_variant_by_index<Archive>(ar, v, static_cast<std::size_t>(index));
-    ar.end_array();
-}
-
-// --- std::optional ---
-template<typename Archive, typename T, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const std::optional<T>& opt) {
-    ar.begin_array(opt.has_value() ? 2 : 1);
-    ar.write_element(opt.has_value());
-    if (opt.has_value()) {
-        ar.write_element(*opt);
-    }
-    ar.end_array();
-}
-
-template<typename Archive, typename T, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, std::optional<T>& opt) {
-    ar.begin_array();
-    bool has_value;
-    ar.read_element(has_value);
-    if (has_value) {
-        T value;
-        ar.read_element(value);
-        opt = std::move(value);
-    } else {
-        opt = std::nullopt;
-    }
-    ar.end_array();
-}
-
-// --- std::pair ---
-template<typename Archive, typename T1, typename T2, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const std::pair<T1, T2>& p) {
-    ar.begin_array(2);
-    ar.write_element(p.first);
-    ar.write_element(p.second);
-    ar.end_array();
-}
-
-template<typename Archive, typename T1, typename T2, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, std::pair<T1, T2>& p) {
-    ar.begin_array();
-    ar.read_element(p.first);
-    ar.read_element(p.second);
-    ar.end_array();
-}
-
-// --- std::tuple ---
-namespace stl_detail {
-    template<typename Archive, typename Tuple, std::size_t... Is>
-    void save_tuple_impl(Archive& ar, const Tuple& t, std::index_sequence<Is...>) {
-        (ar.write_element(std::get<Is>(t)), ...);
-    }
-
-    template<typename Archive, typename Tuple, std::size_t... Is>
-    void load_tuple_impl(Archive& ar, Tuple& t, std::index_sequence<Is...>) {
-        (ar.read_element(std::get<Is>(t)), ...);
-    }
-}
-
-template<typename Archive, typename... Ts, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const std::tuple<Ts...>& t) {
-    ar.begin_array(sizeof...(Ts));
-    stl_detail::save_tuple_impl(ar, t, std::index_sequence_for<Ts...>{});
-    ar.end_array();
-}
-
-template<typename Archive, typename... Ts, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, std::tuple<Ts...>& t) {
-    ar.begin_array();
-    stl_detail::load_tuple_impl(ar, t, std::index_sequence_for<Ts...>{});
-    ar.end_array();
-}
-
-} // namespace serialization
-
-// ============================================================================
-// jai::property<T> serialization support
-// ============================================================================
-// These functions are in the jai namespace (not jai::serialization) so they're
-// found via ADL when serializing property<T> objects.
-// Properties serialize as just their underlying value - the property name is
-// handled by the caller (property_manager or direct ar.serialize() call).
-
-// Forward declaration of property template
-template<typename T> class property;
-
-namespace serialization {
-
-// --- jai::property<T> ---
-// Serializes just the underlying value (property name handled by caller)
-template<typename Archive, typename T, JAI_ONLY_ARCHIVE>
-void save(Archive& ar, const ::jai::property<T>& prop) {
-    ar(prop.get());
-}
-
-template<typename Archive, typename T, JAI_ONLY_ARCHIVE>
-void load(Archive& ar, ::jai::property<T>& prop) {
-    T value{};
-    ar(value);
-    prop = std::move(value);
-}
+// NOTE: STL container serialization (vector, array, map, unordered_map, pair,
+// optional, variant, tuple) and jai::property<T> are now handled internally by
+// archive_writer_impl::operator() and archive_reader_impl::operator().
+// No ADL free functions are needed. This avoids conflicts with Cereal's ADL-based
+// serialization.
 
 } // namespace serialization
 } // namespace jai
+
+// Include polymorphic registry after archive classes are defined
+// (polymorphic.hpp needs archive types, archive templates need polymorphic_registry)
+#include <jaiscript/serialization/polymorphic.hpp>
+
 #endif // JAISCRIPT_SERIALIZATION_ARCHIVE_HPP

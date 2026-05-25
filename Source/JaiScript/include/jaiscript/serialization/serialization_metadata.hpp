@@ -17,6 +17,38 @@ namespace jai {
 namespace jai {
 namespace serialization {
 
+// Forward declarations of concrete archive types for dispatch
+class json_archive_writer;
+class json_archive_reader;
+class binary_archive_writer;
+class binary_archive_reader;
+
+// ============================================================================
+// Archive Type IDs for dispatch
+// ============================================================================
+// Used to recover concrete archive type at runtime for full-fidelity serialization.
+// Add new archive types here as needed.
+
+enum class writer_archive_id : uint8_t {
+    json = 0,
+    binary = 1,
+    unknown = 255
+};
+
+enum class reader_archive_id : uint8_t {
+    json = 0,
+    binary = 1,
+    unknown = 255
+};
+
+// Traits to map archive types to IDs (specialized after archive definitions)
+template<typename Archive> struct writer_archive_id_trait {
+    static constexpr writer_archive_id value = writer_archive_id::unknown;
+};
+template<typename Archive> struct reader_archive_id_trait {
+    static constexpr reader_archive_id value = reader_archive_id::unknown;
+};
+
 // ============================================================================
 // Type-Erased Archive Wrappers
 // ============================================================================
@@ -24,9 +56,13 @@ namespace serialization {
 // Uses function pointers (manual vtable) for minimal indirection.
 // Only used for dynamic/runtime polymorphism - static code uses CRTP directly.
 // See JAI_ARCHIVE_DEVIRTUALIZATION.md for design rationale.
+//
+// KEY FEATURE: dispatch() method recovers concrete archive type via switch,
+// enabling full template instantiation for shared_ptr, load_and_construct, etc.
 
 class any_archive_writer {
     void* ptr_;
+    writer_archive_id id_;
     void (*write_property_name_)(void*, const std::string&);
     void (*write_int8_)(void*, int8_t);
     void (*write_int16_)(void*, int16_t);
@@ -47,11 +83,16 @@ class any_archive_writer {
     void (*begin_map_)(void*, size_t);
     void (*end_map_)(void*);
     void (*write_map_key_)(void*, const std::string&);
+    // Shared pointer ID tracking for type-erased smart pointer serialization
+    std::pair<uint32_t, bool> (*get_or_assign_shared_id_)(void*, const void*);
 
 public:
+    static constexpr bool is_text_format = true; // Conservative default for type-erased
+
     template<typename Archive>
     explicit any_archive_writer(Archive& ar)
         : ptr_(&ar)
+        , id_(writer_archive_id_trait<std::decay_t<Archive>>::value)
         , write_property_name_([](void* p, const std::string& n) { static_cast<Archive*>(p)->write_property_name(n); })
         , write_int8_([](void* p, int8_t v) { static_cast<Archive*>(p)->write_int8(v); })
         , write_int16_([](void* p, int16_t v) { static_cast<Archive*>(p)->write_int16(v); })
@@ -72,6 +113,7 @@ public:
         , begin_map_([](void* p, size_t s) { static_cast<Archive*>(p)->begin_map(s); })
         , end_map_([](void* p) { static_cast<Archive*>(p)->end_map(); })
         , write_map_key_([](void* p, const std::string& k) { static_cast<Archive*>(p)->write_map_key(k); })
+        , get_or_assign_shared_id_([](void* p, const void* raw) { return static_cast<Archive*>(p)->get_or_assign_shared_id(raw); })
     {}
 
     void write_property_name(const std::string& name) { write_property_name_(ptr_, name); }
@@ -94,11 +136,23 @@ public:
     void begin_map(size_t size) { begin_map_(ptr_, size); }
     void end_map() { end_map_(ptr_); }
     void write_map_key(const std::string& key) { write_map_key_(ptr_, key); }
+    std::pair<uint32_t, bool> get_or_assign_shared_id(const void* raw) { return get_or_assign_shared_id_(ptr_, raw); }
+
+    // Archive type recovery for full-fidelity serialization
+    writer_archive_id archive_id() const { return id_; }
+    void* raw_ptr() const { return ptr_; }
+
+    // Dispatch to concrete archive type - recovers full type info!
+    // Usage: ar.dispatch([&](auto& concrete_ar) { concrete_ar(make_nvp("name", value)); });
+    // Implementation is in archive.hpp after concrete archive definitions
+    template<typename Fn>
+    decltype(auto) dispatch(Fn&& fn);
 };
 
 // Forward declare script_value for the reader
 class any_archive_reader {
     void* ptr_;
+    reader_archive_id id_;
     bool (*seek_property_)(void*, const std::string&);
     bool (*read_property_name_)(void*, std::string&);
     int8_t (*read_int8_)(void*);
@@ -124,11 +178,16 @@ class any_archive_reader {
     bool (*needs_property_keys_)(void*);
     void* (*get_engine_)(void*);  // Returns engine*
     void* (*get_user_context_)(void*, std::type_index);  // Returns user context by type_index
+    // Shared pointer ID tracking for type-erased smart pointer deserialization
+    bool (*has_deserialized_shared_)(void*, uint32_t);
+    std::shared_ptr<void> (*get_deserialized_shared_void_)(void*, uint32_t);
+    void (*register_deserialized_shared_void_)(void*, uint32_t, std::shared_ptr<void>);
 
 public:
     template<typename Archive>
     explicit any_archive_reader(Archive& ar)
         : ptr_(&ar)
+        , id_(reader_archive_id_trait<std::decay_t<Archive>>::value)
         , seek_property_([](void* p, const std::string& n) { return static_cast<Archive*>(p)->seek_property(n); })
         , read_property_name_([](void* p, std::string& n) { return static_cast<Archive*>(p)->read_property_name(n); })
         , read_int8_([](void* p) { return static_cast<Archive*>(p)->read_int8(); })
@@ -156,6 +215,14 @@ public:
         , get_user_context_([](void* p, std::type_index ti) -> void* {
             auto& ar = *static_cast<Archive*>(p);
             return ar.get_user_context_raw(ti);
+        })
+        , has_deserialized_shared_([](void* p, uint32_t id) { return static_cast<Archive*>(p)->has_deserialized_shared(id); })
+        , get_deserialized_shared_void_([](void* p, uint32_t id) -> std::shared_ptr<void> {
+            // Get as shared_ptr<void> - the concrete archive stores shared_ptr<void> internally
+            return static_cast<Archive*>(p)->get_deserialized_shared_void(id);
+        })
+        , register_deserialized_shared_void_([](void* p, uint32_t id, std::shared_ptr<void> ptr) {
+            static_cast<Archive*>(p)->register_deserialized_shared_void(id, std::move(ptr));
         })
     {}
 
@@ -193,6 +260,32 @@ public:
         void* raw = get_user_context_(ptr_, std::type_index(typeid(ContextType)));
         return static_cast<ContextType*>(raw);
     }
+
+    // Shared pointer tracking for type-erased deserialization
+    bool has_deserialized_shared(uint32_t id) { return has_deserialized_shared_(ptr_, id); }
+
+    // Get a previously deserialized shared_ptr by ID, cast to the target type
+    template<typename T>
+    std::shared_ptr<T> get_deserialized_shared(uint32_t id) {
+        auto void_ptr = get_deserialized_shared_void_(ptr_, id);
+        return std::static_pointer_cast<T>(void_ptr);
+    }
+
+    // Register a newly deserialized shared_ptr (stores as shared_ptr<void>)
+    template<typename T>
+    void register_deserialized_shared(uint32_t id, std::shared_ptr<T> ptr) {
+        register_deserialized_shared_void_(ptr_, id, std::static_pointer_cast<void>(ptr));
+    }
+
+    // Archive type recovery for full-fidelity deserialization
+    reader_archive_id archive_id() const { return id_; }
+    void* raw_ptr() const { return ptr_; }
+
+    // Dispatch to concrete archive type - recovers full type info!
+    // Usage: ar.dispatch([&](auto& concrete_ar) { concrete_ar(make_nvp("name", value)); });
+    // Implementation is in archive.hpp after concrete archive definitions
+    template<typename Fn>
+    decltype(auto) dispatch(Fn&& fn);
 };
 
 // ============================================================================

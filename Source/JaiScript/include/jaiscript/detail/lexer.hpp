@@ -30,6 +30,7 @@ namespace jai {
         try_keyword, catch_keyword, throw_keyword,
         switch_keyword, case_keyword, default_keyword, fallthrough_keyword,
         include_keyword, import_keyword,
+        coroutine_keyword, yield_keyword,
         
         // Operators
         plus, minus, star, slash, percent,

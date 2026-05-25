@@ -86,6 +86,9 @@ namespace jai {
         // Use const_cast since cpp_bound_ptr_ is type-erased storage
         // Constness is handled at the call site via make_value overloads
         val.cpp_bound_ptr_ = const_cast<void*>(static_cast<const void*>(target));
+        val.cpp_bound_type_size_ = static_cast<uint8_t>(sizeof(T));
+        if constexpr (std::is_unsigned_v<T> && !std::is_same_v<T, bool>)
+            val.cpp_bound_type_size_ |= 0x80;
         return val;
     }
 

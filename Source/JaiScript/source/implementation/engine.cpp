@@ -798,10 +798,11 @@ void engine::initialize_engine_reference() {
     
     // Add built-in functions
     add_variadic_function("print", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+        auto& out = engine_weak->get_output_stream();
         for (const auto& arg : args) {
-            std::cout << arg.to_string();
+            out << arg.to_string();
         }
-        std::cout << std::endl;
+        out << std::endl;
         return script_value(std::monostate{}, engine_weak);
     });
     
@@ -1519,6 +1520,10 @@ backend_type engine::get_backend_type() const {
 
 std::string engine::get_backend_name() const {
     return impl->backend->get_backend_name();
+}
+
+execution_backend* engine::get_execution_backend() const {
+    return impl->backend.get();
 }
 
 void engine::setHasCustomNumericOps(bool value) {

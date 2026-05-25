@@ -126,6 +126,41 @@ inline std::string base64_decode(const std::string& input) {
 
 namespace detail {
 
+// ============================================================================
+// Smart pointer element type extraction
+// ============================================================================
+template<typename T> struct shared_ptr_element { using type = T; };
+template<typename T> struct shared_ptr_element<std::shared_ptr<T>> { using type = T; };
+template<typename T> using shared_ptr_element_t = typename shared_ptr_element<T>::type;
+
+template<typename T> struct unique_ptr_element { using type = T; };
+template<typename T, typename D> struct unique_ptr_element<std::unique_ptr<T, D>> { using type = T; };
+template<typename T> using unique_ptr_element_t = typename unique_ptr_element<T>::type;
+
+template<typename T> struct is_shared_ptr : std::false_type {};
+template<typename T> struct is_shared_ptr<std::shared_ptr<T>> : std::true_type {};
+template<typename T> inline constexpr bool is_shared_ptr_v = is_shared_ptr<T>::value;
+
+template<typename T> struct is_unique_ptr : std::false_type {};
+template<typename T, typename D> struct is_unique_ptr<std::unique_ptr<T, D>> : std::true_type {};
+template<typename T> inline constexpr bool is_unique_ptr_v = is_unique_ptr<T>::value;
+
+// Combined: is owning smart pointer (shared_ptr or unique_ptr, but NOT weak_ptr)
+template<typename T>
+inline constexpr bool is_owning_ptr_v = is_shared_ptr_v<T> || is_unique_ptr_v<T>;
+
+// Get element type from either shared_ptr or unique_ptr
+template<typename T>
+using owning_ptr_element_t = std::conditional_t<
+    is_shared_ptr_v<T>,
+    shared_ptr_element_t<T>,
+    std::conditional_t<is_unique_ptr_v<T>, unique_ptr_element_t<T>, T>
+>;
+
+// ============================================================================
+// Type trait detection (unwraps shared_ptr to check pointee)
+// ============================================================================
+
 // Concept to detect property_owner types (has property_mgr member)
 template<typename T, typename = void>
 struct has_property_mgr : std::false_type {};
@@ -147,12 +182,38 @@ struct has_load_method : std::false_type {};
 template<typename T>
 struct has_load_method<T, std::void_t<decltype(std::declval<T>().load(std::declval<serialization::json_archive_reader&>()))>> : std::true_type {};
 
-// Check if type can use ar(value) directly
-template<typename T>
-constexpr bool can_use_direct_archive_v = has_property_mgr<T>::value || has_save_method<T>::value;
+// Concept to detect types with templated serialize() method
+template<typename T, typename = void>
+struct has_serialize_method : std::false_type {};
 
 template<typename T>
-constexpr bool can_use_direct_archive_read_v = has_property_mgr<T>::value || has_load_method<T>::value;
+struct has_serialize_method<T, std::void_t<decltype(std::declval<T>().serialize(std::declval<serialization::json_archive_writer&>()))>> : std::true_type {};
+
+// ============================================================================
+// Smart pointer aware traits - unwrap owning pointers to check pointee type
+// ============================================================================
+
+// For save: check if T (or T's pointee for shared_ptr/unique_ptr) can be serialized directly
+template<typename T>
+constexpr bool can_use_direct_archive_v = []() {
+    if constexpr (is_owning_ptr_v<T>) {
+        using E = owning_ptr_element_t<T>;
+        return has_property_mgr<E>::value || has_save_method<E>::value || has_serialize_method<E>::value;
+    } else {
+        return has_property_mgr<T>::value || has_save_method<T>::value || has_serialize_method<T>::value;
+    }
+}();
+
+// For load: check if T (or T's pointee for shared_ptr/unique_ptr) can be deserialized directly
+template<typename T>
+constexpr bool can_use_direct_archive_read_v = []() {
+    if constexpr (is_owning_ptr_v<T>) {
+        using E = owning_ptr_element_t<T>;
+        return has_property_mgr<E>::value || has_load_method<E>::value || has_serialize_method<E>::value;
+    } else {
+        return has_property_mgr<T>::value || has_load_method<T>::value || has_serialize_method<T>::value;
+    }
+}();
 
 } // namespace detail
 
@@ -161,68 +222,102 @@ constexpr bool can_use_direct_archive_read_v = has_property_mgr<T>::value || has
 // ============================================================================
 
 // Serialize to JSON string
+// Always wraps in begin_object/end_object for consistent format (like binary)
 template<typename T>
 std::string to_json(engine& eng, const T& value, int indent = 2) {
     serialization::json_archive_writer ar(indent, &eng);
+    ar.begin_object("", 1);
     if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar(value);
+        // Types with property_mgr/save/serialize: serialize content directly
+        // For shared_ptr/unique_ptr, this uses [id, {...}] format with dedup tracking
+        ar.serialize_object_content(value);
     } else {
-        // Basic types: wrap in object with "value0" key
-        ar.begin_object("", 1);
+        // Basic types: serialize with "value0" key
         ar.serialize("value0", value);
-        ar.end_object();
     }
+    ar.end_object();
     return ar.str();
 }
 
 // Serialize to JSON with user context
+// Always wraps in begin_object/end_object for consistent format (like binary)
 template<typename T, typename Context>
 std::string to_json(engine& eng, const T& value, Context& ctx, int indent = 2) {
     serialization::json_archive_writer ar(indent, &eng);
     (void)ctx;
-    if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar(value);
+    ar.begin_object("", 1);
+    if constexpr (detail::is_owning_ptr_v<T> && detail::can_use_direct_archive_v<T>) {
+        if (value) {
+            ar.serialize_object_content(*value);
+        }
+    } else if constexpr (detail::can_use_direct_archive_v<T>) {
+        ar.serialize_object_content(value);  // Don't double-wrap
     } else {
-        ar.begin_object("", 1);
         ar.serialize("value0", value);
-        ar.end_object();
     }
+    ar.end_object();
     return ar.str();
 }
 
 // Deserialize from JSON string
+// Always expects begin_object/end_object wrapper for consistent format (like binary)
 template<typename T>
 T from_json(engine& eng, const std::string& json) {
     serialization::json_archive_reader ar(json, &eng);
+    std::string type_name;
+    uint32_t version;
+    ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::can_use_direct_archive_read_v<T>) {
+    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        // shared_ptr<U> where U has property_mgr/load and is default-constructible
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_shared<E>();
+        ar(*result);  // Read as E, not shared_ptr<E>
+    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        // unique_ptr<U> where U has property_mgr/load and is default-constructible
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_unique<E>();
+        ar(*result);  // Read as E, not unique_ptr<E>
+    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
-        // Basic types: unwrap from object with "value0" key
-        std::string type_name;
-        uint32_t version;
-        ar.begin_object(type_name, version);
+        // Basic types: deserialize with "value0" key
         ar.serialize("value0", result);
-        ar.end_object();
     }
+    ar.end_object();
     return result;
 }
 
 // Deserialize from JSON with user context (for dependency injection)
+// Always expects begin_object/end_object wrapper for consistent format (like binary)
 template<typename T, typename Context>
 T from_json(engine& eng, const std::string& json, Context& ctx) {
     serialization::json_archive_reader ar(json, &eng);
     ar.template set_user_context<Context>(&ctx);
+    std::string type_name;
+    uint32_t version;
+    ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::can_use_direct_archive_read_v<T>) {
+    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        // shared_ptr<U> where U has property_mgr/load and is default-constructible
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_shared<E>();
+        ar(*result);  // Read as E, not shared_ptr<E>
+    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        // unique_ptr<U> where U has property_mgr/load and is default-constructible
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_unique<E>();
+        ar(*result);
+    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
-        std::string type_name;
-        uint32_t version;
-        ar.begin_object(type_name, version);
         ar.serialize("value0", result);
-        ar.end_object();
     }
+    ar.end_object();
     return result;
 }
 
@@ -236,8 +331,12 @@ template<typename T>
 std::vector<uint8_t> to_binary(engine& eng, const T& value) {
     serialization::binary_archive_writer ar(&eng);
     ar.begin_object("", 1);
-    if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar(value);
+    if constexpr (detail::is_owning_ptr_v<T> && detail::can_use_direct_archive_v<T>) {
+        if (value) {
+            ar.serialize_object_content(*value);
+        }
+    } else if constexpr (detail::can_use_direct_archive_v<T>) {
+        ar.serialize_object_content(value);  // Don't double-wrap
     } else {
         ar.serialize("value0", value);
     }
@@ -251,8 +350,12 @@ template<typename T>
 std::string to_binary_string(engine& eng, const T& value) {
     serialization::binary_archive_writer ar(&eng);
     ar.begin_object("", 1);
-    if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar(value);
+    if constexpr (detail::is_owning_ptr_v<T> && detail::can_use_direct_archive_v<T>) {
+        if (value) {
+            ar.serialize_object_content(*value);
+        }
+    } else if constexpr (detail::can_use_direct_archive_v<T>) {
+        ar.serialize_object_content(value);  // Don't double-wrap
     } else {
         ar.serialize("value0", value);
     }
@@ -267,8 +370,12 @@ std::string to_binary_string(engine& eng, const T& value, Context& ctx) {
     serialization::binary_archive_writer ar(&eng);
     (void)ctx;
     ar.begin_object("", 1);
-    if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar(value);
+    if constexpr (detail::is_owning_ptr_v<T> && detail::can_use_direct_archive_v<T>) {
+        if (value) {
+            ar.serialize_object_content(*value);
+        }
+    } else if constexpr (detail::can_use_direct_archive_v<T>) {
+        ar.serialize_object_content(value);  // Don't double-wrap
     } else {
         ar.serialize("value0", value);
     }
@@ -286,7 +393,17 @@ T from_binary(engine& eng, const std::vector<uint8_t>& data) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::can_use_direct_archive_read_v<T>) {
+    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_shared<E>();
+        ar(*result);
+    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_unique<E>();
+        ar(*result);
+    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
         ar.serialize("value0", result);
@@ -304,7 +421,17 @@ T from_binary(engine& eng, const std::vector<uint8_t>& data, Context& ctx) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::can_use_direct_archive_read_v<T>) {
+    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_shared<E>();
+        ar(*result);
+    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_unique<E>();
+        ar(*result);
+    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
         ar.serialize("value0", result);
@@ -325,7 +452,17 @@ T from_binary_string(engine& eng, const std::string& data) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::can_use_direct_archive_read_v<T>) {
+    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_shared<E>();
+        ar(*result);
+    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_unique<E>();
+        ar(*result);
+    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
         ar.serialize("value0", result);
@@ -347,7 +484,17 @@ T from_binary_string(engine& eng, const std::string& data, Context& ctx) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::can_use_direct_archive_read_v<T>) {
+    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_shared<E>();
+        ar(*result);
+    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
+                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
+        using E = detail::owning_ptr_element_t<T>;
+        result = std::make_unique<E>();
+        ar(*result);
+    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
         ar.serialize("value0", result);

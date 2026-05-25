@@ -7,8 +7,8 @@
 #include <iostream>
 #include <climits>
 
-// Include class_definition from dynamic_binder.hpp
-#include <jaiscript/core/dynamic_binder.hpp>
+// Include class_definition (extracted from dynamic_binder.hpp for faster compilation)
+#include <jaiscript/core/class_definition.hpp>
 
 // Need these for the inline implementation at the end
 #include <jaiscript/detail/interpreter.hpp>

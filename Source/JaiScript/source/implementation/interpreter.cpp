@@ -3398,11 +3398,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 				// Both operands are simple identifiers - direct variable lookup without AST traversal
 				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id);
 				if (!leftResult) return leftResult.error_value();
-				script_value leftVal = leftResult.value()->deref();
+				const script_value& leftVal = leftResult.value()->deref();
 
 				auto rightResult = resolve_variable_required(rightId->slot_index, rightId->symbol_id);
 				if (!rightResult) return rightResult.error_value();
-				script_value rightVal = rightResult.value()->deref();
+				const script_value& rightVal = rightResult.value()->deref();
 
 				// Fast path for integer arithmetic (most common in loops)
 				if (can_use_fast_path(expr->op.type)) {
@@ -3415,43 +3415,43 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 						switch (expr->op.type) {
 						case token_type::plus:
-							push_value(make_value(leftInt + rightInt));
+							push_value(make_int_fast(leftInt + rightInt));
 							return {};
 						case token_type::minus:
-							push_value(make_value(leftInt - rightInt));
+							push_value(make_int_fast(leftInt - rightInt));
 							return {};
 						case token_type::star:
-							push_value(make_value(leftInt * rightInt));
+							push_value(make_int_fast(leftInt * rightInt));
 							return {};
 						case token_type::slash:
 							if (rightInt == 0) {
 								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
 							}
-							push_value(make_value(leftInt / rightInt));
+							push_value(make_int_fast(leftInt / rightInt));
 							return {};
 						case token_type::percent:
 							if (rightInt == 0) {
 								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 							}
-							push_value(make_value(leftInt % rightInt));
+							push_value(make_int_fast(leftInt % rightInt));
 							return {};
 						case token_type::less:
-							push_value(make_value(leftInt < rightInt));
+							push_value(make_bool_fast(leftInt < rightInt));
 							return {};
 						case token_type::less_equal:
-							push_value(make_value(leftInt <= rightInt));
+							push_value(make_bool_fast(leftInt <= rightInt));
 							return {};
 						case token_type::greater:
-							push_value(make_value(leftInt > rightInt));
+							push_value(make_bool_fast(leftInt > rightInt));
 							return {};
 						case token_type::greater_equal:
-							push_value(make_value(leftInt >= rightInt));
+							push_value(make_bool_fast(leftInt >= rightInt));
 							return {};
 						case token_type::equal_equal:
-							push_value(make_value(leftInt == rightInt));
+							push_value(make_bool_fast(leftInt == rightInt));
 							return {};
 						case token_type::bang_equal:
-							push_value(make_value(leftInt != rightInt));
+							push_value(make_bool_fast(leftInt != rightInt));
 							return {};
 						default:
 							break; // Fall through to normal path
@@ -3467,43 +3467,43 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 						switch (expr->op.type) {
 						case token_type::plus:
-							push_value(make_value(leftFloat + rightFloat));
+							push_value(make_float_fast(leftFloat + rightFloat));
 							return {};
 						case token_type::minus:
-							push_value(make_value(leftFloat - rightFloat));
+							push_value(make_float_fast(leftFloat - rightFloat));
 							return {};
 						case token_type::star:
-							push_value(make_value(leftFloat * rightFloat));
+							push_value(make_float_fast(leftFloat * rightFloat));
 							return {};
 						case token_type::slash:
 							if (rightFloat == 0.0) {
 								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
 							}
-							push_value(make_value(leftFloat / rightFloat));
+							push_value(make_float_fast(leftFloat / rightFloat));
 							return {};
 						case token_type::percent:
 							if (rightFloat == 0.0) {
 								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
 							}
-							push_value(make_value(std::fmod(leftFloat, rightFloat)));
+							push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
 							return {};
 						case token_type::less:
-							push_value(make_value(leftFloat < rightFloat));
+							push_value(make_bool_fast(leftFloat < rightFloat));
 							return {};
 						case token_type::less_equal:
-							push_value(make_value(leftFloat <= rightFloat));
+							push_value(make_bool_fast(leftFloat <= rightFloat));
 							return {};
 						case token_type::greater:
-							push_value(make_value(leftFloat > rightFloat));
+							push_value(make_bool_fast(leftFloat > rightFloat));
 							return {};
 						case token_type::greater_equal:
-							push_value(make_value(leftFloat >= rightFloat));
+							push_value(make_bool_fast(leftFloat >= rightFloat));
 							return {};
 						case token_type::equal_equal:
-							push_value(make_value(leftFloat == rightFloat));
+							push_value(make_bool_fast(leftFloat == rightFloat));
 							return {};
 						case token_type::bang_equal:
-							push_value(make_value(leftFloat != rightFloat));
+							push_value(make_bool_fast(leftFloat != rightFloat));
 							return {};
 						default:
 							break;
@@ -3520,9 +3520,9 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 					}
 				}
 
-				// Fast path didn't handle it - save values to avoid re-fetching
-				pre_fetched_left = std::move(leftVal);
-				pre_fetched_right = std::move(rightVal);
+				// Fast path didn't handle it - copy values for fallback dispatch
+				pre_fetched_left = leftVal;
+				pre_fetched_right = rightVal;
 				already_have_values = true;
 			}
 			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
@@ -3530,7 +3530,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 				auto* rightLit = static_cast<literal_expr*>(expr->right.get());
 				auto leftResult = resolve_variable_required(leftId->slot_index, leftId->symbol_id);
 				if (!leftResult) return leftResult.error_value();
-				script_value leftVal = leftResult.value()->deref();
+				const script_value& leftVal = leftResult.value()->deref();
 				const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
 
 				// Ultra-fast integer path (most common for loop conditions)
@@ -3545,39 +3545,39 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 						switch (expr->op.type) {
 						case token_type::less:
-							push_value(make_value(leftInt < rightInt));
+							push_value(make_bool_fast(leftInt < rightInt));
 							return {};
 						case token_type::less_equal:
-							push_value(make_value(leftInt <= rightInt));
+							push_value(make_bool_fast(leftInt <= rightInt));
 							return {};
 						case token_type::greater:
-							push_value(make_value(leftInt > rightInt));
+							push_value(make_bool_fast(leftInt > rightInt));
 							return {};
 						case token_type::greater_equal:
-							push_value(make_value(leftInt >= rightInt));
+							push_value(make_bool_fast(leftInt >= rightInt));
 							return {};
 						case token_type::equal_equal:
-							push_value(make_value(leftInt == rightInt));
+							push_value(make_bool_fast(leftInt == rightInt));
 							return {};
 						case token_type::bang_equal:
-							push_value(make_value(leftInt != rightInt));
+							push_value(make_bool_fast(leftInt != rightInt));
 							return {};
 						case token_type::plus:
-							push_value(make_value(leftInt + rightInt));
+							push_value(make_int_fast(leftInt + rightInt));
 							return {};
 						case token_type::minus:
-							push_value(make_value(leftInt - rightInt));
+							push_value(make_int_fast(leftInt - rightInt));
 							return {};
 						case token_type::star:
-							push_value(make_value(leftInt * rightInt));
+							push_value(make_int_fast(leftInt * rightInt));
 							return {};
 						case token_type::slash:
 							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-							push_value(make_value(leftInt / rightInt));
+							push_value(make_int_fast(leftInt / rightInt));
 							return {};
 						case token_type::percent:
 							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-							push_value(make_value(leftInt % rightInt));
+							push_value(make_int_fast(leftInt % rightInt));
 							return {};
 						default:
 							break;
@@ -3592,37 +3592,37 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 						switch (expr->op.type) {
 						case token_type::less:
-							push_value(make_value(leftFloat < rightFloat));
+							push_value(make_bool_fast(leftFloat < rightFloat));
 							return {};
 						case token_type::less_equal:
-							push_value(make_value(leftFloat <= rightFloat));
+							push_value(make_bool_fast(leftFloat <= rightFloat));
 							return {};
 						case token_type::greater:
-							push_value(make_value(leftFloat > rightFloat));
+							push_value(make_bool_fast(leftFloat > rightFloat));
 							return {};
 						case token_type::greater_equal:
-							push_value(make_value(leftFloat >= rightFloat));
+							push_value(make_bool_fast(leftFloat >= rightFloat));
 							return {};
 						case token_type::plus:
-							push_value(make_value(leftFloat + rightFloat));
+							push_value(make_float_fast(leftFloat + rightFloat));
 							return {};
 						case token_type::minus:
-							push_value(make_value(leftFloat - rightFloat));
+							push_value(make_float_fast(leftFloat - rightFloat));
 							return {};
 						case token_type::star:
-							push_value(make_value(leftFloat * rightFloat));
+							push_value(make_float_fast(leftFloat * rightFloat));
 							return {};
 						case token_type::slash:
 							if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-							push_value(make_value(leftFloat / rightFloat));
+							push_value(make_float_fast(leftFloat / rightFloat));
 							return {};
 						default:
 							break;
 						}
 					}
 				}
-				// Fast path didn't fully handle - save for slow path
-				pre_fetched_left = std::move(leftVal);
+				// Fast path didn't fully handle - copy for slow path
+				pre_fetched_left = leftVal;
 				pre_fetched_right = rightVal;
 				already_have_values = true;
 			}
@@ -3648,39 +3648,39 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 						switch (expr->op.type) {
 						case token_type::less:
-							push_value(make_value(leftInt < rightInt));
+							push_value(make_bool_fast(leftInt < rightInt));
 							return {};
 						case token_type::less_equal:
-							push_value(make_value(leftInt <= rightInt));
+							push_value(make_bool_fast(leftInt <= rightInt));
 							return {};
 						case token_type::greater:
-							push_value(make_value(leftInt > rightInt));
+							push_value(make_bool_fast(leftInt > rightInt));
 							return {};
 						case token_type::greater_equal:
-							push_value(make_value(leftInt >= rightInt));
+							push_value(make_bool_fast(leftInt >= rightInt));
 							return {};
 						case token_type::equal_equal:
-							push_value(make_value(leftInt == rightInt));
+							push_value(make_bool_fast(leftInt == rightInt));
 							return {};
 						case token_type::bang_equal:
-							push_value(make_value(leftInt != rightInt));
+							push_value(make_bool_fast(leftInt != rightInt));
 							return {};
 						case token_type::plus:
-							push_value(make_value(leftInt + rightInt));
+							push_value(make_int_fast(leftInt + rightInt));
 							return {};
 						case token_type::minus:
-							push_value(make_value(leftInt - rightInt));
+							push_value(make_int_fast(leftInt - rightInt));
 							return {};
 						case token_type::star:
-							push_value(make_value(leftInt * rightInt));
+							push_value(make_int_fast(leftInt * rightInt));
 							return {};
 						case token_type::slash:
 							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-							push_value(make_value(leftInt / rightInt));
+							push_value(make_int_fast(leftInt / rightInt));
 							return {};
 						case token_type::percent:
 							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-							push_value(make_value(leftInt % rightInt));
+							push_value(make_int_fast(leftInt % rightInt));
 							return {};
 						default:
 							break;
@@ -4126,22 +4126,22 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             switch (expr->op.type) {
                                 case token_type::plus_equal:
                                     target.unchecked_as_int_ref() += rhs_val;
-                                    push_value(target.clone());
+                                    push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::minus_equal:
                                     target.unchecked_as_int_ref() -= rhs_val;
-                                    push_value(target.clone());
+                                    push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::star_equal:
                                     target.unchecked_as_int_ref() *= rhs_val;
-                                    push_value(target.clone());
+                                    push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::slash_equal:
                                     if (rhs_val == 0) {
                                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
                                     }
                                     target.unchecked_as_int_ref() /= rhs_val;
-                                    push_value(target.clone());
+                                    push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 default:
                                     break;  // Fall through to general path
@@ -4161,22 +4161,22 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             switch (expr->op.type) {
                                 case token_type::plus_equal:
                                     target.unchecked_as_int_ref() += rhs_val;
-                                    push_value(target.clone());
+                                    push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::minus_equal:
                                     target.unchecked_as_int_ref() -= rhs_val;
-                                    push_value(target.clone());
+                                    push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::star_equal:
                                     target.unchecked_as_int_ref() *= rhs_val;
-                                    push_value(target.clone());
+                                    push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::slash_equal:
                                     if (rhs_val == 0) {
                                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
                                     }
                                     target.unchecked_as_int_ref() /= rhs_val;
-                                    push_value(target.clone());
+                                    push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 default:
                                     break;  // Fall through to general path
@@ -4209,7 +4209,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                         }
                                         if (handled && expr->op.type == token_type::plus_equal) {
                                             target.unchecked_as_int_ref() += binary_result;
-                                            push_value(target.clone());
+                                            push_value(expression_result_needed_ ? target.clone() : target);
                                             return {};
                                         }
                                     }
@@ -4247,7 +4247,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 return result.error_value();
                             }
                             target = std::move(result.value());
-                            push_value(target.clone());
+                            push_value(expression_result_needed_ ? target.clone() : target);
                             return {};
                         }
                     }
@@ -4268,7 +4268,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         auto custom_result = object_arithmetic_via_method(target, rightValue, op_symbol_id);
                         if (custom_result.has_value()) {
                             target = std::move(custom_result.value());
-                            push_value(target.clone());
+                            push_value(expression_result_needed_ ? target.clone() : target);
                             return {};
                         }
                     }
@@ -4342,7 +4342,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
                 }
 
-                push_value(target.clone());
+                push_value(expression_result_needed_ ? target.clone() : target);
             } else {
                 // Fallback: identifier is an implicit this.member access
                 // Check if 'this' exists and has this field
@@ -5307,13 +5307,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
 // statement visitors
 checked_result<void> interpreter::visit_expression_stmt(expression_stmt* stmt) {
+    // Tell assignment expressions they can skip deep-cloning the result
+    bool prev = expression_result_needed_;
+    expression_result_needed_ = false;
+
     JAISCRIPT_TRY(dispatch_expr(stmt->expression.get()));
+
+    expression_result_needed_ = prev;
 
     // Early exit if exception is propagating
     if (is_unwinding_) return {};
 
     // Pop the result - expression statements don't produce values
-    // (except for top-level expressions in global scope, which are handled by expression_decl)
     pop_value();
     return {};
 }
@@ -6250,6 +6255,15 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     JAISCRIPT_TRY(dispatch_expr(expr->callee.get()));
     script_value callee = pop_value();
 
+    // Handle null-safe method calls: obj?.method() returns null if obj was null
+    if (callee.is_null() && expr->callee->get_type() == node_type::member_expr) {
+        auto* member = static_cast<member_expr*>(expr->callee.get());
+        if (member->null_safe) {
+            push_value(make_value());  // push null
+            return {};
+        }
+    }
+
     // Check if the callee is a function
     if (!callee.is_function()) {
         return checked_result<void>(make_error_code(runtime_error_code::not_a_function));  // [ErrorText] Not a function
@@ -6589,6 +6603,12 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Dereference if needed - subscript access returns references
     objectValue = objectValue.deref();
 
+    // Handle null-safe member access (?.)
+    if (expr->null_safe && objectValue.is_null()) {
+        push_value(make_value());  // push null
+        return {};
+    }
+
     // Handle super:: member access specially
     if (is_super_access) {
         // objectValue is 'this' from visit_super_expr
@@ -6736,9 +6756,19 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             return {};
         }
         else {
-            // Map has no method
+            // No built-in method found - try member name as a map key (for enums: Direction.north)
+            auto key = script_value(std::string(expr->member), engine_);
+            auto& map_storage = const_cast<script_value&>(objectValue).get_map_storage();
+            if (map_storage) {
+                auto it = map_storage->find(key);
+                if (it != map_storage->end()) {
+                    push_value(it->second);
+                    return {};
+                }
+            }
+            // Map has no method or key
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
-                "Map has no method '{0}'", expr->member_id);
+                "Map has no method or key '{0}'", expr->member_id);
         }
     }
 
@@ -10260,13 +10290,24 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         ~call_depth_guard() { --depth; }
     } depth_guard(current_call_depth_);
 
-    // Validate argument count
-    if (function.parameters.size() != args.size()) {
-        return checked_result<script_value>(
-            make_error_code(runtime_error_code::argument_count_mismatch),
-            "Function expected {0} arguments but got {1}",
-            static_cast<uint64_t>(function.parameters.size()), static_cast<uint64_t>(args.size())
-        );
+    // Validate argument count (accounting for default parameter values)
+    {
+        // Count required parameters (those without default values)
+        size_t required_params = 0;
+        for (const auto& p : function.parameters) {
+            if (!p.default_value) {
+                ++required_params;
+            } else {
+                break;  // All parameters after first default also have defaults (parser validated)
+            }
+        }
+        if (args.size() < required_params || args.size() > function.parameters.size()) {
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::argument_count_mismatch),
+                "Function expected {0} arguments but got {1}",
+                static_cast<uint64_t>(function.parameters.size()), static_cast<uint64_t>(args.size())
+            );
+        }
     }
 
     // ============================================================
@@ -10357,6 +10398,18 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     for (size_t i = 0; i < function.parameters.size(); ++i) {
         const auto& param = function.parameters[i];
+
+        // Handle default parameter values: if no argument provided, evaluate default expression
+        if (i >= args.size()) {
+            // Must have a default value (validated by argument count check above)
+            if (param.default_value) {
+                JAISCRIPT_TRY(dispatch_expr(param.default_value.get()));
+                script_value default_val = pop_value();
+                call_stack_[frame_index].set_local(param.slot_index, std::move(default_val));
+                continue;
+            }
+        }
+
         const auto& arg = args[i];
 
         // Use pre-cached symbol ID (parameter binding optimization)
@@ -11005,6 +11058,49 @@ void interpreter::reset_environment_pool() {
 
 // ============================================================
 // SWITCH-BASED DISPATCH (faster than virtual calls)
+checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
+    // Create a map with string keys -> int values for enum members
+    auto enum_map = script_value::make_map(
+        engine_->get_type_info_string(),
+        engine_->get_type_info_int(),
+        engine_);
+    auto& map_ref = const_cast<std::map<script_value, script_value>&>(enum_map.as_map());
+
+    for (size_t i = 0; i < decl->values.size(); ++i) {
+        auto key = script_value(std::string(decl->values[i].first), engine_);
+        map_ref[std::move(key)] = make_int_fast(static_cast<script_int>(i));
+    }
+
+    // Define the enum name in the current environment
+    environment_->define(decl->name_id, std::move(enum_map));
+    return {};
+}
+
+checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* decl) {
+    // Evaluate the RHS
+    JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
+    script_value source = pop_value();
+
+    if (!source.is_array()) {
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+            "Destructuring requires an array on the right-hand side");
+    }
+
+    auto& arr = *get_array_storage(source);
+
+    for (size_t i = 0; i < decl->names.size(); ++i) {
+        script_value val = (i < arr.size()) ? arr[i].clone() : make_value();
+
+        if (decl->slot_indices[i] != SIZE_MAX && !call_stack_.empty()) {
+            call_stack_.back().set_local(decl->slot_indices[i], std::move(val));
+        } else {
+            environment_->define(decl->names[i].second, std::move(val));
+        }
+    }
+
+    return {};
+}
+
 // These functions use a switch on node_type enum instead of
 // virtual method dispatch, eliminating vtable lookup overhead.
 // ============================================================
@@ -11101,6 +11197,10 @@ checked_result<void> interpreter::dispatch_decl(declaration* decl) {
             return visit_include_decl(static_cast<include_decl*>(decl));
         case node_type::import_decl:
             return visit_import_decl(static_cast<import_decl*>(decl));
+        case node_type::enum_decl:
+            return visit_enum_decl(static_cast<enum_decl*>(decl));
+        case node_type::destructuring_decl:
+            return visit_destructuring_decl(static_cast<destructuring_decl*>(decl));
         case node_type::statement_decl:
             return dispatch_stmt(static_cast<statement_decl*>(decl)->statement.get());
         default:

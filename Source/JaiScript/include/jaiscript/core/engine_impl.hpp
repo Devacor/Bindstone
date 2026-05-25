@@ -5,7 +5,7 @@
 
 #include "engine.hpp"
 #include "conversion_registry.hpp"
-#include "dynamic_binder.hpp"
+#include "class_definition.hpp"
 
 namespace jai {
 

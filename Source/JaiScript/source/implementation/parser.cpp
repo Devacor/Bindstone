@@ -1148,8 +1148,12 @@ checked_result<expression_ptr> parser::postfix() {
                 report_error("Brace initialization can only be used with type names", previous());
     return make_error_code(parse_error_code::unexpected_token);
             }
-        } else if (match(token_type::dot)) {
+        } else if (match(token_type::dot) || match(token_type::question_dot)) {
+            bool is_null_safe = (previous().type == token_type::question_dot);
             JAISCRIPT_TRY_ASSIGN(expr, finish_member_access(expr, false));
+            if (is_null_safe) {
+                static_cast<member_expr*>(expr.get())->null_safe = true;
+            }
         } else if (match(token_type::arrow)) {
             JAISCRIPT_TRY_ASSIGN(expr, finish_member_access(expr, true));
         } else if (match(token_type::colon_colon)) {
@@ -1207,6 +1211,26 @@ checked_result<declaration_ptr> parser::declaration() {
         return result;
     }
 
+    // Check for enum keyword
+    if (match(token_type::enum_keyword)) {
+        JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected enum name"));
+        auto [name_id, name_view] = symbolizer_->intern_with_view(name_tok.lexeme);
+        JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' after enum name"));
+
+        auto decl = std::make_shared<enum_decl>(name_tok.location, name_view, name_id);
+
+        if (!check(token_type::right_brace)) {
+            do {
+                JAISCRIPT_TRY_ASSIGN(token val_tok, consume(token_type::identifier, "Expected enum value name"));
+                auto [val_id, val_view] = symbolizer_->intern_with_view(val_tok.lexeme);
+                decl->values.push_back({val_view, val_id});
+            } while (match(token_type::comma));
+        }
+
+        JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after enum values"));
+        return decl;
+    }
+
     // Check for coroutine keyword before function declarations
     if (match(token_type::coroutine_keyword)) {
         // coroutine must be followed by a function declaration
@@ -1234,6 +1258,37 @@ checked_result<declaration_ptr> parser::declaration() {
     if (match({token_type::auto_keyword, token_type::var_keyword, token_type::int_keyword, token_type::float_keyword,
                token_type::string_keyword, token_type::bool_keyword, token_type::char_keyword, token_type::void_keyword,
                token_type::array_keyword, token_type::map_keyword, token_type::weak_ptr_keyword, token_type::shared_ptr_keyword})) {
+
+        // Check for destructuring: auto [x, y, z] = expr;
+        if ((previous().type == token_type::auto_keyword || previous().type == token_type::var_keyword)
+            && check(token_type::left_bracket)) {
+            advance();  // consume [
+
+            auto loc = previous().location;
+            auto decl = std::make_shared<destructuring_decl>(loc, nullptr);
+
+            // Parse variable names
+            do {
+                JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected variable name in destructuring"));
+                auto [sym_id, sym_view] = symbolizer_->intern_with_view(name_tok.lexeme);
+                decl->names.push_back({sym_view, sym_id});
+
+                // Allocate slot if in function scope
+                if (in_function_scope()) {
+                    decl->slot_indices.push_back(allocate_slot(sym_id));
+                } else {
+                    decl->slot_indices.push_back(SIZE_MAX);
+                }
+            } while (match(token_type::comma));
+
+            JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after destructuring names"));
+            JAISCRIPT_TRY(consume(token_type::equal, "Expected '=' after destructuring pattern"));
+
+            JAISCRIPT_TRY_ASSIGN(decl->initializer, expression());
+            JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after destructuring declaration"));
+
+            return decl;
+        }
 
         // Check if this keyword is followed by :: - if so, it's a namespace access, not a type
         if (check(token_type::colon_colon)) {
@@ -1451,8 +1506,25 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 
             parameter param(type, name, is_reference, is_const);
             param.symbol_id = symbolizer_->intern(name);
+
+            // Parse optional default value: = expression
+            if (match(token_type::equal)) {
+                JAISCRIPT_TRY_ASSIGN(param.default_value, expression());
+            }
+
             params.push_back(std::move(param));
         } while (match(token_type::comma));
+    }
+
+    // Validate: parameters with defaults must come after parameters without defaults
+    bool seen_default = false;
+    for (const auto& p : params) {
+        if (p.default_value) {
+            seen_default = true;
+        } else if (seen_default) {
+            report_error("Parameter without default value cannot follow parameter with default value", peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
     }
 
     return params;

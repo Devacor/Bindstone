@@ -364,6 +364,11 @@ namespace jai {
             cached_one_int_ = script_value(static_cast<script_int>(1), engine_);
             cached_zero_float_ = script_value(0.0, engine_);
             cached_one_float_ = script_value(1.0, engine_);
+
+            // Cache type_info pointers for fast value construction
+            if (cached_zero_int_.has_value()) cached_type_info_int_ = cached_zero_int_->get_type_info();
+            if (cached_zero_float_.has_value()) cached_type_info_float_ = cached_zero_float_->get_type_info();
+            if (cached_true_.has_value()) cached_type_info_bool_ = cached_true_->get_type_info();
         }
 
         // Get engine pointer (for internal use in lambdas)
@@ -516,6 +521,8 @@ namespace jai {
         checked_result<void> visit_expression_decl(expression_decl* decl) override;
         checked_result<void> visit_include_decl(include_decl* decl) override;
         checked_result<void> visit_import_decl(import_decl* decl) override;
+        checked_result<void> visit_enum_decl(enum_decl* decl) override;
+        checked_result<void> visit_destructuring_decl(destructuring_decl* decl) override;
         
         // Performance optimization flags
         void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }
@@ -831,6 +838,10 @@ namespace jai {
 		uint64_t getValue_id_;
 		uint64_t cpp_object_field_id_;  // "_cpp_object"
 
+        // When false, assignment expressions skip the deep clone of the result
+        // (the result would be immediately discarded by visit_expression_stmt)
+        bool expression_result_needed_ = true;
+
         // Engine pointer for script_value creation (raw pointer - no atomic ops on copy)
         // Interpreter lifetime is managed by engine, so engine will always outlive interpreter
         engine* engine_ = nullptr;
@@ -843,6 +854,31 @@ namespace jai {
         std::optional<script_value> cached_one_int_;
         std::optional<script_value> cached_zero_float_;
         std::optional<script_value> cached_one_float_;
+
+        // Pre-cached type_info pointers for fast value construction (bypasses engine indirection)
+        type_info_ptr cached_type_info_int_ = nullptr;
+        type_info_ptr cached_type_info_float_ = nullptr;
+        type_info_ptr cached_type_info_bool_ = nullptr;
+
+        // Fast value factories — skip null checks, cache comparisons, and engine indirection
+        inline script_value make_int_fast(script_int i) const noexcept {
+            script_value v(script_value::ast_literal_tag{}, i);
+            v.engine_ = engine_;
+            v.type_info_ = cached_type_info_int_;
+            return v;
+        }
+        inline script_value make_float_fast(script_float f) const noexcept {
+            script_value v(script_value::ast_literal_tag{}, f);
+            v.engine_ = engine_;
+            v.type_info_ = cached_type_info_float_;
+            return v;
+        }
+        inline script_value make_bool_fast(script_bool b) const noexcept {
+            script_value v(script_value::ast_literal_tag{}, b);
+            v.engine_ = engine_;
+            v.type_info_ = cached_type_info_bool_;
+            return v;
+        }
 
         // Temporary storage for 'this' value during method/constructor execution
         script_value current_method_this_;

@@ -133,14 +133,17 @@ public:
     }
 
     // Factory methods for construct<T> pattern
+    // Uses new T(...) instead of make_shared/make_unique because those
+    // construct internally and can't access protected/private constructors
+    // even when access is a friend.
     template<typename T, typename... Args>
     static std::shared_ptr<T> make_shared(Args&&... args) {
-        return std::make_shared<T>(std::forward<Args>(args)...);
+        return std::shared_ptr<T>(new T(std::forward<Args>(args)...));
     }
 
     template<typename T, typename... Args>
     static std::unique_ptr<T> make_unique(Args&&... args) {
-        return std::make_unique<T>(std::forward<Args>(args)...);
+        return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
     }
 };
 
@@ -1071,6 +1074,10 @@ private:
         // Dummy serialize for SFINAE detection
         template<typename... Args>
         void serialize(Args&&...) {}
+
+        // Dummy get_user_context for load_and_construct detection
+        template<typename T>
+        T* get_user_context() const { return nullptr; }
     };
 
     // Helper traits for SFINAE
@@ -1114,11 +1121,12 @@ private:
     struct has_property_mgr<T, std::void_t<decltype(std::declval<T&>().property_mgr)>> : std::true_type {};
 
     // Check for static load_and_construct(Archive&, construct<T>&) method
+    // Uses access:: to detect private/protected methods that friend jai::serialization::access
     template<typename T, typename = void>
     struct has_load_and_construct : std::false_type {};
     template<typename T>
     struct has_load_and_construct<T, std::void_t<
-        decltype(T::load_and_construct(
+        decltype(access::template load_and_construct<T>(
             std::declval<detection_archive_reader&>(),
             std::declval<construct<T>&>()
         ))
@@ -1312,6 +1320,14 @@ public:
             }
             self()->begin_object();
             uint32_t id{};
+            if (!self()->has_property("$id")) {
+                std::string diag = "shared_ptr<" + std::string(typeid(elem_type).name()) + "> missing $id.";
+                diag += " has $val=" + std::to_string(self()->has_property("$val"));
+                diag += " has nodeId=" + std::to_string(self()->has_property("nodeId"));
+                diag += " has componentId=" + std::to_string(self()->has_property("componentId"));
+                diag += " has subdivisions=" + std::to_string(self()->has_property("subdivisions"));
+                throw serialization_error(diag);
+            }
             self()->serialize("$id", id);
             if (self()->has_deserialized_shared(id)) {
                 value = self()->template get_deserialized_shared<elem_type>(id);

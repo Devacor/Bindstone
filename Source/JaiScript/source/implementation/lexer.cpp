@@ -51,6 +51,7 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"import", token_type::import_keyword},
     {"coroutine", token_type::coroutine_keyword},
     {"yield", token_type::yield_keyword},
+    {"enum", token_type::enum_keyword},
 };
 
 lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename)
@@ -76,12 +77,21 @@ std::vector<token> lexer::tokenize() {
 }
 
 token lexer::next_token() {
+    // Drain pending tokens from template string desugaring
+    if (pending_index_ < pending_tokens_.size()) {
+        return pending_tokens_[pending_index_++];
+    }
+    if (!pending_tokens_.empty()) {
+        pending_tokens_.clear();
+        pending_index_ = 0;
+    }
+
     skip_whitespace();
-    
+
     if (is_at_end()) {
         return make_token(token_type::eof);
     }
-    
+
     char c = advance();
     
     // Numbers
@@ -98,6 +108,15 @@ token lexer::next_token() {
         return scan_identifier();
     }
     
+    // Template string literals
+    if (c == '`') {
+        scan_template_string();
+        if (pending_index_ < pending_tokens_.size()) {
+            return pending_tokens_[pending_index_++];
+        }
+        return make_token(token_type::eof);
+    }
+
     // script_string literals
     if (c == '"') {
         return scan_string();
@@ -118,7 +137,9 @@ token lexer::next_token() {
         case ']': return make_token(token_type::right_bracket);
         case ';': return make_token(token_type::semicolon);
         case ',': return make_token(token_type::comma);
-        case '?': return make_token(token_type::question);
+        case '?':
+            if (match('.')) return make_token(token_type::question_dot);
+            return make_token(token_type::question);
         case '~': return make_token(token_type::tilde);
         case '^': return make_token(token_type::caret);
         
@@ -436,6 +457,110 @@ token lexer::scan_number() {
     return tok;
 }
 
+void lexer::scan_template_string() {
+    // Desugar `hello ${expr} world` into: ("" + "hello " + (expr) + " world")
+    // The leading "" ensures string context so + auto-converts non-strings.
+    // IMPORTANT: Build into a local vector, not pending_tokens_, because
+    // next_token() is called recursively for ${} expressions and would
+    // drain pending_tokens_ instead of scanning the source.
+    std::vector<token> result;
+
+    source_location start_loc = current_location();
+
+    auto emit_string_part = [&](const std::string& part) {
+        auto [id, view] = symbolizer_->intern_with_view(part);
+        token tok(token_type::string_literal, view, current_location());
+        tok.string_value = part;
+        result.push_back(tok);
+    };
+
+    auto emit_plus = [&]() {
+        result.push_back(token(token_type::plus, symbolizer_->intern_with_view("+").second, current_location()));
+    };
+
+    // Opening paren and empty string to establish string context
+    result.push_back(token(token_type::left_paren, symbolizer_->intern_with_view("(").second, start_loc));
+    emit_string_part("");
+
+    std::string current_part;
+
+    while (!is_at_end() && peek() != '`') {
+        if (peek() == '$' && peek_next() == '{') {
+            // Emit accumulated string part
+            emit_plus();
+            emit_string_part(current_part);
+            current_part.clear();
+
+            // Emit + ( for the expression
+            emit_plus();
+            result.push_back(token(token_type::left_paren, symbolizer_->intern_with_view("(").second, current_location()));
+
+            advance(); // skip $
+            advance(); // skip {
+
+            // Tokenize the expression inside ${...}, tracking brace depth
+            int brace_depth = 1;
+            while (!is_at_end() && brace_depth > 0) {
+                if (peek() == '}') {
+                    brace_depth--;
+                    if (brace_depth == 0) {
+                        advance(); // consume closing }
+                        break;
+                    }
+                } else if (peek() == '{') {
+                    brace_depth++;
+                }
+
+                // Recursive next_token() is safe here because pending_tokens_
+                // is not being used (we're building into local `result`)
+                token expr_tok = next_token();
+                if (expr_tok.type == token_type::eof || expr_tok.type == token_type::error) break;
+                result.push_back(expr_tok);
+            }
+
+            // Emit closing paren for the expression
+            result.push_back(token(token_type::right_paren, symbolizer_->intern_with_view(")").second, current_location()));
+
+        } else if (peek() == '\\') {
+            // Handle escape sequences
+            advance(); // skip backslash
+            if (!is_at_end()) {
+                char escaped = advance();
+                switch (escaped) {
+                    case 'n': current_part += '\n'; break;
+                    case 't': current_part += '\t'; break;
+                    case 'r': current_part += '\r'; break;
+                    case '\\': current_part += '\\'; break;
+                    case '`': current_part += '`'; break;
+                    case '$': current_part += '$'; break;
+                    default: current_part += '\\'; current_part += escaped; break;
+                }
+            }
+        } else {
+            if (peek() == '\n') { line_++; column_ = 0; }
+            current_part += advance();
+        }
+    }
+
+    // Emit final string part
+    if (!current_part.empty()) {
+        emit_plus();
+        emit_string_part(current_part);
+    }
+
+    // Consume closing backtick
+    if (!is_at_end() && peek() == '`') {
+        advance();
+    }
+
+    // Emit closing paren
+    result.push_back(token(token_type::right_paren, symbolizer_->intern_with_view(")").second, current_location()));
+
+    // Now assign to pending_tokens_ for next_token() to drain
+    pending_tokens_ = std::move(result);
+    pending_index_ = 0;
+}
+
 token lexer::scan_string() {
     size_t start = current_ - 1;  // Include opening quote
     size_t startColumn = column_ - 1;
@@ -615,7 +740,7 @@ std::string token::to_string() const {
 }
 
 bool token::is_keyword() const {
-    return type >= token_type::bool_keyword && type <= token_type::yield_keyword;
+    return type >= token_type::bool_keyword && type <= token_type::enum_keyword;
 }
 
 bool token::is_operator() const {

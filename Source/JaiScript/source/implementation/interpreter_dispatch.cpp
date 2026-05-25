@@ -41,13 +41,13 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         // Common fast path: neither operand is an object, no unwrapping needed
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_value(left.unchecked_as_int() + right.unchecked_as_int());
+            return make_int_fast(left.unchecked_as_int() + right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-            return make_value(lf + rf);
+            return make_float_fast(lf + rf);
         }
         if (li_raw == script_value::TYPEID_STRING || ri_raw == script_value::TYPEID_STRING) {
             return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
@@ -64,7 +64,7 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
 
     // Fast path for integer addition
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(unwrapped_left.unchecked_as_int() + unwrapped_right.unchecked_as_int());
+        return make_int_fast(unwrapped_left.unchecked_as_int() + unwrapped_right.unchecked_as_int());
     }
 
     // Fast path for numeric addition (int/float combinations)
@@ -72,7 +72,7 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-        return make_value(lf + rf);
+        return make_float_fast(lf + rf);
     }
 
     // String concatenation - check for to_string() method on objects
@@ -97,13 +97,13 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_value(left.unchecked_as_int() - right.unchecked_as_int());
+            return make_int_fast(left.unchecked_as_int() - right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-            return make_value(lf - rf);
+            return make_float_fast(lf - rf);
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for - operator");
     }
@@ -116,14 +116,14 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(unwrapped_left.unchecked_as_int() - unwrapped_right.unchecked_as_int());
+        return make_int_fast(unwrapped_left.unchecked_as_int() - unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-        return make_value(lf - rf);
+        return make_float_fast(lf - rf);
     }
 
     // Check for custom operator- method on objects
@@ -143,13 +143,13 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_value(left.unchecked_as_int() * right.unchecked_as_int());
+            return make_int_fast(left.unchecked_as_int() * right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-            return make_value(lf * rf);
+            return make_float_fast(lf * rf);
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for * operator");
     }
@@ -162,14 +162,14 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(unwrapped_left.unchecked_as_int() * unwrapped_right.unchecked_as_int());
+        return make_int_fast(unwrapped_left.unchecked_as_int() * unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-        return make_value(lf * rf);
+        return make_float_fast(lf * rf);
     }
 
     // Check for custom operator* method on objects
@@ -192,7 +192,7 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
             if (right.unchecked_as_int() == 0) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
             }
-            return make_value(left.unchecked_as_int() / right.unchecked_as_int());
+            return make_int_fast(left.unchecked_as_int() / right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
@@ -201,7 +201,7 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
                 return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
             }
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-            return make_value(lf / rf);
+            return make_float_fast(lf / rf);
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for / operator");
     }
@@ -217,7 +217,7 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
         if (unwrapped_right.unchecked_as_int() == 0) {
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
-        return make_value(unwrapped_left.unchecked_as_int() / unwrapped_right.unchecked_as_int());
+        return make_int_fast(unwrapped_left.unchecked_as_int() / unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
@@ -227,7 +227,7 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-        return make_value(lf / rf);
+        return make_float_fast(lf / rf);
     }
 
     // Check for custom operator/ method on objects
@@ -250,7 +250,7 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
             if (right.unchecked_as_int() == 0) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
             }
-            return make_value(left.unchecked_as_int() % right.unchecked_as_int());
+            return make_int_fast(left.unchecked_as_int() % right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
@@ -259,7 +259,7 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
                 return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
             }
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-            return make_value(std::fmod(lf, rf));
+            return make_float_fast(std::fmod(lf, rf));
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for % operator");
     }
@@ -275,7 +275,7 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
         if (unwrapped_right.unchecked_as_int() == 0) {
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
-        return make_value(unwrapped_left.unchecked_as_int() % unwrapped_right.unchecked_as_int());
+        return make_int_fast(unwrapped_left.unchecked_as_int() % unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
@@ -285,7 +285,7 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-        return make_value(std::fmod(lf, rf));
+        return make_float_fast(std::fmod(lf, rf));
     }
 
     // Check for custom operator% method on objects
@@ -305,16 +305,16 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_value(left.unchecked_as_int() < right.unchecked_as_int());
+            return make_bool_fast(left.unchecked_as_int() < right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-            return make_value(lf < rf);
+            return make_bool_fast(lf < rf);
         }
         if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
-            return make_value(left.unchecked_as_string() < right.unchecked_as_string());
+            return make_bool_fast(left.unchecked_as_string() < right.unchecked_as_string());
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
     }
@@ -327,18 +327,18 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(unwrapped_left.unchecked_as_int() < unwrapped_right.unchecked_as_int());
+        return make_bool_fast(unwrapped_left.unchecked_as_int() < unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-        return make_value(lf < rf);
+        return make_bool_fast(lf < rf);
     }
 
     if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        return make_value(unwrapped_left.unchecked_as_string() < unwrapped_right.unchecked_as_string());
+        return make_bool_fast(unwrapped_left.unchecked_as_string() < unwrapped_right.unchecked_as_string());
     }
 
     // Check for custom operator< method on objects
@@ -358,16 +358,16 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_value(left.unchecked_as_int() <= right.unchecked_as_int());
+            return make_bool_fast(left.unchecked_as_int() <= right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-            return make_value(lf <= rf);
+            return make_bool_fast(lf <= rf);
         }
         if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
-            return make_value(left.unchecked_as_string() <= right.unchecked_as_string());
+            return make_bool_fast(left.unchecked_as_string() <= right.unchecked_as_string());
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
     }
@@ -380,18 +380,18 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(unwrapped_left.unchecked_as_int() <= unwrapped_right.unchecked_as_int());
+        return make_bool_fast(unwrapped_left.unchecked_as_int() <= unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-        return make_value(lf <= rf);
+        return make_bool_fast(lf <= rf);
     }
 
     if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        return make_value(unwrapped_left.unchecked_as_string() <= unwrapped_right.unchecked_as_string());
+        return make_bool_fast(unwrapped_left.unchecked_as_string() <= unwrapped_right.unchecked_as_string());
     }
 
     // Check for custom operator<= method on objects
@@ -411,16 +411,16 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_value(left.unchecked_as_int() > right.unchecked_as_int());
+            return make_bool_fast(left.unchecked_as_int() > right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-            return make_value(lf > rf);
+            return make_bool_fast(lf > rf);
         }
         if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
-            return make_value(left.unchecked_as_string() > right.unchecked_as_string());
+            return make_bool_fast(left.unchecked_as_string() > right.unchecked_as_string());
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
     }
@@ -433,18 +433,18 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(unwrapped_left.unchecked_as_int() > unwrapped_right.unchecked_as_int());
+        return make_bool_fast(unwrapped_left.unchecked_as_int() > unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-        return make_value(lf > rf);
+        return make_bool_fast(lf > rf);
     }
 
     if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        return make_value(unwrapped_left.unchecked_as_string() > unwrapped_right.unchecked_as_string());
+        return make_bool_fast(unwrapped_left.unchecked_as_string() > unwrapped_right.unchecked_as_string());
     }
 
     // Check for custom operator> method on objects
@@ -464,16 +464,16 @@ checked_result<script_value> interpreter::handle_greater_equal(const script_valu
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_value(left.unchecked_as_int() >= right.unchecked_as_int());
+            return make_bool_fast(left.unchecked_as_int() >= right.unchecked_as_int());
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
             script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
             script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-            return make_value(lf >= rf);
+            return make_bool_fast(lf >= rf);
         }
         if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
-            return make_value(left.unchecked_as_string() >= right.unchecked_as_string());
+            return make_bool_fast(left.unchecked_as_string() >= right.unchecked_as_string());
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
     }
@@ -486,18 +486,18 @@ checked_result<script_value> interpreter::handle_greater_equal(const script_valu
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_value(unwrapped_left.unchecked_as_int() >= unwrapped_right.unchecked_as_int());
+        return make_bool_fast(unwrapped_left.unchecked_as_int() >= unwrapped_right.unchecked_as_int());
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
         (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
         script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-        return make_value(lf >= rf);
+        return make_bool_fast(lf >= rf);
     }
 
     if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        return make_value(unwrapped_left.unchecked_as_string() >= unwrapped_right.unchecked_as_string());
+        return make_bool_fast(unwrapped_left.unchecked_as_string() >= unwrapped_right.unchecked_as_string());
     }
 
     // Check for custom operator>= method on objects

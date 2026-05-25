@@ -9,24 +9,15 @@
 
 namespace jai {
 
-// Implementation of get_registered_name template
 template<typename T>
 std::string engine::get_registered_name() const {
     auto class_def = get_class_definition_by_type(std::type_index(typeid(T)));
     if (class_def) {
         return class_def->get_name();
     }
-    // Fallback to raw type name
     return typeid(T).name();
 }
 
-// Forward declaration helper function for conversion_registry_impl.hpp
-// Implementation moved to engine.cpp
-
-// Template implementations that need both engine and conversion_registry
-
-// Helper function for function_binder to convert custom types using engine's conversion registry
-// Overload for copyable types - can create a shared_ptr copy as fallback
 template<typename T>
 script_value convert_custom_type_with_registry(const T& t, engine* eng)
     requires std::is_copy_constructible_v<std::remove_const_t<T>>
@@ -37,16 +28,13 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
         return registry->template convert_to_script<NonConstT>(t);
     }
 
-    // Fallback: no class registered, create a shared_ptr copy (strip const for shared_ptr)
     auto sharedObj = std::make_shared<NonConstT>(t);
     if (!eng) {
         throw runtime_error("Engine reference required for custom type conversion");
     }
-    // Use engine to create object with proper type name lookup
     return eng->make_object(sharedObj);
 }
 
-// Overload for non-copyable types - must be registered or error
 template<typename T>
 script_value convert_custom_type_with_registry(const T& t, engine* eng)
     requires (!std::is_copy_constructible_v<std::remove_const_t<T>>)
@@ -57,51 +45,37 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
         return registry->template convert_to_script<NonConstT>(t);
     }
 
-    // Non-copyable type with no registered conversion
-    // The caller should have used shared_ptr<T> or registered the type properly
     throw runtime_error("Cannot convert non-copyable type by value. "
                        "Register the type with dynamic_binder or return shared_ptr<T>.");
 }
 
-// Helper function to convert C++ reference to script_value
-// For registered types, creates non-owning reference via make_cpp_bound
-// For unregistered copyable types, falls back to copy semantics
-// For unregistered non-copyable types, throws error
 template<typename T>
 script_value convert_reference_with_registry(T& t, engine* eng) {
     using NonConstT = std::remove_const_t<T>;
 
-    // For registered class types, create non-owning reference
     if (eng && eng->has_registered_class<NonConstT>()) {
         return script_value::make_cpp_bound(&t, eng);
     }
 
-    // For unregistered types, behavior depends on copyability
     if constexpr (std::is_copy_constructible_v<NonConstT>) {
-        // Fall back to copy semantics for unregistered copyable types
         return convert_custom_type_with_registry<T>(t, eng);
     } else {
-        // Non-copyable and not registered - error
         throw runtime_error("Cannot convert non-copyable type by reference. "
                            "Register the type with dynamic_binder first.");
     }
 }
 
-// Implementation of engine::make_value for non-primitive lvalue references
-// Uses convert_reference_with_registry to handle registered types
 template<typename T>
 requires (!std::is_arithmetic_v<std::remove_cvref_t<T>> &&
           !std::is_same_v<std::remove_cvref_t<T>, script_string> &&
           !std::is_same_v<std::remove_cvref_t<T>, std::string> &&
-          !std::is_convertible_v<T, const char*> &&  // Exclude string literals and char pointers
+          !std::is_convertible_v<T, const char*> &&
           !std::is_same_v<std::remove_cvref_t<T>, std::monostate> &&
           std::is_lvalue_reference_v<T>)
 script_value engine::make_value(T&& value) {
     return convert_reference_with_registry(value, this);
 }
 
-// Implementation of engine::make_value for non-primitive rvalue references
-// Uses convert_custom_type_with_registry to handle class types passed by value
 template<typename T>
 requires (!std::is_arithmetic_v<std::remove_cvref_t<T>> &&
           !std::is_same_v<std::remove_cvref_t<T>, script_string> &&
@@ -115,25 +89,21 @@ script_value engine::make_value(T&& value) {
     return convert_custom_type_with_registry(value, this);
 }
 
-// Implementation of engine-aware vector conversion function
 template<typename T>
 script_value conversions::convert_vector_to_script_array(const std::vector<T>& vec, engine* eng) {
-    // Create array with proper element type info for registered types
     type_info_ptr element_type;
     if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
                    std::is_same_v<T, float> || std::is_same_v<T, double> ||
                    std::is_same_v<T, bool> || std::is_same_v<T, char> ||
                    std::is_same_v<T, std::string> || std::is_same_v<T, script_value>) {
-        // For basic types, use nullptr (generic array)
         element_type = nullptr;
     } else {
-        // For registered types, create persistent type_info
         element_type = eng->get_type_info_for_cpp_type<T>();
     }
 
     auto script_array = script_value::make_array(element_type, eng);
     auto& arr = const_cast<std::vector<script_value>&>(script_array.as_array());
-    
+
     for (const auto& item : vec) {
         if constexpr (std::is_same_v<T, script_value>) {
             arr.push_back(item);
@@ -141,10 +111,8 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                            std::is_same_v<T, float> || std::is_same_v<T, double> ||
                            std::is_same_v<T, bool> || std::is_same_v<T, char> ||
                            std::is_same_v<T, std::string>) {
-            // For basic types that script_value supports directly
             arr.push_back(script_value(item, eng));
         } else {
-            // For custom types, use the conversion registry if available
             if (eng) {
                 auto registry = eng->get_conversion_registry();
                 if (registry && registry->template has_conversion<T>()) {
@@ -152,23 +120,19 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                     continue;
                 }
             }
-            // Fallback: create raw C++ object with engine reference
             auto sharedObj = std::make_shared<T>(item);
             arr.push_back(eng->make_object(sharedObj));
         }
     }
-    
+
     return script_array;
 }
 
-// Engine-aware map conversion implementation
 template<typename K, typename V>
 script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& stdmap, engine* eng) {
-    // Create map with proper key/value type info for registered types
     type_info_ptr key_type;
     type_info_ptr value_type;
 
-    // Determine key type
     if constexpr (std::is_same_v<K, int> || std::is_same_v<K, int64_t> ||
                    std::is_same_v<K, float> || std::is_same_v<K, double> ||
                    std::is_same_v<K, bool> || std::is_same_v<K, char> ||
@@ -178,7 +142,6 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
         key_type = eng->get_type_info_for_cpp_type<K>();
     }
 
-    // Determine value type
     if constexpr (std::is_same_v<V, int> || std::is_same_v<V, int64_t> ||
                    std::is_same_v<V, float> || std::is_same_v<V, double> ||
                    std::is_same_v<V, bool> || std::is_same_v<V, char> ||
@@ -190,12 +153,11 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
 
     auto script_map = script_value::make_map(key_type, value_type, eng);
     auto& map = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
-    
+
     for (const auto& [key, value] : stdmap) {
         script_value converted_key = script_value(std::monostate{}, eng);
         script_value converted_value = script_value(std::monostate{}, eng);
-        
-        // Convert key
+
         if constexpr (std::is_same_v<K, script_value>) {
             converted_key = key;
         } else if constexpr (std::is_same_v<K, int> || std::is_same_v<K, int64_t> ||
@@ -204,24 +166,20 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                            std::is_same_v<K, std::string>) {
             converted_key = script_value(key, eng);
         } else {
-            // For custom key types, use conversion registry if available
             if (eng) {
                 auto registry = eng->get_conversion_registry();
                 if (registry && registry->template has_conversion<K>()) {
                     converted_key = registry->template convert_to_script<K>(key);
                 } else {
-                    // Fallback: create raw C++ object with engine reference
                     auto sharedObj = std::make_shared<K>(key);
                     converted_key = eng->make_object(sharedObj);
                 }
             } else {
-                // Fallback: create raw C++ object with engine reference
                 auto sharedObj = std::make_shared<K>(key);
                 converted_key = eng->make_object(sharedObj);
             }
         }
-        
-        // Convert value
+
         if constexpr (std::is_same_v<V, script_value>) {
             converted_value = value;
         } else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, int64_t> ||
@@ -230,34 +188,26 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                            std::is_same_v<V, std::string>) {
             converted_value = script_value(value, eng);
         } else {
-            // For custom value types, use conversion registry if available
             if (eng) {
                 auto registry = eng->get_conversion_registry();
                 if (registry && registry->template has_conversion<V>()) {
                     converted_value = registry->template convert_to_script<V>(value);
                 } else {
-                    // Fallback: create raw C++ object with engine reference
                     auto sharedObj = std::make_shared<V>(value);
                     converted_value = eng->make_object(sharedObj);
                 }
             } else {
-                // Fallback: create raw C++ object with engine reference
                 auto sharedObj = std::make_shared<V>(value);
                 converted_value = eng->make_object(sharedObj);
             }
         }
-        
+
         map.insert_or_assign(converted_key, converted_value);
     }
-    
+
     return script_map;
 }
 
-// Template implementations moved to engine_templates.hpp to avoid circular dependencies
-
-// Implementation of conversion_manager methods are now in conversion_registry_templates.hpp
-
-// Public template implementation for add_custom_conversion
 template<typename T>
 void engine::add_custom_conversion(
     std::function<T(const script_value&)> from_func,
@@ -267,8 +217,6 @@ void engine::add_custom_conversion(
     conv_manager.add_custom_conversion<T>(from_func, to_func);
 }
 
-// Implementation of parameter_storage::scope_guard methods
-// These need the full engine definition, so they're defined here
 inline detail::parameter_storage::scope_guard::scope_guard(engine* eng, parameter_storage* storage)
     : engine_(eng), previous_(eng ? eng->get_current_parameter_storage() : nullptr) {
     if (eng) {

@@ -145,6 +145,13 @@ else()
     )
 endif()
 
+# Precompiled headers - most test files include these three
+target_precompile_headers(jaiscript_tests PRIVATE
+    <jaiscript/testing/foundry.hpp>
+    <jaiscript/core/engine.hpp>
+    <jaiscript/core/dynamic_binder.hpp>
+)
+
 # Add test to CTest
 enable_testing()
 add_test(NAME FoundryTests COMMAND jaiscript_tests)

@@ -3,7 +3,7 @@
 #define JAI_SERIALIZATION_CONSTRUCT_HPP
 
 #include <memory>
-#include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/archive_impl.hpp>
 
 namespace jai {
 

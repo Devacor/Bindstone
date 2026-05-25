@@ -5,10 +5,7 @@
 
 #include <jaiscript/signals/signal.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/engine_impl.hpp>
 #include <jaiscript/core/value.hpp>
-#include <iostream>
-#include <sstream>
 
 namespace jai {
 
@@ -18,7 +15,6 @@ namespace jai {
 
 namespace detail {
 
-// Helper to convert arguments to script_values and build local variable map
 template<typename... Args>
 inline instance_variables build_script_locals(
 	engine* eng,
@@ -27,12 +23,10 @@ inline instance_variables build_script_locals(
 ) {
 	instance_variables locals;
 
-	// Convert each argument to script_value
 	std::vector<script_value> values;
 	values.reserve(sizeof...(Args));
 	(values.push_back(eng->make_value(std::forward<Args>(args))), ...);
 
-	// Map to parameter names
 	for (size_t i = 0; i < values.size(); ++i) {
 		std::string name = (param_names && i < param_names->size())
 			? (*param_names)[i]
@@ -56,11 +50,8 @@ void receiver<T>::call_script(Args&&... args) {
 				std::forward<Args>(args)...
 			);
 			script_engine_->execute(script_callback_, locals);
-		} catch (const std::exception& e) {
-			std::cerr << "Signal script error: " << e.what() << "\n";
+		} catch (...) {
 		}
-	} else if (!script_callback_.empty()) {
-		std::cerr << "Failed to run script in receiver: no JaiScript engine handle\n";
 	}
 }
 
@@ -76,12 +67,9 @@ bool receiver<T>::call_script_predicate(Args&&... args) {
 			);
 			auto result = script_engine_->execute(script_callback_, locals);
 			return result.template as<bool>();
-		} catch (const std::exception& e) {
-			std::cerr << "Signal script error: " << e.what() << "\n";
+		} catch (...) {
 			return false;
 		}
-	} else if (!script_callback_.empty()) {
-		std::cerr << "Failed to run script in receiver: no JaiScript engine handle\n";
 	}
 	return false;
 }
@@ -91,11 +79,8 @@ void receiver<T>::call_script() {
 	if (script_engine_ && !script_callback_.empty()) {
 		try {
 			script_engine_->execute(script_callback_);
-		} catch (const std::exception& e) {
-			std::cerr << "Signal script error: " << e.what() << "\n";
+		} catch (...) {
 		}
-	} else if (!script_callback_.empty()) {
-		std::cerr << "Failed to run script in receiver: no JaiScript engine handle\n";
 	}
 }
 
@@ -105,12 +90,9 @@ bool receiver<T>::call_script_predicate() {
 		try {
 			auto result = script_engine_->execute(script_callback_);
 			return result.template as<bool>();
-		} catch (const std::exception& e) {
-			std::cerr << "Signal script error: " << e.what() << "\n";
+		} catch (...) {
 			return false;
 		}
-	} else if (!script_callback_.empty()) {
-		std::cerr << "Failed to run script in receiver: no JaiScript engine handle\n";
 	}
 	return false;
 }

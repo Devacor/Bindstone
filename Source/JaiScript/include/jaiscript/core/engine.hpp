@@ -17,7 +17,7 @@
 #include <optional>
 #include <unordered_set>
 #include <typeindex>
-#include <iostream>
+#include <iosfwd>
 
 namespace jai {
 
@@ -766,7 +766,6 @@ namespace jai {
 
 } // namespace jai
 
-// Include template implementations that need both engine and other headers
 #include "engine_impl.hpp"
 #include "conversion_registry_templates.hpp"
 #include "value_impl.hpp"

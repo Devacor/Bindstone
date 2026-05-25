@@ -1,6 +1,7 @@
 #pragma once
 
-#include "archive.hpp"
+#include "archive_impl.hpp"
+#include <jaiscript/core/class_definition.hpp>
 #include <stack>
 #include <sstream>
 #include <iomanip>
@@ -763,6 +764,8 @@ public:
 
         return false;
     }
+
+    void clear_property_value() { current_property_value_ = nullptr; }
 
     bool has_property(const std::string& name) {
         if (object_stack_.empty()) {

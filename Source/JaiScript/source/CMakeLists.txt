@@ -80,6 +80,13 @@ else()
     )
 endif()
 
+# Precompiled headers - parse heavy templates once instead of per-TU
+target_precompile_headers(jaiscript PRIVATE
+    <jaiscript/core/engine.hpp>
+    <jaiscript/core/value.hpp>
+    <jaiscript/core/class_definition.hpp>
+)
+
 # Set target properties
 set_target_properties(jaiscript PROPERTIES
     POSITION_INDEPENDENT_CODE ON

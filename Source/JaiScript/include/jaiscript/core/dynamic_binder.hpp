@@ -5,6 +5,7 @@
 #define JAISCRIPT_dynamic_binder_HPP_INCLUDED
 
 #include "engine.hpp"
+#include "engine_impl.hpp"
 #include "value.hpp"
 #include "types.hpp"
 #include "function_binder.hpp"
@@ -13,7 +14,7 @@
 #include "bound_array.hpp"
 #include "bound_map.hpp"
 #include "bound_cpp_vector.hpp"
-#include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/properties/property_schema.hpp>
 #include <jaiscript/properties/observable_property.hpp>
 #include <jaiscript/signals/signal_impl.hpp>

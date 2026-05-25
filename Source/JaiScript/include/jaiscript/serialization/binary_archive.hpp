@@ -1,6 +1,6 @@
 #pragma once
 
-#include "archive.hpp"
+#include "archive_impl.hpp"
 #include <vector>
 #include <cstring>
 #include <algorithm>
@@ -693,6 +693,8 @@ public:
         key = read_string();
         return true;
     }
+
+    void clear_property_value() {}
 
     bool has_property(const std::string& name) {
         // Check in pre-read property name index

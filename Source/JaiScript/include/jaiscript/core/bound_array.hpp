@@ -47,7 +47,7 @@ public:
         } else if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, script_int>) {
             return script_value(value, eng);
         } else if constexpr (std::is_same_v<T, float>) {
-            return script_value(static_cast<script_float>(value));
+            return script_value(static_cast<script_float>(value), eng);
         } else if constexpr (std::is_same_v<T, double> || std::is_same_v<T, script_float>) {
             return script_value(value, eng);
         } else if constexpr (std::is_same_v<T, bool>) {

@@ -23,7 +23,7 @@
 #endif
 
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/archive_impl.hpp>
 
 namespace jai {
 namespace dynamic_binder_detail {

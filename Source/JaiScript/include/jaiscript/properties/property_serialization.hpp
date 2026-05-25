@@ -2,7 +2,7 @@
 
 #include <jaiscript/properties/property.hpp>
 #include <jaiscript/properties/property_manager.hpp>
-#include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <jaiscript/serialization/construct.hpp>
 #include <jaiscript/serialization/archive_dispatch.hpp>
@@ -1120,9 +1120,11 @@ namespace jai {
 				if (it != m_properties.end()) {
 					it->second->serialize(type_erased);
 				}
-				// Unknown properties should be skipped - but type-erased reader
-				// doesn't have read_value(). For now, JSON must match properties.
 			}
+			// Clear stale property value left by the last read_property_name call
+			// to prevent it from leaking into parent scope (e.g., when the parent
+			// is iterating array elements via begin_object)
+			type_erased.clear_property_value();
 		}
 	}
 

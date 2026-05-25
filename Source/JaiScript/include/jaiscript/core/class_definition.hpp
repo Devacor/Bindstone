@@ -870,7 +870,7 @@ public:
                     try {
                         instance->set_class_definition(shared_from_this());
                     } catch (const std::exception& e) {
-                        std::cerr << "Failed to update class definition for instance: " << e.what() << std::endl;
+                        (void)e;
                     }
                 }
             }
@@ -961,8 +961,7 @@ public:
                         std::vector<script_value> args = {instance_value};
                         auto result = migrate_func(args);
                         if (!result) {
-                            std::cerr << "Hot reload migration error for " << name_
-                                      << ": " << result.message() << std::endl;
+                            (void)result;
                         }
                     }
 
@@ -972,7 +971,7 @@ public:
                 try {
                     instance->set_class_definition(shared_from_this());
                 } catch (const std::exception& e) {
-                    std::cerr << "Failed to update class definition for instance: " << e.what() << std::endl;
+                    (void)e;
                 }
 
                 if (write_idx != read_idx) {

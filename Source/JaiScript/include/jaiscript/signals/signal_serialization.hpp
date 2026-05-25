@@ -4,7 +4,7 @@
 #define __JAISCRIPT_SIGNALS_SIGNAL_SERIALIZATION_HPP__
 
 #include <jaiscript/signals/signal.hpp>
-#include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/archive_impl.hpp>
 
 namespace jai {
 

@@ -178,6 +178,7 @@ class any_archive_reader {
     bool (*needs_property_keys_)(void*);
     void* (*get_engine_)(void*);  // Returns engine*
     void* (*get_user_context_)(void*, std::type_index);  // Returns user context by type_index
+    void (*clear_property_value_)(void*);
     // Shared pointer ID tracking for type-erased smart pointer deserialization
     bool (*has_deserialized_shared_)(void*, uint32_t);
     std::shared_ptr<void> (*get_deserialized_shared_void_)(void*, uint32_t);
@@ -216,6 +217,7 @@ public:
             auto& ar = *static_cast<Archive*>(p);
             return ar.get_user_context_raw(ti);
         })
+        , clear_property_value_([](void* p) { static_cast<Archive*>(p)->clear_property_value(); })
         , has_deserialized_shared_([](void* p, uint32_t id) { return static_cast<Archive*>(p)->has_deserialized_shared(id); })
         , get_deserialized_shared_void_([](void* p, uint32_t id) -> std::shared_ptr<void> {
             // Get as shared_ptr<void> - the concrete archive stores shared_ptr<void> internally
@@ -280,6 +282,8 @@ public:
     // Archive type recovery for full-fidelity deserialization
     reader_archive_id archive_id() const { return id_; }
     void* raw_ptr() const { return ptr_; }
+
+    void clear_property_value() { clear_property_value_(ptr_); }
 
     // Dispatch to concrete archive type - recovers full type info!
     // Usage: ar.dispatch([&](auto& concrete_ar) { concrete_ar(make_nvp("name", value)); });

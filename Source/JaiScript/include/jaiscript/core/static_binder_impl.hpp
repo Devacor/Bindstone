@@ -5,7 +5,7 @@
 
 #include <jaiscript/core/static_binder.hpp>
 #include <jaiscript/core/template_binder.hpp>
-#include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 
 namespace jai {

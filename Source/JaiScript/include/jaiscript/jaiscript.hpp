@@ -59,7 +59,7 @@
 // #include "jvm/vm_backend.hpp"
 
 // 13. Serialization
-#include "serialization/archive.hpp"
+#include "serialization/archive_impl.hpp"
 #include "serialization/convenience.hpp"
 
 // Version information

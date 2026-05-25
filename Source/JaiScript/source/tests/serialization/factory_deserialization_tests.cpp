@@ -1,7 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>  // For any_archive_reader

@@ -502,6 +502,7 @@ namespace jai {
         void set_backend(std::unique_ptr<execution_backend> backend);
         backend_type get_backend_type() const;
         std::string get_backend_name() const;
+        execution_backend* get_execution_backend() const;
 
         // Get string symbolizer for interning identifiers
         string_symbolizer* get_symbolizer();

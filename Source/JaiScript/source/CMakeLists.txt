@@ -4,6 +4,7 @@
 set(JAISCRIPT_SOURCES
     implementation/class_registry.cpp
     implementation/conversion_registry.cpp
+    implementation/coroutine.cpp
     implementation/engine.cpp
     implementation/interpreter.cpp
     implementation/interpreter_dispatch.cpp

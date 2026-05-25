@@ -2899,6 +2899,9 @@ interpreter::interpreter()
     shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
+    coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
+    resume_id_ = string_symbolizer_->intern("resume");
+    done_id_ = string_symbolizer_->intern("done");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2960,6 +2963,9 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
+    coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
+    resume_id_ = string_symbolizer_->intern("resume");
+    done_id_ = string_symbolizer_->intern("done");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -3021,6 +3027,9 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
+    coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
+    resume_id_ = string_symbolizer_->intern("resume");
+    done_id_ = string_symbolizer_->intern("done");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -3086,6 +3095,10 @@ void interpreter::prepare_for_execution() {
     is_unwinding_ = false;
     active_exception_value_.reset();  // No need to create a value here either
     current_catch_var_id_ = 0;
+
+    // Clear coroutine state
+    hasYieldRequest_ = false;
+    active_coroutine_ = nullptr;
 
     // Reset to the engine's global environment directly
     // This fixes issues where the interpreter's environment_ can become disconnected
@@ -5306,14 +5319,36 @@ checked_result<void> interpreter::visit_expression_stmt(expression_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
-    // Create a new child scope for the block
-    // With lazy caching, this is O(1) - no flat_lookup_ copy needed
     auto previous = environment_;
-    environment_ = get_pooled_environment(environment_);
+
+    // Check if we're resuming into this block from a coroutine yield
+    size_t start_index = 0;
+    bool resuming = false;
+    if (active_coroutine_) {
+        auto* cont = active_coroutine_->peek_continuation(stmt);
+        if (cont) {
+            start_index = cont->index;
+            // Restore the environment that was saved when this block yielded.
+            // This includes any inner scopes (for-loop, nested blocks) that
+            // were active at the time of yield.
+            if (cont->saved_env) {
+                environment_ = cont->saved_env;
+            }
+            active_coroutine_->pop_continuation();
+            resuming = true;
+            // DON'T create new scope - the saved environment already has it
+        }
+    }
+
+    if (!resuming) {
+        // Create a new child scope for the block
+        // With lazy caching, this is O(1) - no flat_lookup_ copy needed
+        environment_ = get_pooled_environment(environment_);
+    }
 
     try {
-        for (const auto& decl : stmt->declarations) {
-            auto result = dispatch_decl(decl.get());
+        for (size_t i = start_index; i < stmt->declarations.size(); ++i) {
+            auto result = dispatch_decl(stmt->declarations[i].get());
 
             // IMPORTANT: Clear value stack after each declaration to prevent accumulation
             // This ensures objects are destroyed at statement boundaries, not just at block exit
@@ -5325,7 +5360,9 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
 
             if (!result) {
                 // Restore scope before returning
-                release_environment(environment_);
+                if (!resuming || i > start_index) {
+                    release_environment(environment_);
+                }
                 environment_ = previous;
                 return result;
             }
@@ -5334,10 +5371,30 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
             if (is_unwinding_ || hasBreakRequest_ || hasContinueRequest_ || hasReturnValue_) {
                 break;
             }
+
+            // On yield: record continuation and return without releasing environment
+            if (hasYieldRequest_) {
+                if (active_coroutine_) {
+                    // If inner constructs (if/while/for/block) pushed continuations,
+                    // we need to re-enter this statement on resume (save i).
+                    // If no inner continuations exist, the yield was a direct child
+                    // statement, so skip it on resume (save i + 1).
+                    size_t resume_index = active_coroutine_->has_continuations() ? i : i + 1;
+                    // Save the current environment (may be deeper than this block's scope
+                    // due to inner constructs like for-loops that didn't restore).
+                    // On resume, we'll restore this to get back to the right depth.
+                    active_coroutine_->push_continuation(stmt, resume_index, environment_);
+                }
+                // Restore environment_ to previous so parent constructs see correct scope.
+                environment_ = previous;
+                return {};
+            }
         }
     } catch (...) {
         // Restore scope even if an error occurs
-        release_environment(environment_);
+        if (!resuming) {
+            release_environment(environment_);
+        }
         environment_ = previous;
         throw;
     }
@@ -5347,8 +5404,10 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     // Block statements don't produce a value, so the stack should be cleared
     valueStack_.clear();
 
-    // Restore the previous scope
-    release_environment(environment_);
+    // Restore the previous scope - only release if we created it
+    if (!resuming) {
+        release_environment(environment_);
+    }
     environment_ = previous;
     return {};
 }
@@ -6578,6 +6637,37 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         return {};
     }
 
+    // Handle coroutine_handle methods
+    if (objectValue.is_object()) {
+        auto objHolder = objectValue.get_object_holder();
+        if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
+            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data);
+            if (expr->member_id == resume_id_) {
+                // Return a bound "resume" method
+                auto captured_handle = handle;
+                auto* eng = engine_;
+                script_function resume_method = [captured_handle, eng](const std::vector<script_value>& /*args*/) -> checked_result<script_value> {
+                    return captured_handle->resume(eng);
+                };
+                push_value(script_value::make_function(resume_method, engine_));
+                return {};
+            }
+            if (expr->member_id == done_id_) {
+                // Return a bound "done" method
+                auto captured_handle = handle;
+                auto* eng = engine_;
+                script_function done_method = [captured_handle, eng](const std::vector<script_value>& /*args*/) -> checked_result<script_value> {
+                    return script_value(captured_handle->done(), eng);
+                };
+                push_value(script_value::make_function(done_method, engine_));
+                return {};
+            }
+            // Unknown member on coroutine handle
+            return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+                "coroutine_handle has no member '{0}'", expr->member_id);
+        }
+    }
+
     // Handle string methods
     if (objectValue.is_string()) {
         auto methodIt = string_methods_.find(expr->member_id);
@@ -7605,24 +7695,66 @@ checked_result<void> interpreter::visit_throw_expr(throw_expr* expr) {
     return {};
 }
 
-checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
-    // Evaluate the condition
-    JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
-    script_value conditionValue = pop_value();
+checked_result<void> interpreter::visit_yield_expr(yield_expr* expr) {
+    if (!active_coroutine_) {
+        return checked_result<void>(make_error_code(runtime_error_code::evaluation_failed),
+            "yield used outside of coroutine");
+    }
 
-    // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
+    // Evaluate the yield value (if any)
+    script_value value = make_value();
+    if (expr->value) {
+        JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+        value = pop_value();
+    }
+
+    // Always yield - store value and set the request flag
+    active_coroutine_->do_yield(std::move(value));
+    hasYieldRequest_ = true;
+
+    // Push null onto value stack (yield is an expression, result on resume is null)
+    push_value(make_value());
+    return {};
+}
+
+checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
     bool is_true;
-    if (expression_returns_bool(stmt->condition.get())) {
-        is_true = conditionValue.unchecked_as_bool();
-    } else {
-        is_true = is_truthy(conditionValue);
+    bool resuming = false;
+
+    // Check if we're resuming into a branch from a coroutine yield
+    if (active_coroutine_) {
+        auto* cont = active_coroutine_->peek_continuation(stmt);
+        if (cont) {
+            is_true = (cont->index == 0);  // 0=then branch, 1=else branch
+            active_coroutine_->pop_continuation();
+            resuming = true;
+        }
+    }
+
+    if (!resuming) {
+        // Evaluate the condition
+        JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
+        script_value conditionValue = pop_value();
+
+        // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
+        if (expression_returns_bool(stmt->condition.get())) {
+            is_true = conditionValue.unchecked_as_bool();
+        } else {
+            is_true = is_truthy(conditionValue);
+        }
     }
 
     // Execute appropriate branch based on truthiness
     if (is_true) {
         JAISCRIPT_TRY(dispatch_stmt(stmt->then_statement.get()));
+        if (hasYieldRequest_ && active_coroutine_) {
+            active_coroutine_->push_continuation(stmt, 0);  // then branch
+        }
     } else if (stmt->else_statement) {
         JAISCRIPT_TRY(dispatch_stmt(stmt->else_statement.get()));
+        if (hasYieldRequest_ && active_coroutine_) {
+            active_coroutine_->push_continuation(stmt, 1);  // else branch
+        }
     }
     return {};
 }
@@ -7631,24 +7763,38 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
     // OPTIMIZATION: Pre-check if condition is guaranteed to return bool
     const bool condition_returns_bool = expression_returns_bool(stmt->condition.get());
 
-    while (true) {
-        // Evaluate the condition
-        JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
-
-        const auto& val = valueStack_.top();
-        bool is_true;
-
-        // FAST PATH: If we KNOW the condition returns bool, skip type dispatch
-        if (condition_returns_bool) {
-            is_true = val.unchecked_as_bool();
-        } else {
-            is_true = is_truthy(val);
+    // Check if we're resuming into this while loop from a coroutine yield
+    bool skip_first_condition = false;
+    if (active_coroutine_) {
+        auto* cont = active_coroutine_->peek_continuation(stmt);
+        if (cont) {
+            skip_first_condition = true;
+            active_coroutine_->pop_continuation();
         }
+    }
 
-        valueStack_.discard();
+    while (true) {
+        if (skip_first_condition) {
+            skip_first_condition = false;  // Only skip once
+        } else {
+            // Evaluate the condition
+            JAISCRIPT_TRY(dispatch_expr(stmt->condition.get()));
 
-        if (!is_true) {
-            break;
+            const auto& val = valueStack_.top();
+            bool is_true;
+
+            // FAST PATH: If we KNOW the condition returns bool, skip type dispatch
+            if (condition_returns_bool) {
+                is_true = val.unchecked_as_bool();
+            } else {
+                is_true = is_truthy(val);
+            }
+
+            valueStack_.discard();
+
+            if (!is_true) {
+                break;
+            }
         }
 
         // Execute the loop body
@@ -7669,6 +7815,14 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         if (hasReturnValue_) {
             break;
         }
+
+        // On yield: record continuation and return
+        if (hasYieldRequest_) {
+            if (active_coroutine_) {
+                active_coroutine_->push_continuation(stmt, 0);
+            }
+            return {};
+        }
     }
     return {};
 }
@@ -7682,7 +7836,11 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     // - Per-iteration type validation (~0.1ns) handles edge cases
     // - Falls back to slow path if type changes mid-loop
     //
-    if (stmt->initializer && stmt->condition && stmt->update) {
+    // IMPORTANT: Skip fast path when inside a coroutine - the fast path doesn't
+    // support yield/resume since it uses native C++ loop counters that can't be saved.
+    // The slow path handles yield correctly via continuation points.
+    //
+    if (stmt->initializer && stmt->condition && stmt->update && !active_coroutine_) {
         auto* init_var = stmt->initializer->get_type() == node_type::variable_decl
             ? static_cast<variable_decl*>(stmt->initializer.get()) : nullptr;
         auto* cond_binary = stmt->condition->get_type() == node_type::binary_expr
@@ -7906,7 +8064,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                             environment_ = previous;
                                             return result;
                                         }
-                                        if (is_unwinding_ || hasBreakRequest_ || hasContinueRequest_ || hasReturnValue_) {
+                                        if (is_unwinding_ || hasBreakRequest_ || hasContinueRequest_ || hasReturnValue_ || hasYieldRequest_) {
                                             break;
                                         }
                                     }
@@ -7923,7 +8081,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                 }
 
                                 if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
-                                if (hasReturnValue_) break;
+                                if (hasReturnValue_ || hasYieldRequest_) break;
                                 if (hasContinueRequest_) hasContinueRequest_ = false;
 
                                 // Update step - read from pointer if dynamic
@@ -7959,7 +8117,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                     }
 
                                     if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
-                                    if (hasReturnValue_) break;
+                                    if (hasReturnValue_ || hasYieldRequest_) break;
                                     if (hasContinueRequest_) hasContinueRequest_ = false;
 
                                     if (stmt->update) {
@@ -7986,10 +8144,44 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     }
 
     // === GENERAL PATH: Standard for-loop handling ===
-    // Create new scope for the for loop (initialization variables should be scoped)
-    auto previous = environment_;
-    auto loop_env = get_pooled_environment(environment_);
-    environment_ = loop_env;
+
+    // Check if we're resuming into this for-loop from a coroutine yield
+    bool resuming_loop = false;
+    if (active_coroutine_) {
+        auto* cont = active_coroutine_->peek_continuation(stmt);
+        if (cont) {
+            resuming_loop = true;
+            // Restore the for-loop's environment (includes loop variable scope)
+            if (cont->saved_env) {
+                environment_ = cont->saved_env;
+            }
+            active_coroutine_->pop_continuation();
+            // DON'T create new scope or execute initializer - saved environment has them
+        }
+    }
+
+    // For normal execution, previous is the current environment.
+    // For resume, previous should be the parent of the restored for-loop scope,
+    // so we correctly restore the outer scope on exit.
+    auto previous = resuming_loop ? environment_->get_parent() : environment_;
+    bool owns_scope = false;
+
+    if (!resuming_loop) {
+        // Create new scope for the for loop (initialization variables should be scoped)
+        auto loop_env = get_pooled_environment(environment_);
+        environment_ = loop_env;
+        owns_scope = true;
+
+        // Execute initialization (if present)
+        if (stmt->initializer) {
+            auto result = dispatch_decl(stmt->initializer.get());
+            if (!result) {
+                release_environment(loop_env);
+                environment_ = previous;
+                return result;
+            }
+        }
+    }
 
     // Error capture for lambdas (avoid throwing from hot path)
     std::optional<checked_result<void>> error;
@@ -8039,32 +8231,29 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
         }
     };
 
-    // Execute initialization (if present)
-    if (stmt->initializer) {
-        auto result = dispatch_decl(stmt->initializer.get());
-        if (!result) {
-            release_environment(loop_env);
-            environment_ = previous;
-            return result;
-        }
-    }
+    // Skip first condition if resuming (we were mid-iteration when yield happened)
+    bool skip_condition = resuming_loop;
 
-    // Native C++ for-loop structure (more recognizable to compiler optimizer)
-    // Pattern: for(init; condition; update) { body; }
-    for (; eval_condition(); eval_update()) {
-        // Check if lambda captured an error
+    // Native C++ for-loop structure
+    while (true) {
+        if (skip_condition) {
+            skip_condition = false;  // Only skip on first resumed iteration
+        } else {
+            if (!eval_condition()) break;
+        }
         if (error) break;
 
         // Execute the loop body
         auto result = dispatch_stmt(stmt->body.get());
         if (!result) {
-            release_environment(loop_env);
+            if (owns_scope) {
+                release_environment(environment_);
+            }
             environment_ = previous;
             return result;
         }
 
         // Check for control flow changes (break/continue/return)
-        // These need to happen BEFORE update (continue) or skip update (break/return)
         if (hasBreakRequest_) {
             hasBreakRequest_ = false;
             break;
@@ -8074,14 +8263,30 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             break;
         }
 
+        // On yield: record continuation and return without releasing environment
+        if (hasYieldRequest_) {
+            if (active_coroutine_) {
+                // Save the current environment (for-loop scope or deeper) so we can
+                // restore it on resume. For-loop variables are environment-based
+                // (not slot-based) and must be accessible.
+                active_coroutine_->push_continuation(stmt, 0, environment_);
+            }
+            // Restore environment_ to previous so parent scope is correct
+            environment_ = previous;
+            return {};
+        }
+
         if (hasContinueRequest_) {
             hasContinueRequest_ = false;
-            continue;  // Will execute update in for-loop increment
         }
+
+        eval_update();
     }
 
-    // Release the loop environment to destroy all loop variables
-    release_environment(loop_env);
+    // Release the loop environment to destroy all loop variables (only if we created it)
+    if (owns_scope) {
+        release_environment(environment_);
+    }
 
     // Restore previous environment
     environment_ = previous;
@@ -8099,6 +8304,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
     JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
     script_value container = pop_value();
 
+    // Determine if we can use slot-based access (inside a function with an assigned slot)
+    const bool use_slot = stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty();
+
     // Create a new scope for the loop variable
     push_scope();
 
@@ -8108,10 +8316,18 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
         const size_t array_size = array_storage->size();
 
         if (array_size > 0) {
-            // OPTIMIZATION: Define loop variable ONCE, then use pointer for direct assignment
-            // Use pre-interned symbol ID from parser - no runtime string interning needed
-            environment_->define(stmt->variable_name_id, make_value());
-            script_value* loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
+            script_value* loop_var_ptr = nullptr;
+
+            if (use_slot) {
+                // Slot-based O(1) access: define the variable in the call frame's local slot
+                call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index);
+            } else {
+                // OPTIMIZATION: Define loop variable ONCE, then use pointer for direct assignment
+                // Use pre-interned symbol ID from parser - no runtime string interning needed
+                environment_->define(stmt->variable_name_id, make_value());
+                loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
+            }
 
             for (size_t i = 0; i < array_size; ++i) {
                 if (stmt->is_reference) {
@@ -8143,6 +8359,15 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 if (hasReturnValue_) {
                     break;
                 }
+
+                // On yield: don't pop scope, let environment stay for coroutine to save
+                if (hasYieldRequest_) {
+                    // Note: range-for doesn't need its own continuation because we don't
+                    // re-enter visit_range_for_stmt on resume. The container iteration
+                    // state is implicit in the body block's continuation. On resume,
+                    // we re-enter through the block/for continuation chain above.
+                    return {};
+                }
             }
         }
 
@@ -8166,10 +8391,18 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             }
             const script_function& pair_func = pairConstructor.as_function();
 
-            // OPTIMIZATION: Define loop variable ONCE, then use pointer for direct assignment
-            // Use pre-interned symbol ID from parser - no runtime string interning needed
-            environment_->define(stmt->variable_name_id, make_value());
-            script_value* loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
+            script_value* loop_var_ptr = nullptr;
+
+            if (use_slot) {
+                // Slot-based O(1) access: define the variable in the call frame's local slot
+                call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index);
+            } else {
+                // OPTIMIZATION: Define loop variable ONCE, then use pointer for direct assignment
+                // Use pre-interned symbol ID from parser - no runtime string interning needed
+                environment_->define(stmt->variable_name_id, make_value());
+                loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
+            }
 
             for (auto it = map_storage->begin(); it != map_storage->end(); ++it) {
                 // Create pair args
@@ -8214,6 +8447,11 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 if (hasReturnValue_) {
                     break;
                 }
+
+                // On yield: don't pop scope, let environment stay for coroutine to save
+                if (hasYieldRequest_) {
+                    return {};
+                }
             }
         }
 
@@ -8222,7 +8460,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Range-based for loop requires an array or map
     }
 
-    // Pop the loop scope
+    // Pop the loop scope (only on normal exit, not yield)
     pop_scope();
     return {};
 }
@@ -8471,6 +8709,31 @@ checked_result<void> interpreter::visit_fallthrough_stmt(fallthrough_stmt* stmt)
 checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     // Note: name_id and parameter symbol_ids are pre-interned by the parser
     // (see parse_function_body() and parse_parameter_list())
+
+    if (decl->is_coroutine) {
+        // Coroutine function - calling it returns a coroutine_handle instead of executing
+        // Create a shared copy of the function declaration for the coroutine handle
+        auto func_decl_ptr = std::make_shared<function_decl>(decl->location, decl->name, decl->name_id);
+        func_decl_ptr->parameters = decl->parameters;
+        func_decl_ptr->return_type = decl->return_type;
+        func_decl_ptr->body = decl->body;
+        func_decl_ptr->is_coroutine = true;
+        func_decl_ptr->local_count = decl->local_count;
+
+        auto closure_env = environment_;
+        script_value functionValue = script_value::make_function(
+            [this, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
+                // Create a new coroutine handle
+                auto handle = std::make_shared<coroutine_handle>(engine_);
+                handle->set_function(func_decl_ptr, args, closure_env);
+
+                // Wrap as a script object
+                return make_coroutine_object(handle);
+            }, engine_);
+
+        environment_->define(decl->name_id, functionValue);
+        return {};
+    }
 
     // Don't capture any environment in the closure - just use nullptr
     // The environment stack will handle variable lookup naturally
@@ -10164,7 +10427,11 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     // Execute function body without creating another environment
     // (since we already created one for the function call)
-    for (const auto& decl : function.body->declarations) {
+    // Track which declaration index we're at (needed for coroutine yield)
+    size_t last_body_idx = 0;
+    for (size_t body_idx = 0; body_idx < function.body->declarations.size(); ++body_idx) {
+        last_body_idx = body_idx;
+        const auto& decl = function.body->declarations[body_idx];
         auto result = dispatch_decl(decl.get());
 
         // Check for error codes - propagate errors
@@ -10174,14 +10441,40 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             return result.error_value();
         }
 
-        // Check if we hit a return statement and break early
-        if (hasReturnValue_) {
+        // Check if we hit a return statement or yield and break early
+        if (hasReturnValue_ || hasYieldRequest_) {
             break;
         }
     }
 
     // Get return value
     script_value result = make_value();
+
+    // If yielding, save state for coroutine resume instead of cleaning up
+    if (hasYieldRequest_) {
+        if (active_coroutine_) {
+            result = active_coroutine_->last_value();
+            // Record where to resume in the function body.
+            // If inner constructs pushed continuations, re-enter this statement.
+            // If no inner continuations, the yield was a direct child, skip it.
+            size_t resume_idx = active_coroutine_->has_continuations() ? last_body_idx : last_body_idx + 1;
+            active_coroutine_->push_continuation(function.body.get(), resume_idx);
+            // Save interpreter state into the coroutine for later resume
+            // The visit_* methods have already pushed continuations onto the coroutine
+            // and left the environment chain intact (no releases on yield path)
+            active_coroutine_->saved_environment_ = environment_;
+            active_coroutine_->saved_call_stack_ = std::move(call_stack_);
+            active_coroutine_->saved_return_value_ = std::move(returnValue_);
+            active_coroutine_->saved_has_return_ = hasReturnValue_;
+        }
+        // Restore caller's environment and call stack WITHOUT releasing
+        // (the coroutine now owns the environment chain and call frame)
+        environment_ = previousEnv;
+        call_stack_.clear();  // We moved it, but ensure clean state
+        hasReturnValue_ = previousHasReturn;
+        returnValue_ = previousReturn;
+        return result;
+    }
 
     if (hasReturnValue_) {
         // IMPORTANT: Dereference any references before cleanup destroys the call frame.
@@ -10574,6 +10867,18 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         target_type->id, derefed_arg.type_id());
 }
 
+script_value interpreter::make_coroutine_object(std::shared_ptr<coroutine_handle> handle) {
+    // Construct directly - interpreter is friend of script_value so can access private members
+    script_value v(std::monostate{}, engine_);
+    auto obj = make_strong<script_value::object_holder>();
+    obj->type_name = "coroutine_handle";
+    obj->type_id = coroutine_handle_type_id_;
+    obj->data = std::static_pointer_cast<void>(handle);
+    obj->is_class_instance_wrapper = false;
+    v.set_object_holder(std::move(obj));
+    return v;
+}
+
 script_value interpreter::make_function(std::shared_ptr<script_defined_function> func) {
     // Create a wrapper that handles reference parameters properly
     script_function wrapper = [this, func](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -10696,6 +11001,8 @@ checked_result<void> interpreter::dispatch_expr(expression* expr) {
             return visit_super_expr(static_cast<super_expr*>(expr));
         case node_type::throw_expr:
             return visit_throw_expr(static_cast<throw_expr*>(expr));
+        case node_type::yield_expr:
+            return visit_yield_expr(static_cast<yield_expr*>(expr));
         default:
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                 "Unknown expression type in dispatch_expr");

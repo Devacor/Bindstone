@@ -46,24 +46,6 @@ script_value::script_value(script_bool b, engine* eng) : type_info_(nullptr), en
     }
 }
 
-// Factory methods (DEPRECATED - use engine-aware versions instead)
-// These are kept for backwards compatibility but should not be used in new code
-script_value script_value::make_array(type_info_ptr element_type) {
-    // WARNING: This creates a type_info without interning - use make_array(element_type, engine) instead
-    script_value v;
-    // We cannot use engine interning here as we don't have an engine reference
-    // This method is deprecated and should be replaced with the engine-aware version
-    throw runtime_error("make_array without engine parameter is deprecated - use make_array(element_type, engine) instead");
-}
-
-script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueType) {
-    // WARNING: This creates a type_info without interning - use make_map(keyType, valueType, engine) instead
-    script_value v;
-    // We cannot use engine interning here as we don't have an engine reference
-    // This method is deprecated and should be replaced with the engine-aware version
-    throw runtime_error("make_map without engine parameter is deprecated - use make_map(keyType, valueType, engine) instead");
-}
-
 
 script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env) {
     if (!target) {
@@ -93,7 +75,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
 
     // Create vector with small default capacity to avoid first few reallocations
     auto vec = make_strong<std::vector<script_value>>();
-    vec->reserve(16);  // Reserve space for 16 elements (common small array size)
+    vec->reserve(8);
     v.storage_ = vec;
     return v;
 }
@@ -270,7 +252,8 @@ script_value::script_value(const script_value& other)
     : type_info_(other.type_info_),
       engine_(other.engine_),
       storage_(other.storage_),
-      cpp_bound_ptr_(other.cpp_bound_ptr_) {
+      cpp_bound_ptr_(other.cpp_bound_ptr_),
+      cpp_bound_type_size_(other.cpp_bound_type_size_) {
     // Simple shallow copy - shares storage with the original, including engine pointer
     // cpp_bound_ptr_ is also copied so copies of bound values remain bound
     // NOTE: Raw engine* is much faster to copy than weak_ptr (no atomic ops)
@@ -285,6 +268,7 @@ script_value& script_value::operator=(const script_value& other) {
         engine_ = other.engine_;
         storage_ = other.storage_;
         cpp_bound_ptr_ = other.cpp_bound_ptr_;
+        cpp_bound_type_size_ = other.cpp_bound_type_size_;
     }
     return *this;
 }
@@ -595,11 +579,31 @@ void script_value::assign_through(const script_value& value) {
         // TODO: Store type metadata with cpp_bound values for proper casting
         // For now, we handle common C++ types (int, float, etc.)
         switch (type()) {
-            case script_value_type::jai_int_type:
-                *static_cast<int*>(cpp_bound_ptr_) = static_cast<int>(value.as<script_int>());
+            case script_value_type::jai_int_type: {
+                auto v = value.as<script_int>();
+                const uint8_t size = cpp_bound_type_size_ & 0x7F;
+                if (cpp_bound_type_size_ & 0x80) {
+                    switch (size) {
+                        case 1: *static_cast<uint8_t*>(cpp_bound_ptr_) = static_cast<uint8_t>(v); break;
+                        case 2: *static_cast<uint16_t*>(cpp_bound_ptr_) = static_cast<uint16_t>(v); break;
+                        case 4: *static_cast<uint32_t*>(cpp_bound_ptr_) = static_cast<uint32_t>(v); break;
+                        default: *static_cast<uint64_t*>(cpp_bound_ptr_) = static_cast<uint64_t>(v); break;
+                    }
+                } else {
+                    switch (size) {
+                        case 1: *static_cast<int8_t*>(cpp_bound_ptr_) = static_cast<int8_t>(v); break;
+                        case 2: *static_cast<int16_t*>(cpp_bound_ptr_) = static_cast<int16_t>(v); break;
+                        case 4: *static_cast<int32_t*>(cpp_bound_ptr_) = static_cast<int32_t>(v); break;
+                        default: *static_cast<script_int*>(cpp_bound_ptr_) = v; break;
+                    }
+                }
                 break;
+            }
             case script_value_type::jai_float_type:
-                *static_cast<double*>(cpp_bound_ptr_) = value.as<script_float>();
+                if ((cpp_bound_type_size_ & 0x7F) == sizeof(float))
+                    *static_cast<float*>(cpp_bound_ptr_) = static_cast<float>(value.as<script_float>());
+                else
+                    *static_cast<script_float*>(cpp_bound_ptr_) = value.as<script_float>();
                 break;
             case script_value_type::jai_string_type:
                 *static_cast<std::string*>(cpp_bound_ptr_) = value.as<script_string>();
@@ -642,25 +646,27 @@ void script_value::assign_through(script_value&& value) {
 }
 
 bool script_value::operator==(const script_value& other) const {
-    if (type() != other.type()) {
+    const script_value& lhs = deref();
+    const script_value& rhs = other.deref();
+
+    if (lhs.type() != rhs.type()) {
         return false;
     }
-    
-    switch (type()) {
+
+    switch (lhs.type()) {
         case script_value_type::jai_null_type:
             return true;
         case script_value_type::jai_int_type:
-            return unchecked_as_int() == other.unchecked_as_int();
+            return lhs.unchecked_as_int() == rhs.unchecked_as_int();
         case script_value_type::jai_float_type:
-            return unchecked_as_float() == other.unchecked_as_float();
+            return lhs.unchecked_as_float() == rhs.unchecked_as_float();
         case script_value_type::jai_string_type:
-            return unchecked_as_string() == other.unchecked_as_string();
+            return lhs.unchecked_as_string() == rhs.unchecked_as_string();
         case script_value_type::jai_char_type:
-            return unchecked_as_char() == other.unchecked_as_char();
+            return lhs.unchecked_as_char() == rhs.unchecked_as_char();
         case script_value_type::jai_bool_type:
-            return unchecked_as_bool() == other.unchecked_as_bool();
+            return lhs.unchecked_as_bool() == rhs.unchecked_as_bool();
         default:
-            // TODO: Implement for complex types
             return false;
     }
 }
@@ -677,14 +683,17 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
             return std::strong_ordering::equal; // All nulls are equal
         case script_value_type::jai_int_type:
             return unchecked_as_int() <=> other.unchecked_as_int();
-        case script_value_type::jai_float_type:
-            // script_float comparison returns partial_ordering, convert to strong
-            if (auto cmp = unchecked_as_float() <=> other.unchecked_as_float(); cmp < 0)
+        case script_value_type::jai_float_type: {
+            auto cmp = unchecked_as_float() <=> other.unchecked_as_float();
+            if (cmp == std::partial_ordering::unordered)
+                return std::strong_ordering::less; // NaN sorts before all values deterministically
+            else if (cmp < 0)
                 return std::strong_ordering::less;
             else if (cmp > 0)
                 return std::strong_ordering::greater;
             else
                 return std::strong_ordering::equal;
+        }
         case script_value_type::jai_string_type:
             return unchecked_as_string() <=> other.unchecked_as_string();
         case script_value_type::jai_char_type:

@@ -123,8 +123,20 @@ namespace jai {
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);
         
+        // Recursion depth tracking to prevent stack overflow on deeply nested input
+        int parse_depth_ = 0;
+        static constexpr int MAX_PARSE_DEPTH = 1024;
+
+        struct depth_guard {
+            int& depth_;
+            bool overflow_ = false;
+            depth_guard(int& d, int max) : depth_(d) { overflow_ = (++depth_ > max); }
+            ~depth_guard() { --depth_; }
+        };
+
         // Context tracking for context-sensitive parsing
         bool in_switch_case_ = false;  // Track if we're inside a switch case
+        bool in_coroutine_ = false;   // Track if we're inside a coroutine function
 
         // Helper to check if a type name is registered for template parsing
         bool is_registered_template_type(const std::string& type_name) const;

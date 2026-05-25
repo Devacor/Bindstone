@@ -17,6 +17,60 @@ using namespace jai::foundry;
 namespace jai::foundry::tests {
 
 // ============================================================================
+// Smart Pointer Test Types (must be at namespace scope for JAI_PROPERTY)
+// ============================================================================
+
+struct sp_inner_data {
+    int x = 0;
+    std::string label;
+
+    template<typename Archive>
+    void save(Archive& ar) const {
+        ar.serialize("x", x);
+        ar.serialize("label", label);
+    }
+
+    template<typename Archive>
+    void load(Archive& ar) {
+        ar.serialize("x", x);
+        ar.serialize("label", label);
+    }
+};
+
+struct sp_simple_data {
+    int value = 0;
+
+    template<typename Archive>
+    void save(Archive& ar) const {
+        ar.serialize("value", value);
+    }
+
+    template<typename Archive>
+    void load(Archive& ar) {
+        ar.serialize("value", value);
+    }
+};
+
+struct sp_id_data {
+    int id = 0;
+
+    template<typename Archive>
+    void save(Archive& ar) const {
+        ar.serialize("id", id);
+    }
+
+    template<typename Archive>
+    void load(Archive& ar) {
+        ar.serialize("id", id);
+    }
+};
+
+struct sp_ptr_holder : public property_owner<sp_ptr_holder> {
+    JAI_PROPERTY((std::shared_ptr<sp_simple_data>), data);
+    JAI_PROPERTY((int), extra, 0);
+};
+
+// ============================================================================
 // Test Classes - property_owner Auto-registration
 // ============================================================================
 
@@ -502,10 +556,11 @@ public:
             original->extra_data = 42;
             original->history = {1.0f, 2.5f, 3.7f, 4.2f};
 
-            // Serialize using ar(obj) - dispatches to save() which calls property_mgr.save + extras
+            // Serialize using serialize_object_content - dispatches to save() which calls property_mgr.save + extras
+            // Must use serialize_object_content because we already opened the object with begin_object
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("BlendedObject", 1);
-            writer(*original);
+            writer.serialize_object_content(*original);
             writer.end_object();
             std::string json = writer.str();
 
@@ -543,20 +598,20 @@ public:
             original->extra_data = 99;
             original->history = {10.0f, 20.0f};
 
-            // Serialize using ar(obj)
+            // Serialize using serialize_object_content (we already opened the object)
             std::vector<uint8_t> buffer;
             serialization::binary_archive_writer writer(buffer, eng.get());
             writer.begin_object("BlendedObject", 1);
-            writer(*original);
+            writer.serialize_object_content(*original);
             writer.end_object();
 
-            // Deserialize using ar(obj)
+            // Deserialize - reader(loaded) calls load() which handles begin_object/end_object internally
             blended_object loaded;
             serialization::binary_archive_reader reader(buffer, eng.get());
             std::string type_name;
             uint32_t version;
             reader.begin_object(type_name, version);
-            reader(loaded);
+            loaded.load(reader);
             reader.end_object();
 
             check_eq(loaded.score.get(), 500, "Score from binary");
@@ -576,20 +631,20 @@ public:
             original->name = "AutoPlayer";
             original->speed = 12.5f;
 
-            // Serialize using ar(obj) - dispatches to property_mgr.save (no custom save())
+            // Serialize using serialize_object_content - we already opened the object with begin_object
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("ConvPlayer", 1);
-            writer(*original);
+            writer.serialize_object_content(*original);
             writer.end_object();
             std::string json = writer.str();
 
-            // Deserialize using ar(obj) - dispatches to property_mgr.load (no custom load())
+            // Deserialize - property_mgr.load reads properties directly (no extra begin_object)
             conv_player loaded;
             serialization::json_archive_reader reader(json, eng.get());
             std::string type_name;
             uint32_t version;
             reader.begin_object(type_name, version);
-            reader(loaded);
+            loaded.property_mgr.load(reader);
             reader.end_object();
 
             check_eq(loaded.health.get(), 777, "Health auto-restored");
@@ -658,6 +713,242 @@ public:
             std::string big_binary = to_binary_string(*eng, big_value);
             int64_t big_loaded = from_binary_string<int64_t>(*eng, big_binary);
             check_eq(big_loaded, big_value, "Int64 portable binary roundtrip");
+        });
+
+        // ================================================================
+        // SMART POINTER ROUND-TRIP TESTS
+        // ================================================================
+        // Tests the new object-based JSON format:
+        //   shared_ptr: {"$id": N, "$val": {...}} or {"$id": N} or null
+        //   weak_ptr:   {"$ref": N} or null
+        //   unique_ptr: {"$val": {...}} or null
+
+        test("shared_ptr_json_roundtrip", [this]() {
+            auto eng = engine::make();
+
+            auto ptr1 = std::make_shared<sp_inner_data>();
+            ptr1->x = 42;
+            ptr1->label = "hello";
+
+            // Serialize shared_ptr
+            serialization::json_archive_writer writer(2, eng.get());
+            writer.begin_object();
+            writer.serialize("ptr1", ptr1);
+            writer.serialize("ptr1_alias", ptr1);  // Same pointer again - should be a ref
+            std::shared_ptr<sp_inner_data> null_ptr;
+            writer.serialize("null_ptr", null_ptr);
+            writer.end_object();
+
+            std::string json = writer.str();
+
+            // Verify JSON format: $id and $val keys present
+            check(json.find("$id") != std::string::npos, "$id key present");
+            check(json.find("$val") != std::string::npos, "$val key present");
+            check(json.find("null") != std::string::npos, "null present for null_ptr");
+
+            // Deserialize
+            std::shared_ptr<sp_inner_data> loaded_ptr1;
+            std::shared_ptr<sp_inner_data> loaded_alias;
+            std::shared_ptr<sp_inner_data> loaded_null;
+
+            serialization::json_archive_reader reader(json, eng.get());
+            reader.begin_object();
+            reader.serialize("ptr1", loaded_ptr1);
+            reader.serialize("ptr1_alias", loaded_alias);
+            reader.serialize("null_ptr", loaded_null);
+            reader.end_object();
+
+            // Verify loaded values
+            check(loaded_ptr1 != nullptr, "ptr1 not null");
+            check_eq(loaded_ptr1->x, 42, "ptr1.x preserved");
+            check_eq(loaded_ptr1->label, std::string("hello"), "ptr1.label preserved");
+
+            // Alias should point to same object (de-duplication)
+            check(loaded_alias != nullptr, "alias not null");
+            check(loaded_ptr1.get() == loaded_alias.get(), "alias is same object as ptr1");
+
+            // Null should remain null
+            check(loaded_null == nullptr, "null_ptr stays null");
+        });
+
+        test("shared_ptr_binary_roundtrip", [this]() {
+            auto eng = engine::make();
+
+            auto ptr1 = std::make_shared<sp_inner_data>();
+            ptr1->x = 99;
+            ptr1->label = "binary_test";
+
+            // Serialize
+            std::vector<uint8_t> buffer;
+            serialization::binary_archive_writer writer(buffer, eng.get());
+            writer.begin_object();
+            writer.serialize("ptr1", ptr1);
+            writer.serialize("ptr1_alias", ptr1);
+            std::shared_ptr<sp_inner_data> null_ptr;
+            writer.serialize("null_ptr", null_ptr);
+            writer.end_object();
+
+            // Deserialize
+            std::shared_ptr<sp_inner_data> loaded_ptr1;
+            std::shared_ptr<sp_inner_data> loaded_alias;
+            std::shared_ptr<sp_inner_data> loaded_null;
+
+            serialization::binary_archive_reader reader(buffer, eng.get());
+            std::string type_name;
+            uint32_t version;
+            reader.begin_object(type_name, version);
+            reader.serialize("ptr1", loaded_ptr1);
+            reader.serialize("ptr1_alias", loaded_alias);
+            reader.serialize("null_ptr", loaded_null);
+            reader.end_object();
+
+            check(loaded_ptr1 != nullptr, "ptr1 not null");
+            check_eq(loaded_ptr1->x, 99, "ptr1.x preserved");
+            check_eq(loaded_ptr1->label, std::string("binary_test"), "ptr1.label preserved");
+            check(loaded_alias != nullptr, "alias not null");
+            check(loaded_ptr1.get() == loaded_alias.get(), "alias is same object");
+            check(loaded_null == nullptr, "null_ptr stays null");
+        });
+
+        test("unique_ptr_json_roundtrip", [this]() {
+            auto eng = engine::make();
+
+            auto uptr = std::make_unique<sp_simple_data>();
+            uptr->value = 123;
+
+            // Serialize
+            serialization::json_archive_writer writer(2, eng.get());
+            writer.begin_object();
+            writer.serialize("uptr", uptr);
+            std::unique_ptr<sp_simple_data> null_uptr;
+            writer.serialize("null_uptr", null_uptr);
+            writer.end_object();
+
+            std::string json = writer.str();
+            check(json.find("$val") != std::string::npos, "$val key present for unique_ptr");
+            check(json.find("null") != std::string::npos, "null present for null unique_ptr");
+
+            // Deserialize
+            std::unique_ptr<sp_simple_data> loaded_uptr;
+            std::unique_ptr<sp_simple_data> loaded_null_uptr;
+
+            serialization::json_archive_reader reader(json, eng.get());
+            reader.begin_object();
+            reader.serialize("uptr", loaded_uptr);
+            reader.serialize("null_uptr", loaded_null_uptr);
+            reader.end_object();
+
+            check(loaded_uptr != nullptr, "uptr not null");
+            check_eq(loaded_uptr->value, 123, "uptr.value preserved");
+            check(loaded_null_uptr == nullptr, "null_uptr stays null");
+        });
+
+        test("weak_ptr_json_roundtrip", [this]() {
+            auto eng = engine::make();
+
+            auto shared = std::make_shared<sp_simple_data>();
+            shared->value = 77;
+            std::weak_ptr<sp_simple_data> weak = shared;
+            std::weak_ptr<sp_simple_data> null_weak;
+
+            // Serialize - shared_ptr MUST be serialized before weak_ptr
+            serialization::json_archive_writer writer(2, eng.get());
+            writer.begin_object();
+            writer.serialize("shared", shared);
+            writer.serialize("weak", weak);
+            writer.serialize("null_weak", null_weak);
+            writer.end_object();
+
+            std::string json = writer.str();
+            check(json.find("$ref") != std::string::npos, "$ref key present for weak_ptr");
+
+            // Deserialize
+            std::shared_ptr<sp_simple_data> loaded_shared;
+            std::weak_ptr<sp_simple_data> loaded_weak;
+            std::weak_ptr<sp_simple_data> loaded_null_weak;
+
+            serialization::json_archive_reader reader(json, eng.get());
+            reader.begin_object();
+            reader.serialize("shared", loaded_shared);
+            reader.serialize("weak", loaded_weak);
+            reader.serialize("null_weak", loaded_null_weak);
+            reader.end_object();
+
+            check(loaded_shared != nullptr, "shared not null");
+            check_eq(loaded_shared->value, 77, "shared.value preserved");
+
+            auto locked = loaded_weak.lock();
+            check(locked != nullptr, "weak can lock");
+            check(locked.get() == loaded_shared.get(), "weak points to same shared object");
+
+            check(loaded_null_weak.lock() == nullptr, "null_weak stays expired");
+        });
+
+        test("vector_of_shared_ptr_json_roundtrip", [this]() {
+            auto eng = engine::make();
+
+            auto a = std::make_shared<sp_id_data>();
+            a->id = 1;
+            auto b = std::make_shared<sp_id_data>();
+            b->id = 2;
+
+            std::vector<std::shared_ptr<sp_id_data>> vec = {a, b, a};  // a appears twice
+
+            // Serialize
+            serialization::json_archive_writer writer(2, eng.get());
+            writer.begin_object();
+            writer.serialize("vec", vec);
+            writer.end_object();
+
+            std::string json = writer.str();
+
+            // Deserialize
+            std::vector<std::shared_ptr<sp_id_data>> loaded_vec;
+
+            serialization::json_archive_reader reader(json, eng.get());
+            reader.begin_object();
+            reader.serialize("vec", loaded_vec);
+            reader.end_object();
+
+            check_eq(loaded_vec.size(), size_t(3), "vector size preserved");
+            check(loaded_vec[0] != nullptr, "vec[0] not null");
+            check_eq(loaded_vec[0]->id, 1, "vec[0].id preserved");
+            check(loaded_vec[1] != nullptr, "vec[1] not null");
+            check_eq(loaded_vec[1]->id, 2, "vec[1].id preserved");
+            check(loaded_vec[2] != nullptr, "vec[2] not null");
+            // vec[0] and vec[2] should be the same object (de-duplicated)
+            check(loaded_vec[0].get() == loaded_vec[2].get(), "vec[0] and vec[2] are same object");
+        });
+
+        test("shared_ptr_property_json_roundtrip", [this]() {
+            // Test shared_ptr as a JAI_PROPERTY inside a property_owner
+            auto eng = engine::make();
+
+            sp_ptr_holder original;
+            original.data = std::make_shared<sp_simple_data>();
+            original.data.get()->value = 555;
+            original.extra = 10;
+
+            // Serialize
+            serialization::json_archive_writer writer(2, eng.get());
+            writer.begin_object("sp_ptr_holder", 1);
+            original.property_mgr.save(writer);
+            writer.end_object();
+
+            std::string json = writer.str();
+
+            // Deserialize
+            sp_ptr_holder loaded;
+            serialization::json_archive_reader reader(json, eng.get());
+            std::string type_name;
+            uint32_t version;
+            reader.begin_object(type_name, version);
+            loaded.property_mgr.load(reader);
+            reader.end_object();
+
+            check(loaded.data.get() != nullptr, "data not null");
+            check_eq(loaded.data.get()->value, 555, "data.value preserved");
+            check_eq(loaded.extra.get(), 10, "extra preserved");
         });
     }
 };

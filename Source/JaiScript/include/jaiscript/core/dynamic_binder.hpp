@@ -1379,6 +1379,23 @@ private:
     std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
     std::unordered_map<uint64_t, std::unordered_map<size_t, script_function>> cpp_method_overloads_;  // C++ method overloads by arity for dispatch
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> method_overloads_;  // Track overloads by name_id for type-based resolution (for script methods)
+
+    // Overload resolution cache: keyed by (name_id, arity) -> resolved function_decl
+    // Only populated when method_overloads_ has >1 entry for a given name_id
+    struct overload_cache_key {
+        uint64_t name_id;
+        size_t arity;
+        bool operator==(const overload_cache_key& other) const noexcept {
+            return name_id == other.name_id && arity == other.arity;
+        }
+    };
+    struct overload_cache_hash {
+        size_t operator()(const overload_cache_key& k) const noexcept {
+            return std::hash<uint64_t>{}(k.name_id) ^ (std::hash<size_t>{}(k.arity) << 32);
+        }
+    };
+    mutable std::unordered_map<overload_cache_key, std::shared_ptr<function_decl>, overload_cache_hash> overload_resolution_cache_;
+
     std::unordered_map<uint64_t, script_value> static_methods_;  // Static method storage
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> static_method_overloads_;  // Track overloads by name_id and arity (for script methods)
     std::unordered_map<uint64_t, std::vector<size_t>> static_method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
@@ -1818,7 +1835,7 @@ public:
     // This ensures the class is registered even if the user forgets to call build()
     ~dynamic_binder() {
         if (!built_) {
-            build();
+            try { build(); } catch (...) {}
         }
     }
 

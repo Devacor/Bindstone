@@ -52,7 +52,7 @@ namespace serialization {
 
 		template<typename... Args>
 		void operator()(Args&&... args) {
-			ptr_ref_ = access::make_shared<T>(std::forward<Args>(args)...);
+			ptr_ref_ = ::jai::access::make_shared<T>(std::forward<Args>(args)...);
 			constructed_ = true;
 		}
 
@@ -71,7 +71,7 @@ namespace serialization {
 
 		template<typename... Args>
 		void operator()(Args&&... args) {
-			ptr_ref_ = access::make_unique<T>(std::forward<Args>(args)...);
+			ptr_ref_ = ::jai::access::make_unique<T>(std::forward<Args>(args)...);
 			constructed_ = true;
 		}
 

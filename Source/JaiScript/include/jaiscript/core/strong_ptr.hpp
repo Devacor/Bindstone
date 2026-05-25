@@ -17,14 +17,19 @@ template<typename T> class weaker_ptr;
 namespace detail {
 
 /**
- * @brief Base control block with reference counts only
+ * @brief Base control block with reference counts and type-erased deallocation
  *
  * Purely non-atomic for maximum single-threaded performance.
  * Thread safety is handled at a higher level (critical sections, partitioning, etc.)
+ *
+ * The dealloc_fn pointer enables type-safe deallocation through control_block_base*
+ * without virtual dispatch or reinterpret_cast. Set once at construction, called
+ * only when the last weak reference is released (cold path).
  */
 struct control_block_base {
     size_t strong_count = 1;
     size_t weak_count = 1;  // Strong family's collective weak ref prevents premature CB deletion
+    void (*dealloc_fn)(control_block_base*) = nullptr;
 
     control_block_base() = default;
     control_block_base(const control_block_base&) = delete;
@@ -51,13 +56,18 @@ struct control_block_base {
  * Benefits:
  * - Single allocation instead of two
  * - Better cache locality (refcounts adjacent to object)
- * - Smaller control block (no destructor pointer needed)
  *
  * Trade-off: Memory not freed until all weaker_ptrs are gone (same as make_shared).
  */
 template<typename T>
 struct control_block : control_block_base {
     alignas(T) unsigned char storage[sizeof(T)] = {};
+
+    control_block() {
+        dealloc_fn = [](control_block_base* base) {
+            delete static_cast<control_block<T>*>(base);
+        };
+    }
 
     T* ptr() noexcept { return std::launder(reinterpret_cast<T*>(storage)); }
     const T* ptr() const noexcept { return std::launder(reinterpret_cast<const T*>(storage)); }
@@ -85,7 +95,6 @@ template<typename T>
 class strong_ptr {
 public:
     using element_type = T;
-    using control_block_type = detail::control_block<T>;
 
     // ===== Constructors =====
 
@@ -97,7 +106,6 @@ public:
 
     /// Deleted: use make_strong<T>() instead (enforces combined allocation)
     strong_ptr(T*) = delete;
-    strong_ptr(T*, detail::control_block_base*) = delete;
 
     /// Copy constructor
     strong_ptr(const strong_ptr& other) noexcept
@@ -118,7 +126,7 @@ public:
     template<typename U>
     requires std::is_convertible_v<U*, T*>
     strong_ptr(const strong_ptr<U>& other) noexcept
-        : ptr_(other.ptr_), cb_(reinterpret_cast<control_block_type*>(other.cb_)) {
+        : ptr_(other.ptr_), cb_(other.cb_) {
         if (cb_) {
             cb_->add_strong();
         }
@@ -128,7 +136,7 @@ public:
     template<typename U>
     requires std::is_convertible_v<U*, T*>
     strong_ptr(strong_ptr<U>&& other) noexcept
-        : ptr_(other.ptr_), cb_(reinterpret_cast<control_block_type*>(other.cb_)) {
+        : ptr_(other.ptr_), cb_(other.cb_) {
         other.ptr_ = nullptr;
         other.cb_ = nullptr;
     }
@@ -152,7 +160,7 @@ public:
             // Release the strong family's collective weak reference.
             // Memory is only freed when all weaker_ptrs are also gone.
             if (local_cb->release_weak()) {
-                delete local_cb;
+                local_cb->dealloc_fn(local_cb);
             }
         }
     }
@@ -221,10 +229,10 @@ public:
 
 private:
     T* ptr_ = nullptr;
-    control_block_type* cb_ = nullptr;
+    detail::control_block_base* cb_ = nullptr;
 
     // Private constructor for make_strong
-    strong_ptr(T* ptr, control_block_type* cb) noexcept : ptr_(ptr), cb_(cb) {}
+    strong_ptr(T* ptr, detail::control_block_base* cb) noexcept : ptr_(ptr), cb_(cb) {}
 
     // Friend declarations
     template<typename U> friend class strong_ptr;
@@ -246,7 +254,6 @@ template<typename T>
 class weaker_ptr {
 public:
     using element_type = T;
-    using control_block_type = detail::control_block<T>;
 
     // ===== Constructors =====
 
@@ -282,8 +289,7 @@ public:
         ptr_ = nullptr;
 
         if (local_cb && local_cb->release_weak()) {
-            // Last reference (weak AND strong) - delete control block
-            delete local_cb;
+            local_cb->dealloc_fn(local_cb);
         }
     }
 
@@ -344,7 +350,7 @@ public:
 
 private:
     T* ptr_ = nullptr;
-    control_block_type* cb_ = nullptr;
+    detail::control_block_base* cb_ = nullptr;
 };
 
 /**

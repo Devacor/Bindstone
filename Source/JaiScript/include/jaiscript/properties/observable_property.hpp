@@ -86,7 +86,7 @@ public:
 	}
 
 	observable_property& operator=(T&& v) {
-		if (this->m_value != v) {
+		if (&this->m_value != &v && this->m_value != v) {
 			T old_value = std::move(this->m_value);
 			this->m_value = std::move(v);
 			on_change_.emit(old_value, this->m_value);

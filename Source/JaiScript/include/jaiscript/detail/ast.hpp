@@ -55,6 +55,7 @@ namespace jai {
         this_expr,
         super_expr,
         throw_expr,
+        yield_expr,     // yield / yield value
 
         // Statements (20-39)
         expression_stmt = 20,
@@ -345,7 +346,15 @@ namespace jai {
 
         throw_expr(const source_location& loc, expression_ptr val = nullptr)
             : expression(loc, node_type::throw_expr), value(val) {}    };
-    
+
+    // Yield expression (for coroutines)
+    class yield_expr : public expression {
+    public:
+        expression_ptr value;  // Optional - null for void yield
+
+        yield_expr(const source_location& loc, expression_ptr val = nullptr)
+            : expression(loc, node_type::yield_expr), value(std::move(val)) {}    };
+
     // Base statement node
     class statement : public ast_node {
     public:
@@ -404,6 +413,7 @@ namespace jai {
         type_info_ptr element_type;      // Type of loop variable (auto, int, etc.)
         std::string_view variable_name;  // Name of loop variable - points to symbolizer storage (permanent)
         uint64_t variable_name_id = UINT64_MAX;  // Interned ID for fast lookup (UINT64_MAX = not interned)
+        size_t variable_slot_index = SIZE_MAX;   // Slot index for fast local access (SIZE_MAX = use environment)
         bool is_reference;             // true for auto&, false for auto
         bool is_const;                 // true for const auto&
         expression_ptr container;      // The container to iterate over
@@ -524,10 +534,11 @@ namespace jai {
         std::vector<constructor_initializer> initializers; // For constructor initialization lists
         bool is_override = false; // For override keyword in derived classes
         bool is_static = false;   // For static methods
+        bool is_coroutine = false; // coroutine function (supports yield)
         size_t local_count = 0;   // Total slots needed (params + locals) for stack allocation
 
         function_decl(const source_location& loc, std::string_view n, uint64_t id = UINT64_MAX)
-            : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false), local_count(0) {}
+            : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false), is_coroutine(false), local_count(0) {}
     };
 
     // Class declaration

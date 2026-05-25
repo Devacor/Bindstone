@@ -16,6 +16,7 @@
 #include "ast.hpp"
 #include "string_symbolizer.hpp"
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <unordered_map>
@@ -173,66 +174,8 @@ namespace jai {
         }
 
     protected:
-        // Debug helper to validate parent chain doesn't create a cycle
-        // Only active when JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES is defined
-        void validate_parent_chain(std::shared_ptr<environment> new_parent) const {
-/*
-#ifdef JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES
-            if (!new_parent) return;  // nullptr parent is always valid
-
-            // Check if new_parent's chain eventually points back to 'this'
-            std::unordered_set<const environment*> visited;
-            auto current = new_parent;
-
-            while (current) {
-                // If we encounter 'this', we're creating a cycle!
-                if (current.get() == this) {
-                    std::cerr << "ERROR: Circular parent chain detected!\n";
-                    std::cerr << "  Attempting to set parent of environment " << this
-                              << " (type: " << typeid(*this).name() << ")\n";
-                    std::cerr << "  to parent " << new_parent.get()
-                              << " (type: " << typeid(*new_parent).name() << ")\n";
-                    std::cerr << "  but new_parent's chain already includes this environment!\n";
-                    std::cerr << "  Chain depth before cycle: " << visited.size() << "\n";
-
-                    // Print the chain
-                    std::cerr << "  Parent chain: ";
-                    auto trace = new_parent;
-                    int depth = 0;
-                    while (trace && depth < 10) {
-                        std::cerr << trace.get() << " (" << typeid(*trace).name() << ")";
-                        if (trace.get() == this) {
-                            std::cerr << " <- CYCLE HERE!";
-                        }
-                        trace = trace->parent_;
-                        if (trace) std::cerr << " -> ";
-                        depth++;
-                    }
-                    std::cerr << "\n";
-
-                    // Throw to break and get a stack trace
-                    throw runtime_error("Circular environment parent chain detected!");
-                }
-
-                // Check for other cycles in the parent chain
-                if (visited.count(current.get()) > 0) {
-                    std::cerr << "ERROR: Parent chain already has a cycle before this assignment!\n";
-                    std::cerr << "  Environment at " << current.get()
-                              << " (type: " << typeid(*current).name() << ") appears twice\n";
-                    throw runtime_error("Circular environment parent chain detected in new_parent's existing chain!");
-                }
-
-                visited.insert(current.get());
-                current = current->parent_;
-
-                // Sanity check - prevent infinite loops even in debug mode
-                if (visited.size() > 1000) {
-                    std::cerr << "ERROR: Parent chain depth exceeds 1000! Likely a cycle.\n";
-                    throw runtime_error("Parent chain too deep - likely circular!");
-                }
-            }
-#endif
-*/
+        void validate_parent_chain(std::shared_ptr<environment> /*new_parent*/) const {
+            // Intentionally empty - enable JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES for cycle detection
         }
 
     private:
@@ -301,14 +244,88 @@ namespace jai {
         std::shared_ptr<environment> env_;
     };
 
+    /// @brief Call frame for stack-based function execution
+    /// Parameters are stored in a simple vector for O(n) lookup where n is small.
+    /// This avoids hash map overhead for the most frequently accessed variables.
+    /// Defined at namespace scope so coroutine_handle can reference it without circular includes.
+    struct call_frame {
+        /// Environment for closure/global variable access
+        std::shared_ptr<environment> closure_env;
+
+        /// Method 'this' object pointer (for method calls)
+        /// We store a pointer to avoid script_value default construction issues
+        std::unique_ptr<script_value> this_object_ptr;
+        bool is_method = false;
+
+        /// Static method class definition (for static method calls)
+        std::shared_ptr<class_definition> static_class_def;
+        bool is_static_method = false;
+
+        /// Slot-based local storage: params and locals indexed by slot number
+        /// O(1) access by slot index - much faster than hash map or linear search
+        std::vector<script_value> locals;
+
+        /// Invalid slot constant - SIZE_MAX naturally fails bounds check
+        static constexpr size_t INVALID_SLOT = SIZE_MAX;
+
+        /// Get local by slot index (O(1) access)
+        script_value* get_local(size_t slot) noexcept {
+            if (slot < locals.size()) {
+                return &locals[slot];
+            }
+            return nullptr;
+        }
+
+        const script_value* get_local(size_t slot) const noexcept {
+            if (slot < locals.size()) {
+                return &locals[slot];
+            }
+            return nullptr;
+        }
+
+        /// Set local by slot index - slots are set sequentially (params first, then locals)
+        void set_local(size_t slot, script_value value) {
+            if (slot == locals.size()) {
+                // Sequential append - most common case
+                locals.push_back(std::move(value));
+            } else if (slot < locals.size()) {
+                // Reassignment to existing slot
+                locals[slot] = std::move(value);
+            }
+            // slot > size shouldn't happen with proper slot assignment
+        }
+
+        /// Reserve capacity for locals (called when entering function)
+        void reserve_locals(size_t count) {
+            if (count > 0) {
+                locals.reserve(count);
+            }
+        }
+
+        /// Set 'this' object for method calls
+        void set_this(script_value this_obj) {
+            this_object_ptr = std::make_unique<script_value>(std::move(this_obj));
+            is_method = true;
+        }
+
+        /// Get 'this' object (only valid if is_method is true)
+        script_value& get_this() {
+            return *this_object_ptr;
+        }
+
+        const script_value& get_this() const {
+            return *this_object_ptr;
+        }
+    };
+
     // The interpreter implements the visitor pattern to execute the AST
     class interpreter : public ast_visitor, public std::enable_shared_from_this<interpreter> {
     public:
         using class_lookup_callback = std::function<std::shared_ptr<class_definition>(const std::string&)>;
-        
+
         // Method type for built-in type methods
         using builtin_method = std::function<checked_result<script_value>(interpreter*, script_value&, const std::vector<script_value>&)>;
-        
+
         interpreter();
         interpreter(string_symbolizer* external_symbolizer);
         interpreter(string_symbolizer* external_symbolizer, std::shared_ptr<environment> global_env);
@@ -473,6 +490,7 @@ namespace jai {
         checked_result<void> visit_this_expr(this_expr* expr) override;
         checked_result<void> visit_super_expr(super_expr* expr) override;
         checked_result<void> visit_throw_expr(throw_expr* expr) override;
+        checked_result<void> visit_yield_expr(yield_expr* expr);
 
         // statement visitors
         checked_result<void> visit_expression_stmt(expression_stmt* stmt) override;
@@ -718,6 +736,11 @@ namespace jai {
         bool hasBreakRequest_ = false;
         bool hasContinueRequest_ = false;
 
+        // Coroutine support
+        coroutine_handle* active_coroutine_ = nullptr;
+        bool hasYieldRequest_ = false;
+        friend class coroutine_handle;
+
         // Exception handling state
         std::optional<script_exception> current_exception_;
         bool is_unwinding_ = false;
@@ -746,79 +769,8 @@ namespace jai {
         // Parameters are stored in a simple vector for O(n) lookup where n is small (typically < 8).
         // This avoids hash map overhead for the most frequently accessed variables.
         // Closure/global variables still use environment_ for lookup.
-
-        /// @brief Call frame for stack-based function execution
-        /// Parameters are stored in a simple vector for O(n) lookup where n is small.
-        /// This avoids hash map overhead for the most frequently accessed variables.
-        struct call_frame {
-            /// Environment for closure/global variable access
-            std::shared_ptr<environment> closure_env;
-
-            /// Method 'this' object pointer (for method calls)
-            /// We store a pointer to avoid script_value default construction issues
-            std::unique_ptr<script_value> this_object_ptr;
-            bool is_method = false;
-
-            /// Static method class definition (for static method calls)
-            std::shared_ptr<class_definition> static_class_def;
-            bool is_static_method = false;
-
-            /// Slot-based local storage: params and locals indexed by slot number
-            /// O(1) access by slot index - much faster than hash map or linear search
-            std::vector<script_value> locals;
-
-            /// Invalid slot constant - SIZE_MAX naturally fails bounds check
-            static constexpr size_t INVALID_SLOT = SIZE_MAX;
-
-            /// Get local by slot index (O(1) access)
-            script_value* get_local(size_t slot) noexcept {
-                if (slot < locals.size()) {
-                    return &locals[slot];
-                }
-                return nullptr;
-            }
-
-            const script_value* get_local(size_t slot) const noexcept {
-                if (slot < locals.size()) {
-                    return &locals[slot];
-                }
-                return nullptr;
-            }
-
-            /// Set local by slot index - slots are set sequentially (params first, then locals)
-            void set_local(size_t slot, script_value value) {
-                if (slot == locals.size()) {
-                    // Sequential append - most common case
-                    locals.push_back(std::move(value));
-                } else if (slot < locals.size()) {
-                    // Reassignment to existing slot
-                    locals[slot] = std::move(value);
-                }
-                // slot > size shouldn't happen with proper slot assignment
-            }
-
-            /// Reserve capacity for locals (called when entering function)
-            void reserve_locals(size_t count) {
-                if (count > 0) {
-                    locals.reserve(count);
-                }
-            }
-
-            /// Set 'this' object for method calls
-            void set_this(script_value this_obj) {
-                this_object_ptr = std::make_unique<script_value>(std::move(this_obj));
-                is_method = true;
-            }
-
-            /// Get 'this' object (only valid if is_method is true)
-            script_value& get_this() {
-                return *this_object_ptr;
-            }
-
-            const script_value& get_this() const {
-                return *this_object_ptr;
-            }
-        };
+        // NOTE: call_frame struct is defined at namespace scope (above interpreter class)
+        // so that coroutine_handle can reference it without circular includes.
 
         /// Call stack for function execution
         std::vector<call_frame> call_stack_;
@@ -848,6 +800,9 @@ namespace jai {
         uint64_t shared_ptr_holder_type_id_;
         uint64_t weak_from_this_id_;
         uint64_t shared_from_this_id_;
+        uint64_t coroutine_handle_type_id_;
+        uint64_t resume_id_;
+        uint64_t done_id_;
 
         // Cached symbol IDs for operator overloading (initialized in constructor)
         uint64_t op_plus_id_;
@@ -1017,6 +972,9 @@ namespace jai {
             }
         }
         
+        // Coroutine helper - creates a script_value wrapping a coroutine_handle
+        script_value make_coroutine_object(std::shared_ptr<coroutine_handle> handle);
+
         // Function call helpers
         // Returns checked_result - exceptions only thrown at execute() boundary
         checked_result<script_value> call_function(const script_defined_function& function, const std::vector<script_value>& args);

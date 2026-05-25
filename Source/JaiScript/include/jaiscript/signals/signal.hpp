@@ -10,6 +10,7 @@
 #include <string>
 #include <algorithm>
 #include <type_traits>
+#include <atomic>
 
 #ifndef JAI_SIGNALS_NO_THREADSAFE
 #include <mutex>
@@ -215,14 +216,14 @@ private:
 	std::weak_ptr<void> owner_signal_;  // Weak ref to owning signal for connected() check
 
 	int64_t id_;
-	static int64_t unique_id_;
+	static std::atomic<int64_t> unique_id_;
 
 	// Allow signal_emitter to access private members
 	template<typename U> friend class signal_emitter;
 };
 
 template<typename T>
-int64_t receiver<T>::unique_id_ = 0;
+std::atomic<int64_t> receiver<T>::unique_id_ = 0;
 
 
 // ============================================================================
@@ -531,7 +532,7 @@ private:
 
 		in_call_ = true;
 		bool result = true;
-		std::vector<shared_receiver_type> oneshots_to_remove;
+		bool has_oneshots = false;
 
 		for (size_t i = 0; i < observers_.size(); ++i) {
 			auto locked = observers_[i].lock();
@@ -540,7 +541,7 @@ private:
 			if constexpr (ShortCircuit) {
 				if (!locked->predicate(std::forward<Args>(args)...)) {
 					result = false;
-					if (locked->is_oneshot()) oneshots_to_remove.push_back(locked);
+					if (locked->is_oneshot()) has_oneshots = true;
 					break;
 				}
 			} else {
@@ -548,7 +549,7 @@ private:
 			}
 
 			if (locked->is_oneshot()) {
-				oneshots_to_remove.push_back(locked);
+				has_oneshots = true;
 			}
 		}
 
@@ -560,10 +561,15 @@ private:
 		}
 		disconnect_queue_.clear();
 
-		// Remove one-shots
-		for (auto& recv : oneshots_to_remove) {
-			recv->owner_signal_.reset();
-			remove_observer(recv);
+		// Remove one-shots only if any were found (avoids heap allocation when none exist)
+		if (has_oneshots) {
+			for (size_t i = observers_.size(); i > 0; --i) {
+				auto locked = observers_[i - 1].lock();
+				if (locked && locked->is_oneshot()) {
+					locked->owner_signal_.reset();
+					remove_observer(locked);
+				}
+			}
 		}
 
 		// Cull dead observers
@@ -587,7 +593,7 @@ private:
 
 		in_call_ = true;
 		bool result = true;
-		std::vector<shared_receiver_type> oneshots_to_remove;
+		bool has_oneshots = false;
 
 		for (size_t i = 0; i < observers_.size(); ++i) {
 			auto locked = observers_[i].lock();
@@ -596,7 +602,7 @@ private:
 			if constexpr (ShortCircuit) {
 				if (!locked->predicate()) {
 					result = false;
-					if (locked->is_oneshot()) oneshots_to_remove.push_back(locked);
+					if (locked->is_oneshot()) has_oneshots = true;
 					break;
 				}
 			} else {
@@ -604,7 +610,7 @@ private:
 			}
 
 			if (locked->is_oneshot()) {
-				oneshots_to_remove.push_back(locked);
+				has_oneshots = true;
 			}
 		}
 
@@ -616,10 +622,15 @@ private:
 		}
 		disconnect_queue_.clear();
 
-		// Remove one-shots
-		for (auto& recv : oneshots_to_remove) {
-			recv->owner_signal_.reset();
-			remove_observer(recv);
+		// Remove one-shots only if any were found (avoids heap allocation when none exist)
+		if (has_oneshots) {
+			for (size_t i = observers_.size(); i > 0; --i) {
+				auto locked = observers_[i - 1].lock();
+				if (locked && locked->is_oneshot()) {
+					locked->owner_signal_.reset();
+					remove_observer(locked);
+				}
+			}
 		}
 
 		// Cull dead observers

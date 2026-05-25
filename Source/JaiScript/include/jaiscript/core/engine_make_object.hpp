@@ -39,7 +39,11 @@ script_value script_value::make_registered_object(engine* eng, Args&&... args) {
     }
     
     // Call the constructor function
-    return constructor_func.as_function()(script_args);
+    auto result = constructor_func.as_function()(script_args);
+    if (!result) {
+        throw runtime_error("Constructor failed for class '" + class_name + "': " + result.error_message());
+    }
+    return result.value();
 }
 
 } // namespace jai

@@ -33,6 +33,8 @@ public:
     void write_float64(double value) { write_json_value(value); }
     void write_bool(bool value) { write_json_value(value); }
 
+    void write_null() { write_json_value("null"); }
+
     void write_string(const std::string& value) {
         write_json_value('"' + escape_json_string_local(value) + '"');
     }
@@ -50,9 +52,29 @@ public:
     }
 
     // Object/array structure - non-virtual
+    // No-argument version for inline objects (no type metadata)
+    void begin_object() {
+        // Check base class context: PropertyValue/MapValue context means we're after a property name
+        auto ctx = this->current_context();
+        bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
+
+        if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
+            oss_ << ',';
+        }
+        write_newline();
+        write_indent();
+        oss_ << '{';
+        json_depth_++;
+        container_stack_.push(ContainerType::Object);
+        first_in_container_.push(true);
+    }
+
     void begin_object(const std::string& type_name, uint32_t version) {
-        // Only add comma if we're in an array (not object, since write_property_name handles that)
-        if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
+        // Check base class context: PropertyValue/MapValue context means we're after a property name
+        auto ctx = this->current_context();
+        bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
+
+        if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
             oss_ << ',';
         }
         write_newline();
@@ -84,8 +106,11 @@ public:
     }
 
     void begin_array(size_t size) {
-        // Only add comma if we're in an array (not object, since write_property_name handles that)
-        if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
+        // Check base class context: PropertyValue/MapValue context means we're after a property name
+        auto ctx = this->current_context();
+        bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
+
+        if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
             oss_ << ',';
         }
         write_newline();
@@ -116,12 +141,16 @@ public:
         write_indent();
         oss_ << '"' << escape_json_string_local(name) << "\": ";
         first_in_container_.top() = false;
+        // Context is managed by base class serialize() which pushes PropertyValue after this
     }
 
     // Map serialization - JSON uses native object format
     void begin_map(size_t size) {
-        // Same as begin_array but we'll write it as an object
-        if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
+        // Check base class context: PropertyValue/MapValue context means we're after a property name
+        auto ctx = this->current_context();
+        bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
+
+        if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
             oss_ << ',';
         }
         write_newline();
@@ -153,6 +182,7 @@ public:
         write_indent();
         oss_ << '"' << escape_json_string_local(key) << "\": ";
         first_in_container_.top() = false;
+        // Context is managed by base class which pushes MapValue after this
     }
 
     void write_value(const script_value& value) {
@@ -426,6 +456,7 @@ private:
     std::ostringstream oss_;
     std::stack<ContainerType> container_stack_;
     std::stack<bool> first_in_container_;
+    // Context tracking is now handled by base class (SerializationContext)
 
     bool in_container() const { return !container_stack_.empty(); }
 
@@ -443,12 +474,17 @@ private:
     
     template<typename T>
     void write_json_value(T value) {
-        if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
+        // Check base class context: PropertyValue/MapValue context means we're after a property name
+        auto ctx = this->current_context();
+        bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
+
+        if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
+            // Only add comma in array context for non-first elements
             oss_ << ',';
             write_newline();
             write_indent();
         }
-        
+
         if constexpr (std::is_same_v<T, bool>) {
             oss_ << (value ? "true" : "false");
         } else if constexpr (std::is_floating_point_v<T>) {
@@ -463,7 +499,7 @@ private:
         } else {
             oss_ << value;
         }
-        
+
         if (in_container() && container_stack_.top() == ContainerType::Array) {
             first_in_container_.top() = false;
         }
@@ -504,6 +540,26 @@ public:
     bool read_bool() { return read_value().as<script_bool>(); }
     std::string read_string() { return read_value().as<script_string>(); }
 
+    bool peek_null() {
+        const script_value* value_to_check = nullptr;
+        if (current_property_value_) {
+            value_to_check = current_property_value_;
+        } else if (!array_stack_.empty()) {
+            auto& state = array_stack_.top();
+            if (state.index < state.array.size()) {
+                value_to_check = &state.array[state.index];
+            }
+        }
+        return value_to_check && value_to_check->is_null();
+    }
+
+    void read_null() {
+        auto val = read_value();
+        if (!val.is_null()) {
+            throw serialization_error("Expected null value");
+        }
+    }
+
     std::vector<uint8_t> read_binary(size_t size) {
         std::string hex_str = read_value().as<script_string>();
         std::vector<uint8_t> result;
@@ -516,6 +572,13 @@ public:
     }
 
     // Object/array structure - non-virtual
+    // No-argument version for inline objects (discard type metadata)
+    bool begin_object() {
+        std::string type_name;
+        uint32_t version = 0;
+        return begin_object(type_name, version);
+    }
+
     bool begin_object(std::string& type_name, uint32_t& version) {
         // Determine which value to check
         const script_value* value_to_check = nullptr;
@@ -887,7 +950,13 @@ private:
         } else if (c == '-' || std::isdigit(c)) {
             return parse_number(eng);
         } else {
-            throw serialization_error("Unexpected character in JSON: " + std::string(1, c));
+            // Build context for error message
+            size_t start = (pos_ > 20) ? pos_ - 20 : 0;
+            size_t len = std::min(size_t(40), json_.length() - start);
+            std::string context = json_.substr(start, len);
+            throw serialization_error("Unexpected character '" + std::string(1, c) +
+                "' in JSON at position " + std::to_string(pos_) +
+                ", near: ..." + context + "...");
         }
     }
     
@@ -984,7 +1053,11 @@ private:
             } else if (c == ',') {
                 advance();
             } else {
-                throw serialization_error("Expected ',' or '}' in JSON object");
+                size_t start = (pos_ > 20) ? pos_ - 20 : 0;
+                size_t len = std::min(size_t(40), json_.length() - start);
+                std::string context = json_.substr(start, len);
+                throw serialization_error("Expected ',' or '}' in JSON object at position " +
+                    std::to_string(pos_) + ", got '" + std::string(1, c) + "', near: ..." + context + "...");
             }
         }
 
@@ -1012,7 +1085,11 @@ private:
             } else if (c == ',') {
                 advance();
             } else {
-                throw serialization_error("Expected ',' or ']' in JSON array");
+                size_t start = (pos_ > 20) ? pos_ - 20 : 0;
+                size_t len = std::min(size_t(40), json_.length() - start);
+                std::string context = json_.substr(start, len);
+                throw serialization_error("Expected ',' or ']' in JSON array at position " +
+                    std::to_string(pos_) + ", got '" + std::string(1, c) + "', near: ..." + context + "...");
             }
         }
 
@@ -1077,6 +1154,14 @@ private:
     
     std::stack<ObjectState> object_stack_;
     std::stack<ArrayState> array_stack_;
+};
+
+// Archive ID trait specializations for dispatch pattern
+template<> struct writer_archive_id_trait<json_archive_writer> {
+    static constexpr writer_archive_id value = writer_archive_id::json;
+};
+template<> struct reader_archive_id_trait<json_archive_reader> {
+    static constexpr reader_archive_id value = reader_archive_id::json;
 };
 
 } // namespace serialization

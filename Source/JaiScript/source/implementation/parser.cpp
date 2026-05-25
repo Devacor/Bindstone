@@ -464,7 +464,8 @@ checked_result<expression_ptr> parser::primary() {
                     type_name = type->type_name;
                 }
 
-                return std::make_shared<identifier_expr>(typeToken.location, type_name, symbolizer_->intern(type_name));
+                auto [sym_id, stable_view] = symbolizer_->intern_with_view(type_name);
+                return std::make_shared<identifier_expr>(typeToken.location, stable_view, sym_id);
             }
         }
         current_ = savedPos;
@@ -686,6 +687,12 @@ checked_result<type_info_ptr> parser::parse_type() {
 
 // Simple expression for now
 checked_result<expression_ptr> parser::expression() {
+    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
+    if (guard.overflow_) {
+        return checked_result<expression_ptr>(
+            make_error_code(parse_error_code::unexpected_token),
+            "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
+    }
     return assignment();
 }
 
@@ -1088,6 +1095,24 @@ checked_result<expression_ptr> parser::unary() {
         return std::make_shared<throw_expr>(throw_token.location, value);
     }
 
+    if (match(token_type::yield_keyword)) {
+        token yield_token = previous();
+        if (!in_coroutine_) {
+            report_error("yield can only be used inside a coroutine function", yield_token);
+            return checked_result<expression_ptr>(
+                make_error_code(parse_error_code::unexpected_token),
+                "yield can only be used inside a coroutine function");
+        }
+        expression_ptr value = nullptr;
+        // yield can be followed by an expression, or stand alone
+        if (!check(token_type::semicolon) && !check(token_type::right_paren) &&
+            !check(token_type::right_brace) && !check(token_type::comma) &&
+            !is_at_end()) {
+            JAISCRIPT_TRY_ASSIGN(value, expression());
+        }
+        return std::make_shared<yield_expr>(yield_token.location, std::move(value));
+    }
+
     return postfix();
 }
 
@@ -1179,6 +1204,20 @@ checked_result<declaration_ptr> parser::declaration() {
     if (match(token_type::import_keyword)) {
         JAISCRIPT_TRY_ASSIGN(auto result, import_declaration());
         match(token_type::semicolon);  // Consume optional trailing semicolon
+        return result;
+    }
+
+    // Check for coroutine keyword before function declarations
+    if (match(token_type::coroutine_keyword)) {
+        // coroutine must be followed by a function declaration
+        bool was_in_coroutine = in_coroutine_;
+        in_coroutine_ = true;
+        JAISCRIPT_TRY_ASSIGN(auto result, function_declaration());
+        in_coroutine_ = was_in_coroutine;
+        // Mark the function as a coroutine
+        auto* func = static_cast<function_decl*>(result.get());
+        func->is_coroutine = true;
+        match(token_type::semicolon);
         return result;
     }
 
@@ -1667,10 +1706,17 @@ checked_result<statement_ptr> parser::for_statement() {
                 JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after range expression"));
                 JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
-                return std::make_shared<range_for_stmt>(
+                auto result = std::make_shared<range_for_stmt>(
                     forToken.location, element_type, varName.lexeme, get_symbol_id(varName),
                     is_reference, is_const, container, body
                 );
+
+                // If inside a function scope, allocate a slot for the loop variable
+                if (in_function_scope() && result->variable_name_id != UINT64_MAX) {
+                    result->variable_slot_index = allocate_slot(result->variable_name_id);
+                }
+
+                return result;
             }
         }
     }
@@ -1711,11 +1757,10 @@ traditional_for:
         init = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
         // Note: NOT consuming semicolon here - the for loop will handle it
     } else {
-        // expression init - wrap in a variable declaration without a type
+        // Expression-only init (e.g., function call side effect) — wrap in expression_decl
         JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
         JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after for loop initializer"));
-        // For now, we'll skip expression-only init since it needs to be a declaration
-        // This is a limitation we can address later with a more flexible AST
+        init = std::make_shared<expression_decl>(expr->location, std::move(expr));
     }
 
     // Consume semicolon after init
@@ -2472,7 +2517,8 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
     }
 
     // Intern the namespace name at parse time for fast comparisons later
-    auto namespace_decl_node = std::make_shared<namespace_decl>(start_loc, full_namespace_name, symbolizer_->intern(full_namespace_name));
+    auto [ns_id, ns_view] = symbolizer_->intern_with_view(full_namespace_name);
+    auto namespace_decl_node = std::make_shared<namespace_decl>(start_loc, ns_view, ns_id);
 
     // Push this namespace onto the context stack for nested namespaces
     for (const auto& part : namespace_path) {

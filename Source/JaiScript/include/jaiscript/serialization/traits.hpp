@@ -10,10 +10,19 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <set>
+#include <unordered_set>
+#include <list>
+#include <deque>
+#include <forward_list>
 #include <array>
 #include <memory>
 #include <string>
 #include <utility>
+#include <optional>
+#include <variant>
+#include <tuple>
+#include <iterator>
 
 namespace jai {
 
@@ -52,6 +61,92 @@ template<typename T> inline constexpr bool is_std_array_v = is_std_array<T>::val
 template<typename T> struct is_std_pair : std::false_type {};
 template<typename T1, typename T2> struct is_std_pair<std::pair<T1, T2>> : std::true_type {};
 template<typename T> inline constexpr bool is_std_pair_v = is_std_pair<T>::value;
+
+template<typename T> struct is_std_optional : std::false_type {};
+template<typename T> struct is_std_optional<std::optional<T>> : std::true_type {};
+template<typename T> inline constexpr bool is_std_optional_v = is_std_optional<T>::value;
+
+template<typename T> struct is_std_variant : std::false_type {};
+template<typename... Ts> struct is_std_variant<std::variant<Ts...>> : std::true_type {};
+template<typename T> inline constexpr bool is_std_variant_v = is_std_variant<T>::value;
+
+template<typename T> struct is_std_tuple : std::false_type {};
+template<typename... Ts> struct is_std_tuple<std::tuple<Ts...>> : std::true_type {};
+template<typename T> inline constexpr bool is_std_tuple_v = is_std_tuple<T>::value;
+
+// Specific set/list/deque detection (for explicit handling if needed)
+template<typename T> struct is_std_set : std::false_type {};
+template<typename K, typename C, typename A> struct is_std_set<std::set<K, C, A>> : std::true_type {};
+template<typename T> inline constexpr bool is_std_set_v = is_std_set<T>::value;
+
+template<typename T> struct is_std_unordered_set : std::false_type {};
+template<typename K, typename H, typename E, typename A>
+struct is_std_unordered_set<std::unordered_set<K, H, E, A>> : std::true_type {};
+template<typename T> inline constexpr bool is_std_unordered_set_v = is_std_unordered_set<T>::value;
+
+template<typename T> struct is_std_list : std::false_type {};
+template<typename T, typename A> struct is_std_list<std::list<T, A>> : std::true_type {};
+template<typename T> inline constexpr bool is_std_list_v = is_std_list<T>::value;
+
+template<typename T> struct is_std_deque : std::false_type {};
+template<typename T, typename A> struct is_std_deque<std::deque<T, A>> : std::true_type {};
+template<typename T> inline constexpr bool is_std_deque_v = is_std_deque<T>::value;
+
+template<typename T> struct is_std_forward_list : std::false_type {};
+template<typename T, typename A> struct is_std_forward_list<std::forward_list<T, A>> : std::true_type {};
+template<typename T> inline constexpr bool is_std_forward_list_v = is_std_forward_list<T>::value;
+
+// ============================================================================
+// Generic container trait detection (elegant handling of all containers)
+// ============================================================================
+
+// Detect if type is iterable (has begin/end that return iterators)
+template<typename T, typename = void>
+struct is_iterable : std::false_type {};
+template<typename T>
+struct is_iterable<T, std::void_t<
+    decltype(std::begin(std::declval<T&>())),
+    decltype(std::end(std::declval<T&>()))
+>> : std::true_type {};
+template<typename T> inline constexpr bool is_iterable_v = is_iterable<T>::value;
+
+// Detect if type has key_type (associative containers)
+template<typename T, typename = void>
+struct has_key_type : std::false_type {};
+template<typename T>
+struct has_key_type<T, std::void_t<typename T::key_type>> : std::true_type {};
+template<typename T> inline constexpr bool has_key_type_v = has_key_type<T>::value;
+
+// Detect if type has mapped_type (map-like containers)
+template<typename T, typename = void>
+struct has_mapped_type : std::false_type {};
+template<typename T>
+struct has_mapped_type<T, std::void_t<typename T::mapped_type>> : std::true_type {};
+template<typename T> inline constexpr bool has_mapped_type_v = has_mapped_type<T>::value;
+
+// Map-like: has both key_type and mapped_type (std::map, std::unordered_map, etc.)
+template<typename T>
+inline constexpr bool is_map_like_v = has_key_type_v<T> && has_mapped_type_v<T>;
+
+// Set-like: has key_type but NOT mapped_type (std::set, std::unordered_set, etc.)
+template<typename T>
+inline constexpr bool is_set_like_v = has_key_type_v<T> && !has_mapped_type_v<T> && is_iterable_v<T>;
+
+// Sequence container: iterable with value_type, but not associative and not string
+// Covers: vector, list, deque, forward_list, array
+template<typename T, typename = void>
+struct has_value_type : std::false_type {};
+template<typename T>
+struct has_value_type<T, std::void_t<typename T::value_type>> : std::true_type {};
+template<typename T> inline constexpr bool has_value_type_v = has_value_type<T>::value;
+
+template<typename T>
+inline constexpr bool is_sequence_container_v =
+    is_iterable_v<T> &&
+    has_value_type_v<T> &&
+    !has_key_type_v<T> &&
+    !std::is_same_v<T, std::string> &&
+    !is_std_array_v<T>;  // std::array handled separately due to fixed size
 
 // ============================================================================
 // Container element type extractors
@@ -95,6 +190,10 @@ template<typename T> struct pair_second { using type = void; };
 template<typename T1, typename T2> struct pair_second<std::pair<T1, T2>> { using type = T2; };
 template<typename T> using pair_second_t = typename pair_second<T>::type;
 
+template<typename T> struct optional_element { using type = void; };
+template<typename T> struct optional_element<std::optional<T>> { using type = T; };
+template<typename T> using optional_element_t = typename optional_element<T>::type;
+
 // ============================================================================
 // Smart pointer type detection
 // ============================================================================
@@ -128,6 +227,28 @@ template<typename T, typename D> struct unique_ptr_element<std::unique_ptr<T, D>
 template<typename T> using unique_ptr_element_t = typename unique_ptr_element<T>::type;
 
 // ============================================================================
+// jai::property<T> type detection
+// ============================================================================
+
+// Forward declaration of jai::property template
+} // namespace serialization_traits
+} // namespace jai
+
+namespace jai { template<typename T> class property; }
+
+namespace jai {
+namespace serialization_traits {
+
+template<typename T> struct is_jai_property : std::false_type {};
+template<typename T> struct is_jai_property<::jai::property<T>> : std::true_type {};
+template<typename T> inline constexpr bool is_jai_property_v = is_jai_property<T>::value;
+
+// Property element type extractor
+template<typename T> struct property_element { using type = void; };
+template<typename T> struct property_element<::jai::property<T>> { using type = T; };
+template<typename T> using property_element_t = typename property_element<T>::type;
+
+// ============================================================================
 // Primitive type detection
 // ============================================================================
 
@@ -138,63 +259,6 @@ inline constexpr bool is_direct_serializable_v =
 	std::is_same_v<T, std::string> ||
 	std::is_same_v<T, char> ||
 	std::is_same_v<T, unsigned char>;
-
-// ============================================================================
-// Method detection traits - LEGACY PLACEHOLDERS
-// ============================================================================
-//
-// NOTE: These traits previously detected methods taking archive_writer& or
-// archive_reader& base class references. Since the CRTP-based devirtualization,
-// archives are now concrete template types (e.g., binary_archive_writer).
-//
-// These traits are kept for API compatibility but always return false.
-// The actual serialization detection now uses:
-//   - is_direct_serializable_v<T> for primitives
-//   - has_static_type_v<T> for types with JAI_STATIC_BINDER
-//   - is_property_owner_v<T> for property_owner derived types
-//
-// See JAI_ARCHIVE_DEVIRTUALIZATION.md for the migration details.
-
-template<typename T>
-inline constexpr bool has_member_save_v = false;
-
-template<typename T>
-inline constexpr bool has_member_load_v = false;
-
-template<typename T>
-inline constexpr bool has_member_serialize_save_v = false;
-
-template<typename T>
-inline constexpr bool has_member_serialize_load_v = false;
-
-template<typename T>
-inline constexpr bool has_free_save_v = false;
-
-template<typename T>
-inline constexpr bool has_free_load_v = false;
-
-template<typename T>
-inline constexpr bool has_free_serialize_save_v = false;
-
-template<typename T>
-inline constexpr bool has_free_serialize_load_v = false;
-
-// ============================================================================
-// Combined checks
-// ============================================================================
-
-template<typename T>
-inline constexpr bool has_any_save_v =
-	has_member_save_v<T> || has_free_save_v<T> ||
-	has_member_serialize_save_v<T> || has_free_serialize_save_v<T>;
-
-template<typename T>
-inline constexpr bool has_any_load_v =
-	has_member_load_v<T> || has_free_load_v<T> ||
-	has_member_serialize_load_v<T> || has_free_serialize_load_v<T>;
-
-template<typename T>
-inline constexpr bool has_custom_serialization_v = has_any_save_v<T> && has_any_load_v<T>;
 
 // ============================================================================
 // property_owner detection
@@ -252,22 +316,17 @@ using serialization_traits::is_std_map_v;
 using serialization_traits::is_std_unordered_map_v;
 using serialization_traits::is_std_array_v;
 using serialization_traits::is_std_pair_v;
+using serialization_traits::is_std_optional_v;
+using serialization_traits::is_std_variant_v;
+using serialization_traits::is_std_tuple_v;
 using serialization_traits::is_std_weak_ptr_v;
 using serialization_traits::is_std_shared_ptr_v;
 using serialization_traits::is_std_unique_ptr_v;
 using serialization_traits::is_smart_ptr_v;
 using serialization_traits::is_direct_serializable_v;
-using serialization_traits::has_member_save_v;
-using serialization_traits::has_member_load_v;
-using serialization_traits::has_member_serialize_save_v;
-using serialization_traits::has_member_serialize_load_v;
-using serialization_traits::has_free_save_v;
-using serialization_traits::has_free_load_v;
-using serialization_traits::has_free_serialize_save_v;
-using serialization_traits::has_free_serialize_load_v;
-using serialization_traits::has_any_save_v;
-using serialization_traits::has_any_load_v;
 using serialization_traits::is_property_owner_v;
+using serialization_traits::is_jai_property_v;
+using serialization_traits::property_element_t;
 
 } // namespace jai
 

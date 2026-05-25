@@ -215,7 +215,7 @@ namespace stdlib {
         // unmix - inverse lerp: given a value, returns the percent
         // Returns: (value - start) / (end - start)
         eng_ref.add_function("unmix", [](script_float start, script_float end, script_float value) -> script_float {
-            return (end == start) ? end : (value - start) / (end - start);
+            return (end == start) ? 0.0 : (value - start) / (end - start);
         });
 
         // mix_in - ease-in interpolation (accelerating)
@@ -294,6 +294,7 @@ namespace stdlib {
         // remap(value, in_min, in_max, out_min, out_max)
         eng_ref.add_function("remap", [](script_float value, script_float in_min, script_float in_max,
                                         script_float out_min, script_float out_max) -> script_float {
+            if (in_max == in_min) return out_min;
             script_float t = (value - in_min) / (in_max - in_min);
             return out_min + t * (out_max - out_min);
         });

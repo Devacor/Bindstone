@@ -189,6 +189,16 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
     // Store the AST in method_overloads_ for type-based resolution
     method_overloads_[name_id].push_back(ast);
 
+    // Invalidate overload resolution cache for this method name (new overload may change resolution)
+    // Erase all entries with this name_id from the cache
+    for (auto it = overload_resolution_cache_.begin(); it != overload_resolution_cache_.end(); ) {
+        if (it->first.name_id == name_id) {
+            it = overload_resolution_cache_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     // Capture shared_ptr to this class definition for overload resolution
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
@@ -212,6 +222,29 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
             }
 
             const auto& overloads = it->second;
+
+            // Overload resolution cache: only used when there are multiple overloads
+            // Key by (name_id, arity) — only valid when exactly one overload matches the arity
+            if (overloads.size() > 1) {
+                typename class_definition::overload_cache_key cache_key{name_id, method_args.size()};
+                auto cache_it = class_def->overload_resolution_cache_.find(cache_key);
+                if (cache_it != class_def->overload_resolution_cache_.end()) {
+                    // Cache hit - use the previously resolved overload
+                    std::shared_ptr<function_decl> ast = cache_it->second;
+
+                    auto method_env = interp->get_pooled_method_environment(
+                        definition_env,
+                        this_obj
+                    );
+                    method_env->define("this", this_obj);
+
+                    auto result = interp->execute_method_ast(ast, method_env, method_args);
+
+                    interp->release_environment(method_env, false);
+
+                    return result;
+                }
+            }
 
             // Find best matching overload using C++-style resolution
             // Priority: 1) all typed + exact match, 2) all typed + conversions (fewest first)
@@ -334,6 +367,22 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
 
             if (!best_ast) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "No matching overload found", name_id);
+            }
+
+            // Cache the resolved overload for future calls with same (name_id, arity)
+            // Only cache when there are multiple overloads AND exactly one matches this arity
+            // (if multiple overloads share the same arity, resolution depends on argument types)
+            if (overloads.size() > 1) {
+                size_t arity_match_count = 0;
+                for (const auto& o : overloads) {
+                    if (o->parameters.size() == method_args.size()) {
+                        ++arity_match_count;
+                    }
+                }
+                if (arity_match_count == 1) {
+                    typename class_definition::overload_cache_key cache_key{name_id, method_args.size()};
+                    class_def->overload_resolution_cache_[cache_key] = best_ast;
+                }
             }
 
             std::shared_ptr<function_decl> ast = best_ast;

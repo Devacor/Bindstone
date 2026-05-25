@@ -9,6 +9,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cmath>
+#include <atomic>
 
 namespace jai {
 namespace stdlib {
@@ -16,7 +17,8 @@ namespace stdlib {
     // JSON escape helper
     inline std::string escape_json_string(const std::string& str) {
         std::ostringstream oss;
-        for (char c : str) {
+        for (size_t i = 0; i < str.size(); ++i) {
+            unsigned char c = static_cast<unsigned char>(str[i]);
             switch (c) {
                 case '"':  oss << "\\\""; break;
                 case '\\': oss << "\\\\"; break;
@@ -26,12 +28,15 @@ namespace stdlib {
                 case '\r': oss << "\\r"; break;
                 case '\t': oss << "\\t"; break;
                 default:
-                    if (c >= 0x20 && c <= 0x7E) {
-                        oss << c;
+                    if (c >= 0x80) {
+                        // UTF-8 multi-byte: pass through unescaped (valid JSON per RFC 8259)
+                        oss << str[i];
+                    } else if (c >= 0x20) {
+                        oss << str[i];
                     } else {
-                        // Unicode escape for non-printable
-                        oss << "\\u" << std::hex << std::setw(4) << std::setfill('0') 
-                            << static_cast<int>(static_cast<unsigned char>(c));
+                        // Control characters below 0x20 (other than those handled above)
+                        oss << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                            << static_cast<int>(c);
                     }
             }
         }
@@ -533,25 +538,26 @@ namespace stdlib {
                                         // Process nested values recursively
                                         script_value propValue = processValue(value);
 
-                                        // Set the property using a clean temporary approach
-                                        std::string tempVar = "_json_temp_" + propName;
+                                        // Set the property using unique temporary variables
+                                        static std::atomic<uint64_t> json_counter{0};
+                                        auto id = json_counter.fetch_add(1, std::memory_order_relaxed);
+                                        std::string tempVar = "_jt_" + std::to_string(id);
+                                        std::string objVar = "_jo_" + std::to_string(id);
                                         eng->add_global(tempVar, propValue);
-                                        eng->add_global("_json_obj", instance);
+                                        eng->add_global(objVar, instance);
 
                                         try {
-                                            eng->execute("_json_obj." + propName + " = " + tempVar);
-                                            instance = eng->get_variable("_json_obj");
+                                            eng->execute(objVar + "." + propName + " = " + tempVar);
+                                            instance = eng->get_variable(objVar);
                                         } catch (...) {
                                             // Skip properties that can't be set (e.g., read-only or non-existent)
                                         }
 
-                                        // Clean up - use add_global instead of execute to avoid type checking
+                                        // Clean up - always runs, even after exception above
                                         eng->add_global(tempVar, script_value(std::monostate{}, eng));
+                                        eng->add_global(objVar, script_value(std::monostate{}, eng));
                                     }
                                 }
-
-                                // Clean up - use add_global instead of execute to avoid type checking
-                                eng->add_global("_json_obj", script_value(std::monostate{}, eng));
                             }
 
                             // Call post_deserialize hook if it exists (for both custom and fallback paths)
@@ -670,20 +676,25 @@ namespace stdlib {
                         for (const auto& [key, value] : map) {
                             if (key.is_string() && key.as_string() != "_type_" && key.as_string() != "_version_") {
                                 std::string prop_name = key.as_string();
-                                std::string temp_var = "_binary_temp_" + prop_name;
+                                static std::atomic<uint64_t> binary_counter{0};
+                                auto bid = binary_counter.fetch_add(1, std::memory_order_relaxed);
+                                std::string temp_var = "_bt_" + std::to_string(bid);
+                                std::string obj_var = "_bo_" + std::to_string(bid);
                                 eng->add_global(temp_var, value);
-                                eng->add_global("_binary_obj", instance);
+                                eng->add_global(obj_var, instance);
 
-                                eng->execute("_binary_obj." + prop_name + " = " + temp_var);
-                                instance = eng->get_variable("_binary_obj");
+                                try {
+                                    eng->execute(obj_var + "." + prop_name + " = " + temp_var);
+                                    instance = eng->get_variable(obj_var);
+                                } catch (...) {
+                                    // Skip properties that can't be set
+                                }
 
-                                // Clean up - use add_global instead of execute to avoid type checking
+                                // Clean up - always runs
                                 eng->add_global(temp_var, script_value(std::monostate{}, eng));
+                                eng->add_global(obj_var, script_value(std::monostate{}, eng));
                             }
                         }
-
-                        // Clean up - use add_global instead of execute to avoid type checking
-                        eng->add_global("_binary_obj", script_value(std::monostate{}, eng));
 
                         // Call post_deserialize hook if it exists
                         try {
@@ -764,18 +775,25 @@ namespace stdlib {
                         for (const auto& [key, value] : map) {
                             if (key.is_string() && key.as_string() != "_type_" && key.as_string() != "_version_") {
                                 std::string prop_name = key.as_string();
-                                std::string temp_var = "_base64_temp_" + prop_name;
+                                static std::atomic<uint64_t> base64_counter{0};
+                                auto b64id = base64_counter.fetch_add(1, std::memory_order_relaxed);
+                                std::string temp_var = "_b6t_" + std::to_string(b64id);
+                                std::string obj_var = "_b6o_" + std::to_string(b64id);
                                 eng->add_global(temp_var, value);
-                                eng->add_global("_base64_obj", instance);
+                                eng->add_global(obj_var, instance);
 
-                                eng->execute("_base64_obj." + prop_name + " = " + temp_var);
-                                instance = eng->get_variable("_base64_obj");
+                                try {
+                                    eng->execute(obj_var + "." + prop_name + " = " + temp_var);
+                                    instance = eng->get_variable(obj_var);
+                                } catch (...) {
+                                    // Skip properties that can't be set
+                                }
 
+                                // Clean up - always runs
                                 eng->add_global(temp_var, script_value(std::monostate{}, eng));
+                                eng->add_global(obj_var, script_value(std::monostate{}, eng));
                             }
                         }
-
-                        eng->add_global("_base64_obj", script_value(std::monostate{}, eng));
 
                         // Call post_deserialize hook if it exists
                         try {

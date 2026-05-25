@@ -31,8 +31,9 @@ namespace jai {
 	class property_manager {
 	public:
 		property_manager() = default;
-		property_manager(property_manager&&) = default;
 
+		property_manager(property_manager&&) = delete;
+		property_manager& operator=(property_manager&&) = delete;
 		property_manager(const property_manager&) = delete;
 		property_manager& operator=(const property_manager&) = delete;
 
@@ -232,9 +233,10 @@ namespace jai {
 
 	public:
 
-		// Move operations
-		property_owner(property_owner&&) = default;
-		property_owner& operator=(property_owner&&) = default;
+		// Move operations deleted: property_manager holds raw pointers to
+		// member properties that would be invalidated by a move.
+		property_owner(property_owner&&) = delete;
+		property_owner& operator=(property_owner&&) = delete;
 
 		virtual ~property_owner() = default;
 

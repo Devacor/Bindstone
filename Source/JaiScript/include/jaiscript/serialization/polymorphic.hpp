@@ -96,14 +96,15 @@ private:
     polymorphic_registry() = default;
 
     // --- Save function generation ---
-    // Uses access::member_save via dispatch to recover concrete archive type
+    // Uses archive operator() via dispatch — handles save methods, property_mgr,
+    // and access-controlled methods without requiring friendship
 
     template<typename T>
     static save_fn_t make_save_fn() {
         return [](any_archive_writer& ar, const void* ptr) {
             auto& obj = *static_cast<const T*>(ptr);
             ar.dispatch([&](auto& concrete_ar) {
-                access::member_save(concrete_ar, obj, uint32_t(0));
+                concrete_ar(obj);
             });
         };
     }
@@ -124,7 +125,7 @@ private:
     struct has_jai_load_and_construct : std::false_type {};
     template<typename T>
     struct has_jai_load_and_construct<T, std::void_t<decltype(
-        T::load_and_construct(std::declval<detection_archive&>(), std::declval<construct<T>&>())
+        access::template load_and_construct<T>(std::declval<detection_archive&>(), std::declval<construct<T>&>())
     )>> : std::true_type {};
 
     template<typename T>
@@ -134,7 +135,7 @@ private:
                 return ar.dispatch([](auto& concrete_ar) -> std::shared_ptr<void> {
                     std::shared_ptr<T> ptr;
                     construct<T> c(ptr);
-                    T::load_and_construct(concrete_ar, c);
+                    access::template load_and_construct<T>(concrete_ar, c);
                     return std::static_pointer_cast<void>(ptr);
                 });
             };
@@ -142,7 +143,7 @@ private:
             return [](any_archive_reader& ar) -> std::shared_ptr<void> {
                 return ar.dispatch([](auto& concrete_ar) -> std::shared_ptr<void> {
                     auto ptr = std::make_shared<T>();
-                    access::member_load(concrete_ar, *ptr, uint32_t(0));
+                    concrete_ar(*ptr);
                     if constexpr (requires { ptr->initialize(); }) {
                         ptr->initialize();
                     }

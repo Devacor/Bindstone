@@ -82,6 +82,8 @@ namespace jai {
         statement_decl,
         include_decl,
         import_decl,
+        enum_decl,
+        destructuring_decl,
     };
 
     // parameter information for functions and lambdas
@@ -92,6 +94,7 @@ namespace jai {
         bool is_const = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
         mutable size_t slot_index = SIZE_MAX;     // Slot index for fast local access (SIZE_MAX = not assigned)
+        expression_ptr default_value;              // Optional default value expression (null = no default)
 
         parameter(type_info_ptr t, const std::string& n, bool ref = false, bool c = false)
             : type(t), name(n), is_reference(ref), is_const(c), symbol_id(UINT64_MAX), slot_index(SIZE_MAX) {}
@@ -142,6 +145,8 @@ namespace jai {
         virtual checked_result<void> visit_expression_decl(class expression_decl* decl) = 0;
         virtual checked_result<void> visit_include_decl(class include_decl* decl) = 0;
         virtual checked_result<void> visit_import_decl(class import_decl* decl) = 0;
+        virtual checked_result<void> visit_enum_decl(class enum_decl* decl) = 0;
+        virtual checked_result<void> visit_destructuring_decl(class destructuring_decl* decl) = 0;
     };
     
     // Base AST node
@@ -257,6 +262,7 @@ namespace jai {
         mutable uint64_t getter_id = UINT64_MAX;  // Cached interned ID for "_get_" + member (computed on first use)
         bool is_arrow;  // true for ->, false for .
         bool is_static; // true for ::, false for . or ->
+        bool null_safe = false;  // true for ?. null-safe member access
 
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
@@ -616,6 +622,28 @@ namespace jai {
         // Constructor for expression syntax: import(expr)
         import_decl(const source_location& loc, expression_ptr expr)
             : declaration(loc, node_type::import_decl), path(), path_expr(expr) {}    };
+
+    // Enum declaration
+    class enum_decl : public declaration {
+    public:
+        std::string_view name;
+        uint64_t name_id;
+        std::vector<std::pair<std::string_view, uint64_t>> values;  // name, symbol_id pairs
+
+        enum_decl(const source_location& loc, std::string_view n, uint64_t nid)
+            : declaration(loc, node_type::enum_decl), name(n), name_id(nid) {}
+    };
+
+    // Destructuring declaration: auto [x, y, z] = [1, 2, 3];
+    class destructuring_decl : public declaration {
+    public:
+        std::vector<std::pair<std::string_view, uint64_t>> names;  // variable names + symbol IDs
+        std::vector<size_t> slot_indices;  // slot indices for each variable
+        expression_ptr initializer;
+
+        destructuring_decl(const source_location& loc, expression_ptr init)
+            : declaration(loc, node_type::destructuring_decl), initializer(std::move(init)) {}
+    };
 
     // Helper function to check if an expression is GUARANTEED to return a boolean
     // This allows skipping is_truthy() type dispatch and using unchecked_as_bool() directly

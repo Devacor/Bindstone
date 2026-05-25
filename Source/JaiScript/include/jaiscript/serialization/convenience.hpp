@@ -287,7 +287,7 @@ T from_json(engine& eng, const std::string& json) {
         ar.serialize("value0", result);
     }
     ar.end_object();
-    return result;
+    return std::move(result);
 }
 
 // Deserialize from JSON with user context (for dependency injection)
@@ -318,7 +318,7 @@ T from_json(engine& eng, const std::string& json, Context& ctx) {
         ar.serialize("value0", result);
     }
     ar.end_object();
-    return result;
+    return std::move(result);
 }
 
 // ============================================================================

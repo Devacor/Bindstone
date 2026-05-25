@@ -17,3 +17,4 @@
 #include "implementation/parse_errors.cpp"
 #include "implementation/interpreter_dispatch.cpp"
 #include "implementation/vm_backend_stub.cpp"
+#include "implementation/coroutine.cpp"

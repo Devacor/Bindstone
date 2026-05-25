@@ -31,6 +31,7 @@ namespace jai {
         switch_keyword, case_keyword, default_keyword, fallthrough_keyword,
         include_keyword, import_keyword,
         coroutine_keyword, yield_keyword,
+        enum_keyword,
         
         // Operators
         plus, minus, star, slash, percent,
@@ -42,7 +43,7 @@ namespace jai {
         dot, arrow,
         ampersand, pipe, caret,  // Bitwise operators &, |, ^
         colon_colon,
-        question, colon,
+        question, question_dot, colon,
         tilde,  // For bitwise NOT and destructors: ~ClassName()
         spaceship,  // C++20 three-way comparison operator <=>
         left_shift, right_shift,  // Shift operators << and >>
@@ -144,7 +145,12 @@ namespace jai {
         token scan_string();
         token scan_char();
         token scan_identifier();
-        
+        void scan_template_string();
+
+        // Pending token queue for template string desugaring
+        std::vector<token> pending_tokens_;
+        size_t pending_index_ = 0;
+
         // Utilities
         bool is_digit(char c) const;
         bool is_alpha(char c) const;

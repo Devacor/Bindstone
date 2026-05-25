@@ -465,6 +465,66 @@ public:
             auto result = engine->execute("var s = \"aaa\"; s.replace_all(\"a\", \"b\"); s;");
             check_eq(result.as<std::string>(), "bbb");
         });
+
+        // ============================================================
+        // Template strings (backtick syntax)
+        // ============================================================
+
+        test("template_string_basic", [this]() {
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(auto name = "world"; `hello ${name}`;)");
+            check_eq(result.as<std::string>(), "hello world");
+        });
+
+        test("template_string_expression", [this]() {
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(auto x = 10; auto y = 20; `${x} + ${y} = ${x + y}`;)");
+            check_eq(result.as<std::string>(), "10 + 20 = 30");
+        });
+
+        test("template_string_no_interpolation", [this]() {
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(`just a plain string`;)");
+            check_eq(result.as<std::string>(), "just a plain string");
+        });
+
+        test("template_string_only_expression", [this]() {
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(auto val = 42; `${val}`;)");
+            check_eq(result.as<std::string>(), "42");
+        });
+
+        test("template_string_nested_expressions", [this]() {
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(auto hp = 80; auto max_hp = 100; `Health: ${hp}/${max_hp} (${hp * 100 / max_hp}%)`;)");
+            check_eq(result.as<std::string>(), "Health: 80/100 (80%)");
+        });
+
+        test("template_string_escape_backtick", [this]() {
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(`hello\`world`;)");
+            check_eq(result.as<std::string>(), "hello`world");
+        });
+
+        test("template_string_escape_dollar", [this]() {
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(`price: \$${99}`;)");
+            check_eq(result.as<std::string>(), "price: $99");
+        });
+
+        test("template_string_multiline", [this]() {
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
+            auto result = engine->execute("`line1\nline2`;");
+            check_eq(result.as<std::string>(), "line1\nline2");
+        });
     }
 };
 

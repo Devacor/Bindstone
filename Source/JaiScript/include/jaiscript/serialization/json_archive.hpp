@@ -351,7 +351,8 @@ private:
     // Local helper functions to avoid circular includes
     std::string escape_json_string_local(const std::string& str) {
         std::ostringstream oss;
-        for (char c : str) {
+        for (size_t i = 0; i < str.size(); ++i) {
+            unsigned char c = static_cast<unsigned char>(str[i]);
             switch (c) {
                 case '"':  oss << "\\\""; break;
                 case '\\': oss << "\\\\"; break;
@@ -361,11 +362,15 @@ private:
                 case '\r': oss << "\\r"; break;
                 case '\t': oss << "\\t"; break;
                 default:
-                    if (c >= 0x20 && c <= 0x7E) {
-                        oss << c;
+                    if (c >= 0x80) {
+                        // UTF-8 multi-byte: pass through unescaped (valid JSON per RFC 8259)
+                        oss << str[i];
+                    } else if (c >= 0x20) {
+                        oss << str[i];
                     } else {
-                        oss << "\\u" << std::hex << std::setw(4) << std::setfill('0') 
-                            << static_cast<int>(static_cast<unsigned char>(c));
+                        // Control characters below 0x20 (other than those handled above)
+                        oss << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                            << static_cast<int>(c);
                     }
             }
         }
@@ -1007,11 +1012,36 @@ private:
                         }
                         std::string hex = json_.substr(pos_ + 1, 4);
                         pos_ += 4;
-                        int codepoint = std::stoi(hex, nullptr, 16);
-                        if (codepoint < 128) {
+                        uint32_t codepoint = static_cast<uint32_t>(std::stoul(hex, nullptr, 16));
+                        // Handle UTF-16 surrogate pairs
+                        if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
+                            // High surrogate - look for low surrogate \uXXXX
+                            if (pos_ + 2 < json_.length() && json_[pos_ + 1] == '\\' && json_[pos_ + 2] == 'u') {
+                                if (pos_ + 6 < json_.length()) {
+                                    std::string low_hex = json_.substr(pos_ + 3, 4);
+                                    uint32_t low = static_cast<uint32_t>(std::stoul(low_hex, nullptr, 16));
+                                    if (low >= 0xDC00 && low <= 0xDFFF) {
+                                        codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low - 0xDC00);
+                                        pos_ += 6; // Skip the \uXXXX low surrogate
+                                    }
+                                }
+                            }
+                        }
+                        // Encode as UTF-8
+                        if (codepoint < 0x80) {
                             result += static_cast<char>(codepoint);
+                        } else if (codepoint < 0x800) {
+                            result += static_cast<char>(0xC0 | (codepoint >> 6));
+                            result += static_cast<char>(0x80 | (codepoint & 0x3F));
+                        } else if (codepoint < 0x10000) {
+                            result += static_cast<char>(0xE0 | (codepoint >> 12));
+                            result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+                            result += static_cast<char>(0x80 | (codepoint & 0x3F));
                         } else {
-                            result += '?'; // Placeholder
+                            result += static_cast<char>(0xF0 | (codepoint >> 18));
+                            result += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+                            result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+                            result += static_cast<char>(0x80 | (codepoint & 0x3F));
                         }
                         break;
                     }

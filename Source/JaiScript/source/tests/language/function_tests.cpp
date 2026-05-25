@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai::foundry;
 
@@ -250,10 +251,167 @@ public:
                 
                 cpp_style(10) + func_style(10) + short_style(10);
             )";
-            
+
             script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 36); // 11 + 12 + 13 = 36
+        });
+
+        test("default_parameter_basic", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                function add(int a, int b = 10) -> int { return a + b; }
+                add(5);
+            )");
+            check_eq(result.as<int64_t>(), int64_t(15));
+        });
+
+        test("default_parameter_override", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                function add(int a, int b = 10) -> int { return a + b; }
+                add(5, 20);
+            )");
+            check_eq(result.as<int64_t>(), int64_t(25));
+        });
+
+        test("default_parameter_multiple", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                function make_point(int x = 0, int y = 0, int z = 0) -> int { return x + y + z; }
+                make_point() + make_point(1) + make_point(1, 2) + make_point(1, 2, 3);
+            )");
+            check_eq(result.as<int64_t>(), int64_t(0 + 1 + 3 + 6));
+        });
+
+        test("default_parameter_string", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                function greet(string name, string greeting = "hello") -> string {
+                    return greeting + " " + name;
+                }
+                greet("world");
+            )");
+            check_eq(result.as<std::string>(), std::string("hello world"));
+        });
+
+        // === Enum Tests ===
+        test("enum_basic", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                enum Direction { north, south, east, west }
+                Direction.east;
+            )");
+            check_eq(result.as<int64_t>(), int64_t(2));
+        });
+
+        test("enum_comparison", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                enum Color { red, green, blue }
+                auto c = Color.green;
+                c == Color.green;
+            )");
+            check_eq(result.as<bool>(), true);
+        });
+
+        test("enum_in_switch", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                enum Weapon { sword, bow, staff }
+                auto w = Weapon.bow;
+                auto damage = 0;
+                switch (w) {
+                    case Weapon.sword: damage = 10;
+                    case Weapon.bow: damage = 8;
+                    case Weapon.staff: damage = 12;
+                }
+                damage;
+            )");
+            check_eq(result.as<int64_t>(), int64_t(8));
+        });
+
+        // === Null-safe Member Access Tests ===
+        test("null_safe_on_null", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                auto obj = null;
+                obj?.toString();
+            )");
+            check(result.is_null());
+        });
+
+        test("null_safe_on_value", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                auto s = "hello";
+                s?.length();
+            )");
+            check_eq(result.as<int64_t>(), int64_t(5));
+        });
+
+        test("null_safe_chain", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            auto result = eng->execute(R"(
+                auto obj = null;
+                auto x = obj?.toString();
+                x == null;
+            )");
+            check_eq(result.as<bool>(), true);
+        });
+
+        // === Destructuring Tests ===
+        test("destructuring_basic", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                auto [x, y, z] = [1, 2, 3];
+            )");
+            check_eq(eng->get_variable("x").as<int64_t>(), int64_t(1));
+            check_eq(eng->get_variable("y").as<int64_t>(), int64_t(2));
+            check_eq(eng->get_variable("z").as<int64_t>(), int64_t(3));
+        });
+
+        test("destructuring_fewer_vars", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                auto [a, b] = [10, 20, 30];
+            )");
+            check_eq(eng->get_variable("a").as<int64_t>(), int64_t(10));
+            check_eq(eng->get_variable("b").as<int64_t>(), int64_t(20));
+        });
+
+        test("destructuring_more_vars", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                auto [a, b, c] = [10, 20];
+            )");
+            check_eq(eng->get_variable("a").as<int64_t>(), int64_t(10));
+            check_eq(eng->get_variable("b").as<int64_t>(), int64_t(20));
+            check(eng->get_variable("c").is_null());
+        });
+
+        test("destructuring_from_variable", [this]() {
+            auto eng = engine::make();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                auto arr = [100, 200];
+                auto [x, y] = arr;
+            )");
+            check_eq(eng->get_variable("x").as<int64_t>(), int64_t(100));
+            check_eq(eng->get_variable("y").as<int64_t>(), int64_t(200));
         });
     }
 };

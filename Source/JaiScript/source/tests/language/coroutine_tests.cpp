@@ -282,6 +282,51 @@ public:
             check_eq(count, int64_t(3));
         });
 
+        test("range_for_over_generator", [this]() {
+            auto eng = jai::engine::make();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                coroutine int fibonacci() {
+                    int a = 0;
+                    int b = 1;
+                    while (true) {
+                        yield a;
+                        int temp = a + b;
+                        a = b;
+                        b = temp;
+                    }
+                }
+                auto sum = 0;
+                auto count = 0;
+                for (auto x : fibonacci()) {
+                    sum = sum + x;
+                    count = count + 1;
+                    if (count == 7) { break; }
+                }
+            )");
+            // fibonacci: 0, 1, 1, 2, 3, 5, 8 → sum = 20
+            check_eq(eng->get_variable("sum").as<int64_t>(), int64_t(20));
+            check_eq(eng->get_variable("count").as<int64_t>(), int64_t(7));
+        });
+
+        test("range_for_over_finite_generator", [this]() {
+            auto eng = jai::engine::make();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                coroutine int range(int n) {
+                    for (int i = 0; i < n; i++) {
+                        yield i;
+                    }
+                }
+                auto total = 0;
+                for (auto x : range(5)) {
+                    total = total + x;
+                }
+            )");
+            // 0 + 1 + 2 + 3 + 4 = 10
+            check_eq(eng->get_variable("total").as<int64_t>(), int64_t(10));
+        });
+
         test("for_loop_yield_step_by_step", [this]() {
             auto eng = jai::engine::make();
             jai::stdlib::register_all(eng);

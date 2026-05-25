@@ -8455,9 +8455,49 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             }
         }
 
+    } else if (container.is_object()) {
+        // Check for coroutine/generator iteration
+        auto objHolder = container.get_object_holder();
+        if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
+            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data);
+
+            script_value* loop_var_ptr = nullptr;
+            if (use_slot) {
+                call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index);
+            } else {
+                environment_->define(stmt->variable_name_id, make_value());
+                loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
+            }
+
+            while (!handle->done()) {
+                auto resume_result = handle->resume(engine_);
+                if (!resume_result) {
+                    pop_scope();
+                    return resume_result.error_value();
+                }
+                if (handle->done()) break;
+
+                *loop_var_ptr = std::move(resume_result.value());
+
+                auto body_result = dispatch_stmt(stmt->body.get());
+                if (!body_result) {
+                    pop_scope();
+                    return body_result;
+                }
+
+                if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
+                if (hasContinueRequest_) { hasContinueRequest_ = false; continue; }
+                if (hasReturnValue_) break;
+                if (hasYieldRequest_) return {};
+            }
+        } else {
+            pop_scope();
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+        }
     } else {
         pop_scope();
-        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Range-based for loop requires an array or map
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
     // Pop the loop scope (only on normal exit, not yield)

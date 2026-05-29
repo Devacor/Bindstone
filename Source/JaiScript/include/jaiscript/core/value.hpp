@@ -55,6 +55,17 @@ namespace jai {
     template<typename T, template<typename...> class Template>
     inline constexpr bool is_specialization_v = is_specialization<T, Template>::value;
 
+    // Convert a double to script_int (int64) with DEFINED behavior for NaN, +/-inf,
+    // and out-of-range values. A plain static_cast of those to a 64-bit integer is
+    // undefined behavior in C++ (commonly yielding INT64_MIN or a trap). NaN -> 0,
+    // and out-of-range saturates to INT64_MIN/MAX.
+    inline script_int float_to_script_int(script_float f) noexcept {
+        if (std::isnan(f)) return 0;
+        if (f >= 9223372036854775808.0) return (std::numeric_limits<script_int>::max)();   // >= 2^63
+        if (f <= -9223372036854775808.0) return (std::numeric_limits<script_int>::min)();  // <= -2^63
+        return static_cast<script_int>(f);
+    }
+
     class script_value {
     public:
         script_value(std::nullptr_t) = delete;
@@ -628,9 +639,9 @@ namespace jai {
                 return checked_result<script_int>(std::get<script_int>(val.storage_));
             } else if (val.type() == script_value_type::jai_float_type) {
                 if (val.cpp_bound_ptr_) {
-                    return checked_result<script_int>(static_cast<script_int>(val.unchecked_as_float()));
+                    return checked_result<script_int>(float_to_script_int(val.unchecked_as_float()));
                 }
-                return checked_result<script_int>(static_cast<script_int>(std::get<script_float>(val.storage_)));
+                return checked_result<script_int>(float_to_script_int(std::get<script_float>(val.storage_)));
             }
             return checked_result<script_int>(
                 make_error_code(runtime_error_code::type_mismatch),
@@ -641,14 +652,19 @@ namespace jai {
         inline checked_result<script_float> checked_as_float() const {
             const script_value& val = deref();
             if (val.type() == script_value_type::jai_float_type) {
+                // unchecked_as_float() decodes the bound size (4-byte float vs
+                // 8-byte double). Reading a bound float as a raw script_float
+                // (double) reinterpreted 8 bytes from a 4-byte object -> garbage + OOB.
                 if (val.cpp_bound_ptr_) {
-                    return checked_result<script_float>(*static_cast<const script_float*>(val.cpp_bound_ptr_));
+                    return checked_result<script_float>(val.unchecked_as_float());
                 }
                 return checked_result<script_float>(std::get<script_float>(val.storage_));
             } else if (val.type() == script_value_type::jai_int_type) {
-                // Int to float conversion
+                // Int to float conversion. unchecked_as_int() decodes the bound
+                // integer's true size/signedness; the old `const int*` cast read a
+                // fixed 4-byte signed value, truncating int64 and misreading other widths.
                 if (val.cpp_bound_ptr_) {
-                    return checked_result<script_float>(static_cast<script_float>(*static_cast<const int*>(val.cpp_bound_ptr_)));
+                    return checked_result<script_float>(static_cast<script_float>(val.unchecked_as_int()));
                 }
                 return checked_result<script_float>(static_cast<script_float>(std::get<script_int>(val.storage_)));
             }
@@ -716,7 +732,7 @@ namespace jai {
                 if (val.type() == script_value_type::jai_int_type) {
                     return checked_result<T>(std::get<script_int>(val.storage_));
                 } else if (val.type() == script_value_type::jai_float_type) {
-                    return checked_result<T>(static_cast<script_int>(std::get<script_float>(val.storage_)));
+                    return checked_result<T>(float_to_script_int(std::get<script_float>(val.storage_)));
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
@@ -726,13 +742,17 @@ namespace jai {
             }
             else if constexpr (std::is_same_v<T, script_float> || std::is_same_v<T, double>) {
                 const script_value& val = deref();
-                if (val.cpp_bound_ptr_) {
-                    return checked_result<T>(*static_cast<const script_float*>(val.cpp_bound_ptr_));
-                }
+                // Decode bound values via the size/sign-aware accessors. The old
+                // blanket `*static_cast<const script_float*>(cpp_bound_ptr_)` read 8
+                // bytes for ANY bound value, reinterpreting bound ints and 4-byte
+                // floats as doubles (wrong value, and an out-of-bounds read for float).
                 if (val.type() == script_value_type::jai_float_type) {
-                    return checked_result<T>(std::get<script_float>(val.storage_));
+                    return checked_result<T>(val.cpp_bound_ptr_ ? val.unchecked_as_float()
+                                                                : std::get<script_float>(val.storage_));
                 } else if (val.type() == script_value_type::jai_int_type) {
-                    return checked_result<T>(static_cast<script_float>(std::get<script_int>(val.storage_)));
+                    return checked_result<T>(static_cast<script_float>(
+                        val.cpp_bound_ptr_ ? val.unchecked_as_int()
+                                           : std::get<script_int>(val.storage_)));
                 }
                 return checked_result<T>(
                     make_error_code(runtime_error_code::type_mismatch),
@@ -794,12 +814,12 @@ namespace jai {
                 const script_value& val = deref();
                 if (val.type() == script_value_type::jai_float_type) {
                     if (val.cpp_bound_ptr_) {
-                        return checked_result<T>(static_cast<float>(*static_cast<const script_float*>(val.cpp_bound_ptr_)));
+                        return checked_result<T>(static_cast<float>(val.unchecked_as_float()));
                     }
                     return checked_result<T>(static_cast<float>(std::get<script_float>(val.storage_)));
                 } else if (val.type() == script_value_type::jai_int_type) {
                     if (val.cpp_bound_ptr_) {
-                        return checked_result<T>(static_cast<float>(*static_cast<const int*>(val.cpp_bound_ptr_)));
+                        return checked_result<T>(static_cast<float>(val.unchecked_as_int()));
                     }
                     return checked_result<T>(static_cast<float>(std::get<script_int>(val.storage_)));
                 }
@@ -1362,6 +1382,14 @@ namespace jai {
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             std::shared_ptr<void> data;     // The actual object
             bool is_class_instance_wrapper = false;  // True if data is a class_instance object (both C++ and script classes), false for raw data
+
+            // Lifetime anchor for NON-OWNING references (data == nullptr, cpp_bound_ptr_ set).
+            // When a C++ method returns a reference into its receiver (e.g. `return *this`
+            // for chaining), the resulting non-owning value must keep the receiver's
+            // underlying object alive even if the receiver was a temporary. This pins
+            // that owner WITHOUT participating in extraction (cpp_bound_ptr_ remains the
+            // authoritative target). Empty for owning objects.
+            std::shared_ptr<void> keep_alive;
 
             // Note: Serialization functions will be managed externally
             // by ISerializer implementations to keep JaiScript dependency-free

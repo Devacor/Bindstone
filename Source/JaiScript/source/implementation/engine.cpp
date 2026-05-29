@@ -1,6 +1,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
 // JVM backend is already included in jaiscript.hpp
 #include <iostream>
 #include <fstream>
@@ -1804,6 +1805,10 @@ serialization::serialization_registry& engine::get_serialization_registry() {
 
 class_registry& engine::get_class_registry() {
     return impl->class_registry_;
+}
+
+bool engine::throw_on_overflow() const {
+    return kCheckedOverflow;  // compile-time policy (interpreter.hpp)
 }
 
 script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {

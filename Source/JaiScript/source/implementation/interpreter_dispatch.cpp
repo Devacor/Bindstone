@@ -1,7 +1,16 @@
 #include "../../include/jaiscript/detail/interpreter.hpp"
+#include "../../include/jaiscript/detail/integer_ops.hpp"  // kCheckedOverflow + jai::ints helpers
 #include <cmath>
+#include <limits>
 
 namespace jai {
+
+namespace {
+    // Shared error result for an overflowing integer operation.
+    inline checked_result<script_value> overflow_error(const char* msg) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
+    }
+}
 
 // Initialize the binary operator dispatch table
 void interpreter::init_dispatch_table() {
@@ -41,7 +50,10 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         // Common fast path: neither operand is an object, no unwrapping needed
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_int_fast(left.unchecked_as_int() + right.unchecked_as_int());
+            const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
+            script_int r;
+            if (!ints::try_add(a, b, r)) return overflow_error("Integer overflow in '+'");
+            return make_int_fast(r);
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
@@ -64,7 +76,10 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
 
     // Fast path for integer addition
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_int_fast(unwrapped_left.unchecked_as_int() + unwrapped_right.unchecked_as_int());
+        const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
+        script_int r;
+        if (!ints::try_add(a, b, r)) return overflow_error("Integer overflow in '+'");
+        return make_int_fast(r);
     }
 
     // Fast path for numeric addition (int/float combinations)
@@ -97,7 +112,10 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_int_fast(left.unchecked_as_int() - right.unchecked_as_int());
+            const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
+            script_int r;
+            if (!ints::try_sub(a, b, r)) return overflow_error("Integer overflow in '-'");
+            return make_int_fast(r);
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
@@ -116,7 +134,10 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_int_fast(unwrapped_left.unchecked_as_int() - unwrapped_right.unchecked_as_int());
+        const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
+        script_int r;
+        if (!ints::try_sub(a, b, r)) return overflow_error("Integer overflow in '-'");
+        return make_int_fast(r);
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
@@ -143,7 +164,10 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            return make_int_fast(left.unchecked_as_int() * right.unchecked_as_int());
+            const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
+            script_int r;
+            if (!ints::try_mul(a, b, r)) return overflow_error("Integer overflow in '*'");
+            return make_int_fast(r);
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
@@ -162,7 +186,10 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        return make_int_fast(unwrapped_left.unchecked_as_int() * unwrapped_right.unchecked_as_int());
+        const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
+        script_int r;
+        if (!ints::try_mul(a, b, r)) return overflow_error("Integer overflow in '*'");
+        return make_int_fast(r);
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
@@ -189,10 +216,13 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            if (right.unchecked_as_int() == 0) {
+            const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
+            if (b == 0) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
             }
-            return make_int_fast(left.unchecked_as_int() / right.unchecked_as_int());
+            script_int r;
+            if (!ints::try_div(a, b, r)) return overflow_error("Integer overflow in '/'");  // INT64_MIN / -1
+            return make_int_fast(r);
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
@@ -214,10 +244,13 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        if (unwrapped_right.unchecked_as_int() == 0) {
+        const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
+        if (b == 0) {
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
-        return make_int_fast(unwrapped_left.unchecked_as_int() / unwrapped_right.unchecked_as_int());
+        script_int r;
+        if (!ints::try_div(a, b, r)) return overflow_error("Integer overflow in '/'");  // INT64_MIN / -1
+        return make_int_fast(r);
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
@@ -247,10 +280,11 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-            if (right.unchecked_as_int() == 0) {
+            const script_int b = right.unchecked_as_int();
+            if (b == 0) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
             }
-            return make_int_fast(left.unchecked_as_int() % right.unchecked_as_int());
+            return make_int_fast(ints::mod(left.unchecked_as_int(), b));  // handles a % -1 == 0 (no trap)
         }
         if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
             (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
@@ -272,10 +306,11 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
     const size_t ri = unwrapped_right.raw_storage_index();
 
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        if (unwrapped_right.unchecked_as_int() == 0) {
+        const script_int b = unwrapped_right.unchecked_as_int();
+        if (b == 0) {
             return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
         }
-        return make_int_fast(unwrapped_left.unchecked_as_int() % unwrapped_right.unchecked_as_int());
+        return make_int_fast(ints::mod(unwrapped_left.unchecked_as_int(), b));  // handles a % -1 == 0 (no trap)
     }
 
     if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
@@ -542,7 +577,13 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
 
     // Handle numeric type comparison (int vs float should compare by value)
     if ((unwrapped_left.is_int() || unwrapped_left.is_float()) && (unwrapped_right.is_int() || unwrapped_right.is_float())) {
-        // Convert both to float for comparison to handle 5 == 5.0 correctly
+        // Two integers: compare exactly. Converting both to double (as the mixed
+        // case does) loses precision for |n| > 2^53, so e.g.
+        // 9007199254740993 == 9007199254740992 would wrongly report true.
+        if (unwrapped_left.is_int() && unwrapped_right.is_int()) {
+            return make_value(unwrapped_left.unchecked_as_int() == unwrapped_right.unchecked_as_int());
+        }
+        // Mixed int/float (or float/float): compare as float to handle 5 == 5.0.
         script_float lf = unwrapped_left.is_int() ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
         script_float rf = unwrapped_right.is_int() ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
         return make_value(lf == rf);
@@ -628,8 +669,10 @@ checked_result<script_value> interpreter::handle_not_equal(const script_value& l
 }
 
 checked_result<script_value> interpreter::handle_spaceship(const script_value& left, const script_value& right) {
-    // Fast path for integer spaceship - avoid function calls
-    if (left.type() == script_value_type::jai_int_type && right.type() == script_value_type::jai_int_type) {
+    // Fast path for integer spaceship - avoid function calls.
+    // Use raw_storage_index() (a single integer read) instead of type() to avoid
+    // a type_info_ pointer chase, matching the sibling arithmetic handlers.
+    if (left.raw_storage_index() == script_value::TYPEID_INT && right.raw_storage_index() == script_value::TYPEID_INT) {
         // Direct storage access, single C++20 spaceship operation
         auto cmp = left.unchecked_as_int() <=> right.unchecked_as_int();
         return make_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));

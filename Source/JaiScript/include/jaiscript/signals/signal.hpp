@@ -805,7 +805,13 @@ private:
 
 } // namespace jai
 
-// Include template implementations (requires engine.hpp, so must come after class definitions)
-#include <jaiscript/signals/signal_impl.hpp>
+// NOTE: signal_impl.hpp (the script-callback execution glue) is intentionally NOT
+// included here. It drags in core/engine.hpp + core/value.hpp (the entire interpreter
+// + value system, ~58 extra transitive includes, ~1.8s parse cost per TU), which the
+// vast majority of consumers using plain C++ signals never need.
+//
+// Consumers that actually fire SCRIPT receivers (receiver<T> constructed from a script
+// string + engine*) must include <jaiscript/signals/signal_impl.hpp> explicitly.
+// dynamic_binder.hpp and signal_serialization.hpp already do so.
 
 #endif // __JAISCRIPT_SIGNALS_SIGNAL_HPP__

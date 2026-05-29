@@ -695,6 +695,8 @@ public:
     }
 
     void clear_property_value() {}
+    bool has_current_property_value() const { return false; }
+    bool in_array() const { return false; }
 
     bool has_property(const std::string& name) {
         // Check in pre-read property name index

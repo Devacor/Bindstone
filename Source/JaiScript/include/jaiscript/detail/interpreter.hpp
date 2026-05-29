@@ -13,6 +13,12 @@
 #define JAI_MAX_CALL_DEPTH 10000
 #endif
 
+// NOTE: the compile-time integer-overflow policy (kCheckedOverflow and the
+// jai::ints helpers) lives in <jaiscript/detail/integer_ops.hpp>, which the
+// engine .cpp files include directly. It is intentionally kept out of this
+// widely-included header so its <intrin.h> dependency does not bloat consumer
+// (Bindstone) translation units.
+
 #include "ast.hpp"
 #include "string_symbolizer.hpp"
 #include <jaiscript/core/value.hpp>
@@ -291,8 +297,19 @@ namespace jai {
             } else if (slot < locals.size()) {
                 // Reassignment to existing slot
                 locals[slot] = std::move(value);
+            } else {
+                // slot > size: a lower-numbered slot belongs to a declaration in a
+                // block that was not executed (e.g. an untaken if-branch). The parser
+                // assigns slots monotonically across the whole function body, so such
+                // gaps are legal. Grow the locals vector with null placeholders so the
+                // target slot exists, then store the value. Placeholders carry the same
+                // engine context as the value being stored.
+                locals.reserve(slot + 1);
+                while (locals.size() < slot) {
+                    locals.emplace_back(std::monostate{}, value.get_engine());
+                }
+                locals.push_back(std::move(value));
             }
-            // slot > size shouldn't happen with proper slot assignment
         }
 
         /// Reserve capacity for locals (called when entering function)
@@ -765,6 +782,13 @@ namespace jai {
         // Switch statement control flow state
         bool in_switch_ = false;
         bool should_fallthrough_ = false;
+
+        // True only while evaluating the outermost subscript that is the TARGET of
+        // an assignment (e.g. the `m[k]` in `m[k] = v`). Map subscript needs to
+        // auto-insert a slot in that case, but a plain READ (`x = m[k]`) must NOT
+        // grow the map. visit_binary captures and clears this immediately so
+        // nested subscripts are treated as reads.
+        bool lvalue_target_context_ = false;
 
         // Call depth tracking for recursion limit
         int current_call_depth_ = 0;

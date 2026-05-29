@@ -133,6 +133,14 @@ namespace jai {
             }
         }
         
+        // Reports this build's COMPILE-TIME integer-overflow policy:
+        //   true  => overflowing integer +, -, *, unary -, and INT64_MIN/-1 division
+        //            raise a catchable runtime error (the default, "safe by default").
+        //   false => those operations wrap with well-defined two's-complement semantics.
+        // Chosen at build time via JAISCRIPT_CHECKED_OVERFLOW / JAISCRIPT_WRAP_ON_OVERFLOW;
+        // there is no runtime toggle (so the hot path carries no policy branch).
+        bool throw_on_overflow() const;
+
         // Object creation through registered class system
         template<typename T, typename... Args>
         script_value make_object(Args&&... args) {

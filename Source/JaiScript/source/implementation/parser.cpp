@@ -1076,6 +1076,17 @@ checked_result<expression_ptr> parser::multiplicative() {
 }
 
 checked_result<expression_ptr> parser::unary() {
+    // unary() recurses into itself for chained prefix operators (e.g. !!!x,
+    // - - -x) WITHOUT re-entering expression(), so the depth guard in
+    // expression() does not cover it. Guard here too, or adversarial input
+    // like a long run of '!' overflows the native stack.
+    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
+    if (guard.overflow_) {
+        return checked_result<expression_ptr>(
+            make_error_code(parse_error_code::unexpected_token),
+            "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
+    }
+
     if (match({token_type::bang, token_type::minus, token_type::plus_plus,
                token_type::minus_minus, token_type::ampersand, token_type::tilde})) {
         token op = previous();
@@ -1774,19 +1785,30 @@ checked_result<statement_ptr> parser::for_statement() {
             // Check for colon - this indicates range-based for
             if (match(token_type::colon)) {
                 // This is a range-based for loop!
+                // Parse the container in the OUTER scope (it must not see the
+                // loop variable's slot).
                 JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
                 JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after range expression"));
+
+                // Allocate the loop variable's slot BEFORE parsing the body so
+                // that references to it inside the body resolve to this slot.
+                // (Previously the body was parsed first, leaving every use of
+                // the loop variable with slot_index == SIZE_MAX, which threw
+                // 'Undefined variable' at runtime for range-for inside any
+                // function/lambda.)
+                uint64_t var_id = get_symbol_id(varName);
+                size_t var_slot = SIZE_MAX;
+                if (in_function_scope() && var_id != UINT64_MAX) {
+                    var_slot = allocate_slot(var_id);
+                }
+
                 JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
                 auto result = std::make_shared<range_for_stmt>(
-                    forToken.location, element_type, varName.lexeme, get_symbol_id(varName),
+                    forToken.location, element_type, varName.lexeme, var_id,
                     is_reference, is_const, container, body
                 );
-
-                // If inside a function scope, allocate a slot for the loop variable
-                if (in_function_scope() && result->variable_name_id != UINT64_MAX) {
-                    result->variable_slot_index = allocate_slot(result->variable_name_id);
-                }
+                result->variable_slot_index = var_slot;
 
                 return result;
             }

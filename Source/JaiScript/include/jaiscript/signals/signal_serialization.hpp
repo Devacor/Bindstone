@@ -4,6 +4,9 @@
 #define __JAISCRIPT_SIGNALS_SIGNAL_SERIALIZATION_HPP__
 
 #include <jaiscript/signals/signal.hpp>
+// signal.hpp no longer pulls in the engine-coupled script glue; serialization needs a
+// complete engine type (get_user_context<engine>) and the script-receiver execution path.
+#include <jaiscript/signals/signal_impl.hpp>
 #include <jaiscript/serialization/archive_impl.hpp>
 
 namespace jai {

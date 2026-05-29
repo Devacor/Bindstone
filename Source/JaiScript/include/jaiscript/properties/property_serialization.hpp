@@ -800,7 +800,9 @@ namespace property_serialization {
 						}
 						ar.begin_object();
 						serialization::any_archive_reader wrapper(ar);
-						auto void_ptr = entry->load_fn(wrapper);
+						// Pass id so load_fn registers the object eagerly (before its
+						// properties load), enabling subtree back-references to resolve.
+						auto void_ptr = entry->load_fn(wrapper, id);
 						ptr = std::static_pointer_cast<T>(void_ptr);
 						ar.end_object();
 						did_poly = true;
@@ -1113,17 +1115,15 @@ namespace jai {
 				}
 			}
 		} else {
-			// JSON format: loop until no more properties
-			std::string property_name;
-			while (type_erased.read_property_name(property_name)) {
-				auto it = m_properties.find(property_name);
-				if (it != m_properties.end()) {
-					it->second->serialize(type_erased);
+			// JSON format: seek each known property by name (map lookup).
+			// This avoids consuming the sequential iterator, which is critical
+			// when multiple property_mgrs at different inheritance levels
+			// (Sprite → Drawable → Component) read from the same flat object.
+			for (const auto& [name, prop] : m_properties) {
+				if (type_erased.seek_property(name)) {
+					prop->serialize(type_erased);
 				}
 			}
-			// Clear stale property value left by the last read_property_name call
-			// to prevent it from leaking into parent scope (e.g., when the parent
-			// is iterating array elements via begin_object)
 			type_erased.clear_property_value();
 		}
 	}

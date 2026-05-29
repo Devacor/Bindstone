@@ -272,37 +272,22 @@ public:
     }
 
 private:
-    // Detection archive for SFINAE trait checking
-    // Must satisfy jai_archive concept so constrained methods (requires jai_archive<Archive>) are found
-    // Using this instead of Derived avoids CRTP completeness issues during instantiation
-    // Includes dummy operator() to allow SFINAE detection of serialize methods that call ar(...)
-    struct detection_archive_writer {
-        static constexpr bool is_jai_archive = true;
-        static constexpr bool is_text_format = false;
-
-        // Dummy operator() for SFINAE detection - accepts any arguments
-        template<typename... Args>
-        void operator()(Args&&...) const {}
-
-        // Dummy serialize for SFINAE detection
-        template<typename... Args>
-        void serialize(Args&&...) const {}
-    };
-
-    // Helper traits for SFINAE
-    // Uses access::member_* to detect methods - works with protected methods that friend jai::serialization::access
+    // Helper traits for SFINAE — uses Derived (the concrete archive) instead of a stub type.
+    // These traits are only evaluated inside member function template enable_if/if-constexpr,
+    // which are instantiated at the call site where Derived is complete.
+    // Uses ::jai::access::member_* to detect protected methods via friendship.
 
     // Check for versioned save(Archive&, uint32_t) - for Cereal-compatible MV types
     template<typename T, typename = void>
     struct has_versioned_save_method : std::false_type {};
     template<typename T>
-    struct has_versioned_save_method<T, std::void_t<decltype(access::member_save(std::declval<detection_archive_writer&>(), std::declval<const T&>(), std::uint32_t(0)))>> : std::true_type {};
+    struct has_versioned_save_method<T, std::void_t<decltype(::jai::access::member_save(std::declval<Derived&>(), std::declval<const T&>(), std::uint32_t(0)))>> : std::true_type {};
 
     // Check for non-versioned save(Archive&) - for JaiScript-only types
     template<typename T, typename = void>
     struct has_simple_save_method : std::false_type {};
     template<typename T>
-    struct has_simple_save_method<T, std::void_t<decltype(access::member_save(std::declval<detection_archive_writer&>(), std::declval<const T&>()))>> : std::true_type {};
+    struct has_simple_save_method<T, std::void_t<decltype(::jai::access::member_save(std::declval<Derived&>(), std::declval<const T&>()))>> : std::true_type {};
 
     // Combined: has either versioned or simple save method
     template<typename T>
@@ -312,13 +297,13 @@ private:
     template<typename T, typename = void>
     struct has_versioned_serialize_method : std::false_type {};
     template<typename T>
-    struct has_versioned_serialize_method<T, std::void_t<decltype(access::member_serialize(std::declval<detection_archive_writer&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
+    struct has_versioned_serialize_method<T, std::void_t<decltype(::jai::access::member_serialize(std::declval<Derived&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
 
     // Check for non-versioned serialize(Archive&) method
     template<typename T, typename = void>
     struct has_simple_serialize_method : std::false_type {};
     template<typename T>
-    struct has_simple_serialize_method<T, std::void_t<decltype(access::member_serialize(std::declval<detection_archive_writer&>(), std::declval<T&>()))>> : std::true_type {};
+    struct has_simple_serialize_method<T, std::void_t<decltype(::jai::access::member_serialize(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
 
     // Combined: has either versioned or simple serialize method
     template<typename T>
@@ -333,13 +318,13 @@ private:
     template<typename T, typename = void>
     struct has_adl_save : std::false_type {};
     template<typename T>
-    struct has_adl_save<T, std::void_t<decltype(save(std::declval<detection_archive_writer&>(), std::declval<const T&>()))>> : std::true_type {};
+    struct has_adl_save<T, std::void_t<decltype(save(std::declval<Derived&>(), std::declval<const T&>()))>> : std::true_type {};
 
     // Check for ADL-findable serialize(Archive&, T&) function (works for both save and load)
     template<typename T, typename = void>
     struct has_adl_serialize : std::false_type {};
     template<typename T>
-    struct has_adl_serialize<T, std::void_t<decltype(serialize(std::declval<detection_archive_writer&>(), std::declval<T&>()))>> : std::true_type {};
+    struct has_adl_serialize<T, std::void_t<decltype(serialize(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
 
 public:
     // operator() for types with member save method
@@ -354,9 +339,9 @@ public:
             push_context(SerializationContext::ObjectBody);  // Prevent nested wrapping
         }
         if constexpr (has_versioned_save_method<T>::value) {
-            access::member_save(*self(), obj, 0);  // Call versioned save with version=0
+            ::jai::access::member_save(*self(), obj, 0);  // Call versioned save with version=0
         } else {
-            access::member_save(*self(), obj);     // Call simple save
+            ::jai::access::member_save(*self(), obj);     // Call simple save
         }
         if (wrap) {
             pop_context();
@@ -378,9 +363,9 @@ public:
             push_context(SerializationContext::ObjectBody);  // Prevent nested wrapping
         }
         if constexpr (has_versioned_serialize_method<T>::value) {
-            access::member_serialize(*self(), const_cast<T&>(obj), 0);  // Call versioned serialize with version=0
+            ::jai::access::member_serialize(*self(), const_cast<T&>(obj), 0);  // Call versioned serialize with version=0
         } else {
-            access::member_serialize(*self(), const_cast<T&>(obj));     // Call simple serialize
+            ::jai::access::member_serialize(*self(), const_cast<T&>(obj));     // Call simple serialize
         }
         if (wrap) {
             pop_context();
@@ -641,14 +626,9 @@ public:
                 self()->end_object();
             }
         } else {
-            static_assert(has_adl_save<T>::value || has_adl_serialize<T>::value,
-                "Type is not serializable: no save() method, serialize() method, property_mgr, "
-                "or ADL save/serialize function found. "
-                "Options: (1) Add a save(Archive&) member method, "
-                "(2) Add a serialize(Archive&) member method, "
-                "(3) Inherit from property_owner<T>, "
-                "(4) Provide free save(Archive&, const T&) or serialize(Archive&, T&) function, "
-                "(5) Mark the property as transient if it shouldn't be serialized.");
+            throw serialization_error(
+                "Type '" + std::string(typeid(T).name()) + "' is not serializable. "
+                "Add save/load, serialize, property_owner, or ADL functions — or mark the property transient.");
         }
     }
 
@@ -929,41 +909,22 @@ public:
     }
 
 private:
-    // Detection archive for SFINAE trait checking
-    // Must satisfy jai_archive concept so constrained methods (requires jai_archive<Archive>) are found
-    // Using this instead of Derived avoids CRTP completeness issues during instantiation
-    // Includes dummy operator() to allow SFINAE detection of serialize methods that call ar(...)
-    struct detection_archive_reader {
-        static constexpr bool is_jai_archive = true;
-        static constexpr bool is_text_format = false;
-
-        // Dummy operator() for SFINAE detection - accepts any arguments
-        template<typename... Args>
-        void operator()(Args&&...) {}
-
-        // Dummy serialize for SFINAE detection
-        template<typename... Args>
-        void serialize(Args&&...) {}
-
-        // Dummy get_user_context for load_and_construct detection
-        template<typename T>
-        T* get_user_context() const { return nullptr; }
-    };
-
-    // Helper traits for SFINAE
-    // Uses access::member_* to detect methods - works with protected methods that friend jai::serialization::access
+    // Helper traits for SFINAE — uses Derived (the concrete archive) instead of a stub type.
+    // These traits are only evaluated inside member function template enable_if/if-constexpr,
+    // which are instantiated at the call site where Derived is complete.
+    // Uses ::jai::access::member_* to detect protected methods via friendship.
 
     // Check for versioned load(Archive&, uint32_t) - for Cereal-compatible MV types
     template<typename T, typename = void>
     struct has_versioned_load_method : std::false_type {};
     template<typename T>
-    struct has_versioned_load_method<T, std::void_t<decltype(access::member_load(std::declval<detection_archive_reader&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
+    struct has_versioned_load_method<T, std::void_t<decltype(::jai::access::member_load(std::declval<Derived&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
 
     // Check for non-versioned load(Archive&) - for JaiScript-only types
     template<typename T, typename = void>
     struct has_simple_load_method : std::false_type {};
     template<typename T>
-    struct has_simple_load_method<T, std::void_t<decltype(access::member_load(std::declval<detection_archive_reader&>(), std::declval<T&>()))>> : std::true_type {};
+    struct has_simple_load_method<T, std::void_t<decltype(::jai::access::member_load(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
 
     // Combined: has either versioned or simple load method
     template<typename T>
@@ -973,13 +934,13 @@ private:
     template<typename T, typename = void>
     struct has_versioned_serialize_method : std::false_type {};
     template<typename T>
-    struct has_versioned_serialize_method<T, std::void_t<decltype(access::member_serialize(std::declval<detection_archive_reader&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
+    struct has_versioned_serialize_method<T, std::void_t<decltype(::jai::access::member_serialize(std::declval<Derived&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
 
     // Check for non-versioned serialize(Archive&) method
     template<typename T, typename = void>
     struct has_simple_serialize_method : std::false_type {};
     template<typename T>
-    struct has_simple_serialize_method<T, std::void_t<decltype(access::member_serialize(std::declval<detection_archive_reader&>(), std::declval<T&>()))>> : std::true_type {};
+    struct has_simple_serialize_method<T, std::void_t<decltype(::jai::access::member_serialize(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
 
     // Combined: has either versioned or simple serialize method
     template<typename T>
@@ -991,13 +952,13 @@ private:
     struct has_property_mgr<T, std::void_t<decltype(std::declval<T&>().property_mgr)>> : std::true_type {};
 
     // Check for static load_and_construct(Archive&, construct<T>&) method
-    // Uses access:: to detect private/protected methods that friend jai::serialization::access
+    // Uses access:: to detect private/protected methods that friend jai::access
     template<typename T, typename = void>
     struct has_load_and_construct : std::false_type {};
     template<typename T>
     struct has_load_and_construct<T, std::void_t<
-        decltype(access::template load_and_construct<T>(
-            std::declval<detection_archive_reader&>(),
+        decltype(::jai::access::load_and_construct(
+            std::declval<Derived&>(),
             std::declval<construct<T>&>()
         ))
     >> : std::true_type {};
@@ -1006,13 +967,13 @@ private:
     template<typename T, typename = void>
     struct has_adl_load : std::false_type {};
     template<typename T>
-    struct has_adl_load<T, std::void_t<decltype(load(std::declval<detection_archive_reader&>(), std::declval<T&>()))>> : std::true_type {};
+    struct has_adl_load<T, std::void_t<decltype(load(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
 
     // Check for ADL-findable serialize(Archive&, T&) function (works for both save and load)
     template<typename T, typename = void>
     struct has_adl_serialize : std::false_type {};
     template<typename T>
-    struct has_adl_serialize<T, std::void_t<decltype(serialize(std::declval<detection_archive_reader&>(), std::declval<T&>()))>> : std::true_type {};
+    struct has_adl_serialize<T, std::void_t<decltype(serialize(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
 
     // Helper to load variant alternatives by index
     template<typename Variant, std::size_t I = 0>
@@ -1039,9 +1000,9 @@ public:
     template<typename T, std::enable_if_t<has_load_method<T>::value, int> = 0>
     void operator()(T& obj) {
         if constexpr (has_versioned_load_method<T>::value) {
-            access::member_load(*self(), obj, 0);  // Call versioned load with version=0
+            ::jai::access::member_load(*self(), obj, 0);  // Call versioned load with version=0
         } else {
-            access::member_load(*self(), obj);     // Call simple load
+            ::jai::access::member_load(*self(), obj);     // Call simple load
         }
     }
 
@@ -1054,9 +1015,9 @@ public:
         has_serialize_method<T>::value, int> = 0>
     void operator()(T& obj) {
         if constexpr (has_versioned_serialize_method<T>::value) {
-            access::member_serialize(*self(), obj, 0);  // Call versioned serialize with version=0
+            ::jai::access::member_serialize(*self(), obj, 0);  // Call versioned serialize with version=0
         } else {
-            access::member_serialize(*self(), obj);     // Call simple serialize
+            ::jai::access::member_serialize(*self(), obj);     // Call simple serialize
         }
     }
 
@@ -1172,6 +1133,18 @@ public:
                 self()->end_array();
             }
         }
+        // Set-like containers (std::set, std::unordered_set, etc.) - stored as arrays
+        else if constexpr (is_set_like_v<T>) {
+            using elem_type = typename T::key_type;
+            size_t size = self()->begin_array();
+            value.clear();
+            for (size_t i = 0; i < size; ++i) {
+                elem_type elem{};
+                read_element(elem);
+                value.insert(std::move(elem));
+            }
+            self()->end_array();
+        }
         // std::pair
         else if constexpr (is_std_pair_v<T>) {
             self()->begin_array();
@@ -1188,7 +1161,9 @@ public:
                 value.reset();
                 return;
             }
-            self()->begin_object();
+            if (!self()->begin_object()) {
+                throw serialization_error("shared_ptr begin_object failed for " + std::string(typeid(elem_type).name()));
+            }
             uint32_t id{};
             self()->serialize("$id", id);
             if (self()->has_deserialized_shared(id)) {
@@ -1207,7 +1182,9 @@ public:
                         }
                         self()->begin_object();
                         any_archive_reader wrapper(*self());
-                        auto void_ptr = entry->load_fn(wrapper);
+                        // Pass id so load_fn registers the object eagerly (before its
+                        // properties load), enabling subtree back-references to resolve.
+                        auto void_ptr = entry->load_fn(wrapper, id);
                         value = std::static_pointer_cast<elem_type>(void_ptr);
                         self()->end_object();
                         self()->register_deserialized_shared(id, value);
@@ -1223,15 +1200,15 @@ public:
                         uint32_t version = 0;
                         self()->begin_object(type_name, version);
                         construct<elem_type> c(value);
-                        access::template load_and_construct<elem_type>(*self(), c);
+                        c.set_on_construct([&]() { self()->register_deserialized_shared(id, value); });
+                        ::jai::access::load_and_construct(*self(), c);
                         self()->end_object();
-                        self()->register_deserialized_shared(id, value);
                     } else if constexpr (std::is_default_constructible_v<elem_type>) {
                         value = std::make_shared<elem_type>();
-                        self()->serialize("$val", *value);
                         self()->register_deserialized_shared(id, value);
+                        self()->serialize("$val", *value);
                     } else {
-                        throw serialization_error("Cannot deserialize shared_ptr<T>: type is not default constructible and has no load_and_construct");
+                        throw serialization_error("Cannot deserialize shared_ptr<" + std::string(typeid(elem_type).name()) + ">: type is not default constructible and has no load_and_construct");
                     }
                 }
             } else if (self()->has_property("$val")) {
@@ -1243,15 +1220,15 @@ public:
                     uint32_t version = 0;
                     self()->begin_object(type_name, version);
                     construct<elem_type> c(value);
-                    access::template load_and_construct<elem_type>(*self(), c);
+                    c.set_on_construct([&]() { self()->register_deserialized_shared(id, value); });
+                    ::jai::access::load_and_construct(*self(), c);
                     self()->end_object();
-                    self()->register_deserialized_shared(id, value);
                 } else if constexpr (std::is_default_constructible_v<elem_type>) {
                     value = std::make_shared<elem_type>();
-                    self()->serialize("$val", *value);
                     self()->register_deserialized_shared(id, value);
+                    self()->serialize("$val", *value);
                 } else {
-                    throw serialization_error("Cannot deserialize shared_ptr<T>: type is not default constructible and has no load_and_construct");
+                    throw serialization_error("Cannot deserialize shared_ptr<" + std::string(typeid(elem_type).name()) + ">: type is not default constructible and has no load_and_construct");
                 }
             }
             self()->end_object();
@@ -1340,14 +1317,9 @@ public:
             load(*self(), value);
             self()->end_object();
         } else {
-            static_assert(has_adl_load<T>::value || has_adl_serialize<T>::value,
-                "Type is not deserializable: no load() method, serialize() method, property_mgr, "
-                "or ADL load/serialize function found. "
-                "Options: (1) Add a load(Archive&) member method, "
-                "(2) Add a serialize(Archive&) member method, "
-                "(3) Inherit from property_owner<T>, "
-                "(4) Provide free load(Archive&, T&) or serialize(Archive&, T&) function, "
-                "(5) Mark the property as transient if it shouldn't be serialized.");
+            throw serialization_error(
+                "Type '" + std::string(typeid(T).name()) + "' is not deserializable. "
+                "Add save/load, serialize, property_owner, or ADL functions — or mark the property transient.");
         }
     }
 
@@ -1426,33 +1398,31 @@ public:
     template<typename T>
     void read_custom(T& value) {
         if constexpr (has_versioned_load_method<T>::value) {
-            // Versioned load for Cereal-compatible types
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
-            access::member_load(*self(), value, version);
+            ::jai::access::member_load(*self(), value, version);
             self()->end_object();
         }
         else if constexpr (has_simple_load_method<T>::value) {
-            // Simple load for JaiScript-only types
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
-            access::member_load(*self(), value);
+            ::jai::access::member_load(*self(), value);
             self()->end_object();
         }
         else if constexpr (has_versioned_serialize_method<T>::value) {
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
-            access::member_serialize(*self(), value, version);
+            ::jai::access::member_serialize(*self(), value, version);
             self()->end_object();
         }
         else if constexpr (has_simple_serialize_method<T>::value) {
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
-            access::member_serialize(*self(), value);
+            ::jai::access::member_serialize(*self(), value);
             self()->end_object();
         }
         else if constexpr (has_property_mgr<T>::value) {

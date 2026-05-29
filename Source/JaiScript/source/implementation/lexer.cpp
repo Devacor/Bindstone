@@ -62,16 +62,20 @@ lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std
 
 std::vector<token> lexer::tokenize() {
     std::vector<token> tokens;
-    while (!is_at_end()) {
+    // Loop until next_token() actually produces EOF, rather than gating on
+    // is_at_end(). A template-string literal (`...`) desugars into a queue of
+    // pending tokens; scan_template_string() consumes the source up to and
+    // including the closing backtick, so if the literal is the LAST content in
+    // the source, is_at_end() becomes true after the first pending token is
+    // returned. Gating the loop on !is_at_end() would then drop the remaining
+    // pending tokens. next_token() drains the pending queue first and only
+    // returns EOF once it is empty AND the source is exhausted.
+    while (true) {
         token token = next_token();
         tokens.push_back(token);
         if (token.type == token_type::eof) {
             break;
         }
-    }
-    // Always ensure we have an EOF token at the end
-    if (tokens.empty() || tokens.back().type != token_type::eof) {
-        tokens.push_back(make_token(token_type::eof));
     }
     return tokens;
 }
@@ -444,7 +448,14 @@ token lexer::scan_number() {
         } else if (is_binary) {
             tok.int_value = std::stoll(lexeme_str.substr(2), nullptr, 2);
         } else if (lexeme_str.size() > 1 && lexeme_str[0] == '0' && is_digit(lexeme_str[1])) {
-            tok.int_value = std::stoll(lexeme_str, nullptr, 8);
+            // C-style octal (leading 0). std::stoll(base 8) stops at the first
+            // non-octal digit WITHOUT erroring (e.g. "08" -> 0, "019" -> 1), so
+            // verify the whole literal was consumed; otherwise it is malformed.
+            size_t consumed = 0;
+            tok.int_value = std::stoll(lexeme_str, &consumed, 8);
+            if (consumed != lexeme_str.size()) {
+                return error_token("Invalid octal literal (digits 8/9 not allowed): '" + lexeme_str + "'");
+            }
         } else {
             tok.int_value = std::stoll(lexeme_str);
         }

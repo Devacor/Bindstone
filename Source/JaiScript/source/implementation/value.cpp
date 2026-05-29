@@ -683,26 +683,46 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
             return std::strong_ordering::equal; // All nulls are equal
         case script_value_type::jai_int_type:
             return unchecked_as_int() <=> other.unchecked_as_int();
-        case script_value_type::jai_float_type: {
-            auto cmp = unchecked_as_float() <=> other.unchecked_as_float();
-            if (cmp == std::partial_ordering::unordered)
-                return std::strong_ordering::less; // NaN sorts before all values deterministically
-            else if (cmp < 0)
-                return std::strong_ordering::less;
-            else if (cmp > 0)
-                return std::strong_ordering::greater;
-            else
-                return std::strong_ordering::equal;
-        }
+        case script_value_type::jai_float_type:
+            // Use a TOTAL order over doubles (IEEE-754 totalOrder). The previous
+            // code mapped every NaN comparison to `less`, which made NaN < NaN
+            // true — an irreflexivity violation that is undefined behavior when a
+            // float (or NaN) is used as a std::map key. std::strong_order makes
+            // all NaNs compare equal to each other and orders them deterministically.
+            return std::strong_order(unchecked_as_float(), other.unchecked_as_float());
         case script_value_type::jai_string_type:
             return unchecked_as_string() <=> other.unchecked_as_string();
         case script_value_type::jai_char_type:
             return unchecked_as_char() <=> other.unchecked_as_char();
         case script_value_type::jai_bool_type:
             return unchecked_as_bool() <=> other.unchecked_as_bool();
-        default:
-            // For complex types, compare by address for now
-            return &storage_ <=> &other.storage_;
+        default: {
+            // Complex types (array/map/object/function/shared_ptr/reference): order
+            // by the address of the HELD object, which is a STABLE identity for a
+            // given value. The previous code compared &storage_ — the address of the
+            // operand's own member — which is a transient property of the comparison,
+            // not of the value, so the ordering of a logical key changed between
+            // operations and violated std::map's strict-weak-ordering invariant
+            // (corrupting maps with complex-typed keys). Use std::less for a
+            // guaranteed total order over pointers.
+            auto identity = [](const script_value& v) -> const void* {
+                switch (v.raw_storage_index()) {
+                    case TYPEID_ARRAY:      return std::get_if<TYPEID_ARRAY>(&v.storage_)->get();
+                    case TYPEID_MAP:        return std::get_if<TYPEID_MAP>(&v.storage_)->get();
+                    case TYPEID_OBJECT:     return std::get_if<TYPEID_OBJECT>(&v.storage_)->get();
+                    case TYPEID_FUNCTION:   return std::get_if<TYPEID_FUNCTION>(&v.storage_)->get();
+                    case TYPEID_SHARED_PTR: return std::get_if<TYPEID_SHARED_PTR>(&v.storage_)->get();
+                    case TYPEID_REFERENCE:  return std::get_if<TYPEID_REFERENCE>(&v.storage_)->get();
+                    default:                return nullptr;  // invalid/weak_ptr: treated as one equivalence class
+                }
+            };
+            const void* lp = identity(*this);
+            const void* rp = identity(other);
+            std::less<const void*> ptr_less;
+            if (ptr_less(lp, rp)) return std::strong_ordering::less;
+            if (ptr_less(rp, lp)) return std::strong_ordering::greater;
+            return std::strong_ordering::equal;
+        }
     }
 }
 

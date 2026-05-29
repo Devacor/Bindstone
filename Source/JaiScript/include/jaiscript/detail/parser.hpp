@@ -123,9 +123,15 @@ namespace jai {
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);
         
-        // Recursion depth tracking to prevent stack overflow on deeply nested input
+        // Recursion depth tracking to prevent stack overflow on deeply nested input.
+        // NOTE: this must be low enough that REACHING the limit does not itself
+        // overflow the native stack (each recursive-descent level consumes a real
+        // C++ frame). 1024 was too high: on a 1 MB stack (Windows default) with
+        // Debug-sized frames, ~1024-deep unary/expression recursion overflowed the
+        // stack BEFORE the guard could fire. 250 leaves comfortable headroom while
+        // still allowing any realistic expression nesting depth.
         int parse_depth_ = 0;
-        static constexpr int MAX_PARSE_DEPTH = 1024;
+        static constexpr int MAX_PARSE_DEPTH = 250;
 
         struct depth_guard {
             int& depth_;

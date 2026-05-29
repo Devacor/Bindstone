@@ -18,7 +18,13 @@ namespace serialization {
 class polymorphic_registry {
 public:
     using save_fn_t = std::function<void(any_archive_writer&, const void*)>;
-    using load_fn_t = std::function<std::shared_ptr<void>(any_archive_reader&)>;
+    // The uint32_t `id` is the shared-pointer id the object will be registered
+    // under. The load_fn registers the object EAGERLY (immediately after
+    // construction, before its own properties load) so that back-references
+    // within the object's subtree — e.g. a child's weak_ptr to its parent, or
+    // a Component's componentOwner pointing at the Node currently being loaded —
+    // resolve correctly during load.
+    using load_fn_t = std::function<std::shared_ptr<void>(any_archive_reader&, std::uint32_t id)>;
 
     struct type_entry {
         std::string name;
@@ -84,9 +90,18 @@ public:
             auto& obj = *static_cast<const T*>(ptr);
             ar.dispatch([&](auto& concrete_ar) { s(concrete_ar, obj); });
         };
-        entry.load_fn = [l = std::forward<LoadFn>(load)](any_archive_reader& ar) -> std::shared_ptr<void> {
-            return ar.dispatch([&l](auto& concrete_ar) -> std::shared_ptr<void> {
-                return std::static_pointer_cast<void>(l(concrete_ar));
+        entry.load_fn = [l = std::forward<LoadFn>(load)](any_archive_reader& ar, std::uint32_t id) -> std::shared_ptr<void> {
+            return ar.dispatch([&l, id](auto& concrete_ar) -> std::shared_ptr<void> {
+                // Manual load lambdas own construction, so eager registration is
+                // best-effort: register as soon as the object exists so that
+                // anything loaded afterward can reference it. (A manual type that
+                // needs to resolve references to *itself* mid-construction must
+                // register the shared_ptr itself.)
+                auto ptr = l(concrete_ar);
+                if (ptr) {
+                    concrete_ar.register_deserialized_shared(id, ptr);
+                }
+                return std::static_pointer_cast<void>(ptr);
             });
         };
         instance().register_entry(std::type_index(typeid(T)), std::move(entry));
@@ -125,24 +140,35 @@ private:
     struct has_jai_load_and_construct : std::false_type {};
     template<typename T>
     struct has_jai_load_and_construct<T, std::void_t<decltype(
-        access::template load_and_construct<T>(std::declval<detection_archive&>(), std::declval<construct<T>&>())
+        ::jai::access::load_and_construct(std::declval<detection_archive&>(), std::declval<construct<T>&>())
     )>> : std::true_type {};
 
     template<typename T>
     static load_fn_t make_load_fn() {
         if constexpr (has_jai_load_and_construct<T>::value) {
-            return [](any_archive_reader& ar) -> std::shared_ptr<void> {
-                return ar.dispatch([](auto& concrete_ar) -> std::shared_ptr<void> {
+            return [](any_archive_reader& ar, std::uint32_t id) -> std::shared_ptr<void> {
+                return ar.dispatch([id](auto& concrete_ar) -> std::shared_ptr<void> {
                     std::shared_ptr<T> ptr;
                     construct<T> c(ptr);
-                    access::template load_and_construct<T>(concrete_ar, c);
+                    // Register EAGERLY the moment the object is constructed, before
+                    // load_and_construct loads its properties. This mirrors the
+                    // non-polymorphic shared_ptr load path (archive_impl.hpp), which
+                    // sets the same on_construct hook, and lets back-references
+                    // inside this object's subtree resolve during load.
+                    c.set_on_construct([&ptr, id, &concrete_ar]() {
+                        concrete_ar.register_deserialized_shared(id, ptr);
+                    });
+                    ::jai::access::load_and_construct(concrete_ar, c);
                     return std::static_pointer_cast<void>(ptr);
                 });
             };
         } else if constexpr (std::is_default_constructible_v<T>) {
-            return [](any_archive_reader& ar) -> std::shared_ptr<void> {
-                return ar.dispatch([](auto& concrete_ar) -> std::shared_ptr<void> {
+            return [](any_archive_reader& ar, std::uint32_t id) -> std::shared_ptr<void> {
+                return ar.dispatch([id](auto& concrete_ar) -> std::shared_ptr<void> {
                     auto ptr = std::make_shared<T>();
+                    // Register before loading properties so subtree back-references
+                    // (weak_ptr / shared_ptr pointing back into this object) resolve.
+                    concrete_ar.register_deserialized_shared(id, ptr);
                     concrete_ar(*ptr);
                     if constexpr (requires { ptr->initialize(); }) {
                         ptr->initialize();

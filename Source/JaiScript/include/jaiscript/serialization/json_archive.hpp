@@ -6,6 +6,16 @@
 #include <sstream>
 #include <iomanip>
 #include <cmath>
+#include <charconv>     // std::to_chars for shortest round-trippable float output
+#include <string_view>
+
+// Maximum nesting depth for JSON TEXT parsing (from_json). Each level recurses a
+// couple of native stack frames, so this is intentionally well below
+// JAI_MAX_SERIALIZATION_DEPTH (used for in-memory traversal) to guarantee the
+// guard fires before deeply-nested / adversarial input exhausts the call stack.
+#ifndef JAI_MAX_JSON_PARSE_DEPTH
+#define JAI_MAX_JSON_PARSE_DEPTH 128
+#endif
 
 namespace jai {
 namespace serialization {
@@ -398,9 +408,15 @@ private:
             case script_value_type::jai_float_type: {
                 double d = val.as_float();
                 if (std::isfinite(d)) {
-                    oss << std::setprecision(15) << d;
-                    std::string str = oss.str();
-                    if (str.find('.') == std::string::npos && str.find('e') == std::string::npos) {
+                    // Shortest exact round-trip representation (setprecision(15) loses
+                    // the trailing bits of a double, which has up to 17 sig digits).
+                    char buf[64];
+                    auto res = std::to_chars(buf, buf + sizeof(buf), d);
+                    std::string_view sv(buf, static_cast<size_t>(res.ptr - buf));
+                    oss << sv;
+                    if (sv.find('.') == std::string_view::npos &&
+                        sv.find('e') == std::string_view::npos &&
+                        sv.find('E') == std::string_view::npos) {
                         oss << ".0";
                     }
                 } else {
@@ -500,7 +516,18 @@ private:
             } else if (std::isinf(value)) {
                 oss_ << (value > 0 ? "1e999" : "-1e999");
             } else {
-                oss_ << value;
+                // Shortest representation that round-trips exactly (default ostream
+                // precision is only 6 significant digits, which silently loses bits).
+                char buf[64];
+                auto res = std::to_chars(buf, buf + sizeof(buf), value);
+                std::string_view sv(buf, static_cast<size_t>(res.ptr - buf));
+                oss_ << sv;
+                // Keep it a JSON "float" on round-trip (e.g. 3 -> 3.0, not int 3).
+                if (sv.find('.') == std::string_view::npos &&
+                    sv.find('e') == std::string_view::npos &&
+                    sv.find('E') == std::string_view::npos) {
+                    oss_ << ".0";
+                }
             }
         } else {
             oss_ << value;
@@ -547,16 +574,8 @@ public:
     std::string read_string() { return read_value().as<script_string>(); }
 
     bool peek_null() {
-        const script_value* value_to_check = nullptr;
-        if (current_property_value_) {
-            value_to_check = current_property_value_;
-        } else if (!array_stack_.empty()) {
-            auto& state = array_stack_.top();
-            if (state.index < state.array.size()) {
-                value_to_check = &state.array[state.index];
-            }
-        }
-        return value_to_check && value_to_check->is_null();
+        const script_value* val = next_value(/*peek_only=*/true);
+        return val && val->is_null();
     }
 
     void read_null() {
@@ -586,38 +605,18 @@ public:
     }
 
     bool begin_object(std::string& type_name, uint32_t& version) {
-        // Determine which value to check
-        const script_value* value_to_check = nullptr;
-
-        if (current_property_value_) {
-            // Use value from read_property_name()
-            value_to_check = current_property_value_;
-        } else if (!array_stack_.empty()) {
-            // We're inside an array - read the next element
-            auto& arr_state = array_stack_.top();
-            if (arr_state.index < arr_state.array.size()) {
-                temp_value_ = arr_state.array[arr_state.index++];
-                value_to_check = &temp_value_;
-            } else {
-                return false;
-            }
-        } else {
-            value_to_check = current_value_;
-        }
-
+        const script_value* value_to_check = next_value();
         if (!value_to_check || !value_to_check->is_map()) {
             return false;
         }
 
         const auto& map = value_to_check->as_map();
 
-        // Get engine reference for creating script_values
         auto eng = engine_ref_;
         if (!eng) {
             throw serialization_error("Engine reference expired during JSON deserialization");
         }
 
-        // Read _type_ field
         auto type_it = map.find(script_value("_type_", eng));
         if (type_it != map.end() && type_it->second.is_string()) {
             type_name = type_it->second.as_string();
@@ -625,22 +624,15 @@ public:
             type_name = "";
         }
 
-        // Read _version_ field (default to 1)
         auto version_it = map.find(script_value("_version_", eng));
         if (version_it != map.end() && version_it->second.is_int()) {
             version = static_cast<uint32_t>(version_it->second.as_int());
         } else {
             version = 1;
         }
-        
+
         version_ = version;
-        
-        // Set up iteration state
         object_stack_.push(ObjectState{map, map.begin()});
-
-        // Clear current_property_value_ after using it (consumed)
-        current_property_value_ = nullptr;
-
         return true;
     }
 
@@ -651,35 +643,13 @@ public:
     }
 
     size_t begin_array() {
-        // Determine which value to check
-        const script_value* value_to_check = nullptr;
-
-        if (current_property_value_) {
-            // Use value from read_property_name()
-            value_to_check = current_property_value_;
-        } else if (!array_stack_.empty()) {
-            // We're inside an array - read the next element
-            auto& arr_state = array_stack_.top();
-            if (arr_state.index < arr_state.array.size()) {
-                temp_value_ = arr_state.array[arr_state.index++];
-                value_to_check = &temp_value_;
-            } else {
-                return 0;
-            }
-        } else {
-            value_to_check = current_value_;
-        }
-
+        const script_value* value_to_check = next_value();
         if (!value_to_check || !value_to_check->is_array()) {
             return 0;
         }
 
         const auto& arr = value_to_check->as_array();
         array_stack_.push(ArrayState{arr, 0});
-
-        // Clear current_property_value_ after using it (consumed)
-        current_property_value_ = nullptr;
-
         return arr.size();
     }
 
@@ -702,6 +672,7 @@ public:
             if (prop_name != "_type_" && prop_name != "_version_") {
                 name = prop_name;
                 current_property_value_ = &obj_state.current->second;
+                cpv_depth_ = object_stack_.size();
                 ++obj_state.current;
                 return true;
             }
@@ -713,31 +684,13 @@ public:
 
     // Map deserialization - JSON reads from native object format
     size_t begin_map() {
-        // Use same logic as begin_object but without type/version reading
-        const script_value* value_to_check = nullptr;
-
-        if (current_property_value_) {
-            value_to_check = current_property_value_;
-        } else if (!array_stack_.empty()) {
-            auto& arr_state = array_stack_.top();
-            if (arr_state.index < arr_state.array.size()) {
-                temp_value_ = arr_state.array[arr_state.index++];
-                value_to_check = &temp_value_;
-            } else {
-                return 0;
-            }
-        } else {
-            value_to_check = current_value_;
-        }
-
+        const script_value* value_to_check = next_value();
         if (!value_to_check || !value_to_check->is_map()) {
             return 0;
         }
 
         const auto& map = value_to_check->as_map();
         object_stack_.push(ObjectState{map, map.begin()});
-        current_property_value_ = nullptr;
-
         return map.size();
     }
 
@@ -748,7 +701,6 @@ public:
     }
 
     bool read_map_key(std::string& key) {
-        // Same as read_property_name but without filtering metadata
         if (object_stack_.empty()) {
             return false;
         }
@@ -758,6 +710,7 @@ public:
         if (obj_state.current != obj_state.map.end()) {
             key = obj_state.current->first.as_string();
             current_property_value_ = &obj_state.current->second;
+            cpv_depth_ = object_stack_.size();
             ++obj_state.current;
             return true;
         }
@@ -766,6 +719,8 @@ public:
     }
 
     void clear_property_value() { current_property_value_ = nullptr; }
+    bool has_current_property_value() const { return current_property_value_ != nullptr; }
+    bool in_array() const { return !array_stack_.empty(); }
 
     bool has_property(const std::string& name) {
         if (object_stack_.empty()) {
@@ -790,7 +745,6 @@ public:
             return false;
         }
 
-        // Get engine reference for creating script_values
         auto eng = engine_ref_;
         if (!eng) {
             throw serialization_error("Engine reference expired during JSON deserialization");
@@ -798,53 +752,38 @@ public:
 
         auto& obj_state = object_stack_.top();
 
-        // Fast path: check if current iterator matches (skip metadata)
         while (obj_state.current != obj_state.map.end()) {
             const std::string& prop_name = obj_state.current->first.as_string();
             if (prop_name == "_type_" || prop_name == "_version_") {
                 ++obj_state.current;
                 continue;
             }
-            // Check if this is the property we want
             if (prop_name == name) {
                 current_property_value_ = &obj_state.current->second;
+                cpv_depth_ = object_stack_.size();
                 ++obj_state.current;
                 return true;
             }
-            // Not a match - properties are out of order, use slow path
             break;
         }
 
-        // Slow path: lookup by name in map
         auto it = obj_state.map.find(script_value(name, eng));
         if (it == obj_state.map.end()) {
             return false;
         }
 
         current_property_value_ = &it->second;
+        cpv_depth_ = object_stack_.size();
         return true;
     }
 
     script_value read_value() {
-        // Track depth - throws on overflow (hard failure, no partial data)
         depth_guard guard(current_depth_);
 
-        script_value result;
+        const script_value* val = next_value();
+        if (!val) val = current_value_;
+        script_value result = val ? *val : script_value();
 
-        if (current_property_value_) {
-            result = *current_property_value_;
-            current_property_value_ = nullptr;
-        } else if (!array_stack_.empty()) {
-            auto& arr_state = array_stack_.top();
-            if (arr_state.index < arr_state.array.size()) {
-                result = arr_state.array[arr_state.index++];
-            } else {
-                result = *current_value_;
-            }
-        } else {
-            result = *current_value_;
-        }
-        
         // Check for shared_ptr reconstruction
         if (result.is_map()) {
             const auto& map = result.as_map();
@@ -921,8 +860,36 @@ private:
     script_value root_value_;
     const script_value* current_value_;
     const script_value* current_property_value_ = nullptr;
-    script_value temp_value_;  // Temporary storage for array elements
+    size_t cpv_depth_ = 0;
+    script_value temp_value_;
     std::vector<std::string> path_stack_;
+
+    // Central value resolution — every value-consuming method delegates here.
+    // cpv is only valid at the depth where it was set; stale cpv is discarded.
+    // peek_only=true examines without consuming (for peek_null).
+    const script_value* next_value(bool peek_only = false) {
+        bool cpv_valid = current_property_value_ && (cpv_depth_ == object_stack_.size());
+
+        if (cpv_valid) {
+            const script_value* val = current_property_value_;
+            if (!peek_only) current_property_value_ = nullptr;
+            return val;
+        }
+
+        current_property_value_ = nullptr;
+
+        if (!array_stack_.empty()) {
+            auto& arr = array_stack_.top();
+            if (arr.index < arr.array.size()) {
+                if (peek_only) return &arr.array[arr.index];
+                temp_value_ = arr.array[arr.index++];
+                return &temp_value_;
+            }
+            return nullptr;
+        }
+
+        return current_value_;
+    }
 
     // JSON parsing methods
     script_value parse_json() {
@@ -931,6 +898,15 @@ private:
     }
     
     script_value parse_value() {
+        // Bound recursion: nested arrays/objects ([[[...]]] or {"a":{"a":...}})
+        // recurse per nesting level, and without a limit deeply-nested (e.g.
+        // adversarial) input overflows the native stack — an uncatchable crash.
+        depth_guard guard(current_depth_);  // also enforces JAI_MAX_SERIALIZATION_DEPTH
+        if (current_depth_ > JAI_MAX_JSON_PARSE_DEPTH) {
+            throw serialization_error(
+                "Maximum JSON nesting depth (" + std::to_string(JAI_MAX_JSON_PARSE_DEPTH) + ") exceeded");
+        }
+
         skip_whitespace();
 
         if (pos_ >= json_.length()) {

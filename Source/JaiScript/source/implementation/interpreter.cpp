@@ -2,6 +2,7 @@
 #include <jaiscript/stdlib/containers.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/class_registry.hpp>
+#include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <stdexcept>
 #include <sstream>
 #include <cmath>
@@ -13,6 +14,14 @@
 #include <fstream>
 
 namespace jai {
+
+namespace {
+    // Local helper: error result for an overflowing integer op in the inlined
+    // fast paths below (mirrors interpreter_dispatch.cpp's handlers).
+    inline checked_result<void> int_overflow_v(const char* msg) {
+        return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
+    }
+}
 
 // Helper function to check if a value is compatible with a target element type
 // Returns: true if compatible, false otherwise
@@ -1259,8 +1268,10 @@ void interpreter::init_builtin_methods() {
             try {
                 size_t pos = 0;
                 long long val = std::stoll(str, &pos, base);
-                // Check if entire string was consumed (ignoring trailing whitespace)
-                while (pos < str.size() && std::isspace(str[pos])) ++pos;
+                // Check if entire string was consumed (ignoring trailing whitespace).
+                // isspace requires an unsigned-char value (or EOF); a negative char
+                // (bytes >= 0x80 in UTF-8) is undefined behavior.
+                while (pos < str.size() && std::isspace(static_cast<unsigned char>(str[pos]))) ++pos;
                 if (pos != str.size()) {
                     return default_val;
                 }
@@ -1285,8 +1296,9 @@ void interpreter::init_builtin_methods() {
             try {
                 size_t pos = 0;
                 double val = std::stod(str, &pos);
-                // Check if entire string was consumed (ignoring trailing whitespace)
-                while (pos < str.size() && std::isspace(str[pos])) ++pos;
+                // Check if entire string was consumed (ignoring trailing whitespace).
+                // isspace requires an unsigned-char value; a negative char is UB.
+                while (pos < str.size() && std::isspace(static_cast<unsigned char>(str[pos]))) ++pos;
                 if (pos != str.size()) {
                     return default_val;
                 }
@@ -2648,7 +2660,30 @@ script_value interpreter::create_bound_method(const script_value& this_obj, cons
 
         // Call the method with 'this' included
         const auto& method_func = method.as_function();
-        return method_func(method_args);
+        auto result = method_func(method_args);
+
+        // If the method returned a NON-OWNING reference into its receiver (the
+        // classic chaining idiom `Counter& increment() { ...; return *this; }`
+        // produces a cpp-bound T& whose object_holder owns nothing), pin the
+        // receiver's underlying object onto the result so it survives even when
+        // the receiver was a temporary, e.g. `Counter().increment().add(5)`.
+        // Without this, the temporary receiver is freed when this bound-method
+        // closure is destroyed, leaving the returned reference dangling
+        // (a use-after-free that Release builds happened to mask).
+        if (result && this_obj.is_object()) {
+            script_value& rv = result.value();
+            if (rv.is_non_owning_object()) {
+                auto rv_holder = rv.get_object_holder();
+                auto recv_holder = this_obj.get_object_holder();
+                if (rv_holder && recv_holder) {
+                    // Prefer the receiver's owning data; if the receiver is itself a
+                    // non-owning link in the chain, propagate its existing anchor.
+                    rv_holder->keep_alive = recv_holder->data ? recv_holder->data
+                                                              : recv_holder->keep_alive;
+                }
+            }
+        }
+        return result;
     }, eng);
 }
 
@@ -3415,25 +3450,25 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 						switch (expr->op.type) {
 						case token_type::plus:
-							push_value(make_int_fast(leftInt + rightInt));
+							{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::minus:
-							push_value(make_int_fast(leftInt - rightInt));
+							{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::star:
-							push_value(make_int_fast(leftInt * rightInt));
+							{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::slash:
 							if (rightInt == 0) {
 								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
 							}
-							push_value(make_int_fast(leftInt / rightInt));
+							{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::percent:
 							if (rightInt == 0) {
 								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 							}
-							push_value(make_int_fast(leftInt % rightInt));
+							push_value(make_int_fast(ints::mod(leftInt, rightInt)));
 							return {};
 						case token_type::less:
 							push_value(make_bool_fast(leftInt < rightInt));
@@ -3563,21 +3598,21 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							push_value(make_bool_fast(leftInt != rightInt));
 							return {};
 						case token_type::plus:
-							push_value(make_int_fast(leftInt + rightInt));
+							{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::minus:
-							push_value(make_int_fast(leftInt - rightInt));
+							{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::star:
-							push_value(make_int_fast(leftInt * rightInt));
+							{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::slash:
 							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-							push_value(make_int_fast(leftInt / rightInt));
+							{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::percent:
 							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-							push_value(make_int_fast(leftInt % rightInt));
+							push_value(make_int_fast(ints::mod(leftInt, rightInt)));
 							return {};
 						default:
 							break;
@@ -3666,21 +3701,21 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							push_value(make_bool_fast(leftInt != rightInt));
 							return {};
 						case token_type::plus:
-							push_value(make_int_fast(leftInt + rightInt));
+							{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::minus:
-							push_value(make_int_fast(leftInt - rightInt));
+							{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::star:
-							push_value(make_int_fast(leftInt * rightInt));
+							{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::slash:
 							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-							push_value(make_int_fast(leftInt / rightInt));
+							{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
 							return {};
 						case token_type::percent:
 							if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-							push_value(make_int_fast(leftInt % rightInt));
+							push_value(make_int_fast(ints::mod(leftInt, rightInt)));
 							return {};
 						default:
 							break;
@@ -3725,6 +3760,12 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             return {};
         }
     }
+
+    // Capture whether THIS binary expression is the outermost assignment-target
+    // subscript, then clear the flag so any nested subscripts evaluated while
+    // computing the operands below are treated as reads (no map auto-insert).
+    const bool want_lvalue_write = lvalue_target_context_;
+    lvalue_target_context_ = false;
 
     // Evaluate operands once and use them throughout (or use pre-fetched values)
     std::optional<script_value> left_raw_opt, left_opt, right_opt;
@@ -3841,8 +3882,9 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                                 (expr->left->get_type() == node_type::binary_expr &&
                                  static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
 
-                if (is_lvalue) {
-                    // This is an lvalue expression, return a reference to allow modification
+                if (is_lvalue && want_lvalue_write) {
+                    // Assignment target (m[k] = v): auto-insert a slot so the
+                    // assignment has somewhere to write through.
                     script_value& value_ref = map[right];
 
                     // If this created a new entry with default constructor, it has invalid engine reference
@@ -3860,6 +3902,24 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
                     script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_, value_type);
                     push_value(ref_value);
+                } else if (is_lvalue) {
+                    // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
+                    // of m[k][i] / m[k].field): return a reference to the EXISTING
+                    // entry so nested in-place mutation still works, but NEVER
+                    // insert a missing key — reading must not grow the map.
+                    auto it = map.find(right);
+                    if (it != map.end()) {
+                        script_value& value_ref = const_cast<script_value&>(it->second);
+                        if (!value_ref.has_valid_engine()) {
+                            value_ref.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
+                        }
+                        auto map_type_info = left.get_type_info();
+                        type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
+                        push_value(script_value::make_reference(&value_ref, environment_, engine_, value_type));
+                    } else {
+                        // Missing key on a read: yield null WITHOUT inserting.
+                        push_value(script_value(std::monostate{}, engine_));
+                    }
                 } else {
                     // This is a true temporary (e.g., function return), read-only access
                     auto it = map.find(right);
@@ -3981,7 +4041,13 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     switch (expr->op.type) {
         case token_type::minus: {
             if (oi == script_value::TYPEID_INT) {
-                push_value(make_value(-operand.unchecked_as_int()));
+                // -INT64_MIN is undefined behavior; ints::try_neg applies the overflow
+                // policy (raise when checked, wrap to INT64_MIN otherwise).
+                script_int neg;
+                if (!ints::try_neg(operand.unchecked_as_int(), neg)) {
+                    return int_overflow_v("Integer overflow in unary '-'");
+                }
+                push_value(make_value(neg));
             } else if (oi == script_value::TYPEID_FLOAT) {
                 push_value(make_value(-operand.unchecked_as_float()));
             } else {
@@ -4399,7 +4465,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 switch (expr->op.type) {
                     case token_type::plus_equal:
                         if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                            resultValue = make_value(currentValue.unchecked_as_int() + rightValue.unchecked_as_int());
+                            { script_int rr; if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='"); resultValue = make_value(rr); }
                         } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
                                    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
                             script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
@@ -4413,7 +4479,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         break;
                     case token_type::minus_equal:
                         if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                            resultValue = make_value(currentValue.unchecked_as_int() - rightValue.unchecked_as_int());
+                            { script_int rr; if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='"); resultValue = make_value(rr); }
                         } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
                                    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
                             script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
@@ -4425,7 +4491,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         break;
                     case token_type::star_equal:
                         if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                            resultValue = make_value(currentValue.unchecked_as_int() * rightValue.unchecked_as_int());
+                            { script_int rr; if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='"); resultValue = make_value(rr); }
                         } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
                                    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
                             script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
@@ -4510,7 +4576,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             switch (expr->op.type) {
                 case token_type::plus_equal: {
                     if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                        resultValue = make_value(currentValue.unchecked_as_int() + rightValue.unchecked_as_int());
+                        { script_int rr; if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='"); resultValue = make_value(rr); }
                     } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
                                (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
                         script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
@@ -4526,7 +4592,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
                 case token_type::minus_equal: {
                     if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                        resultValue = make_value(currentValue.unchecked_as_int() - rightValue.unchecked_as_int());
+                        { script_int rr; if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='"); resultValue = make_value(rr); }
                     } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
                                (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
                         script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
@@ -4540,7 +4606,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
                 case token_type::star_equal: {
                     if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                        resultValue = make_value(currentValue.unchecked_as_int() * rightValue.unchecked_as_int());
+                        { script_int rr; if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='"); resultValue = make_value(rr); }
                     } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
                                (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
                         script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
@@ -5253,8 +5319,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             auto* binaryExpr = static_cast<binary_expr*>(expr->target.get());
             if (binaryExpr->op.type == token_type::left_bracket) {
                 // Evaluate the entire target expression (e.g., nested["nums"][1])
-                // This should return a reference if it's a valid lvalue
-                JAISCRIPT_TRY(dispatch_expr(expr->target.get()));
+                // This should return a reference if it's a valid lvalue.
+                // Mark this as an assignment-target subscript so a map key is
+                // auto-inserted (visit_binary clears the flag for nested reads).
+                lvalue_target_context_ = true;
+                auto target_eval = dispatch_expr(expr->target.get());
+                lvalue_target_context_ = false;
+                JAISCRIPT_TRY(target_eval);
                 script_value target_ref = pop_value();
                 
                 // Check if we got a reference
@@ -7831,6 +7902,14 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         auto result = dispatch_stmt(stmt->body.get());
         if (!result) return result;
 
+        // A script `throw` sets is_unwinding_ and the body short-circuits
+        // without advancing any loop state. Stop the loop so the exception can
+        // propagate; otherwise we re-evaluate the condition forever (condition
+        // evaluation no-ops while unwinding) and hang.
+        if (is_unwinding_) {
+            break;
+        }
+
         // Check for control flow changes (break/continue/return)
         if (hasBreakRequest_) {
             hasBreakRequest_ = false;  // Clear the flag
@@ -8110,6 +8189,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                     }
                                 }
 
+                                if (is_unwinding_) break;  // script throw unwinding: stop the loop
                                 if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
                                 if (hasReturnValue_ || hasYieldRequest_) break;
                                 if (hasContinueRequest_) hasContinueRequest_ = false;
@@ -8283,6 +8363,12 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             return result;
         }
 
+        // A script `throw` unwinds: stop the loop (otherwise the condition/update
+        // no-op while unwinding and we spin forever).
+        if (is_unwinding_) {
+            break;
+        }
+
         // Check for control flow changes (break/continue/return)
         if (hasBreakRequest_) {
             hasBreakRequest_ = false;
@@ -8359,7 +8445,11 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
             }
 
-            for (size_t i = 0; i < array_size; ++i) {
+            // Re-check the LIVE size each iteration: the loop body can alias the
+            // same array (arrays are shared strong_ptr storage) and shrink it
+            // (clear/pop/erase). Trusting the cached array_size would index past
+            // the end with unchecked operator[] -> OOB read / crash.
+            for (size_t i = 0; i < array_storage->size(); ++i) {
                 if (stmt->is_reference) {
                     // Create a reference to the actual array element
                     *loop_var_ptr = script_value::make_reference(&(*array_storage)[i], environment_, engine_);
@@ -8373,6 +8463,11 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 if (!body_result) {
                     pop_scope();
                     return body_result;
+                }
+
+                // A script `throw` unwinds: stop iterating so it can propagate.
+                if (is_unwinding_) {
+                    break;
                 }
 
                 // Check for control flow changes (break/continue/return) - mirror while/for loops
@@ -8463,6 +8558,11 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     return body_result;
                 }
 
+                // A script `throw` unwinds: stop iterating so it can propagate.
+                if (is_unwinding_) {
+                    break;
+                }
+
                 // Check for control flow changes (break/continue/return) - mirror while/for loops
                 if (hasBreakRequest_) {
                     hasBreakRequest_ = false;  // Clear the flag
@@ -8516,6 +8616,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     return body_result;
                 }
 
+                if (is_unwinding_) break;  // script throw unwinding: stop iterating
                 if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
                 if (hasContinueRequest_) { hasContinueRequest_ = false; continue; }
                 if (hasReturnValue_) break;
@@ -8694,6 +8795,20 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                     // Restore the previous environment
                     environment_ = previous;
 
+                    // An explicit `break;` inside a case terminates the switch
+                    // (break-by-default already does this), so consume the request
+                    // here — it must NOT leak to an enclosing loop. A `continue;`
+                    // (and return/unwind) is left set so it propagates outward.
+                    if (hasBreakRequest_) {
+                        hasBreakRequest_ = false;
+                        break;  // Terminate the switch
+                    }
+
+                    // Propagate continue/return/unwind out of the switch immediately.
+                    if (hasContinueRequest_ || hasReturnValue_ || is_unwinding_) {
+                        break;
+                    }
+
                     // Check if we should continue to next case (implicit break by default)
                     if (!should_fallthrough_) {
                         break;  // Stop executing further cases
@@ -8724,6 +8839,12 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
 
                 // Restore the previous environment
                 environment_ = previous;
+
+                // Consume an explicit `break;` in default so it does not leak to
+                // an enclosing loop (continue/return/unwind still propagate).
+                if (hasBreakRequest_) {
+                    hasBreakRequest_ = false;
+                }
             } catch (...) {
                 // Restore environment before re-throwing
                 environment_ = previous;
@@ -8747,8 +8868,12 @@ checked_result<void> interpreter::visit_case_stmt(case_stmt* stmt) {
         auto result = dispatch_stmt(s.get());
         if (!result) return result;
 
-        // Check for break or return
-        if (hasReturnValue_ || is_unwinding_) {
+        // Stop the case body on return, exception unwind, OR a break/continue
+        // request. Previously only return/unwind stopped it, so statements after
+        // a `continue;` (or `break;`) kept executing. break terminates the switch
+        // and continue targets an enclosing loop; either way the rest of the case
+        // body must not run.
+        if (hasReturnValue_ || is_unwinding_ || hasBreakRequest_ || hasContinueRequest_) {
             break;
         }
     }
@@ -8762,8 +8887,8 @@ checked_result<void> interpreter::visit_default_stmt(default_stmt* stmt) {
         auto result = dispatch_stmt(s.get());
         if (!result) return result;
 
-        // Check for break or return
-        if (hasReturnValue_ || is_unwinding_) {
+        // See visit_case_stmt: stop on break/continue as well as return/unwind.
+        if (hasReturnValue_ || is_unwinding_ || hasBreakRequest_ || hasContinueRequest_) {
             break;
         }
     }

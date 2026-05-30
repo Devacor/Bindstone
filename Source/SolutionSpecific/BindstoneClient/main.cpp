@@ -23,6 +23,7 @@
 // --- Manual JSON parse benchmark (run with -bench): real engine DOM vs flat parser ---
 #include <jaiscript/serialization/json_archive.hpp>
 #include "../../JaiScript/bench/fast_json.hpp"
+#include "MV/Render/Scene/emitter.h"
 #include <chrono>
 #include <algorithm>
 #include <vector>
@@ -289,6 +290,69 @@ static void RunSceneLoadBenchmark(bool a_headless) {
 	timeLoad("[Cereal  map.scene ]", [&] { return MV::Scene::Node::loadCereal("Assets/Scenes/map.scene", managers.services, true); });
 }
 
+// CPU baseline for the particle hot loops (single-threaded, no GL): Particle::update (the per-frame
+// per-particle simulation, incl. the per-particle TransformMatrix) and the vertex-generation loop
+// from loadParticlesToPoints. Establishes a "before" number for perf work. Run: BindstoneClient.exe -emitterbench
+static void RunEmitterBenchmark() {
+	using namespace MV;
+	std::cout << "\n=== Emitter CPU baseline (single-thread; Particle::update + vertex gen, no GL) ===\n";
+	const int frames = 120;
+	const size_t counts[] = { 1000, 10000, 100000 };
+	for (size_t n : counts) {
+		std::vector<Scene::Particle> particles(n);
+		for (auto& p : particles) {
+			p.change.maxLifespan = 1000.0f;             // stay alive across the whole run
+			p.change.beginSpeed = 120.0f; p.change.endSpeed = 30.0f;
+			p.change.beginScale = Scale(8.0f, 8.0f); p.change.endScale = Scale(2.0f, 2.0f);
+			p.change.beginColor = Color(1.0f, 1.0f, 1.0f, 1.0f); p.change.endColor = Color(1.0f, 0.0f, 0.0f, 0.0f);
+			p.change.rateOfChange = AxisAngles(0.0f, 0.0f, 0.1f);
+			p.change.rotationalChange = AxisAngles(0.0f, 0.0f, 0.5f);
+			p.change.directionalChangeRad(AxisAngles(0.0f, 0.0f, 0.2f));
+			p.direction = AxisAngles(0.0f, 0.0f, randomNumber(0.0f, 6.28318f));
+			p.scale = Scale(6.0f, 6.0f);
+			p.rotation = AxisAngles(0.0f, 0.0f, randomNumber(0.0f, 6.28318f));
+			p.setGravity(40.0f);
+		}
+
+		volatile double sink = 0.0;
+
+		// 1) Particle::update over `frames` frames.
+		auto u0 = std::chrono::steady_clock::now();
+		for (int f = 0; f < frames; ++f) {
+			for (auto& p : particles) { p.update(1.0 / 60.0); }
+		}
+		auto u1 = std::chrono::steady_clock::now();
+		sink += particles[0].position.x;
+		double updNs = std::chrono::duration<double, std::nano>(u1 - u0).count() / (double(n) * frames);
+
+		// 2) Vertex generation (the loadParticlesToPoints inner loop) once over all particles.
+		std::vector<DrawPoint> pts; pts.reserve(n * 4);
+		std::vector<GLuint> idx; idx.reserve(n * 6);
+		TexturePoint tp[4] = { {0.0f,0.0f}, {0.0f,1.0f}, {1.0f,1.0f}, {1.0f,0.0f} };
+		auto v0 = std::chrono::steady_clock::now();
+		pts.clear(); idx.clear();
+		for (auto& particle : particles) {
+			BoxAABB<> bounds(Point<>(particle.scale.x / -2.0f, particle.scale.y / -2.0f, 0.0f), Point<>(particle.scale.x / 2.0f, particle.scale.y / 2.0f, 0.0f));
+			bounds.sanitize();
+			Scene::appendQuadVertexIndices(idx, static_cast<GLuint>(pts.size()));
+			auto c = cos(particle.rotation.z);
+			auto s = sin(particle.rotation.z);
+			for (size_t i = 0; i < 4; ++i) {
+				auto corner = bounds[i];
+				rotatePoint2DRad(corner.x, corner.y, c, s);
+				corner += particle.position;
+				pts.emplace_back(corner, particle.color, tp[i]);
+			}
+		}
+		auto v1 = std::chrono::steady_clock::now();
+		sink += pts.empty() ? 0.0 : pts[0].x;
+		double vtxNs = std::chrono::duration<double, std::nano>(v1 - v0).count() / double(n);
+
+		std::printf("  %7zu particles:  update %6.1f ns/particle  (=%6.3f ms/frame)   vertexgen %5.1f ns/particle  (=%6.3f ms)   [sink=%.1f]\n",
+			n, updNs, updNs * n / 1e6, vtxNs, vtxNs * n / 1e6, (double)sink);
+	}
+}
+
 int main(int argc, char *argv[]) {
 	MV::info("Hello world!");
 	MV::debug(":D :D :D");
@@ -347,6 +411,10 @@ int main(int argc, char *argv[]) {
 		}
 		if (strcmp(argv[i], "-loadbenchgl") == 0) {
 			RunSceneLoadBenchmark(false);
+			return 0;
+		}
+		if (strcmp(argv[i], "-emitterbench") == 0) {
+			RunEmitterBenchmark();
 			return 0;
 		}
 	}

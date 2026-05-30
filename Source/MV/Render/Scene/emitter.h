@@ -6,6 +6,7 @@
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 #include <atomic>
+#include <cmath>
 
 namespace MV {
 	namespace Scene {
@@ -161,8 +162,9 @@ namespace MV {
 				float timeScale = static_cast<float>(a_dt);
 				totalLifespan = std::min(totalLifespan + timeScale, change.maxLifespan);
 
-				float mixValue = totalLifespan / change.maxLifespan;
-				
+				// Guard maxLifespan == 0 (would be a 0/0 NaN that propagates into every mixed field).
+				float mixValue = change.maxLifespan > 0.0f ? totalLifespan / change.maxLifespan : 1.0f;
+
 				direction += change.currentDirectionalChangeRad(change.currentDirectionalChangeRad() + (change.rateOfChange * timeScale)) * timeScale;
 				rotation += change.rotationalChange * timeScale;
 
@@ -170,15 +172,14 @@ namespace MV {
 				scale = mix(change.beginScale, change.endScale, mixValue);
 				color = mix(change.beginColor, change.endColor, mixValue);
 
-				Point<> distance(0.0f, speed * timeScale, 0.0f);
-				TransformMatrix rotator;
-				rotator.rotateXYZ(direction);
-				distance = rotator * distance;
-				position += distance;
+				// Velocity = the per-particle direction applied to (0, speed*dt, 0). This used to build
+				// a TransformMatrix and do an identity*rotation 4x4 matmul + a matrix*vector PER PARTICLE
+				// PER FRAME; rotatedYAxis computes the identical result from just column 1 of the rotation.
+				position += rotatedYAxis(direction, speed * timeScale);
 				position += gravityConstant * timeScale;
-				
+
 				//currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(textureCount), static_cast<float>(textureCount * (change.animationFramesPerSecond / timeScale))));
-				
+
 				return totalLifespan == change.maxLifespan;
 			}
 
@@ -202,13 +203,25 @@ namespace MV {
 			size_t textureCount = 0;
 
 			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 0.0f, toRadians(180.0f))) {
-				gravityConstant.locate(0.0f, a_magnitude, 0.0f);
-				TransformMatrix rotator;
-				rotator.rotateXYZ(a_direction);
-				gravityConstant = rotator * gravityConstant;
+				gravityConstant = rotatedYAxis(a_direction, a_magnitude);
 			}
 		private:
 			Point<> gravityConstant;
+
+			// Rotates the +Y vector (0, a_magnitude, 0) by an XYZ-Euler rotation. Numerically identical
+			// to (TransformMatrix().rotateXYZ(a_angles) * Point(0, a_magnitude, 0)) — since the input is
+			// along +Y, only column 1 of the XYZ rotation matrix contributes, so we skip building and
+			// multiplying a full 4x4 matrix (the matmul-against-identity was pure waste).
+			static inline Point<> rotatedYAxis(const AxisAngles &a_angles, float a_magnitude) {
+				const float cX = std::cos(a_angles.x), sX = std::sin(a_angles.x);
+				const float cY = std::cos(a_angles.y), sY = std::sin(a_angles.y);
+				const float cZ = std::cos(a_angles.z), sZ = std::sin(a_angles.z);
+				return Point<>(
+					(-cY * sZ) * a_magnitude,
+					(cX * cZ - sX * sY * sZ) * a_magnitude,
+					(sX * cZ + cX * sY * sZ) * a_magnitude
+				);
+			}
 		};
 
 		struct EmitterSpawnProperties : public jai::property_owner<EmitterSpawnProperties> {

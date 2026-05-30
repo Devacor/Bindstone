@@ -1695,7 +1695,13 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 
 	saveButton->onAccept.connect("save", [&](std::shared_ptr<MV::Scene::Clickable>){
+		auto t0 = std::chrono::steady_clock::now();
 		panel.root()->saveJai(fileName->text(), panel.services());
+		auto t1 = std::chrono::steady_clock::now();
+		auto saveMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+		std::cout << "\n____\n";
+		std::cout << "\nJaiScript save: " << saveMs << " ms";
+		std::cout << "\n____\n";
 	});
 
 	loadButton->onAccept.connect("load", [&](std::shared_ptr<MV::Scene::Clickable>){

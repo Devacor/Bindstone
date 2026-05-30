@@ -12,7 +12,7 @@
 #include "render.h"
 #include "boxaabb.h"
 
-#include <jaiscript/signals/signal.hpp>
+#include <jaiscript/signals/signal_decl.hpp>
 #include "MV/Serialization/serialize.h"
 
 namespace MV {
@@ -58,9 +58,47 @@ namespace MV {
 	//required to allow forward declared MV::SharedTextures
 	MV::SharedTextures* getSharedTextureFromServices(MV::Services& a_services);
 
+	// Canonicalizes a texture path so different spellings of the same file dedupe to one
+	// GPU texture in LoadedTexture::globalLookup. sdlFileHandle() opens with an "Assets/"
+	// prefix fallback, so "Atlases/x.png" and "Assets/Atlases\x.png" are the same file but
+	// previously keyed differently -> the same image was decoded + uploaded twice. We strip
+	// a leading "Assets/" and normalize separators (case preserved so the on-disk open path
+	// stays valid via the fallback).
+	inline std::string normalizeTexturePath(std::string a_path) {
+		for (auto &c : a_path) { if (c == '\\') c = '/'; }
+		static const char prefix[] = "assets/";
+		if (a_path.size() >= 7) {
+			bool match = true;
+			for (size_t i = 0; i < 7; ++i) {
+				char a = a_path[i];
+				if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+				if (a != prefix[i]) { match = false; break; }
+			}
+			if (match) { a_path.erase(0, 7); }
+		}
+		return a_path;
+	}
+
+	// Lightweight scene-load texture profiling (decode vs GL upload). Atomic because decode
+	// now runs on the thread pool (parallel preload); near-zero cost when unused.
+	struct TextureLoadProfile {
+		std::atomic<int64_t> loadFileCalls{ 0 };   // == decodes (cache misses)
+		std::atomic<int64_t> uploadCalls{ 0 };     // glTexImage2D calls (non-headless)
+		std::atomic<int64_t> uploadBytes{ 0 };     // total RGBA bytes uploaded
+		std::atomic<int64_t> decodeMicros{ 0 };    // summed IMG_Load_RW time (CPU, across threads)
+		std::atomic<int64_t> uploadMicros{ 0 };    // summed glTexImage2D time (main thread)
+		void reset() { loadFileCalls = 0; uploadCalls = 0; uploadBytes = 0; decodeMicros = 0; uploadMicros = 0; }
+	};
+	TextureLoadProfile& textureLoadProfile();
+
+	// Decodes an image file into an SDL surface (CPU only, thread-safe — no GL). Split out of
+	// LoadedTexture::loadFile so the texture system can decode many files in parallel and then
+	// upload them on the GL thread.
+	std::shared_ptr<OwnedSurface> decodeTextureSurface(const TextureParameters& a_parameters);
+
 	struct TextureParameters {
 		TextureParameters(std::string a_path, bool a_powerTwo, bool a_repeat, bool a_pixel):
-			path(a_path),
+			path(normalizeTexturePath(std::move(a_path))),
 			powerTwo(a_powerTwo),
 			repeat(a_repeat),
 			pixel(a_pixel),
@@ -80,7 +118,7 @@ namespace MV {
 		}
 
 		void set(std::string a_path, bool a_powerTwo, bool a_repeat, bool a_pixel) {
-			path = a_path;
+			path = normalizeTexturePath(std::move(a_path));
 			powerTwo = a_powerTwo;
 			repeat = a_repeat;
 			pixel = a_pixel;
@@ -210,6 +248,13 @@ namespace MV {
 		GLuint id() const {
 			return locallyOwnedDataValue ? locallyOwnedDataValue->textureId : dataValue->textureId;
 		}
+
+		// Parallel-preload support (used by SharedTextures::flushDeferredLoad). isCached tells
+		// whether a (path,params) GL texture already exists; cacheDecodedSurface uploads an
+		// already-decoded surface on the calling (GL) thread and inserts it into globalLookup,
+		// so a subsequent LoadedTexture(params) is a cache hit and never re-decodes.
+		static bool isCached(const TextureParameters& a_parameters);
+		static void cacheDecodedSurface(const TextureParameters& a_parameters, const std::shared_ptr<OwnedSurface>& a_surface);
 	private:
 		LoadedTexture(const LoadedTexture&) = delete;
 		LoadedTexture& operator=(const LoadedTexture&) = delete;
@@ -228,6 +273,11 @@ namespace MV {
 
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
 		friend cereal::access;
+		friend jai::access;
+		friend class jai::serialization::access;
+		friend class FileTextureDefinition;
+		friend class DynamicTextureDefinition;
+		friend class SurfaceTextureDefinition;
 	protected:
 		jai::signal_emitter<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
 	public:
@@ -279,19 +329,29 @@ namespace MV {
 	private:
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
-			archive(
-				cereal::make_nvp("name", textureName),
-				cereal::make_nvp("size", textureSize),
-				cereal::make_nvp("contentSize", desiredSize)
-			);
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive(
+					jai::serialization::make_nvp("name", textureName),
+					jai::serialization::make_nvp("size", textureSize),
+					jai::serialization::make_nvp("contentSize", desiredSize),
+					jai::serialization::make_nvp("scale", logicalScale),
+					JAI_NVP(handles)
+				);
+			} else {
+				archive(
+					cereal::make_nvp("name", textureName),
+					cereal::make_nvp("size", textureSize),
+					cereal::make_nvp("contentSize", desiredSize)
+				);
 
-			if(version > 0){
-				archive(cereal::make_nvp("scale", logicalScale));
+				if(version > 0){
+					archive(cereal::make_nvp("scale", logicalScale));
+				}
+
+				archive(
+					CEREAL_NVP(handles)
+				);
 			}
-
-			archive(
-				CEREAL_NVP(handles)
-			);
 		}
 
 		virtual void reloadImplementation() = 0;
@@ -299,12 +359,20 @@ namespace MV {
 
 	class FileTextureDefinition : public TextureDefinition {
 		friend cereal::access;
+		friend jai::access;
+		friend class jai::serialization::access;
 	public:
 		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false, bool a_pixel = false){
 			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, a_pixel));
 		}
 		static std::unique_ptr<FileTextureDefinition> makeUnmanaged(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false, bool a_pixel = false){
 			return std::unique_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, a_pixel, false));
+		}
+
+		// The exact key this definition loads under — used by the parallel preload to decode
+		// it off-thread, matching what reloadImplementation() builds.
+		TextureParameters fileTextureParameters() const {
+			return TextureParameters{ textureName, powerTwo, repeat, pixel };
 		}
 
 	protected:
@@ -320,8 +388,13 @@ namespace MV {
 	private:
 
 		template<class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/){
-			archive(CEREAL_NVP(powerTwo), CEREAL_NVP(repeat), CEREAL_NVP(pixel), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+		void serialize(Archive & archive, std::uint32_t const version){
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive(JAI_NVP(powerTwo), JAI_NVP(repeat), JAI_NVP(pixel));
+				TextureDefinition::serialize(archive, version);
+			} else {
+				archive(CEREAL_NVP(powerTwo), CEREAL_NVP(repeat), CEREAL_NVP(pixel), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+			}
 		}
 
 		template<class Archive>
@@ -339,6 +412,22 @@ namespace MV {
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
 
+		template<typename Archive>
+		static void load_and_construct(Archive& ar, jai::serialization::construct<FileTextureDefinition>& construct) {
+			bool powerTwo = true, repeat = false, pixel = false;
+			ar.serialize("powerTwo", powerTwo);
+			ar.serialize("repeat", repeat);
+			ar.serialize("pixel", pixel);
+			construct("", powerTwo, repeat, pixel);
+			auto* services = ar.get_user_context<MV::Services>();
+			if (services) construct->textures = services->get<MV::SharedTextures>();
+			ar.serialize("name", construct->textureName);
+			ar.serialize("size", construct->textureSize);
+			ar.serialize("contentSize", construct->desiredSize);
+			ar.serialize("scale", construct->logicalScale);
+			ar.serialize("handles", construct->handles);
+		}
+
 		SharedTextures *textures = nullptr;
 		bool powerTwo;
 		bool repeat;
@@ -347,6 +436,8 @@ namespace MV {
 
 	class DynamicTextureDefinition : public TextureDefinition {
 		friend cereal::access;
+		friend jai::access;
+		friend class jai::serialization::access;
 	public:
 		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f}){
 			return std::shared_ptr<DynamicTextureDefinition>(new DynamicTextureDefinition(a_name, a_size, a_backgroundColor));
@@ -366,8 +457,13 @@ namespace MV {
 
 	private:
 		template<class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/){
-			archive(CEREAL_NVP(backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+		void serialize(Archive & archive, std::uint32_t const version){
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				archive(JAI_NVP(backgroundColor));
+				TextureDefinition::serialize(archive, version);
+			} else {
+				archive(CEREAL_NVP(backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+			}
 		}
 
 		template<class Archive>
@@ -378,11 +474,24 @@ namespace MV {
 			construct->backgroundColor = backgroundColor;
 		}
 
+		template<typename Archive>
+		static void load_and_construct(Archive& ar, jai::serialization::construct<DynamicTextureDefinition>& construct) {
+			construct("", Size<int>(), Color());
+			ar.serialize("backgroundColor", construct->backgroundColor);
+			ar.serialize("name", construct->textureName);
+			ar.serialize("size", construct->textureSize);
+			ar.serialize("contentSize", construct->desiredSize);
+			ar.serialize("scale", construct->logicalScale);
+			ar.serialize("handles", construct->handles);
+		}
+
 		Color backgroundColor;
 	};
 
 	class SurfaceTextureDefinition : public TextureDefinition {
 		friend cereal::access;
+		friend jai::access;
+		friend class jai::serialization::access;
 	public:
 		static std::shared_ptr<SurfaceTextureDefinition> make(const std::string &a_name, std::function<std::shared_ptr<OwnedSurface> ()> a_surfaceGenerator){
 			return std::shared_ptr<SurfaceTextureDefinition>(new SurfaceTextureDefinition(a_name, a_surfaceGenerator));
@@ -407,8 +516,12 @@ namespace MV {
 
 	private:
 		template<class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/){
-			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+		void serialize(Archive & archive, std::uint32_t const version){
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				TextureDefinition::serialize(archive, version);
+			} else {
+				archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+			}
 			//Must manually call setSurfaceGenerator; We can assume whatever owns this texture definition knows how to reconstitute it.
 		}
 
@@ -418,12 +531,24 @@ namespace MV {
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
 
+		template<typename Archive>
+		static void load_and_construct(Archive& ar, jai::serialization::construct<SurfaceTextureDefinition>& construct) {
+			construct("", std::function<std::shared_ptr<OwnedSurface>()>());
+			ar.serialize("name", construct->textureName);
+			ar.serialize("size", construct->textureSize);
+			ar.serialize("contentSize", construct->desiredSize);
+			ar.serialize("scale", construct->logicalScale);
+			ar.serialize("handles", construct->handles);
+		}
+
 		std::function<std::shared_ptr<OwnedSurface> ()> surfaceGenerator;
 		Size<int> generatedSurfaceSize;
 	};
 
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
 		friend cereal::access;
+		friend jai::access;
+		friend class jai::serialization::access;
 		friend TextureDefinition;
 		jai::signal_emitter<void(std::shared_ptr<TextureHandle>)> sizeChangeSignal;
 	public:
@@ -498,25 +623,35 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
-			if (version == 0) {
-				BoxAABB<int> oldIntegralBounds;
-				bool oldFlipValues;
+			if constexpr (jai::serialization::jai_archive<Archive>) {
 				archive(
-					cereal::make_nvp("handleRegion", oldIntegralBounds),
-					cereal::make_nvp("flipX", oldFlipValues),
-					cereal::make_nvp("flipY", oldFlipValues),
-					CEREAL_NVP(textureDefinition),
-					CEREAL_NVP(handlePercent)
+					jai::serialization::make_nvp("texture", textureDefinition),
+					jai::serialization::make_nvp("handle", handlePercent),
+					jai::serialization::make_nvp("slice", slicePercent),
+					jai::serialization::make_nvp("name", debugName),
+					JAI_NVP(packId)
 				);
-			}else{
-				archive(
-					cereal::make_nvp("texture", textureDefinition),
-					cereal::make_nvp("handle", handlePercent),
-					cereal::make_nvp("slice", slicePercent),
-					cereal::make_nvp("name", debugName)
-				);
-				if (version > 1) {
-					archive(cereal::make_nvp("packId", packId));
+			} else {
+				if (version == 0) {
+					BoxAABB<int> oldIntegralBounds;
+					bool oldFlipValues;
+					archive(
+						cereal::make_nvp("handleRegion", oldIntegralBounds),
+						cereal::make_nvp("flipX", oldFlipValues),
+						cereal::make_nvp("flipY", oldFlipValues),
+						CEREAL_NVP(textureDefinition),
+						CEREAL_NVP(handlePercent)
+					);
+				}else{
+					archive(
+						cereal::make_nvp("texture", textureDefinition),
+						cereal::make_nvp("handle", handlePercent),
+						cereal::make_nvp("slice", slicePercent),
+						cereal::make_nvp("name", debugName)
+					);
+					if (version > 1) {
+						archive(cereal::make_nvp("packId", packId));
+					}
 				}
 			}
 		}
@@ -554,6 +689,24 @@ namespace MV {
 				}
 				construct->postLoadInitialize(sharedTextures);
 			}
+		}
+
+		template<typename Archive>
+		static void load_and_construct(Archive& ar, jai::serialization::construct<TextureHandle>& construct) {
+			std::shared_ptr<TextureDefinition> textureDefinition;
+			ar.serialize("texture", textureDefinition);
+			construct(textureDefinition);
+			ar.serialize("handle", construct->handlePercent);
+			ar.serialize("slice", construct->slicePercent);
+			ar.serialize("name", construct->debugName);
+			ar.serialize("packId", construct->packId);
+			// Always resolve SharedTextures (not only for packs): postLoadInitialize uses it to
+			// route the load through the parallel deferred-load queue when one is active.
+			MV::SharedTextures* sharedTextures = nullptr;
+			if (auto* services = ar.get_user_context<MV::Services>()) {
+				sharedTextures = getSharedTextureFromServices(*services);
+			}
+			construct->postLoadInitialize(sharedTextures);
 		}
 
 		void postLoadInitialize(SharedTextures* a_sharedTextures);

@@ -2,8 +2,12 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <future>
+#include <set>
 #include <SDL_image.h>
 #include "MV/Utility/generalUtility.h"
+#include "MV/Utility/threadPool.hpp"
 #include "MV/Render/points.h"
 #include "sharedTextures.h"
 
@@ -17,7 +21,6 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include "MV/Serialization/property_cereal.hpp"
 
 CEREAL_REGISTER_TYPE(MV::TextureDefinition);
 CEREAL_REGISTER_TYPE(MV::FileTextureDefinition);
@@ -29,6 +32,12 @@ CEREAL_REGISTER_TYPE(MV::TextureHandle);
 CEREAL_CLASS_VERSION(MV::TextureHandle, 2);
 
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenetextures);
+
+#include <jaiscript/core/registrar.hpp>
+static jai::registrar<MV::FileTextureDefinition, MV::Services> _regFileTexDef("FileTextureDefinition");
+static jai::registrar<MV::DynamicTextureDefinition, MV::Services> _regDynTexDef("DynamicTextureDefinition");
+static jai::registrar<MV::SurfaceTextureDefinition, MV::Services> _regSurfTexDef("SurfaceTextureDefinition");
+static jai::registrar<MV::TextureHandle, MV::Services> _regTexHandle("TextureHandle");
 
 namespace MV {
 
@@ -119,24 +128,107 @@ namespace MV {
 		return a_img;
 	}
 
+	TextureLoadProfile& textureLoadProfile() {
+		static TextureLoadProfile profile;
+		return profile;
+	}
+
+	// CPU-only image decode (no GL) — safe to run on the thread pool.
+	std::shared_ptr<OwnedSurface> decodeTextureSurface(const TextureParameters &a_parameters) {
+		SDL_RWops* sdlIO = sdlFileHandle(a_parameters.path);
+		if (!sdlIO) {
+			MV::warning("Failed to load image [", a_parameters.path, "]");
+			return nullptr;
+		}
+		++textureLoadProfile().loadFileCalls;
+		auto decodeStart = std::chrono::steady_clock::now();
+		SDL_Surface *img = IMG_Load_RW(sdlIO, 1);
+		textureLoadProfile().decodeMicros += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - decodeStart).count();
+		if (!img) {
+			MV::error("Failed to load image [", a_parameters.path, "] [", SDL_GetError(), "]");
+			return nullptr;
+		}
+		return OwnedSurface::make(img);
+	}
+
 	std::unique_ptr<LoadedTextureData> LoadedTexture::loadFile(const TextureParameters &a_parameters) {
 		if (a_parameters.cleared) {
 			warning("Warning: Passing in a cleared texture parameter! [", a_parameters.path, "]");
 		}
 
 		MV::info("Loading Image: ", a_parameters.path);
-		SDL_RWops* sdlIO = sdlFileHandle(a_parameters.path);
-		if (!sdlIO) {
-			MV::warning("Failed to load image [", a_parameters.path, "]");
-			return {};
+		auto surface = decodeTextureSurface(a_parameters);
+		if (!surface) { return {}; }
+		return loadTextureFromSurface(surface, a_parameters);
+	}
+
+	bool LoadedTexture::isCached(const TextureParameters &a_parameters) {
+		std::scoped_lock guard(lock);
+		return globalLookup.find(a_parameters) != globalLookup.end();
+	}
+
+	// Uploads an already-decoded surface on the calling (GL) thread and caches it so a later
+	// LoadedTexture(params) is a hit. Called serially from flushDeferredLoad after the parallel
+	// decode; a null/failed surface is left uncached (the eventual load() retries inline).
+	void LoadedTexture::cacheDecodedSurface(const TextureParameters &a_parameters, const std::shared_ptr<OwnedSurface> &a_surface) {
+		if (!a_surface || !a_surface->get()) { return; }
+		std::scoped_lock guard(lock);
+		if (globalLookup.find(a_parameters) != globalLookup.end()) { return; }
+		auto data = loadTextureFromSurface(a_surface, a_parameters);
+		if (data) {
+			globalLookup.insert({ a_parameters, std::move(data) });
 		}
-		SDL_Surface *img = IMG_Load_RW(sdlIO, 1);
-		if (!img) {
-			MV::error("Failed to load image [", a_parameters.path, "] [",SDL_GetError(),"]");
-			return {};
+	}
+
+	void SharedTextures::flushDeferredLoad(ThreadPool &a_pool) {
+		deferActive = false;
+		if (deferredDefinitions.empty()) { return; }
+
+		auto definitions = std::move(deferredDefinitions);
+		deferredDefinitions.clear();
+
+		// Unique image keys that still need decoding (skip duplicates and already-cached ones).
+		std::vector<TextureParameters> toDecode;
+		std::set<TextureParameters> seen;
+		for (auto &definition : definitions) {
+			TextureParameters params = definition->fileTextureParameters();
+			if (seen.insert(params).second && !LoadedTexture::isCached(params)) {
+				toDecode.push_back(params);
+			}
 		}
 
-		return loadTextureFromSurface(OwnedSurface::make(img), a_parameters);
+		if (!toDecode.empty()) {
+			std::vector<std::shared_ptr<OwnedSurface>> surfaces(toDecode.size());
+			if (a_pool.threads() == 0) {
+				// No worker threads available: decode serially (still correct).
+				for (size_t i = 0; i < toDecode.size(); ++i) {
+					surfaces[i] = decodeTextureSurface(toDecode[i]);
+				}
+			} else {
+				// Decode every unique image in parallel on the pool; barrier on a future.
+				auto remaining = std::make_shared<std::atomic<size_t>>(toDecode.size());
+				std::promise<void> done;
+				auto finished = done.get_future();
+				for (size_t i = 0; i < toDecode.size(); ++i) {
+					a_pool.task([i, &toDecode, &surfaces, remaining, &done]() {
+						try { surfaces[i] = decodeTextureSurface(toDecode[i]); } catch (...) { surfaces[i] = nullptr; }
+						if (--(*remaining) == 0) { done.set_value(); }
+					});
+				}
+				finished.wait();
+			}
+
+			// Upload the decoded surfaces on this (GL) thread, in order, into globalLookup.
+			for (size_t i = 0; i < toDecode.size(); ++i) {
+				LoadedTexture::cacheDecodedSurface(toDecode[i], surfaces[i]);
+			}
+		}
+
+		// Every queued definition's load() is now a globalLookup cache hit (no decode); it still
+		// fires onReload so dependent drawables refresh exactly as on the inline path.
+		for (auto &definition : definitions) {
+			definition->load();
+		}
 	}
 
 	//Load an opengl texture
@@ -171,7 +263,12 @@ namespace MV {
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (a_parameters.repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_parameters.repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 
+			auto uploadStart = std::chrono::steady_clock::now();
 			glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(surfaceToWorkWith->get()), surfaceToWorkWith->get()->w, surfaceToWorkWith->get()->h, 0, getTextureFormat(surfaceToWorkWith->get()), GL_UNSIGNED_BYTE, surfaceToWorkWith->get()->pixels);
+			auto& prof = textureLoadProfile();
+			prof.uploadMicros += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - uploadStart).count();
+			++prof.uploadCalls;
+			prof.uploadBytes += static_cast<int64_t>(surfaceToWorkWith->get()->w) * surfaceToWorkWith->get()->h * 4;
 		}
 		return results;
 	}
@@ -484,6 +581,15 @@ namespace MV {
 			}
 		}
 		if (needsLoad) {
+			// During a scene load's deferred-load session, queue file textures for parallel
+			// decode instead of decoding them inline here (the dominant cost). Non-file
+			// definitions (dynamic/surface) don't read from disk, so they load inline.
+			if (a_sharedTextures && a_sharedTextures->deferralActive()) {
+				if (auto fileDefinition = std::dynamic_pointer_cast<FileTextureDefinition>(textureDefinition)) {
+					a_sharedTextures->queueDeferredLoad(fileDefinition);
+					return;
+				}
+			}
 			textureDefinition->load();
 		}
 	}

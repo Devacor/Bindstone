@@ -1,0 +1,7 @@
+# Build artifacts from the standalone JSON benchmark (bench_json.cpp)
+*.exe
+*.obj
+*.ilk
+*.pdb
+*.exp
+*.lib

@@ -261,6 +261,12 @@ static void RunSceneLoadBenchmark(bool a_headless) {
 		try {
 			auto t0 = std::chrono::steady_clock::now();
 			auto root = loadFn();
+			// Textures now stream in (decode on the pool, GL upload on the main thread via
+			// pool.run()). Drain them so the measured time is a full load — in the game the
+			// loop does one run() per frame, streaming the scene in over a few frames.
+			while (managers.textures.pendingTextureLoads() > 0) {
+				managers.pool.run();
+			}
 			auto t1 = std::chrono::steady_clock::now();
 			double ms = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0;
 			const auto& tp = MV::textureLoadProfile();

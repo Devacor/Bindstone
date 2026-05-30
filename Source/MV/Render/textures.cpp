@@ -180,55 +180,75 @@ namespace MV {
 		}
 	}
 
-	void SharedTextures::flushDeferredLoad(ThreadPool &a_pool) {
-		deferActive = false;
-		if (deferredDefinitions.empty()) { return; }
+	GLuint SharedTextures::loadingPlaceholderId() {
+		if (RUNNING_IN_HEADLESS) { return 0; }
+		// Singleton 2x2 magenta/black checker, created once on the GL thread. Nearest-filtered
+		// and repeating so a stretched sprite shows obvious "still loading" squares.
+		static GLuint checkerId = 0;
+		if (checkerId == 0) {
+			const uint32_t magenta = 0xFFFF00FFu;   // RGBA bytes FF 00 FF FF (little-endian)
+			const uint32_t black   = 0xFF000000u;   // RGBA bytes 00 00 00 FF
+			uint32_t pixels[4] = { magenta, black, black, magenta };
+			glGenTextures(1, &checkerId);
+			glBindTexture(GL_TEXTURE_2D, checkerId);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+		}
+		return checkerId;
+	}
 
-		auto definitions = std::move(deferredDefinitions);
-		deferredDefinitions.clear();
+	void SharedTextures::loadFile(const std::shared_ptr<FileTextureDefinition>& a_definition, bool a_blocking, std::function<void()> a_onLoaded) {
+		if (!a_definition) { return; }
+		if (a_definition->loaded()) { if (a_onLoaded) { a_onLoaded(); } return; }
 
-		// Unique image keys that still need decoding (skip duplicates and already-cached ones).
-		std::vector<TextureParameters> toDecode;
-		std::set<TextureParameters> seen;
-		for (auto &definition : definitions) {
-			TextureParameters params = definition->fileTextureParameters();
-			if (seen.insert(params).second && !LoadedTexture::isCached(params)) {
-				toDecode.push_back(params);
-			}
+		const TextureParameters params = a_definition->fileTextureParameters();
+		const bool canStream = !a_blocking && ourLoadThreadPool && !RUNNING_IN_HEADLESS && !LoadedTexture::isCached(params);
+
+		if (!canStream) {
+			// Synchronous: blocking/headless, or already cached (a hit, so this is cheap).
+			// load() decodes+uploads inline if needed, sets loadedTexture, and fires onReload.
+			a_definition->load();
+			if (a_onLoaded) { a_onLoaded(); }
+			return;
 		}
 
-		if (!toDecode.empty()) {
-			std::vector<std::shared_ptr<OwnedSurface>> surfaces(toDecode.size());
-			if (a_pool.threads() == 0) {
-				// No worker threads available: decode serially (still correct).
-				for (size_t i = 0; i < toDecode.size(); ++i) {
-					surfaces[i] = decodeTextureSurface(toDecode[i]);
+		// Stream it: decode on a worker thread, then upload + finalize on the MAIN thread (the
+		// onFinish runs via ThreadPool::run(), which the game loop drains each frame). Until the
+		// upload lands, textureId() reports the loading-placeholder checker.
+		a_definition->loadPending = true;
+		++ourPendingTextureLoads;
+
+		// Coalesce by params: register this definition as a waiter. If a decode for the same
+		// image is already in flight, just wait for it (no redundant decode); otherwise kick it.
+		auto& waiters = ourInFlightLoads[params];
+		waiters.push_back(PendingTextureLoad{ a_definition, std::move(a_onLoaded) });
+		if (waiters.size() > 1) {
+			return;
+		}
+
+		auto surface = std::make_shared<std::shared_ptr<OwnedSurface>>();
+		SharedTextures* self = this;
+		ourLoadThreadPool->task(ThreadPool::Job(
+			[params, surface]() {
+				try { *surface = decodeTextureSurface(params); } catch (...) { *surface = nullptr; }
+			},
+			[self, params, surface]() {
+				LoadedTexture::cacheDecodedSurface(params, *surface);   // GL upload (main thread), once
+				auto it = self->ourInFlightLoads.find(params);
+				if (it == self->ourInFlightLoads.end()) { return; }
+				std::vector<PendingTextureLoad> waiters = std::move(it->second);
+				self->ourInFlightLoads.erase(it);
+				for (auto& waiter : waiters) {
+					waiter.definition->loadPending = false;
+					waiter.definition->load();   // globalLookup hit -> sets loadedTexture, fires onReload
+					--self->ourPendingTextureLoads;
+					if (waiter.onLoaded) { waiter.onLoaded(); }
 				}
-			} else {
-				// Decode every unique image in parallel on the pool; barrier on a future.
-				auto remaining = std::make_shared<std::atomic<size_t>>(toDecode.size());
-				std::promise<void> done;
-				auto finished = done.get_future();
-				for (size_t i = 0; i < toDecode.size(); ++i) {
-					a_pool.task([i, &toDecode, &surfaces, remaining, &done]() {
-						try { surfaces[i] = decodeTextureSurface(toDecode[i]); } catch (...) { surfaces[i] = nullptr; }
-						if (--(*remaining) == 0) { done.set_value(); }
-					});
-				}
-				finished.wait();
-			}
-
-			// Upload the decoded surfaces on this (GL) thread, in order, into globalLookup.
-			for (size_t i = 0; i < toDecode.size(); ++i) {
-				LoadedTexture::cacheDecodedSurface(toDecode[i], surfaces[i]);
-			}
-		}
-
-		// Every queued definition's load() is now a globalLookup cache hit (no decode); it still
-		// fires onReload so dependent drawables refresh exactly as on the inline path.
-		for (auto &definition : definitions) {
-			definition->load();
-		}
+			},
+			ThreadPool::Job::Continue::MAIN_THREAD));
 	}
 
 	//Load an opengl texture
@@ -293,7 +313,9 @@ namespace MV {
 	}
 
 	GLuint TextureDefinition::textureId() const {
-		return loadedTexture ? loadedTexture->id() : 0;
+		if (loadedTexture) { return loadedTexture->id(); }
+		if (loadPending) { return SharedTextures::loadingPlaceholderId(); }
+		return 0;
 	}
 
 	bool TextureDefinition::loaded() const {
@@ -581,12 +603,12 @@ namespace MV {
 			}
 		}
 		if (needsLoad) {
-			// During a scene load's deferred-load session, queue file textures for parallel
-			// decode instead of decoding them inline here (the dominant cost). Non-file
-			// definitions (dynamic/surface) don't read from disk, so they load inline.
-			if (a_sharedTextures && a_sharedTextures->deferralActive()) {
+			// Stream file textures through the manager: decode off-thread, upload on the main
+			// thread, showing the loading-placeholder checker meanwhile. Non-file definitions
+			// (dynamic/surface) generate in memory, so they load inline.
+			if (a_sharedTextures) {
 				if (auto fileDefinition = std::dynamic_pointer_cast<FileTextureDefinition>(textureDefinition)) {
-					a_sharedTextures->queueDeferredLoad(fileDefinition);
+					a_sharedTextures->loadFile(fileDefinition);
 					return;
 				}
 			}

@@ -7,6 +7,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <atomic>
 
 #include <filesystem>
 
@@ -68,19 +69,27 @@ namespace MV {
 			return a_filename + (a_repeat ? "1" : "0") + (a_pixel ? "1" : "");
 		}
 
-		// ---- Parallel deferred texture loading -------------------------------------------
-		// While a deferred-load session is active, FileTextureDefinition loads triggered during
-		// scene deserialization are queued instead of decoded inline (see postLoadInitialize).
-		// flushDeferredLoad then decodes every unique queued image in parallel on the thread
-		// pool and uploads them on the calling (GL) thread, so each queued definition's load()
-		// becomes a globalLookup cache hit. Net effect: the dominant per-image decode cost runs
-		// across all cores instead of serially, with no change to the loaded scene.
-		void beginDeferredLoad() { deferActive = true; deferredDefinitions.clear(); }
-		bool deferralActive() const { return deferActive; }
-		void queueDeferredLoad(const std::shared_ptr<FileTextureDefinition> &a_definition) {
-			if (a_definition) { deferredDefinitions.push_back(a_definition); }
-		}
-		void flushDeferredLoad(ThreadPool &a_pool);
+		// ---- Streaming / parallel texture loading (manager-owned) ------------------------
+		// loadFile decodes a file texture's image on the thread pool and uploads it to GL on
+		// the MAIN thread (delivered when the pool's main-thread completion callbacks run from
+		// the game loop, i.e. ThreadPool::run()). Until then the definition reports the
+		// magenta/black "loading" checker placeholder. on_loaded (optional) fires on the main
+		// thread once the texture is live. a_blocking=true decodes + uploads inline instead.
+		// This is owned entirely by the texture system, so every load path benefits — the scene
+		// loader no longer brackets anything.
+		void loadThreadPool(ThreadPool* a_pool) { ourLoadThreadPool = a_pool; }
+		ThreadPool* loadThreadPool() const { return ourLoadThreadPool; }
+
+		void loadFile(const std::shared_ptr<FileTextureDefinition>& a_definition,
+		              bool a_blocking = false,
+		              std::function<void()> a_onLoaded = {});
+
+		// Textures still decoding/uploading — for blocking waits and load screens.
+		int pendingTextureLoads() const { return ourPendingTextureLoads.load(); }
+
+		// GL id of the magenta/black checker shown while a texture streams in (lazily created
+		// on the GL thread; 0 in headless).
+		static GLuint loadingPlaceholderId();
 
 	private:
 		std::vector<std::string> getImagesInFolder(const std::string& a_packPath) const;
@@ -91,8 +100,17 @@ namespace MV {
 		std::map<std::string, std::shared_ptr<DynamicTextureDefinition>> dynamicDefinitions;
 		std::map<std::string, std::shared_ptr<SurfaceTextureDefinition>> surfaceDefinitions;
 
-		bool deferActive = false;
-		std::vector<std::shared_ptr<FileTextureDefinition>> deferredDefinitions;
+		ThreadPool* ourLoadThreadPool = nullptr;
+		std::atomic<int> ourPendingTextureLoads{ 0 };
+
+		// In-flight decode coalescing: many definitions can reference one image file. The first
+		// kicks the decode; the rest wait on it (no redundant decode) and are all finalized
+		// together when that single decode lands. Touched only on the main thread.
+		struct PendingTextureLoad {
+			std::shared_ptr<FileTextureDefinition> definition;
+			std::function<void()> onLoaded;
+		};
+		std::map<TextureParameters, std::vector<PendingTextureLoad>> ourInFlightLoads;
 	};
 }
 

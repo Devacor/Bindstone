@@ -229,19 +229,11 @@ namespace MV {
 			jai::serialization::json_archive_reader ar(contents, engine);
 			const auto tParse1 = std::chrono::steady_clock::now();
 
-			// Decode this scene's file textures in parallel: queue them during the walk, then
-			// decode-all on the thread pool + upload on this (GL) thread after. Skipped in
-			// headless (load() is a no-op there — decoding would be wasted work).
-			auto* sharedTextures = a_services.get<MV::SharedTextures>(false);
-			auto* threadPool = a_services.get<MV::ThreadPool>(false);
-			const bool deferTextures = sharedTextures && threadPool && !MV::RUNNING_IN_HEADLESS;
-			if (deferTextures) { sharedTextures->beginDeferredLoad(); }
-
 			ar.set_user_context<MV::Services>(&a_services);
 			std::shared_ptr<Node> result;
-			ar(result);  // load_complete() fires on root via post_load depth tracking
-
-			if (deferTextures) { sharedTextures->flushDeferredLoad(*threadPool); }
+			ar(result);  // load_complete() fires on root via post_load depth tracking. File
+			             // textures stream in via SharedTextures (async decode on the pool +
+			             // main-thread GL upload); the scene loader stays out of it now.
 			const auto tWalk1 = std::chrono::steady_clock::now();
 
 			if (!a_newNodeId.empty()) {

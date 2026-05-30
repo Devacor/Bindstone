@@ -32,6 +32,8 @@ struct Managers {
 		services.connect(&textures);
 		services.connect(&defaultLogin);
 		//services.connect(&audio);
+
+		textures.loadThreadPool(&pool);   // lets the texture manager stream image decodes off-thread
 	}
 
 	MV::Stopwatch timer;

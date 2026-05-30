@@ -12,7 +12,7 @@
 #include <concepts>
 #include <type_traits>
 #include "require.hpp"
-#include <jaiscript/signals/signal.hpp>
+#include <jaiscript/signals/signal_decl.hpp>
 #include <cereal/cereal.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>

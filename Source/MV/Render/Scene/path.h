@@ -191,6 +191,13 @@ namespace MV {
 				a_construct->initialize();
 			}
 
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<PathMap>& construct) {
+				construct(std::shared_ptr<Node>(), Size<int>());
+				construct->load(ar, 0);
+				construct->initialize();
+			}
+
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<PathMap>(cellDimensions, map->size(), map->corners()).self());
 			}
@@ -220,6 +227,7 @@ namespace MV {
 		class PathAgent : public jai::property_owner<PathAgent, Component> {
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
 		public:
 			typedef void CallbackSignature(std::shared_ptr<PathAgent>);
 			typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
@@ -423,6 +431,13 @@ namespace MV {
 				a_construct(std::shared_ptr<Node>());
 				a_construct->load(a_archive, version);
 				a_construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<PathAgent>& construct) {
+				construct(std::shared_ptr<Node>());
+				construct->load(ar, 0);
+				construct->initialize();
 			}
 
 			virtual void initialize() override;

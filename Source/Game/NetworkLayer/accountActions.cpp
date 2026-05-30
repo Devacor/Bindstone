@@ -144,7 +144,7 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 					if (hashedPassword == result[0][1].as<std::string>()) {
 						std::string playerStateJson = result[0][4].as<std::string>();
 						if (a_connection->authenticate(result[0][8].as<int64_t>(), result[0][6].as<std::string>(), result[0][7].as<std::string>(), playerStateJson, result[0][5].as<std::string>())) {
-							std::string clientJson = MV::toJson(a_connection->player()->client);
+							std::string clientJson = MV::toJson(a_connection->player()->client, a_connection->server().managers().services);
 							a_connection->connection()->send(
 								makeNetworkString<LoginResponse>("Successful login.", 
 								(!saveHash.empty() && MV::sha512(clientJson) == saveHash ? std::string() : clientJson),

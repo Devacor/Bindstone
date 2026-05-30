@@ -15,14 +15,14 @@ void LobbyUserConnectionState::connectImplementation() {
 }
 
 void LobbyUserConnectionState::message(const std::string &a_message) {
-	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
+	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, ourServer.managers().services);
 	action->execute(this);
 }
 
 bool LobbyUserConnectionState::authenticate(int64_t a_id, const std::string& a_email, const std::string& a_name, const std::string &a_newState, const std::string &a_serverState) {
 	try {
-		ourPlayer = std::make_shared<ServerPlayer>(MV::fromJsonInline<ServerPlayer>(a_serverState));
-		ourPlayer->client = std::make_shared<LocalPlayer>(a_id, a_email, a_name, MV::fromJsonInline<IntermediateDbPlayer>(a_newState));
+		ourPlayer = std::make_shared<ServerPlayer>(MV::fromJsonInline<ServerPlayer>(a_serverState, ourServer.managers().services));
+		ourPlayer->client = std::make_shared<LocalPlayer>(a_id, a_email, a_name, MV::fromJsonInline<IntermediateDbPlayer>(a_newState, ourServer.managers().services));
 		auto lockedConnection = connection();
 		auto connectionList = ourServer.server()->connections();
 		for (auto&& c : connectionList) {
@@ -78,7 +78,7 @@ bool LobbyGameConnectionState::handleExpiredPlayers() {
 }
 
 void LobbyGameConnectionState::message(const std::string &a_message) {
-	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
+	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, ourServer.managers().services);
 	action->execute(this);
 }
 

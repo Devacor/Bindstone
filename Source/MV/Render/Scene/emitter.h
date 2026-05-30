@@ -75,84 +75,82 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				archive(
-					cereal::make_nvp("rateOfChange", rateOfChange),
-					cereal::make_nvp("directionalChange", directionalChangeTemplate),
-					cereal::make_nvp("rotationalChange", rotationalChange),
-					cereal::make_nvp("beginSpeed", beginSpeed),
-					cereal::make_nvp("endSpeed", endSpeed),
-					cereal::make_nvp("beginScale", beginScale),
-					cereal::make_nvp("endScale", endScale),
-					cereal::make_nvp("beginColor", beginColor),
-					cereal::make_nvp("endColor", endColor),
-					cereal::make_nvp("maxLifespan", maxLifespan),
-					cereal::make_nvp("gravityMagnitude", gravityMagnitude),
-					cereal::make_nvp("gravityDirection", gravityDirection),
-					cereal::make_nvp("animationFramesPerSecond", animationFramesPerSecond)
-				);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					archive(
+						JAI_NVP(rateOfChange),
+						jai::serialization::make_nvp("directionalChange", directionalChangeTemplate),
+						JAI_NVP(rotationalChange),
+						JAI_NVP(beginSpeed),
+						JAI_NVP(endSpeed),
+						JAI_NVP(beginScale),
+						JAI_NVP(endScale),
+						JAI_NVP(beginColor),
+						JAI_NVP(endColor),
+						JAI_NVP(maxLifespan),
+						JAI_NVP(gravityMagnitude),
+						JAI_NVP(gravityDirection),
+						JAI_NVP(animationFramesPerSecond)
+					);
+				} else {
+					archive(
+						cereal::make_nvp("rateOfChange", rateOfChange),
+						cereal::make_nvp("directionalChange", directionalChangeTemplate),
+						cereal::make_nvp("rotationalChange", rotationalChange),
+						cereal::make_nvp("beginSpeed", beginSpeed),
+						cereal::make_nvp("endSpeed", endSpeed),
+						cereal::make_nvp("beginScale", beginScale),
+						cereal::make_nvp("endScale", endScale),
+						cereal::make_nvp("beginColor", beginColor),
+						cereal::make_nvp("endColor", endColor),
+						cereal::make_nvp("maxLifespan", maxLifespan),
+						cereal::make_nvp("gravityMagnitude", gravityMagnitude),
+						cereal::make_nvp("gravityDirection", gravityDirection),
+						cereal::make_nvp("animationFramesPerSecond", animationFramesPerSecond)
+					);
+				}
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				archive(
-					cereal::make_nvp("rateOfChange", rateOfChange),
-					cereal::make_nvp("directionalChange", directionalChangeTemplate),
-					cereal::make_nvp("rotationalChange", rotationalChange),
-					cereal::make_nvp("beginSpeed", beginSpeed),
-					cereal::make_nvp("endSpeed", endSpeed),
-					cereal::make_nvp("beginScale", beginScale),
-					cereal::make_nvp("endScale", endScale),
-					cereal::make_nvp("beginColor", beginColor),
-					cereal::make_nvp("endColor", endColor),
-					cereal::make_nvp("maxLifespan", maxLifespan),
-					cereal::make_nvp("gravityMagnitude", gravityMagnitude),
-					cereal::make_nvp("gravityDirection", gravityDirection),
-					cereal::make_nvp("animationFramesPerSecond", animationFramesPerSecond)
-				);
-				if (version < 1) {
-					toRadiansInPlace(rateOfChange);
-					toRadiansInPlace(directionalChangeTemplate);
-					toRadiansInPlace(rotationalChange);
-					toRadiansInPlace(gravityDirection);
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					archive(
+						JAI_NVP(rateOfChange),
+						jai::serialization::make_nvp("directionalChange", directionalChangeTemplate),
+						JAI_NVP(rotationalChange),
+						JAI_NVP(beginSpeed),
+						JAI_NVP(endSpeed),
+						JAI_NVP(beginScale),
+						JAI_NVP(endScale),
+						JAI_NVP(beginColor),
+						JAI_NVP(endColor),
+						JAI_NVP(maxLifespan),
+						JAI_NVP(gravityMagnitude),
+						JAI_NVP(gravityDirection),
+						JAI_NVP(animationFramesPerSecond)
+					);
+				} else {
+					archive(
+						cereal::make_nvp("rateOfChange", rateOfChange),
+						cereal::make_nvp("directionalChange", directionalChangeTemplate),
+						cereal::make_nvp("rotationalChange", rotationalChange),
+						cereal::make_nvp("beginSpeed", beginSpeed),
+						cereal::make_nvp("endSpeed", endSpeed),
+						cereal::make_nvp("beginScale", beginScale),
+						cereal::make_nvp("endScale", endScale),
+						cereal::make_nvp("beginColor", beginColor),
+						cereal::make_nvp("endColor", endColor),
+						cereal::make_nvp("maxLifespan", maxLifespan),
+						cereal::make_nvp("gravityMagnitude", gravityMagnitude),
+						cereal::make_nvp("gravityDirection", gravityDirection),
+						cereal::make_nvp("animationFramesPerSecond", animationFramesPerSecond)
+					);
+					if (version < 1) {
+						toRadiansInPlace(rateOfChange);
+						toRadiansInPlace(directionalChangeTemplate);
+						toRadiansInPlace(rotationalChange);
+						toRadiansInPlace(gravityDirection);
+					}
 				}
-				directionalChangeCurrent = directionalChangeTemplate;
-			}
-
-			// JaiScript serialization (templated on Archive for CRTP support)
-			// Using return-type SFINAE to hide from Cereal's trait detection
-			template<typename Archive>
-			auto save(Archive& ar) const -> std::enable_if_t<jai::serialization::jai_archive<Archive>> {
-				ar("rateOfChange", rateOfChange);
-				ar("directionalChange", directionalChangeTemplate);
-				ar("rotationalChange", rotationalChange);
-				ar("beginSpeed", beginSpeed);
-				ar("endSpeed", endSpeed);
-				ar("beginScale", beginScale);
-				ar("endScale", endScale);
-				ar("beginColor", beginColor);
-				ar("endColor", endColor);
-				ar("maxLifespan", maxLifespan);
-				ar("gravityMagnitude", gravityMagnitude);
-				ar("gravityDirection", gravityDirection);
-				ar("animationFramesPerSecond", animationFramesPerSecond);
-			}
-
-			template<typename Archive>
-			auto load(Archive& ar) -> std::enable_if_t<jai::serialization::jai_archive<Archive>> {
-				ar("rateOfChange", rateOfChange);
-				ar("directionalChange", directionalChangeTemplate);
-				ar("rotationalChange", rotationalChange);
-				ar("beginSpeed", beginSpeed);
-				ar("endSpeed", endSpeed);
-				ar("beginScale", beginScale);
-				ar("endScale", endScale);
-				ar("beginColor", beginColor);
-				ar("endColor", endColor);
-				ar("maxLifespan", maxLifespan);
-				ar("gravityMagnitude", gravityMagnitude);
-				ar("gravityDirection", gravityDirection);
-				ar("animationFramesPerSecond", animationFramesPerSecond);
-				// Sync directionalChangeCurrent with template on load
 				directionalChangeCurrent = directionalChangeTemplate;
 			}
 		};
@@ -303,11 +301,12 @@ namespace MV {
 			}
 		};
 
-		EmitterSpawnProperties loadEmitterProperties(const std::string &a_file, MV::Services& a_services);
+		void loadEmitterProperties(EmitterSpawnProperties& a_result, const std::string &a_file, MV::Services& a_services);
 
 		class Emitter : public jai::property_owner<Emitter, Drawable> {
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
 		public:
 			DrawableDerivedAccessors(Emitter)
 
@@ -378,6 +377,14 @@ namespace MV {
 
 				construct(std::shared_ptr<Node>(), *pool);
 				construct->load(archive, version);
+				construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Emitter>& construct) {
+				auto* services = ar.template get_user_context<MV::Services>();
+				construct(std::shared_ptr<Node>(), *services->template get<MV::ThreadPool>());
+				construct->load(ar, 0);
 				construct->initialize();
 			}
 

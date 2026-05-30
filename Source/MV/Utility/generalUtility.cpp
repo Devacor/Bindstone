@@ -207,7 +207,10 @@ namespace MV {
 	}
 
 	bool writeToFile(const std::string& a_path, const std::string& a_contents) {
-		std::filesystem::path finalPath = std::filesystem::path(a_path).is_absolute() ? a_path : playerPreferencesPath() + a_path;
+		// Use path as-is if absolute or explicitly relative (./ or .\), otherwise use playerPreferencesPath
+		bool useAsIs = std::filesystem::path(a_path).is_absolute() ||
+			a_path.starts_with("./") || a_path.starts_with(".\\");
+		std::filesystem::path finalPath = useAsIs ? a_path : playerPreferencesPath() + a_path;
 		std::filesystem::create_directories(finalPath.parent_path());
 #if defined(__ANDROID__) || defined(__APPLE__)
 		SDL_RWops* rw = SDL_RWFromFile(finalPath.c_str(), "wb");

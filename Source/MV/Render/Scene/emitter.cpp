@@ -4,7 +4,6 @@
 #include "MV/Utility/generalUtility.h"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include "MV/Serialization/property_cereal.hpp"
 #include <jaiscript/serialization/archive.hpp>
 
 #include <jaiscript/core/registrar.hpp>
@@ -416,12 +415,19 @@ namespace MV {
 			return a_clone;
 		}
 
-		MV::Scene::EmitterSpawnProperties loadEmitterProperties(const std::string &a_file, MV::Services& a_services) {
+		void loadEmitterProperties(EmitterSpawnProperties& a_result, const std::string &a_file, MV::Services& a_services) {
 			try {
-				return MV::fromJson<EmitterSpawnProperties>(MV::fileContents(a_file), a_services);
-			} catch (::cereal::RapidJSONException &a_exception) {
+				auto* engine = a_services.get<jai::engine>();
+				auto contents = MV::fileContents(a_file);
+				jai::serialization::json_archive_reader ar(contents, engine);
+				ar.set_user_context<MV::Services>(&a_services);
+				std::string type_name;
+				uint32_t version;
+				ar.begin_object(type_name, version);
+				ar(a_result);
+				ar.end_object();
+			} catch (std::exception &a_exception) {
 				std::cerr << "Failed to load emitter: " << a_exception.what() << std::endl;
-				return{};
 			}
 		}
 

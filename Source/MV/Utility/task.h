@@ -9,7 +9,7 @@
 #include <algorithm>
 
 #include "MV/Utility/require.hpp"
-#include <jaiscript/signals/signal.hpp>
+#include <jaiscript/signals/signal_decl.hpp>
 #include "MV/Utility/exactType.hpp"
 
 #include "cereal/cereal.hpp"

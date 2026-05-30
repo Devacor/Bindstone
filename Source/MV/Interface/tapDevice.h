@@ -4,7 +4,7 @@
 #include <SDL.h>
 #include <memory>
 #include "MV/Render/points.h"
-#include <jaiscript/signals/signal.hpp>
+#include <jaiscript/signals/signal_decl.hpp>
 
 namespace MV{
 	struct ExclusiveTapAction{

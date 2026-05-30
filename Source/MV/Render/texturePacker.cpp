@@ -4,7 +4,6 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include "MV/Serialization/property_cereal.hpp"
 
 #include "sharedTextures.h"
 

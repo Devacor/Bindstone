@@ -20,6 +20,8 @@ namespace MV {
 		class Sprite : public jai::property_owner<Sprite, Drawable> {
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
+			friend class jai::serialization::access;
 
 		public:
 			DrawableDerivedAccessors(Sprite)
@@ -77,6 +79,13 @@ namespace MV {
 			static void load_and_construct(Archive& archive, cereal::construct<Sprite>& construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);
+				construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Sprite>& construct) {
+				construct(std::shared_ptr<Node>());
+				construct->load(ar, 0);
 				construct->initialize();
 			}
 

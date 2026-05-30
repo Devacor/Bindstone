@@ -12,6 +12,7 @@ namespace MV {
 		class Text : public jai::property_owner<Text, Drawable> {
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
 
 		public:
 			typedef void TextSignalSignature(std::shared_ptr<Text>);
@@ -237,6 +238,15 @@ namespace MV {
 				construct->formattedText->scene()->removeFromParent();
 				construct->load(archive, version);
 
+				construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Text>& construct) {
+				auto* services = ar.template get_user_context<MV::Services>();
+				construct(std::shared_ptr<Node>(), *services->template get<MV::TextLibrary>());
+				construct->formattedText->scene()->removeFromParent();
+				construct->load(ar, 0);
 				construct->initialize();
 			}
 

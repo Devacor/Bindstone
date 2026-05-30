@@ -4,7 +4,6 @@
 
 #include "cereal/cereal.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include "MV/Serialization/property_cereal.hpp"
 
 namespace MV {
 

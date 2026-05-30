@@ -40,6 +40,7 @@ namespace MV {
 
 		class Clickable : public jai::property_owner<Clickable, Sprite> {
 			friend cereal::access;
+			friend jai::access;
 			friend Node;
 		public:
 			typedef void ButtonSignalSignature(const std::shared_ptr<Clickable>&);
@@ -193,6 +194,14 @@ namespace MV {
 				auto* mouse = services.get<MV::TapDevice>();
 				construct(std::shared_ptr<Node>(), *mouse);
 				construct->load(archive, version);
+				construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Clickable>& construct) {
+				auto* services = ar.template get_user_context<MV::Services>();
+				construct(std::shared_ptr<Node>(), *services->template get<MV::TapDevice>());
+				construct->load(ar, 0);
 				construct->initialize();
 			}
 

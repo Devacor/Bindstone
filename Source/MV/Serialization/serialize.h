@@ -1,7 +1,9 @@
 #ifndef _MV_SERIALIZE_H_
 #define _MV_SERIALIZE_H_
 
-#include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/serialization/convenience.hpp>
+#include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 
 #include "MV/Utility/services.hpp"

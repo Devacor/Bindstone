@@ -13,7 +13,7 @@
 
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/scopeGuard.hpp"
-#include <jaiscript/signals/signal.hpp>
+#include <jaiscript/signals/signal_decl.hpp>
 #include "MV/Render/points.h"
 #include <jaiscript/serialization/construct.hpp>
 #include <jaiscript/serialization/archive.hpp>
@@ -26,7 +26,8 @@ namespace MV {
 		friend TemporaryCost;
 		friend Map;  // For sparse serialization access to travelCost/staticBlockedSemaphore
 		friend cereal::access;
-		friend class jai::access;  // JaiScript serialization support
+		friend class jai::access;  // JaiScript load_and_construct support
+		friend class jai::serialization::access;  // JaiScript save/load support
 	public:
 		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
 		typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
@@ -94,12 +95,20 @@ namespace MV {
 		static const int MAXIMUM_CLEARANCE = 8;
 	private:
 
-		// Versioned save/load for both Cereal and JaiScript
-		// Defined out-of-line after Map class because Cereal branch needs Map to be complete
+		// Versioned save/load for JaiScript only
+		// Defined out-of-line after Map class because it needs Map to be complete
 		template<class Archive>
+			requires jai::serialization::jai_archive<Archive>
 		void save(Archive& archive, std::uint32_t const version) const;
 		template<class Archive>
+			requires jai::serialization::jai_archive<Archive>
 		void load(Archive& archive, std::uint32_t const version);
+
+		// Non-versioned serialize for Cereal (legacy files don't have version numbers)
+		// Defined out-of-line after Map class because it needs Map to be complete
+		template<class Archive>
+			requires (!jai::serialization::jai_archive<Archive>)
+		void serialize(Archive& archive);
 
 		void calculateClearance() const;
 
@@ -136,7 +145,8 @@ namespace MV {
 
 	class Map : public std::enable_shared_from_this<Map> {
 		friend cereal::access;
-		friend class jai::access;  // JaiScript serialization support (like cereal::access)
+		friend class jai::access;  // JaiScript load_and_construct support
+		friend class jai::serialization::access;  // JaiScript save/load support
 	public:
 		// JaiScript load_and_construct - must be public for trait detection
 		// Takes jai::serialization::construct (different from cereal::construct)
@@ -252,36 +262,37 @@ namespace MV {
 
 		void hookUpObservation();
 
+		// Versioned save/load for JaiScript only
 		template<class Archive>
+			requires jai::serialization::jai_archive<Archive>
 		void save(Archive & archive, std::uint32_t const /*version*/) const {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive("usingCorners", usingCorners);
-				archive("squares", squares);
-			} else {
-				archive(
-					CEREAL_NVP(usingCorners),
-					CEREAL_NVP(squares)
-				);
-			}
+			archive("usingCorners", usingCorners);
+			archive("squares", squares);
 		}
 
 		template<class Archive>
+			requires jai::serialization::jai_archive<Archive>
 		void load(Archive & archive, std::uint32_t const /*version*/) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive("usingCorners", usingCorners);
-				archive("squares", squares);
-				// Note: map pointers for nodes are set in load_and_construct
-			} else {
-				archive(
-					CEREAL_NVP(usingCorners),
-					CEREAL_NVP(squares)
-				);
-			}
+			archive("usingCorners", usingCorners);
+			archive("squares", squares);
+			// Note: map pointers for nodes are set in load_and_construct
 			hookUpObservation();
 		}
 
+		// Non-versioned serialize for Cereal (legacy files don't have version numbers)
 		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<Map> &construct, std::uint32_t const /*version*/) {
+			requires (!jai::serialization::jai_archive<Archive>)
+		void serialize(Archive & archive) {
+			archive(
+				CEREAL_NVP(usingCorners),
+				CEREAL_NVP(squares)
+			);
+			hookUpObservation();
+		}
+
+		// Non-versioned load_and_construct for Cereal (legacy files don't have version numbers)
+		template<class Archive>
+		static void load_and_construct(Archive & archive, cereal::construct<Map> &construct) {
 			construct();
 			archive(
 				cereal::make_nvp("usingCorners", construct->usingCorners),
@@ -486,6 +497,7 @@ namespace MV {
 
 	class NavigationAgent : public std::enable_shared_from_this<NavigationAgent> {
 		friend cereal::access;
+		friend class jai::serialization::access;
 	public:
 		typedef void CallbackSignature(std::shared_ptr<NavigationAgent>);
 		typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
@@ -684,60 +696,59 @@ namespace MV {
 			}
 		}
 
+		// Versioned save/load for JaiScript only
 		template<class Archive>
-		void save(Archive & archive, std::uint32_t const version) const {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(
-					JAI_NVP(ourPosition),
-					JAI_NVP(ourGoal),
-					JAI_NVP(ourSpeed),
-					JAI_NVP(acceptableDistance),
-					JAI_NVP(unitSize),
-					JAI_NVP(map),
-					JAI_NVP(footprintDisabled),
-					JAI_NVP(waitingForPlacement)
-				);
-			} else {
-				archive(
-					CEREAL_NVP(ourPosition),
-					CEREAL_NVP(ourGoal),
-					CEREAL_NVP(ourSpeed),
-					CEREAL_NVP(acceptableDistance),
-					CEREAL_NVP(unitSize),
-					CEREAL_NVP(map),
-					CEREAL_NVP(footprintDisabled),
-					CEREAL_NVP(waitingForPlacement)
-				);
-			}
+			requires jai::serialization::jai_archive<Archive>
+		void save(Archive & archive, std::uint32_t const /*version*/) const {
+			archive(
+				JAI_NVP(ourPosition),
+				JAI_NVP(ourGoal),
+				JAI_NVP(ourSpeed),
+				JAI_NVP(acceptableDistance),
+				JAI_NVP(unitSize),
+				JAI_NVP(map),
+				JAI_NVP(footprintDisabled),
+				JAI_NVP(waitingForPlacement)
+			);
 		}
 
 		template<class Archive>
-		void load(Archive & archive, std::uint32_t const version) {
+			requires jai::serialization::jai_archive<Archive>
+		void load(Archive & archive, std::uint32_t const /*version*/) {
 			blockMap();
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(
-					JAI_NVP(ourPosition),
-					JAI_NVP(ourGoal),
-					JAI_NVP(ourSpeed),
-					JAI_NVP(acceptableDistance),
-					JAI_NVP(unitSize),
-					JAI_NVP(map),
-					JAI_NVP(footprintDisabled),
-					JAI_NVP(waitingForPlacement)
-				);
-			} else {
-				archive(
-					CEREAL_NVP(ourPosition),
-					CEREAL_NVP(ourGoal),
-					CEREAL_NVP(ourSpeed),
-					CEREAL_NVP(acceptableDistance),
-					CEREAL_NVP(unitSize),
-					CEREAL_NVP(map),
-					CEREAL_NVP(footprintDisabled),
-					CEREAL_NVP(waitingForPlacement)
-				);
-			}
+			archive(
+				JAI_NVP(ourPosition),
+				JAI_NVP(ourGoal),
+				JAI_NVP(ourSpeed),
+				JAI_NVP(acceptableDistance),
+				JAI_NVP(unitSize),
+				JAI_NVP(map),
+				JAI_NVP(footprintDisabled),
+				JAI_NVP(waitingForPlacement)
+			);
 			unblockMap();
+		}
+
+		// Non-versioned serialize for Cereal (legacy files don't have version numbers)
+		template<class Archive>
+			requires (!jai::serialization::jai_archive<Archive>)
+		void serialize(Archive & archive) {
+			if constexpr (Archive::is_loading::value) {
+				blockMap();
+			}
+			archive(
+				CEREAL_NVP(ourPosition),
+				CEREAL_NVP(ourGoal),
+				CEREAL_NVP(ourSpeed),
+				CEREAL_NVP(acceptableDistance),
+				CEREAL_NVP(unitSize),
+				CEREAL_NVP(map),
+				CEREAL_NVP(footprintDisabled),
+				CEREAL_NVP(waitingForPlacement)
+			);
+			if constexpr (Archive::is_loading::value) {
+				unblockMap();
+			}
 		}
 
 		void markDirty() {
@@ -893,44 +904,42 @@ namespace MV {
 		int ourDebugId = 0;
 	};
 
-	// Out-of-line MapNode save/load - defined here because Cereal branch needs Map to be complete
+	// Out-of-line MapNode save/load for JaiScript only
 	template<class Archive>
+		requires jai::serialization::jai_archive<Archive>
 	void MapNode::save(Archive& archive, std::uint32_t const /*version*/) const {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive("location", location);
-			archive("useCorners", useCorners);
-			archive("travelCost", travelCost);
-			archive("staticBlockedSemaphore", staticBlockedSemaphore);
-		} else {
-			std::weak_ptr<Map> weakMap;
-			weakMap = map->shared_from_this();
-			archive(
-				CEREAL_NVP(location),
-				CEREAL_NVP(useCorners),
-				CEREAL_NVP(travelCost),
-				CEREAL_NVP(staticBlockedSemaphore),
-				cereal::make_nvp("map", weakMap)
-			);
-		}
+		archive("location", location);
+		archive("useCorners", useCorners);
+		archive("travelCost", travelCost);
+		archive("staticBlockedSemaphore", staticBlockedSemaphore);
 	}
 
 	template<class Archive>
+		requires jai::serialization::jai_archive<Archive>
 	void MapNode::load(Archive& archive, std::uint32_t const /*version*/) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive("location", location);
-			archive("useCorners", useCorners);
-			archive("travelCost", travelCost);
-			archive("staticBlockedSemaphore", staticBlockedSemaphore);
-			// map pointer set by Map::load_and_construct after deserializing squares
-		} else {
-			std::weak_ptr<Map> weakMap;
-			archive(
-				CEREAL_NVP(location),
-				CEREAL_NVP(useCorners),
-				CEREAL_NVP(travelCost),
-				CEREAL_NVP(staticBlockedSemaphore),
-				cereal::make_nvp("map", weakMap)
-			);
+		archive("location", location);
+		archive("useCorners", useCorners);
+		archive("travelCost", travelCost);
+		archive("staticBlockedSemaphore", staticBlockedSemaphore);
+		// map pointer set by Map::load_and_construct after deserializing squares
+	}
+
+	// Non-versioned serialize for Cereal (legacy files don't have version numbers)
+	template<class Archive>
+		requires (!jai::serialization::jai_archive<Archive>)
+	void MapNode::serialize(Archive& archive) {
+		std::weak_ptr<Map> weakMap;
+		if constexpr (Archive::is_saving::value) {
+			weakMap = map->shared_from_this();
+		}
+		archive(
+			CEREAL_NVP(location),
+			CEREAL_NVP(useCorners),
+			CEREAL_NVP(travelCost),
+			CEREAL_NVP(staticBlockedSemaphore),
+			cereal::make_nvp("map", weakMap)
+		);
+		if constexpr (Archive::is_loading::value) {
 			map = weakMap.lock().get();
 		}
 	}

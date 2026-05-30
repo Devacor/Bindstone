@@ -11,6 +11,7 @@
 #include "SDL_ttf.h"
 #include "MV/Render/points.h"
 #include "cereal/archives/adapters.hpp"
+#include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
 	namespace Scene{
@@ -60,6 +61,7 @@ namespace MV {
 	///////////////////////////////////
 	class FontDefinition : public std::enable_shared_from_this<FontDefinition>{
 		friend cereal::access;
+		friend class jai::serialization::access;
 		friend TextLibrary;
 		friend std::ostream& operator<<(std::ostream&, const FontDefinition&);
 	public:
@@ -317,6 +319,7 @@ namespace MV {
 	///////////////////////////////////
 	class FormattedText{
 		friend cereal::access;
+		friend class jai::serialization::access;
 		friend FormattedLine;
 	public:
 		FormattedText(const FormattedText& a_rhs);
@@ -402,19 +405,32 @@ namespace MV {
 	private:
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const a_version) {
-			if (a_version > 0) {
+			if constexpr (jai::serialization::jai_archive<Archive>) {
+				auto str = string();
 				archive(
-					cereal::make_nvp("minimumTextLineHeight", minimumTextLineHeight),
-					cereal::make_nvp("showAsPassword", showAsPassword)
+					JAI_NVP(minimumTextLineHeight),
+					JAI_NVP(showAsPassword),
+					JAI_NVP(defaultStateIdentifier),
+					JAI_NVP(textWidth),
+					JAI_NVP(textWrapping),
+					JAI_NVP(textJustification),
+					jai::serialization::make_nvp("string", str)
+				);
+			} else {
+				if (a_version > 0) {
+					archive(
+						cereal::make_nvp("minimumTextLineHeight", minimumTextLineHeight),
+						cereal::make_nvp("showAsPassword", showAsPassword)
+					);
+				}
+				archive(
+					cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
+					cereal::make_nvp("textWidth", textWidth),
+					cereal::make_nvp("textWrapping", textWrapping),
+					cereal::make_nvp("textJustification", textJustification),
+					cereal::make_nvp("string", string())
 				);
 			}
-			archive(
-				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
-				cereal::make_nvp("textWidth", textWidth),
-				cereal::make_nvp("textWrapping", textWrapping),
-				cereal::make_nvp("textJustification", textJustification),
-				cereal::make_nvp("string", string())
-			);
 		}
 
 		template<class Archive>

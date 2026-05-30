@@ -179,6 +179,11 @@ namespace jai {
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, engine* eng);
         // Overload for container subscript references with element type constraint
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, engine* eng, type_info_ptr container_element_type);
+        // Reallocation-safe reference to a vector element (range-for auto&, arr[i] lvalue):
+        // holds the owning container + index so deref/assign-through recompute the element
+        // address each time and bounds-check it (see reference_holder::container).
+        static script_value make_element_reference(const strong_ptr<std::vector<script_value>>& container, size_t index,
+                                                   const std::shared_ptr<environment>& env, engine* eng, type_info_ptr element_type);
         static script_value make_function(const script_function& func, engine* eng);
         
         // Factory method for C++ bound values
@@ -1397,9 +1402,20 @@ namespace jai {
         
         // Reference wrapper for reference types
         struct reference_holder {
-            script_value* target = nullptr;  // Points to the referenced value
+            script_value* target = nullptr;  // Points to the referenced value (when container is null)
             std::weak_ptr<environment> sourceEnv;  // environment that owns the target
             type_info_ptr container_element_type = nullptr;  // For array/map subscript refs: the element type constraint
+
+            // For references into a std::vector element (range-for `auto&`, `arr[i]`
+            // lvalue): hold the OWNING container + index instead of a raw element
+            // pointer. A raw pointer into a vector dangles when the vector reallocates
+            // (e.g. a push inside the loop body) -> heap corruption on write-through.
+            // When `container` is set, deref()/assign_through() recompute the element
+            // address from container+index each time (surviving reallocation) and
+            // bounds-check the index (a shrink throws instead of reading freed memory).
+            // The strong_ptr also keeps the vector alive for the reference's lifetime.
+            strong_ptr<std::vector<script_value>> container;
+            size_t container_index = SIZE_MAX;
         };
         
         

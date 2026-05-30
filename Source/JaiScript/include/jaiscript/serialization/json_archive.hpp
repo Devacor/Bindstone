@@ -617,14 +617,14 @@ public:
             throw serialization_error("Engine reference expired during JSON deserialization");
         }
 
-        auto type_it = map.find(script_value("_type_", eng));
+        auto type_it = map.find(script_value(script_value::ast_literal_tag{}, std::string("_type_")));
         if (type_it != map.end() && type_it->second.is_string()) {
             type_name = type_it->second.as_string();
         } else {
             type_name = "";
         }
 
-        auto version_it = map.find(script_value("_version_", eng));
+        auto version_it = map.find(script_value(script_value::ast_literal_tag{}, std::string("_version_")));
         if (version_it != map.end() && version_it->second.is_int()) {
             version = static_cast<uint32_t>(version_it->second.as_int());
         } else {
@@ -632,7 +632,7 @@ public:
         }
 
         version_ = version;
-        object_stack_.push(ObjectState{map, map.begin()});
+        object_stack_.push(ObjectState(map, map.begin()));
         return true;
     }
 
@@ -690,7 +690,7 @@ public:
         }
 
         const auto& map = value_to_check->as_map();
-        object_stack_.push(ObjectState{map, map.begin()});
+        object_stack_.push(ObjectState(map, map.begin()));
         return map.size();
     }
 
@@ -726,15 +726,7 @@ public:
         if (object_stack_.empty()) {
             return false;
         }
-
-        // Get engine reference for creating script_values
-        auto eng = engine_ref_;
-        if (!eng) {
-            throw serialization_error("Engine reference expired during JSON deserialization");
-        }
-
-        const auto& obj_state = object_stack_.top();
-        return obj_state.map.find(script_value(name, eng)) != obj_state.map.end();
+        return object_stack_.top().index.count(name) > 0;
     }
 
     // Seek to a specific property by name
@@ -745,34 +737,18 @@ public:
             return false;
         }
 
-        auto eng = engine_ref_;
-        if (!eng) {
-            throw serialization_error("Engine reference expired during JSON deserialization");
-        }
-
         auto& obj_state = object_stack_.top();
 
-        while (obj_state.current != obj_state.map.end()) {
-            const std::string& prop_name = obj_state.current->first.as_string();
-            if (prop_name == "_type_" || prop_name == "_version_") {
-                ++obj_state.current;
-                continue;
-            }
-            if (prop_name == name) {
-                current_property_value_ = &obj_state.current->second;
-                cpv_depth_ = object_stack_.size();
-                ++obj_state.current;
-                return true;
-            }
-            break;
-        }
-
-        auto it = obj_state.map.find(script_value(name, eng));
-        if (it == obj_state.map.end()) {
+        // Fast path: O(1) lookup via the pre-built string index.
+        // The old path called map.find(script_value(name, eng)) which allocated
+        // and interned a script_value key on every property access — O(log N) with
+        // heavy constant cost. The index uses plain std::string keys: O(1) average.
+        auto it = obj_state.index.find(name);
+        if (it == obj_state.index.end()) {
             return false;
         }
 
-        current_property_value_ = &it->second;
+        current_property_value_ = it->second;
         cpv_depth_ = object_stack_.size();
         return true;
     }
@@ -1053,7 +1029,12 @@ private:
             expect(':');
             script_value value = parse_value();
 
-            map[script_value(key, eng)] = value;
+            // Use ast_literal_tag: creates a string script_value WITHOUT interning
+            // into the symbolizer. JSON keys are only used for DOM lookup (via the
+            // unordered_map index in ObjectState) and string content comparison in
+            // std::map<> — both work correctly without interning. This eliminates
+            // O(N) symbolizer hash-map operations, the dominant parse cost.
+            map.emplace(script_value(script_value::ast_literal_tag{}, key), std::move(value));
 
             char c = peek();
             if (c == '}') {
@@ -1154,6 +1135,20 @@ private:
     struct ObjectState {
         const std::map<script_value, script_value>& map;
         std::map<script_value, script_value>::const_iterator current;
+        // O(1) property lookup index built once when the object is opened.
+        // Keys are plain std::string — no engine, no script_value comparison.
+        std::unordered_map<std::string, const script_value*> index;
+
+        ObjectState(const std::map<script_value, script_value>& m,
+                    std::map<script_value, script_value>::const_iterator it)
+            : map(m), current(it) {
+            index.reserve(m.size());
+            for (const auto& [k, v] : m) {
+                if (k.is_string()) {
+                    index.emplace(k.unchecked_as_string(), &v);
+                }
+            }
+        }
     };
     
     struct ArrayState {

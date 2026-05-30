@@ -553,7 +553,9 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument");
         }
 
-        const auto& arr = self.unchecked_as_array();
+        // Snapshot first: func is user script that may mutate THIS array (shared
+        // storage), reallocating the buffer and invalidating the iterator.
+        const std::vector<script_value> arr = self.unchecked_as_array();
         const auto& func = args[0].unchecked_as_function();
         script_value result = script_value::make_array(nullptr, interp->get_engine());
         auto& resultPtr = result.unchecked_get_array_storage();
@@ -577,17 +579,27 @@ void interpreter::init_builtin_methods() {
 
         auto& arrPtr = self.unchecked_get_array_storage();
 
+        // Sort a SNAPSHOT, then write it back. The comparator (default or custom) can
+        // run user script that mutates THIS array; sorting the live buffer while it
+        // reallocates is undefined behavior / a crash. (A user-supplied comparator
+        // that isn't a strict weak ordering is still the caller's responsibility, as
+        // in C++ — but it can no longer corrupt the container.)
+        std::vector<script_value> tmp = *arrPtr;
+
         if (args.empty()) {
-            // Default sort - numeric or lexicographic
-            std::sort(arrPtr->begin(), arrPtr->end(), [](const script_value& a, const script_value& b) {
-                if (a.is_int() && b.is_int()) {
-                    return a.unchecked_as_int() < b.unchecked_as_int();
-                } else if (a.is_float() && b.is_float()) {
-                    return a.unchecked_as_float() < b.unchecked_as_float();
-                } else if (a.is_string() && b.is_string()) {
-                    return a.unchecked_as_string() < b.unchecked_as_string();
+            // Default order: a strict weak ordering for ALL element types. Numerics
+            // compare by value (int/float mixed too); everything else falls back to
+            // script_value's total <=> order. The previous comparator returned false
+            // for any mixed pair, which is NOT a strict weak ordering (std::sort UB).
+            std::sort(tmp.begin(), tmp.end(), [](const script_value& a, const script_value& b) {
+                const bool an = a.is_int() || a.is_float();
+                const bool bn = b.is_int() || b.is_float();
+                if (an && bn) {
+                    double av = a.is_int() ? static_cast<double>(a.unchecked_as_int()) : a.unchecked_as_float();
+                    double bv = b.is_int() ? static_cast<double>(b.unchecked_as_int()) : b.unchecked_as_float();
+                    return av < bv;
                 }
-                return false;
+                return a < b;  // total order via operator<=> (numerics have lowest type ids)
             });
         } else {
             // Custom comparator
@@ -595,12 +607,13 @@ void interpreter::init_builtin_methods() {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "sort() comparator must be a function");
             }
             const auto& comparator = args[0].unchecked_as_function();
-            std::sort(arrPtr->begin(), arrPtr->end(), [&comparator](const script_value& a, const script_value& b) {
+            std::sort(tmp.begin(), tmp.end(), [&comparator](const script_value& a, const script_value& b) {
                 auto result = comparator({a, b});
                 if (!result) return false;
                 return result.value().is_bool() && result.value().unchecked_as_bool();
             });
         }
+        *arrPtr = std::move(tmp);
         return interp->make_value();
     }},
 
@@ -643,18 +656,25 @@ void interpreter::init_builtin_methods() {
         const auto& predicate = args[0].unchecked_as_function();
         script_int removed_count = 0;
 
-        for (auto it = arrPtr->begin(); it != arrPtr->end(); ) {
-            auto call_result = predicate({*it});
+        // Snapshot the elements before iterating: the predicate is user script that
+        // can mutate THIS array (arrays share strong_ptr storage), and a push/clear
+        // would reallocate the buffer and dangle a live iterator. Evaluate against the
+        // snapshot, collect survivors, then write them back.
+        std::vector<script_value> snapshot = *arrPtr;
+        std::vector<script_value> kept;
+        kept.reserve(snapshot.size());
+        for (auto& elem : snapshot) {
+            auto call_result = predicate({elem});
             if (!call_result) {
                 return call_result.error_value();
             }
             if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
-                it = arrPtr->erase(it);
-                ++removed_count;
+                ++removed_count;          // dropped
             } else {
-                ++it;
+                kept.push_back(elem);     // survivor
             }
         }
+        *arrPtr = std::move(kept);
         return interp->make_value(removed_count);
     }},
 
@@ -3334,8 +3354,12 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         }
     }
 
-    // Special handling for type constructors like weak_ptr<T>, shared_ptr<T>
-    if (expr->name.find("weak_ptr<") == 0 || expr->name.find("shared_ptr<") == 0) {
+    // Special handling for type constructors like weak_ptr<T>, shared_ptr<T>.
+    // This is reached on every non-local (global/function/member) identifier access,
+    // so gate the two prefix scans on the first character: any name not starting
+    // with 'w'/'s' (the overwhelming majority) can't match and skips both find()s.
+    if (!expr->name.empty() && (expr->name.front() == 'w' || expr->name.front() == 's') &&
+        (expr->name.find("weak_ptr<") == 0 || expr->name.find("shared_ptr<") == 0)) {
         // This is a type constructor being used as a function
         // Extract the base type name (weak_ptr or shared_ptr)
         size_t pos = expr->name.find('<');
@@ -3858,13 +3882,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                              static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
 
             if (is_lvalue) {
-                // This is an lvalue expression, return a reference to allow modification
-                auto& mut_array = const_cast<std::vector<script_value>&>(array);
-                script_value* element_ptr = &mut_array[index];
-                // Get element type constraint from the array's type_info for validation on assignment
+                // Reallocation-safe reference to the element (container+index, not a raw
+                // pointer into the vector buffer): holding `arr[i]` as an lvalue across a
+                // push that reallocates would otherwise dangle -> heap corruption (#41).
                 auto array_type_info = left.get_type_info();
                 type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
-                script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_, element_type);
+                script_value ref_value = script_value::make_element_reference(
+                    left.get_array_storage(), static_cast<size_t>(index), environment_, engine_, element_type);
                 push_value(ref_value);
             } else {
                 // True temporary (e.g., function return), read-only access
@@ -6358,8 +6382,14 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             // Check if this is a simple identifier (needed for references)
             if (argExpr->get_type() == node_type::identifier_expr) {
                 auto* identExpr = static_cast<identifier_expr*>(argExpr.get());
-                // Get the symbol ID for this variable
-                uint64_t symbol_id = string_symbolizer_->intern(identExpr->name);
+                // Reuse the parser-assigned interned symbol id instead of re-interning
+                // (a string hash + map probe) on every call. Cache it on first use for
+                // the rare case the parser left it unset.
+                uint64_t symbol_id = identExpr->symbol_id;
+                if (symbol_id == UINT64_MAX) {
+                    symbol_id = string_symbolizer_->intern(identExpr->name);
+                    identExpr->symbol_id = symbol_id;
+                }
                 current_arg_metadata_.emplace_back(symbol_id, environment_.get());
             } else {
                 // Not an identifier - can't take reference
@@ -7167,6 +7197,21 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 find_identifiers(ternary->condition.get());
                 find_identifiers(ternary->then_expression.get());
                 find_identifiers(ternary->else_expression.get());
+            } else if (e->get_type() == node_type::array_literal_expr) {
+                auto* arr = static_cast<array_literal_expr*>(e);
+                for (const auto& el : arr->elements) find_identifiers(el.get());
+            } else if (e->get_type() == node_type::map_literal_expr) {
+                auto* m = static_cast<map_literal_expr*>(e);
+                for (const auto& kv : m->entries) { find_identifiers(kv.first.get()); find_identifiers(kv.second.get()); }
+            } else if (e->get_type() == node_type::new_expr) {
+                auto* ne = static_cast<new_expr*>(e);
+                for (const auto& a : ne->arguments) find_identifiers(a.get());
+            } else if (e->get_type() == node_type::throw_expr) {
+                auto* te = static_cast<throw_expr*>(e);
+                if (te->value) find_identifiers(te->value.get());
+            } else if (e->get_type() == node_type::yield_expr) {
+                auto* ye = static_cast<yield_expr*>(e);
+                if (ye->value) find_identifiers(ye->value.get());
             }
             // Add more expression types as needed
         };
@@ -7204,15 +7249,255 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 if (return_s->value) {
                     find_identifiers(return_s->value.get());
                 }
+            } else if (s->get_type() == node_type::for_stmt) {
+                auto* for_s = static_cast<for_stmt*>(s);
+                if (for_s->initializer) find_in_statement(for_s->initializer.get());
+                if (for_s->condition) find_identifiers(for_s->condition.get());
+                if (for_s->update) find_identifiers(for_s->update.get());
+                find_in_statement(for_s->body.get());
+            } else if (s->get_type() == node_type::range_for_stmt) {
+                auto* rf = static_cast<range_for_stmt*>(s);
+                if (rf->container) find_identifiers(rf->container.get());
+                find_in_statement(rf->body.get());
+            } else if (s->get_type() == node_type::switch_stmt) {
+                auto* sw = static_cast<switch_stmt*>(s);
+                if (sw->condition) find_identifiers(sw->condition.get());
+                for (const auto& c : sw->cases) {
+                    if (c->value) find_identifiers(c->value.get());
+                    for (const auto& st : c->body) find_in_statement(st.get());
+                }
+                if (sw->default_case) {
+                    for (const auto& st : sw->default_case->body) find_in_statement(st.get());
+                }
+            } else if (s->get_type() == node_type::try_stmt) {
+                auto* tr = static_cast<try_stmt*>(s);
+                if (tr->try_block) find_in_statement(tr->try_block.get());
+                if (tr->catch_block) find_in_statement(tr->catch_block.get());
+            } else if (s->get_type() == node_type::variable_decl) {
+                auto* vd = static_cast<variable_decl*>(s);
+                if (vd->initializer) find_identifiers(vd->initializer.get());
+            } else if (s->get_type() == node_type::expression_decl) {
+                auto* ed = static_cast<expression_decl*>(s);
+                if (ed->expression) find_identifiers(ed->expression.get());
+            } else if (s->get_type() == node_type::statement_decl) {
+                auto* sd = static_cast<statement_decl*>(s);
+                if (sd->statement) find_in_statement(sd->statement.get());
             }
             // Add more statement types as needed
         };
         
         // Analyze the lambda body
         find_in_statement(expr->body.get());
-        
+
     }
-    
+
+    // ----------------------------------------------------------------
+    // OUTER-LOCAL SLOT CAPTURE
+    //
+    // When the parser assigned slot indices, it walked the outer function
+    // scope stack — so identifier_expr nodes in this lambda body that
+    // refer to OUTER locals have their slot_index set to the outer
+    // function's slot (e.g. slot 0 of the enclosing `auto f()`) rather
+    // than SIZE_MAX. At runtime the lambda runs in its OWN call frame
+    // (slot 0 = its first param/local), so a baked-in outer slot resolves
+    // to completely wrong data or "Undefined variable".
+    //
+    // Fix: scan the lambda body for identifier nodes whose slot_index falls
+    // within the outer call frame's live slot range. For each, read the
+    // value from the outer frame (which IS alive at lambda creation time),
+    // materialise it into the capture environment, then zero the baked
+    // slot_index to SIZE_MAX so the runtime lookup falls through to the env
+    // path on every subsequent call.
+    //
+    // This is purely a runtime operation — zero parser changes. Patching
+    // slot_index to SIZE_MAX is safe because:
+    //  (a) outer-local slot indices can NEVER be valid inside the lambda's
+    //      own frame, so this is always the correct semantics.
+    //  (b) re-parsing (hot reload) will regenerate the lambda AST fresh.
+    //
+    // Performance: one AST walk at closure-creation time, O(1) env lookup
+    // per captured local on every call — identical cost to the existing
+    // [=] path. No overhead for lambdas that don't reference outer locals.
+    // ----------------------------------------------------------------
+    struct outer_slot_ref {
+        identifier_expr* node;       // the AST node (we'll zero its slot_index)
+        uint64_t symbol_id;
+        size_t outer_slot;           // the outer frame's slot index
+    };
+    std::vector<outer_slot_ref> outer_slot_refs;
+
+    // Build the set of slot indices that belong to THIS lambda's own scope
+    // (params get slots 0..N-1; body locals get N..local_count-1). Any
+    // slot_index NOT in [0, local_count) seen in the body came from an
+    // outer scope and refers to the outer function's frame.
+    const size_t lambda_local_count = expr->local_count;  // set by parser after exit_function_scope
+
+    // Build the set of outer-slot-index identifiers we've already handled
+    // (avoid duplicates for the same symbol used multiple times in the body)
+    std::unordered_set<uint64_t> outer_slots_captured;
+
+    if (!call_stack_.empty()) {
+        const size_t outer_slot_count = call_stack_.back().local_count();
+
+        // Reuse the existing AST-walk infrastructure but collect identifier_expr*
+        // nodes whose slot_index is in [0, outer_slot_count) — those came from the
+        // outer function scope.  We walk even for no-capture lambdas ([]) because the
+        // parser still bakes outer slot indices whenever the body references them.
+        std::function<void(expression*)> collect_outer_slots_expr;
+        std::function<void(statement*)>  collect_outer_slots_stmt;
+
+        collect_outer_slots_expr = [&](expression* e) {
+            if (!e) return;
+            if (e->get_type() == node_type::identifier_expr) {
+                auto* ident = static_cast<identifier_expr*>(e);
+                if (ident->slot_index != SIZE_MAX &&
+                    ident->slot_index < outer_slot_count &&
+                    ident->slot_index >= lambda_local_count) {
+                    // This slot came from the outer frame; record if not seen yet.
+                    if (outer_slots_captured.insert(ident->symbol_id).second) {
+                        outer_slot_refs.push_back({ident, ident->symbol_id, ident->slot_index});
+                    } else {
+                        // Same symbol, different node — still patch the slot_index
+                        ident->slot_index = SIZE_MAX;
+                    }
+                }
+                return;
+            }
+            // Recurse into sub-expressions (mirrors find_identifiers above)
+            switch (e->get_type()) {
+            case node_type::binary_expr: {
+                auto* b = static_cast<binary_expr*>(e);
+                collect_outer_slots_expr(b->left.get());
+                collect_outer_slots_expr(b->right.get());
+                break;
+            }
+            case node_type::unary_expr:
+                collect_outer_slots_expr(static_cast<unary_expr*>(e)->operand.get()); break;
+            case node_type::call_expr: {
+                auto* c = static_cast<call_expr*>(e);
+                collect_outer_slots_expr(c->callee.get());
+                for (const auto& a : c->arguments) collect_outer_slots_expr(a.get());
+                break;
+            }
+            case node_type::member_expr:
+                collect_outer_slots_expr(static_cast<member_expr*>(e)->object.get()); break;
+            case node_type::assignment_expr: {
+                auto* a = static_cast<assignment_expr*>(e);
+                collect_outer_slots_expr(a->target.get());
+                collect_outer_slots_expr(a->value.get());
+                break;
+            }
+            case node_type::ternary_expr: {
+                auto* t = static_cast<ternary_expr*>(e);
+                collect_outer_slots_expr(t->condition.get());
+                collect_outer_slots_expr(t->then_expression.get());
+                collect_outer_slots_expr(t->else_expression.get());
+                break;
+            }
+            case node_type::array_literal_expr:
+                for (const auto& el : static_cast<array_literal_expr*>(e)->elements)
+                    collect_outer_slots_expr(el.get());
+                break;
+            case node_type::map_literal_expr:
+                for (const auto& kv : static_cast<map_literal_expr*>(e)->entries) {
+                    collect_outer_slots_expr(kv.first.get());
+                    collect_outer_slots_expr(kv.second.get());
+                }
+                break;
+            case node_type::new_expr:
+                for (const auto& a : static_cast<new_expr*>(e)->arguments)
+                    collect_outer_slots_expr(a.get());
+                break;
+            case node_type::throw_expr:
+                if (static_cast<throw_expr*>(e)->value)
+                    collect_outer_slots_expr(static_cast<throw_expr*>(e)->value.get());
+                break;
+            case node_type::yield_expr:
+                if (static_cast<yield_expr*>(e)->value)
+                    collect_outer_slots_expr(static_cast<yield_expr*>(e)->value.get());
+                break;
+            default: break;
+            }
+        };
+
+        collect_outer_slots_stmt = [&](statement* s) {
+            if (!s) return;
+            switch (s->get_type()) {
+            case node_type::expression_stmt:
+                collect_outer_slots_expr(static_cast<expression_stmt*>(s)->expression.get()); break;
+            case node_type::expression_decl:
+                collect_outer_slots_expr(static_cast<expression_decl*>(s)->expression.get()); break;
+            case node_type::statement_decl:
+                collect_outer_slots_stmt(static_cast<statement_decl*>(s)->statement.get()); break;
+            case node_type::block_stmt:
+                for (const auto& d : static_cast<block_stmt*>(s)->declarations)
+                    collect_outer_slots_stmt(d.get());
+                break;
+            case node_type::if_stmt: {
+                auto* is = static_cast<if_stmt*>(s);
+                collect_outer_slots_expr(is->condition.get());
+                collect_outer_slots_stmt(is->then_statement.get());
+                if (is->else_statement) collect_outer_slots_stmt(is->else_statement.get());
+                break;
+            }
+            case node_type::while_stmt: {
+                auto* ws = static_cast<while_stmt*>(s);
+                collect_outer_slots_expr(ws->condition.get());
+                collect_outer_slots_stmt(ws->body.get());
+                break;
+            }
+            case node_type::for_stmt: {
+                auto* fs = static_cast<for_stmt*>(s);
+                if (fs->initializer) collect_outer_slots_stmt(fs->initializer.get());
+                if (fs->condition)   collect_outer_slots_expr(fs->condition.get());
+                if (fs->update)      collect_outer_slots_expr(fs->update.get());
+                collect_outer_slots_stmt(fs->body.get());
+                break;
+            }
+            case node_type::range_for_stmt: {
+                auto* rf = static_cast<range_for_stmt*>(s);
+                if (rf->container) collect_outer_slots_expr(rf->container.get());
+                collect_outer_slots_stmt(rf->body.get());
+                break;
+            }
+            case node_type::return_stmt:
+                if (static_cast<return_stmt*>(s)->value)
+                    collect_outer_slots_expr(static_cast<return_stmt*>(s)->value.get());
+                break;
+            case node_type::switch_stmt: {
+                auto* sw = static_cast<switch_stmt*>(s);
+                if (sw->condition) collect_outer_slots_expr(sw->condition.get());
+                for (const auto& c : sw->cases) {
+                    if (c->value) collect_outer_slots_expr(c->value.get());
+                    for (const auto& st : c->body) collect_outer_slots_stmt(st.get());
+                }
+                if (sw->default_case)
+                    for (const auto& st : sw->default_case->body) collect_outer_slots_stmt(st.get());
+                break;
+            }
+            case node_type::try_stmt: {
+                auto* tr = static_cast<try_stmt*>(s);
+                if (tr->try_block) collect_outer_slots_stmt(tr->try_block.get());
+                if (tr->catch_block) collect_outer_slots_stmt(tr->catch_block.get());
+                break;
+            }
+            case node_type::variable_decl:
+                if (static_cast<variable_decl*>(s)->initializer)
+                    collect_outer_slots_expr(static_cast<variable_decl*>(s)->initializer.get());
+                break;
+            default: break;
+            }
+        };
+
+        collect_outer_slots_stmt(expr->body.get());
+    }
+
+    // If we found any outer-slot references, we need a capture env even for a
+    // bare [] lambda (automatic local capture, a stated JaiScript feature).
+    if (!outer_slot_refs.empty()) {
+        has_explicit_captures = true;  // forces needs_capture_env = true below
+    }
+
     // Determine if we actually need a capture environment
     bool needs_capture_env = has_explicit_captures || (has_default_capture && !used_variables.empty());
 
@@ -7236,8 +7521,19 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     std::shared_ptr<environment> final_closure_env;
 
     if (needs_capture_env) {
-        // Create captured variables in the closure environment
-        std::shared_ptr<environment> captureEnv = std::make_shared<environment>(closure_env, string_symbolizer_);
+        // Create captured variables in the closure environment.
+        // Parent = global environment (NOT the local-function's pool-env).
+        //
+        // Using the local function's closure_env as parent causes a use-after-free
+        // / ownership cycle for ESCAPING closures: the outer function's pooled env
+        // gets released when it returns, then get_pooled_environment() re-allocates
+        // that same slot with itself (or a descendant) as parent → infinite loop.
+        //
+        // The capture env is self-contained: all needed outer variables are copied
+        // into it (env-variables above, and outer-slot locals below). The only thing
+        // a parent provides beyond that is global-scope fallback, so pointing at the
+        // global env gives correct semantics without the lifecycle hazard.
+        auto captureEnv = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
         
         // Process default captures first ([=] or [&])
         if (has_default_capture && !used_variables.empty()) {
@@ -7254,19 +7550,40 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     }
                 }
 
-                if (!is_overridden && environment_->contains(var_id)) {
-                    if (capture_by_ref) {
-                        // Capture by reference - create reference to original variable
-                        script_value* targetPtr = environment_->get_value_ptr(var_id);
-                        if (targetPtr) {
-                            script_value refValue = script_value::make_reference(targetPtr, environment_);
-                            captureEnv->define(var_id, std::move(refValue));
+                if (!is_overridden) {
+                    // Check environment first, then call-frame slots (locals live there).
+                    if (environment_->contains(var_id)) {
+                        if (capture_by_ref) {
+                            script_value* targetPtr = environment_->get_value_ptr(var_id);
+                            if (targetPtr) {
+                                script_value refValue = script_value::make_reference(targetPtr, environment_);
+                                captureEnv->define(var_id, std::move(refValue));
+                            }
+                        } else {
+                            auto capture_result = environment_->get(var_id);
+                            if (capture_result) {
+                                captureEnv->define(var_id, capture_result.value().clone());
+                            }
                         }
-                    } else {
-                        // Capture by value - deep copy at capture time
-                        auto capture_result = environment_->get(var_id);
-                        if (capture_result) {
-                            captureEnv->define(var_id, capture_result.value().clone());
+                    } else if (!call_stack_.empty()) {
+                        // Local lives in the outer call frame (slot-based storage).
+                        // Find it via the outer_slot_refs we already collected — the
+                        // slot-scan above already resolved outer slots to symbol_ids.
+                        for (const auto& ref : outer_slot_refs) {
+                            if (ref.symbol_id == var_id) {
+                                script_value* slot_val = call_stack_.back().get_local(ref.outer_slot);
+                                if (slot_val) {
+                                    if (capture_by_ref) {
+                                        // By-ref of a slot: safe only for inline (non-escaping) use.
+                                        // Provide a value-clone and let the slot-scan patch handle
+                                        // the escaping-closure case above (UAF avoidance).
+                                        captureEnv->define(var_id, slot_val->deref().clone());
+                                    } else {
+                                        captureEnv->define(var_id, slot_val->deref().clone());
+                                    }
+                                }
+                                break;
+                            }
                         }
                     }
                 }
@@ -7277,39 +7594,74 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         for (const auto& capture : expr->captures) {
             // Special handling for 'this' - method_environment provides it via get() override
             // even though contains() might return false
+            // Check environment first; if not there check the outer call-frame
+            // (locals with slot_index live there, not in environment_).
             bool can_capture = environment_->contains(capture.symbol_id);
+            bool capture_from_slot = false;
+            script_value* slot_val = nullptr;
+
             if (!can_capture && capture.symbol_id == this_id) {
-                // Try to get 'this' - method_environment will provide it
                 auto this_test_result = environment_->get(this_id);
-                if (this_test_result) {
-                    can_capture = true;
+                if (this_test_result) can_capture = true;
+            }
+
+            if (!can_capture && !call_stack_.empty()) {
+                // Walk outer_slot_refs to find this symbol's outer slot
+                for (const auto& ref : outer_slot_refs) {
+                    if (ref.symbol_id == capture.symbol_id) {
+                        slot_val = call_stack_.back().get_local(ref.outer_slot);
+                        if (slot_val) { can_capture = true; capture_from_slot = true; }
+                        break;
+                    }
                 }
             }
 
             if (can_capture) {
-                if (capture.by_reference) {
-                    // Capture by reference - create reference to original variable
+                if (capture_from_slot) {
+                    // Local in outer call frame: always capture by value (clone).
+                    // Capturing a stack slot by reference for an escaping closure is
+                    // a use-after-free; value semantics are safe in all cases.
+                    captureEnv->define(capture.symbol_id, slot_val->deref().clone());
+                } else if (capture.by_reference) {
                     script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
                     if (targetPtr) {
                         script_value refValue = script_value::make_reference(targetPtr, environment_);
                         captureEnv->define(capture.symbol_id, std::move(refValue));
                     } else {
-                        // Cannot capture variable by reference
                         return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
                             "Cannot capture variable '{0}' by reference", capture.symbol_id);
                     }
                 } else {
-                    // Capture by value - deep copy at capture time
                     auto capture_result = environment_->get(capture.symbol_id);
-                    if (!capture_result) {
-                        return capture_result.error_value();
-                    }
+                    if (!capture_result) return capture_result.error_value();
                     captureEnv->define(capture.symbol_id, capture_result.value().clone());
                 }
             } else {
-                // Cannot capture undefined variable
                 return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
                     "Cannot capture undefined variable '{0}'", capture.symbol_id);
+            }
+        }
+
+        // Materialise outer-frame locals into the capture env and patch their
+        // slot_index to SIZE_MAX so every subsequent call resolves via the env
+        // (O(1) hash lookup) rather than the wrong call-frame slot.
+        if (!call_stack_.empty()) {
+            for (auto& ref : outer_slot_refs) {
+                // Skip if already captured explicitly / by default-capture above
+                if (captureEnv->contains(ref.symbol_id)) {
+                    ref.node->slot_index = SIZE_MAX;
+                    continue;
+                }
+                script_value* slot_val = call_stack_.back().get_local(ref.outer_slot);
+                if (slot_val) {
+                    // Always capture by VALUE (clone) — by-reference into a stack
+                    // slot is inherently lifetime-unsafe for an escaping closure.
+                    // [&] users wanting live binding should capture an explicit ref
+                    // or use a wrapper object; silent by-ref from slot is a UAF.
+                    captureEnv->define(ref.symbol_id, slot_val->deref().clone());
+                }
+                // Patch the AST node so future lookups go through the env path
+                ref.node->slot_index = SIZE_MAX;
             }
         }
 
@@ -8451,8 +8803,10 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             // the end with unchecked operator[] -> OOB read / crash.
             for (size_t i = 0; i < array_storage->size(); ++i) {
                 if (stmt->is_reference) {
-                    // Create a reference to the actual array element
-                    *loop_var_ptr = script_value::make_reference(&(*array_storage)[i], environment_, engine_);
+                    // Reallocation-safe reference (container+index, not a raw element
+                    // pointer): a push in the loop body can reallocate the vector, and a
+                    // raw pointer would dangle -> heap corruption on write-through (#41).
+                    *loop_var_ptr = script_value::make_element_reference(array_storage, i, environment_, engine_, nullptr);
                 } else {
                     // Make a copy of the element - assign directly to pointer
                     *loop_var_ptr = (*array_storage)[i].clone();
@@ -9512,6 +9866,11 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
             // Track whether the iterative multi-level loop handled parent field initializers
             bool handled_parent_init = false;
+            // Track `: this(...)` delegation. C++ delegating-ctor semantics: the
+            // target constructor constructs the members; the delegating ctor must NOT
+            // re-run field initializers afterward (that re-applies declared defaults
+            // and clobbers what the target set).
+            bool delegated_to_this = false;
 
             // Process constructor initializers (: super(args), : this(args))
             for (const auto& initializer : matching_ctor->initializers) {
@@ -9785,6 +10144,12 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                             "No matching constructor found for this() delegation");
                     }
                     
+                    // Apply this class's field initializers (declared defaults) BEFORE the
+                    // delegated-to ctor body, so the target can override them. Suppress the
+                    // post-loop re-run below so they are not applied twice (the clobber bug).
+                    self->evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+                    delegated_to_this = true;
+
                     // Call the target constructor on this instance with method environment
                     // Use definition_env as parent
                     scoped_method_environment target_method_env(
@@ -9801,8 +10166,12 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // Evaluate field initializers BEFORE executing the constructor body
             // Field initializers can access constructor parameters via init_env
             // If the iterative multi-level loop already handled parent field initializers,
-            // skip recursive parent processing to avoid re-evaluating defaults
-            self->evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+            // skip recursive parent processing to avoid re-evaluating defaults.
+            // Skip entirely when this ctor delegated via `: this(...)` — the target
+            // already initialized the fields and re-running would clobber them (#24).
+            if (!delegated_to_this) {
+                self->evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+            }
 
             // Execute the matching constructor with method environment
             // Create a method environment that provides implicit 'this' field access

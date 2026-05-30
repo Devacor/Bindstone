@@ -14,7 +14,7 @@
 #include "MV/Render/points.h"
 #include "MV/Render/boxaabb.h"
 #include "MV/Utility/generalUtility.h"
-#include <jaiscript/signals/signal.hpp>
+#include <jaiscript/signals/signal_decl.hpp>
 #include "MV/Utility/task.h"
 #include "MV/Utility/visitor.hpp"
 #include "MV/Utility/services.hpp"
@@ -148,6 +148,8 @@ namespace MV {
 		                  public jai::property_owner<Component> {
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
+			friend class jai::serialization::access;
 
 		public:
 			virtual ~Component() {detachImplementation();}
@@ -260,7 +262,7 @@ namespace MV {
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.save(archive);
+					archive(property_mgr);
 				} else {
 					archive(cereal::make_nvp("componentId", componentId.get()));
 					archive(cereal::make_nvp("componentOwner", componentOwner.get()));
@@ -270,7 +272,7 @@ namespace MV {
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.load(archive);
+					archive(property_mgr);
 				} else {
 					archive(cereal::make_nvp("componentId", componentId.get()));
 					archive(cereal::make_nvp("componentOwner", componentOwner.get()));
@@ -284,6 +286,13 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Component> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);
+				construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Component>& construct) {
+				construct(std::shared_ptr<Node>());
+				construct->load(ar, 0);
 				construct->initialize();
 			}
 

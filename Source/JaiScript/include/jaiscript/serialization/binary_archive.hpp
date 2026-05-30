@@ -1017,15 +1017,15 @@ private:
                                     }
                                 }
 
-                                uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
-                                auto post_deserialize = class_def->get_method(post_deserialize_id, false);
-                                if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                uint64_t post_load_id = class_eng->symbolize("post_load");
+                                auto post_load = class_def->get_method(post_load_id, false);
+                                if (post_load.type() == script_value_type::jai_function_type) {
                                     try {
                                         std::vector<script_value> args = {
                                             constructed_obj,
                                             script_value(static_cast<script_int>(version), class_eng)
                                         };
-                                        (void)post_deserialize.as_function()(args);
+                                        (void)post_load.as_function()(args);
                                     } catch (...) {
                                     }
                                 }

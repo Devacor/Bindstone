@@ -7,10 +7,10 @@
 #include "cereal/archives/adapters.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include "MV/Serialization/property_cereal.hpp"
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/serialization/json_archive.hpp>
 #include "MV/Utility/services.hpp"
 
 // JaiScript serialization support
@@ -111,13 +111,21 @@ namespace MV {
 			if (allowDraw) {
 				bool allowChildrenToDraw = true;
 				for (size_t i = 0; i < childComponents->size();++i) {
-					allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
+					// Guard against re-entrant node destruction: a draw callback can
+					// fire a signal that detaches/destroys components on this node.
+					// Check ownerIsAlive() before drawing to avoid the PointerException
+					// from Component::owner() when the parent node has been released.
+					if ((*childComponents)[i]->ownerIsAlive()) {
+						allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
+					}
 				}
 				if (allowChildrenToDraw) {
 					drawChildren();
 				}
 				for (size_t i = 0; i < childComponents->size(); ++i) {
-					childComponents[i]->endDraw();
+					if ((*childComponents)[i]->ownerIsAlive()) {
+						childComponents[i]->endDraw();
+					}
 				}
 			}
 		}
@@ -138,13 +146,17 @@ namespace MV {
 				temporaryWorldMatrixTransform *= localTransform();
 				bool allowChildrenToDraw = true;
 				for (size_t i = 0; i < childComponents->size();++i) {
-					allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
+					if ((*childComponents)[i]->ownerIsAlive()) {
+						allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
+					}
 				}
 				if (allowChildrenToDraw) {
 					drawChildren(worldTransform());
 				}
 				for (size_t i = 0; i < childComponents->size(); ++i) {
-					childComponents[i]->endDraw();
+					if ((*childComponents)[i]->ownerIsAlive()) {
+						childComponents[i]->endDraw();
+					}
 				}
 			}
 		}
@@ -203,7 +215,11 @@ namespace MV {
 			require<ResourceException>(!contents.empty(), "File not found for Node::load: ", a_filename);
 
 			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
-			std::shared_ptr<Node> result = MV::fromJson<std::shared_ptr<Node>>(contents, a_services);
+			auto* engine = a_services.get<jai::engine>();
+			jai::serialization::json_archive_reader ar(contents, engine);
+			ar.set_user_context<MV::Services>(&a_services);
+			std::shared_ptr<Node> result;
+			ar(result);  // load_complete() fires on root via post_load depth tracking
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
 			}
@@ -223,6 +239,9 @@ namespace MV {
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
 			}
+			if (a_doPostLoadStep) {
+				result->postLoadStep();
+			}
 			return result;
 		}
 
@@ -238,7 +257,7 @@ namespace MV {
 			std::stringstream stream(contents);
 			std::shared_ptr<Node> result;
 			{
-				cereal::JSONInputArchive archive(stream);
+				cereal::UserDataAdapter<MV::Services, cereal::JSONInputArchive> archive(a_services, stream);
 				archive(result);
 			}
 			if (!a_newNodeId.empty()) {
@@ -351,8 +370,11 @@ namespace MV {
 				childComponents = originalChildComponents;
 			};
 
-			// Serialize using property_mgr
-			writeToFile(a_filename, MV::toJson(*this, a_services));
+			// Serialize directly as shared_ptr (bypasses to_json wrapper which adds incompatible outer object)
+			auto* engine = a_services.get<jai::engine>();
+			jai::serialization::json_archive_writer ar(0, engine);  // indent=0: compact JSON
+			ar(self);
+			writeToFile(a_filename, ar.str());
 			return self;
 		}
 
@@ -364,7 +386,11 @@ namespace MV {
 			auto contents = fileContents(a_filename);
 			require<ResourceException>(!contents.empty(), "File not found for Node::loadJai: ", a_filename);
 
-			auto result = MV::fromJson<std::shared_ptr<Node>>(contents, a_services);
+			auto* engine = a_services.get<jai::engine>();
+			jai::serialization::json_archive_reader ar(contents, engine);
+			ar.set_user_context<MV::Services>(&a_services);
+			std::shared_ptr<Node> result;
+			ar(result);
 
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
@@ -872,6 +898,7 @@ namespace MV {
 					a_self->myParent->onChangeSignal(myParent->shared_from_this());
 				}
 			});
+
 		}
 
 		void Node::safeOnChange() {
@@ -1067,6 +1094,7 @@ namespace MV {
 		}
 
 		void Node::recalculateMatrixAfterLoad() {
+			fixChildOwnership();
 			quietLocalMatrixFix();
 
 			for (auto&& child : childNodes) {

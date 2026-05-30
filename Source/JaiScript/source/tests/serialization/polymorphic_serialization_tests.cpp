@@ -476,7 +476,7 @@ public:
         // POST-DESERIALIZE HOOK TESTS WITH INHERITANCE
         // =====================================================================
 
-        test("post_deserialize_called_on_derived_class", [&]() {
+        test("post_load_called_on_derived_class", [&]() {
             auto eng = engine::make();
             stdlib::register_json_functions(*eng);
 
@@ -485,7 +485,7 @@ public:
                     var value = 0;
                     var base_hook_called = false;
 
-                    function post_deserialize(version) {
+                    function post_load(version) {
                         base_hook_called = true;
                     }
                 }
@@ -494,7 +494,7 @@ public:
                     var derived_value = 0;
                     var derived_hook_called = false;
 
-                    override function post_deserialize(version) {
+                    override function post_load(version) {
                         derived_hook_called = true;
                         // Note: In current implementation, derived overrides base
                     }
@@ -516,7 +516,7 @@ public:
             check_eq(eng->execute("loaded.derived_value").as<script_int>(), 20);
         });
 
-        test("cpp_class_post_deserialize_with_inheritance", [&]() {
+        test("cpp_class_post_load_with_inheritance", [&]() {
             auto eng = engine::make();
             stdlib::register_json_functions(*eng);
 
@@ -537,7 +537,7 @@ public:
                 .base_class<SerEntity>()
                 .property("health", &SerCharacter::health)
                 .property("max_health", &SerCharacter::max_health)
-                .post_deserialize_hook([](SerCharacter& self, int version) {
+                .post_load_hook([](SerCharacter& self, int version) {
                     character_hook_called = true;
                     character_hook_version = version;
                     // Ensure health doesn't exceed max
@@ -646,7 +646,7 @@ public:
                     var doors = 4;
                     var migrated = false;
 
-                    function post_deserialize(version) {
+                    function post_load(version) {
                         if (version < 2) {
                             // Old versions didn't have doors, default to 4
                             doors = 4;

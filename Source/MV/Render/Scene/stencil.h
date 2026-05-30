@@ -11,6 +11,7 @@ namespace MV {
 		class Stencil : public Sprite {
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
 
 		public:
 			DrawableDerivedAccessors(Stencil)
@@ -54,6 +55,13 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Stencil> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);
+				construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Stencil>& construct) {
+				construct(std::shared_ptr<Node>());
+				construct->load(ar, 0);
 				construct->initialize();
 			}
 

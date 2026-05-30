@@ -13,6 +13,7 @@ namespace MV {
 		class Grid : public jai::property_owner<Grid, Drawable> {
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
 
 		public:
 			enum class AutoLayoutPolicy {None, Self, Local, Child, Comprehensive};
@@ -116,6 +117,13 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Grid> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);
+				construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Grid>& construct) {
+				construct(std::shared_ptr<Node>());
+				construct->load(ar, 0);
 				construct->initialize();
 			}
 

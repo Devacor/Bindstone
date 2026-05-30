@@ -1,6 +1,5 @@
 #include "pathfinding.h"
 #include "cereal/archives/json.hpp"
-#include "MV/Serialization/property_cereal.hpp"
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>

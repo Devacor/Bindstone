@@ -28,7 +28,7 @@
 #include "MV/Render/points.h"
 #include "MV/Render/matrix.hpp"
 #include "MV/Utility/generalUtility.h"
-#include <jaiscript/signals/signal.hpp>
+#include <jaiscript/signals/signal_decl.hpp>
 
 #ifdef __APPLE__
 #import "TargetConditionals.h" 

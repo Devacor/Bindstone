@@ -26,7 +26,7 @@ void GameUserConnectionState::disconnectImplementation() {
 }
 
 void GameUserConnectionState::message(const std::string &a_message) {
-	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
+	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, ourServer.managers().services);
 	action->execute(this, ourServer);
 }
 

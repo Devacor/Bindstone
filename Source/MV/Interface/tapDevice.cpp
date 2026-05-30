@@ -1,7 +1,7 @@
 #include "tapDevice.h"
+#include <jaiscript/signals/signal_impl.hpp>
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include "MV/Serialization/property_cereal.hpp"
 
 namespace MV{
 

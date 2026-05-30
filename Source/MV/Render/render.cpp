@@ -1,4 +1,5 @@
 #include "render.h"
+#include <jaiscript/signals/signal_impl.hpp>
 #include "Scene/node.h"
 #include "textures.h"
 #include "sharedTextures.h"

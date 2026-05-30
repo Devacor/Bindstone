@@ -104,6 +104,7 @@ namespace MV {
 		
 		class Spine : public jai::property_owner<Spine, Drawable> {
 			friend cereal::access;
+			friend jai::access;
 			friend Node;
 			friend void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
@@ -142,6 +143,7 @@ namespace MV {
 
 			private:
 				friend cereal::access;
+			friend jai::access;
 				template<class Archive>
 				void save(Archive & archive, std::uint32_t const) const {
 					if constexpr (jai::serialization::jai_archive<Archive>) {
@@ -271,6 +273,13 @@ namespace MV {
 				);
 				construct(std::shared_ptr<Node>(), fileBundle);
 				construct->load(archive, version);
+				construct->initialize();
+			}
+
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Spine>& construct) {
+				construct(std::shared_ptr<Node>(), FileBundle());
+				construct->load(ar, 0);
 				construct->initialize();
 			}
 

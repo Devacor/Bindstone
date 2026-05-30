@@ -252,10 +252,10 @@ namespace jai {
 		// Post-deserialization hook (called after all objects are deserialized)
 		// Override in derived classes to resolve cross-references, update caches, etc.
 		// Uses type-erased archive for polymorphic dispatch
-		virtual void post_deserialize(serialization::any_archive_reader& ar) {
+		virtual void post_load(serialization::any_archive_reader& ar) {
 			// Default: call base class hooks
 			if constexpr (sizeof...(Bases) > 0) {
-				(try_post_deserialize_base<Bases>(ar), ...);
+				(try_post_load_base<Bases>(ar), ...);
 			}
 		}
 
@@ -264,7 +264,7 @@ namespace jai {
 		void load_with_hook(Archive& ar) {
 			property_mgr.load(ar);
 			serialization::any_archive_reader type_erased(ar);
-			post_deserialize(type_erased);
+			post_load(type_erased);
 		}
 
 	protected:
@@ -305,12 +305,12 @@ namespace jai {
 		void try_bind_base(...) {}
 
 		template<typename Base>
-		auto try_post_deserialize_base(serialization::any_archive_reader& ar)
-			-> decltype(static_cast<Base*>(this)->post_deserialize(ar), void()) {
-			static_cast<Base*>(this)->post_deserialize(ar);
+		auto try_post_load_base(serialization::any_archive_reader& ar)
+			-> decltype(static_cast<Base*>(this)->post_load(ar), void()) {
+			static_cast<Base*>(this)->post_load(ar);
 		}
 		template<typename Base>
-		void try_post_deserialize_base(...) {}
+		void try_post_load_base(...) {}
 	};
 
 	// ============================================================================

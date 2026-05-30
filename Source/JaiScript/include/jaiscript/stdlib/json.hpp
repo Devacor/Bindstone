@@ -560,7 +560,7 @@ namespace stdlib {
                                 }
                             }
 
-                            // Call post_deserialize hook if it exists (for both custom and fallback paths)
+                            // Call post_load hook if it exists (for both custom and fallback paths)
                             // Pass both the object and the version number for migration logic
                             try {
                                 auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
@@ -569,9 +569,9 @@ namespace stdlib {
                                     if (class_def) {
                                         auto class_eng = class_def->get_engine();
                                         if (!class_eng) return instance;
-                                        uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
-                                        script_value post_deserialize = class_def->get_method(post_deserialize_id, false);  // Don't throw if not found
-                                        if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                        uint64_t post_load_id = class_eng->symbolize("post_load");
+                                        script_value post_load = class_def->get_method(post_load_id, false);  // Don't throw if not found
+                                        if (post_load.type() == script_value_type::jai_function_type) {
                                             // Extract version from map (default to 1 if not present)
                                             script_int version = 1;
                                             auto versionIt = map.find(script_value("_version_", eng));
@@ -583,7 +583,7 @@ namespace stdlib {
                                                 instance,
                                                 script_value(version, eng)
                                             };
-                                            (void)post_deserialize.as_function()(args);
+                                            (void)post_load.as_function()(args);
                                         }
                                     }
                                 }
@@ -696,7 +696,7 @@ namespace stdlib {
                             }
                         }
 
-                        // Call post_deserialize hook if it exists
+                        // Call post_load hook if it exists
                         try {
                             auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
                             if (class_instance_ptr) {
@@ -704,9 +704,9 @@ namespace stdlib {
                                 if (class_def) {
                                     auto class_eng = class_def->get_engine();
                                     if (class_eng) {
-                                        uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
-                                        script_value post_deserialize = class_def->get_method(post_deserialize_id, false);
-                                        if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                        uint64_t post_load_id = class_eng->symbolize("post_load");
+                                        script_value post_load = class_def->get_method(post_load_id, false);
+                                        if (post_load.type() == script_value_type::jai_function_type) {
                                             // Extract version from map (default to 1 if not present)
                                             script_int version = 1;
                                             auto version_it = map.find(script_value("_version_", eng));
@@ -718,7 +718,7 @@ namespace stdlib {
                                                 instance,
                                                 script_value(version, eng)
                                             };
-                                            (void)post_deserialize.as_function()(args);
+                                            (void)post_load.as_function()(args);
                                         }
                                     }
                                 }
@@ -795,7 +795,7 @@ namespace stdlib {
                             }
                         }
 
-                        // Call post_deserialize hook if it exists
+                        // Call post_load hook if it exists
                         try {
                             auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
                             if (class_instance_ptr) {
@@ -803,9 +803,9 @@ namespace stdlib {
                                 if (class_def) {
                                     auto class_eng = class_def->get_engine();
                                     if (class_eng) {
-                                        uint64_t post_deserialize_id = class_eng->symbolize("post_deserialize");
-                                        script_value post_deserialize = class_def->get_method(post_deserialize_id, false);
-                                        if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                        uint64_t post_load_id = class_eng->symbolize("post_load");
+                                        script_value post_load = class_def->get_method(post_load_id, false);
+                                        if (post_load.type() == script_value_type::jai_function_type) {
                                             script_int version = 1;
                                             auto version_it = map.find(script_value("_version_", eng));
                                             if (version_it != map.end() && version_it->second.is_int()) {
@@ -816,7 +816,7 @@ namespace stdlib {
                                                 instance,
                                                 script_value(version, eng)
                                             };
-                                            (void)post_deserialize.as_function()(args);
+                                            (void)post_load.as_function()(args);
                                         }
                                     }
                                 }

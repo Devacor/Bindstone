@@ -269,6 +269,148 @@ public:
             e->add_global("s", s);
             check_throws([&]() { e->execute("from_json(s)"); });
         });
+
+        // ---- #23 field initializers run in DECLARATION order (not intern order) ----
+        test("field_init_declaration_order", [this]() {
+            auto e = engine::make();
+            // 'total' is interned first (global) -> smaller name_id than 'base'; the old
+            // map-ordered init ran total's initializer before base's -> base unset.
+            auto r = e->execute(R"(
+                auto total = 0;
+                class Account { int base = 100; int total = this.base + 5; }
+                auto a = Account();
+                a.total
+            )");
+            check_eq((int64_t)105, r.as_int());
+        });
+
+        // ---- #24 this() delegation: target's assignment wins, other defaults kept ----
+        test("this_delegation_no_clobber", [this]() {
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                class C {
+                    int x = 999;
+                    int y = 7;
+                    C() : this(42) { }
+                    C(int v) { this.x = v; }
+                }
+                auto c = C();
+                c.x * 1000 + c.y
+            )");
+            check_eq((int64_t)42007, r.as_int());  // x=42 (target), y=7 (default kept)
+        });
+
+        // ---- #31 array callbacks that mutate the same array must not crash ----
+        test("remove_if_callback_mutation", [this]() {
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                var arr = [1, 2, 3, 4, 5, 6, 7, 8];
+                arr.remove_if([](auto x) -> auto { if (x == 2) { arr.push(99); } return x % 2 == 0; });
+                arr.length()
+            )");
+            check_eq((int64_t)4, r.as_int());  // survivors [1,3,5,7]; the push is discarded
+        });
+        test("sort_mixed_numeric_no_ub", [this]() {
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                var a = [3.5, 1, 2.5, 2];
+                a.sort();
+                a[0]
+            )");
+            check_eq((int64_t)1, r.as_int());  // value order: [1, 2, 2.5, 3.5]
+        });
+
+        // ---- #41 reference into an array survives reallocation (no heap corruption) ----
+        // ---- #20 closure capture of enclosing function locals (all forms) ----
+        test("closure_capture_local_auto_no_capture", [this]() {
+            // [] lambda (no explicit capture) must still see enclosing locals
+            // via the automatic-local-capture feature.
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                auto make() -> auto {
+                    auto local = 7;
+                    return []() -> auto { return local + 1; };
+                }
+                auto f = make();
+                f()
+            )");
+            check_eq((int64_t)8, r.as_int());
+        });
+        test("closure_capture_local_eq", [this]() {
+            // [=] captures local by value — snapshot at capture time
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                auto make() -> auto {
+                    auto local = 10;
+                    return [=]() -> auto { return local * 2; };
+                }
+                make()()
+            )");
+            check_eq((int64_t)20, r.as_int());
+        });
+        test("closure_capture_local_inline", [this]() {
+            // Inline (non-escaping) closure also works
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                auto result = 0;
+                auto x = 5;
+                auto f = [=]() -> auto { return x + 3; };
+                result = f();
+                result
+            )");
+            check_eq((int64_t)8, r.as_int());
+        });
+        test("closure_capture_local_snapshot", [this]() {
+            // Captured value is a snapshot — mutation of outer var doesn't affect closure
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                auto x = 10;
+                auto f = [=]() -> auto { return x; };
+                x = 999;
+                f()
+            )");
+            check_eq((int64_t)10, r.as_int());
+        });
+        test("closure_capture_local_explicit", [this]() {
+            // Explicit [local] capture of a function local
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                auto make(auto n) -> auto {
+                    auto doubled = n * 2;
+                    return [doubled]() -> auto { return doubled + 1; };
+                }
+                make(6)()
+            )");
+            check_eq((int64_t)13, r.as_int());
+        });
+        test("closure_capture_multiple_locals", [this]() {
+            // Multiple locals captured (auto + different types)
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                auto make() -> auto {
+                    auto a = 3;
+                    auto b = 4;
+                    return [=]() -> auto { return a * a + b * b; };
+                }
+                make()()
+            )");
+            check_eq((int64_t)25, r.as_int());
+        });
+
+        test("range_for_ref_realloc_no_corruption", [this]() {
+            auto e = engine::make();
+            auto r = e->execute(R"(
+                auto arr = [10, 20, 30];
+                for (auto& x : arr) {
+                    var j = 0;
+                    while (j < 64) { arr.push(0); j = j + 1; }  // force a reallocation
+                    x = 999;                                    // write through AFTER realloc
+                    break;
+                }
+                arr[0]
+            )");
+            check_eq((int64_t)999, r.as_int());  // recomputed element address, not a dangling ptr
+        });
     }
 };
 

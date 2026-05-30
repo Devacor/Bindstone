@@ -66,6 +66,7 @@ namespace MV {
 
 		class Anchors {
 			friend cereal::access;
+			friend jai::access;
 			friend Drawable;
 			friend jai::property<Anchors>;
 			// JaiScript serialization support (templated for CRTP archives)
@@ -159,6 +160,8 @@ namespace MV {
 			friend Anchors;
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
+			friend class jai::serialization::access;
 
 		public:
 
@@ -309,10 +312,19 @@ namespace MV {
 			template<class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
 				if constexpr (jai::serialization::jai_archive<Archive>) {
-					// property_mgr.save() handles all JAI_PROPERTY fields including points/vertexIndices
-					// Note: JaiScript always serializes all properties - the serializePoints() conditional
-					// only applies to Cereal for backward compatibility with derived classes like Spine
+					// Honour serializePoints() for the JaiScript path, matching Cereal behaviour.
+					// Emitter, Path, Spine etc. override serializePoints()=false because their
+					// geometry is procedural/computed and must not be saved (they have 10k+ points).
+					// Temporarily suppress serialization so property_mgr.save() skips them.
+					const auto pointsMode = points.get_serialize_mode();
+					const auto indicesMode = vertexIndices.get_serialize_mode();
+					if (!serializePoints()) {
+						points.set_serialize_mode(jai::serialize_mode::transient);
+						vertexIndices.set_serialize_mode(jai::serialize_mode::transient);
+					}
 					property_mgr.save(archive);
+					points.set_serialize_mode(pointsMode);
+					vertexIndices.set_serialize_mode(indicesMode);
 					Component::save(archive, 0);
 				} else {
 					archive(cereal::make_nvp("anchors", ourAnchors.get()));
@@ -359,6 +371,13 @@ namespace MV {
 				construct->initialize();
 			}
 
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Drawable>& construct) {
+				construct(std::shared_ptr<Node>());
+				construct->load(ar, 0);
+				construct->initialize();
+			}
+
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node>& a_parent) {
 				return cloneHelper(a_parent->attach<Drawable>().self());
 			}
@@ -377,7 +396,7 @@ namespace MV {
 			JAI_PROPERTY((std::vector<DrawPoint>), points, {});
 			JAI_PROPERTY((std::vector<GLuint>), vertexIndices, {});
 
-			JAI_PROPERTY((BoxAABB<>), localBounds);
+			JAI_TRANSIENT_PROPERTY((BoxAABB<>), localBounds);  // derived: recomputed from points
 
 			std::shared_ptr<Shader> shaderProgram = nullptr;
 			JAI_PROPERTY((std::string), shaderProgramId, PREMULTIPLY_ID);

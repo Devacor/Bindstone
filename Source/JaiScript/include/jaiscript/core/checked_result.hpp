@@ -8,7 +8,6 @@
 #include <utility>
 #include <string_view>
 #include <string>
-#include <format>
 #include <concepts>
 
 namespace jai {
@@ -395,12 +394,18 @@ inline error_propagator::operator checked_result<T>() const {
  * @return Formatted error message string
  */
 inline std::string format_error_message(std::string_view msg, std::string_view arg0, std::string_view arg1 = {}) {
-    try {
-        return std::vformat(msg, std::make_format_args(arg0, arg1));
-    } catch (...) {
-        // If formatting fails, return the raw message
-        return std::string(msg);
+    // Plain {0}/{1} substitution (matches format_error_message_numeric). These error
+    // messages only ever use simple {0}/{1} placeholders, so this avoids pulling in
+    // the very heavy <format> header — which checked_result.hpp is included by
+    // value.hpp into essentially every JaiScript (and JaiScript-consuming) TU.
+    std::string result(msg);
+    if (auto pos = result.find("{0}"); pos != std::string::npos) {
+        result.replace(pos, 3, arg0);
     }
+    if (auto pos = result.find("{1}"); pos != std::string::npos) {
+        result.replace(pos, 3, arg1);
+    }
+    return result;
 }
 
 // Overload for numeric arguments (when symbol resolution isn't available)

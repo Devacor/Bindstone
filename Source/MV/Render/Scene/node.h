@@ -9,6 +9,7 @@ namespace MV {
 
 		class Node : public jai::property_owner<Node>, public std::enable_shared_from_this<Node> {
 			friend cereal::access;
+			friend class jai::serialization::access;
 			friend jai::access;
 			friend Component;
 
@@ -19,9 +20,17 @@ namespace MV {
 				~LoadOptions() {
 					services.disconnect<LoadOptions>();
 				}
+
+				// Depth tracking for load_complete: incremented when load_and_construct
+				// enters a node, decremented in post_load. The node whose decrement
+				// brings depth to 0 is the root — it fires load_complete() if present.
+				void enterLoad() { ++depth; }
+				bool exitLoad() { return --depth == 0; }
+
 				bool doPostLoad;
 			private:
 				MV::Services &services;
+				int depth = 0;
 				LoadOptions(const LoadOptions &) = delete;
 				LoadOptions& operator=(const LoadOptions &) = delete;
 			};
@@ -871,56 +880,56 @@ namespace MV {
 
 			void fixChildOwnership();
 
+			// Serialization for both JaiScript and Cereal
+			// Uses if constexpr to dispatch to the appropriate format
+			// Note: Uses save/load_and_construct pattern because Node requires constructor args
 			template<class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
-				std::vector<std::shared_ptr<Node>> filteredChildren;
-				std::copy_if(childNodes.get().begin(), childNodes.get().end(), std::back_inserter(filteredChildren), [](const auto &a_child){
-					return a_child->allowSerialize;
-				});
-				std::weak_ptr<Node> weakParent;
-				std::vector<std::shared_ptr<Component>> filteredChildComponents;
-				std::copy_if(childComponents.get().begin(), childComponents.get().end(), std::back_inserter(filteredChildComponents), [](const auto &a_child) {
-					return a_child->allowSerialize;
-				});
+			void save(Archive & archive, std::uint32_t const version) const {
+				if constexpr (jai::serialization::jai_archive<Archive>) {
+					// JaiScript path - use automatic property serialization
+					const_cast<Node*>(this)->property_mgr.save(archive);
+				} else {
+					// Filter children and components that are serializable
+					std::vector<std::shared_ptr<Node>> filteredChildren;
+					std::copy_if(childNodes.get().begin(), childNodes.get().end(), std::back_inserter(filteredChildren), [](const auto &a_child){
+						return a_child->allowSerialize;
+					});
+					std::vector<std::shared_ptr<Component>> filteredChildComponents;
+					std::copy_if(childComponents.get().begin(), childComponents.get().end(), std::back_inserter(filteredChildComponents), [](const auto &a_child) {
+						return a_child->allowSerialize;
+					});
+					std::weak_ptr<Node> weakParent;
+					if (myParent) {
+						weakParent = myParent->shared_from_this();
+					}
+					// Cereal path - ensure bounds are up to date before saving
+					if (dirtyChildBounds) {
+						const_cast<Node*>(this)->recalculateChildBounds();
+					}
+					if (dirtyLocalBounds) {
+						const_cast<Node*>(this)->recalculateLocalBounds();
+					}
 
-				if (myParent) {
-					weakParent = myParent->shared_from_this();
-				}
-				if (dirtyChildBounds) {
-					recalculateChildBounds();
-				}
-				if (dirtyLocalBounds) {
-					recalculateLocalBounds();
-				}
-
-				archive(
-					cereal::make_nvp("nodeId", nodeId.get()),
-					cereal::make_nvp("isRootNode", myParent == nullptr),
-					cereal::make_nvp("parent", weakParent),
-					cereal::make_nvp("allowDraw", allowDraw.get()),
-					cereal::make_nvp("allowUpdate", allowUpdate.get()),
-					cereal::make_nvp("translateTo", translateTo.get()),
-					cereal::make_nvp("rotateTo", rotateTo.get()),
-					cereal::make_nvp("scaleTo", scaleTo.get()),
-					cereal::make_nvp("sortDepth", sortDepth.get()),
-					cereal::make_nvp("nodeAlpha", nodeAlpha.get()),
-					cereal::make_nvp("localBounds", localBounds.get()),
-					cereal::make_nvp("localChildBounds", localChildBounds.get()));
-				if (version > 0) {
-					archive(cereal::make_nvp("cameraId", ourCameraId.get()));
-				}
-				archive(
-					cereal::make_nvp("childNodes", filteredChildren),
-					cereal::make_nvp("childComponents", filteredChildComponents)
-				);
-				if (childNodes.get().empty() && !filteredChildren.empty()) {
-					childNodes = filteredChildren;
-				}
-				if (childComponents.get().empty() && !filteredChildComponents.empty()) {
-					childComponents = filteredChildComponents;
-				}
-				if (version < 2) {
-					rotateTo = toRadians(rotateTo.get());
+					archive(
+						cereal::make_nvp("nodeId", nodeId.get()),
+						cereal::make_nvp("isRootNode", myParent == nullptr),
+						cereal::make_nvp("parent", weakParent),
+						cereal::make_nvp("allowDraw", allowDraw.get()),
+						cereal::make_nvp("allowUpdate", allowUpdate.get()),
+						cereal::make_nvp("translateTo", translateTo.get()),
+						cereal::make_nvp("rotateTo", rotateTo.get()),
+						cereal::make_nvp("scaleTo", scaleTo.get()),
+						cereal::make_nvp("sortDepth", sortDepth.get()),
+						cereal::make_nvp("nodeAlpha", nodeAlpha.get()),
+						cereal::make_nvp("localBounds", localBounds.get()),
+						cereal::make_nvp("localChildBounds", localChildBounds.get()));
+					if (version > 0) {
+						archive(cereal::make_nvp("cameraId", ourCameraId.get()));
+					}
+					archive(
+						cereal::make_nvp("childNodes", filteredChildren),
+						cereal::make_nvp("childComponents", filteredChildComponents)
+					);
 				}
 			}
 
@@ -967,44 +976,52 @@ namespace MV {
 				}
 			}
 
+			// Pass 2: per-object reconnection/finalization. Fires on every deserialized
+			// node after its own properties are loaded. Good for: asset ID → texture
+			// handle lookup, weak-ptr backref relinking, per-node cache rebuilding.
+			// Unsilences the node so signals work again after the load suppression.
+			void post_load(jai::serialization::any_archive_reader& ar) {
+				unsilenceInternal(false, false);  // restore signals; no batched callbacks
+
+				// If this node is the root (depth returns to 0), fire load_complete.
+				MV::Services* services = ar.get_user_context<MV::Services>();
+				if (services) {
+					auto* options = services->get<LoadOptions>(false);
+					if (options && options->exitLoad() && options->doPostLoad) {
+						load_complete();
+					}
+				}
+			}
+
+			// Pass 3: tree-wide structural finalization, fires once on the root node
+			// after the entire tree is assembled and all post_load hooks have run.
+			// Handles work that requires the full parent-child graph: matrix recalculation,
+			// alpha propagation, component initialization.
+			void load_complete() {
+				postLoadStep();
+			}
+
 			// JaiScript version of load_and_construct (templated for CRTP archives)
 			template<typename Archive>
 			static void load_and_construct(Archive& ar, jai::serialization::construct<Node>& construct) {
 				MV::Services* services = ar.get_user_context<MV::Services>();
 				auto* renderer = services->get<MV::Draw2D>();
-				LoadOptions* options = services->get<LoadOptions>(false);
-				bool doPostLoad = options ? options->doPostLoad : true;
+
+				// Track nesting depth so post_load can identify the root node.
+				auto* options = services->get<LoadOptions>(false);
+				if (options) { options->enterLoad(); }
 
 				std::string nodeId;
 				ar.serialize("nodeId", nodeId);
 				construct(*renderer, nodeId);
 
-				bool isRootNode = false;
-				std::weak_ptr<Node> weakParent;
-				ar.serialize("isRootNode", isRootNode);
-				ar.serialize("parent", weakParent);
+				// Silence all signals before restoring properties. Without this,
+				// every property setter fires markBoundsDirty() → full parent-chain
+				// propagation — O(N²) recalculations across the tree. post_load
+				// unsilences once all properties are restored.
+				construct->silenceInternal();
 
-				if (auto lockedParent = weakParent.lock()) {
-					construct->myParent = lockedParent.get();
-				}
-
-				// Serialize into the property objects directly (they have load() methods)
-				ar.serialize("allowDraw", construct->allowDraw);
-				ar.serialize("allowUpdate", construct->allowUpdate);
-				ar.serialize("translateTo", construct->translateTo);
-				ar.serialize("rotateTo", construct->rotateTo);
-				ar.serialize("scaleTo", construct->scaleTo);
-				ar.serialize("sortDepth", construct->sortDepth);
-				ar.serialize("nodeAlpha", construct->nodeAlpha);
-				ar.serialize("localBounds", construct->localBounds);
-				ar.serialize("localChildBounds", construct->localChildBounds);
-				ar.serialize("cameraId", construct->ourCameraId);
-				ar.serialize("childNodes", construct->childNodes);
-				ar.serialize("childComponents", construct->childComponents);
-
-				if (doPostLoad && isRootNode) {
-					construct->postLoadStep();
-				}
+				construct->load_with_hook(ar);
 			}
 
 			Draw2D &draw2d;
@@ -1016,8 +1033,8 @@ namespace MV {
 			JAI_PROPERTY((Scale), scaleTo);
 			JAI_PROPERTY((Point<>), translateTo);
 			JAI_PROPERTY((AxisAngles), rotateTo);
-			JAI_PROPERTY((BoxAABB<>), localBounds);
-			JAI_PROPERTY((BoxAABB<>), localChildBounds);
+			JAI_TRANSIENT_PROPERTY((BoxAABB<>), localBounds);       // derived: recomputed from component geometry
+			JAI_TRANSIENT_PROPERTY((BoxAABB<>), localChildBounds);  // derived: recomputed from child nodes
 			JAI_PROPERTY((PointPrecision), sortDepth, 0.0f);
 			JAI_PROPERTY((PointPrecision), nodeAlpha, 1.0f);
 			JAI_PROPERTY((bool), allowUpdate, true);
@@ -1047,6 +1064,36 @@ namespace MV {
 		};
 
 		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node);
+	}
+}
+
+// Force Cereal to use non-polymorphic serialization for shared_ptr<Node> and weak_ptr<Node>
+// Node is technically polymorphic (virtual destructor from property_owner), but
+// existing scene files were saved using the non-polymorphic ptr_wrapper format.
+// These overloads must be defined AFTER cereal/types/polymorphic.hpp is included
+// (which happens via component.h -> textures.h -> serialize.h) and AFTER Node is defined.
+namespace cereal {
+	template<class Archive>
+	void save(Archive& ar, const std::shared_ptr<MV::Scene::Node>& ptr) {
+		ar(make_nvp("ptr_wrapper", memory_detail::make_ptr_wrapper(ptr)));
+	}
+
+	template<class Archive>
+	void load(Archive& ar, std::shared_ptr<MV::Scene::Node>& ptr) {
+		ar(make_nvp("ptr_wrapper", memory_detail::make_ptr_wrapper(ptr)));
+	}
+
+	template<class Archive>
+	void save(Archive& ar, const std::weak_ptr<MV::Scene::Node>& ptr) {
+		auto const sptr = ptr.lock();
+		ar(make_nvp("ptr_wrapper", memory_detail::make_ptr_wrapper(sptr)));
+	}
+
+	template<class Archive>
+	void load(Archive& ar, std::weak_ptr<MV::Scene::Node>& ptr) {
+		std::shared_ptr<MV::Scene::Node> sptr;
+		ar(make_nvp("ptr_wrapper", memory_detail::make_ptr_wrapper(sptr)));
+		ptr = sptr;
 	}
 }
 

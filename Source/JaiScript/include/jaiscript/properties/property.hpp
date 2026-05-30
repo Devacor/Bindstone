@@ -84,7 +84,12 @@ namespace jai {
 		}
 
 		// Convenience method: mark this property as transient (won't serialize at compile-time)
+		serialize_mode get_serialize_mode() const { return m_serialize_mode; }
+		void set_serialize_mode(serialize_mode mode) const { m_serialize_mode = mode; }
+
+		// Convenience shorthands
 		void set_transient() const { m_serialize_mode = serialize_mode::transient; }
+		void clear_transient() const { m_serialize_mode = serialize_mode::automatic; }
 
 		// allow_save: true if property should be serialized
 		// - serialize_mode::transient always returns false
@@ -191,10 +196,17 @@ namespace jai {
 			m_serialize_mode = mode;
 		}
 
-		// Convenience method: mark this property as transient (won't serialize)
-		// Returns reference to self for use immediately after construction if needed
-		property& set_transient() {
+		// Convenience shorthands (delegate to base class set_serialize_mode)
+		const property& set_transient() const {
 			m_serialize_mode = serialize_mode::transient;
+			return *this;
+		}
+		const property& clear_transient() const {
+			m_serialize_mode = serialize_mode::automatic;
+			return *this;
+		}
+		const property& set_serialize_mode(serialize_mode mode) const {
+			m_serialize_mode = mode;
 			return *this;
 		}
 

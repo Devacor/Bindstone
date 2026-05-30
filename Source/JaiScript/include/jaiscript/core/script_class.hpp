@@ -136,22 +136,29 @@ public:
         return destructor_ast_;
     }
     
-    // Add field initializer AST (will be evaluated at instance construction time)
+    // Add field initializer AST (will be evaluated at instance construction time).
+    // Stored in SOURCE DECLARATION ORDER (append), not interned-id order — a field
+    // initializer may read a sibling field (this.other), so order must match the
+    // source. (Previously a std::map keyed by name_id ran initializers in interning
+    // order, which only coincides with declaration order if each name is first seen
+    // at its declaration; a name interned earlier elsewhere broke it.)
     void add_field_initializer_ast(uint64_t field_id, expression_ptr initializer) {
-        field_initializer_asts_[field_id] = initializer;
+        for (auto& [id, ast] : field_initializer_asts_) {
+            if (id == field_id) { ast = initializer; return; }
+        }
+        field_initializer_asts_.emplace_back(field_id, initializer);
     }
 
     // Get field initializer AST (for instance construction)
     expression_ptr get_field_initializer_ast(uint64_t field_id) const {
-        auto it = field_initializer_asts_.find(field_id);
-        if (it != field_initializer_asts_.end()) {
-            return it->second;
+        for (const auto& [id, ast] : field_initializer_asts_) {
+            if (id == field_id) return ast;
         }
         return nullptr;
     }
 
-    // Get all field initializer ASTs
-    const std::map<uint64_t, expression_ptr>& get_field_initializer_asts() const {
+    // Get all field initializer ASTs (in declaration order)
+    const std::vector<std::pair<uint64_t, expression_ptr>>& get_field_initializer_asts() const {
         return field_initializer_asts_;
     }
 
@@ -168,7 +175,8 @@ private:
     std::map<uint64_t, std::shared_ptr<function_decl>> method_asts_;
     std::vector<std::shared_ptr<function_decl>> constructor_asts_;
     std::shared_ptr<function_decl> destructor_ast_;
-    std::map<uint64_t, expression_ptr> field_initializer_asts_;
+    // Vector (not map) to preserve source declaration order for field initializers.
+    std::vector<std::pair<uint64_t, expression_ptr>> field_initializer_asts_;
 };
 
 // For backward compatibility during migration

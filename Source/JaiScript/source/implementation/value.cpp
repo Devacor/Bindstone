@@ -237,6 +237,30 @@ script_value script_value::make_reference(script_value* target, const std::share
     return v;
 }
 
+script_value script_value::make_element_reference(const strong_ptr<std::vector<script_value>>& container, size_t index,
+                                                  const std::shared_ptr<environment>& env, engine* eng, type_info_ptr element_type) {
+    if (!container || index >= container->size()) {
+        throw runtime_error("Cannot create reference to out-of-range array element");
+    }
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference((*container)[index].get_type_info());
+    auto ref = make_strong<reference_holder>();
+    ref->sourceEnv = env;
+    ref->container_element_type = element_type;
+    ref->container = container;          // owns the vector (keeps it alive) + enables re-resolve
+    ref->container_index = index;
+    // target is the element address AT CREATION time — valid for callers that resolve
+    // and use the reference immediately (the assignment paths). deref()/assign_through()
+    // ignore it in favor of container+index, which is recomputed each time and bounds-
+    // checked, so a reference STORED across a reallocation (the #41 case) stays safe.
+    ref->target = &(*container)[index];
+    v.storage_ = ref;
+    return v;
+}
+
 script_value script_value::make_function(const script_function& func, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create function with null engine pointer");
@@ -532,8 +556,23 @@ std::string script_value::to_string() const {
 const script_value& script_value::deref() const {
     // Use current_type() not defined_type() - references may have type_info with different base_type
     if (current_type() == script_value_type::jai_reference_type) {
-        auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
-        if (!refHolder || !refHolder->target) {
+        // Bind a reference to the held strong_ptr (do NOT copy it): copying bumps and
+        // then drops the (non-atomic) refcount on every deref, which is pure overhead
+        // on this hot path. We only read target/sourceEnv here.
+        const auto& refHolder = std::get<strong_ptr<reference_holder>>(storage_);
+        if (!refHolder) {
+            throw runtime_error("Null reference");
+        }
+        if (refHolder->container) {
+            // Vector-element reference: recompute the element address from container+index
+            // each time so it survives reallocation (push), and bounds-check so a shrink
+            // (pop/erase/clear) throws instead of reading freed memory (#41).
+            if (refHolder->container_index >= refHolder->container->size()) {
+                throw runtime_error("Reference to a removed array element");
+            }
+            return (*refHolder->container)[refHolder->container_index].deref();
+        }
+        if (!refHolder->target) {
             throw runtime_error("Null reference");
         }
         if (refHolder->sourceEnv.expired()) {
@@ -550,8 +589,18 @@ const script_value& script_value::deref() const {
 script_value& script_value::deref() {
     // Use current_type() not defined_type() - references may have type_info with different base_type
     if (current_type() == script_value_type::jai_reference_type) {
-        auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
-        if (!refHolder || !refHolder->target) {
+        // See const overload: bind, don't copy, the strong_ptr (avoids refcount churn).
+        auto& refHolder = std::get<strong_ptr<reference_holder>>(storage_);
+        if (!refHolder) {
+            throw runtime_error("Null reference");
+        }
+        if (refHolder->container) {
+            if (refHolder->container_index >= refHolder->container->size()) {
+                throw runtime_error("Reference to a removed array element");
+            }
+            return (*refHolder->container)[refHolder->container_index].deref();
+        }
+        if (!refHolder->target) {
             throw runtime_error("Null reference");
         }
         if (refHolder->sourceEnv.expired()) {
@@ -566,7 +615,19 @@ script_value& script_value::deref() {
 void script_value::assign_through(const script_value& value) {
     if (type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
-        if (!refHolder || !refHolder->target) {
+        if (!refHolder) {
+            throw runtime_error("Null reference in assign_through");
+        }
+        if (refHolder->container) {
+            // Vector-element reference: resolve fresh + bounds-check before writing,
+            // so a write-through after a reallocation/shrink can't corrupt the heap (#41).
+            if (refHolder->container_index >= refHolder->container->size()) {
+                throw runtime_error("Assignment to a removed array element");
+            }
+            (*refHolder->container)[refHolder->container_index] = value;
+            return;
+        }
+        if (!refHolder->target) {
             throw runtime_error("Null reference in assign_through");
         }
         if (refHolder->sourceEnv.expired()) {
@@ -627,7 +688,17 @@ void script_value::assign_through(const script_value& value) {
 void script_value::assign_through(script_value&& value) {
     if (type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
-        if (!refHolder || !refHolder->target) {
+        if (!refHolder) {
+            throw runtime_error("Null reference in assign_through");
+        }
+        if (refHolder->container) {
+            if (refHolder->container_index >= refHolder->container->size()) {
+                throw runtime_error("Assignment to a removed array element");
+            }
+            (*refHolder->container)[refHolder->container_index] = std::move(value);
+            return;
+        }
+        if (!refHolder->target) {
             throw runtime_error("Null reference in assign_through");
         }
         if (refHolder->sourceEnv.expired()) {

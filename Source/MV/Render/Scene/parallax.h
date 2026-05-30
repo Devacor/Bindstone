@@ -9,6 +9,7 @@ namespace MV {
 		class Parallax : public jai::property_owner<Parallax, Component> {
 			friend Node;
 			friend cereal::access;
+			friend jai::access;
 
 		public:
 			ComponentDerivedAccessors(Parallax)
@@ -107,6 +108,13 @@ namespace MV {
 				construct->initialize();
 			}
 
+			template<typename Archive>
+			static void load_and_construct(Archive& ar, jai::serialization::construct<Parallax>& construct) {
+				construct(std::shared_ptr<Node>());
+				construct->load(ar, 0);
+				construct->initialize();
+			}
+
 			std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) override {
 				return cloneHelper(a_parent->attach<Parallax>().self());
 			}
@@ -114,6 +122,7 @@ namespace MV {
 			std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone) override;
 
 			void initialize() override;
+			void postLoadInitialize() override;
 			void detachImplementation() override;
 			void reattachImplementation() override;
 			void updateImplementation(double a_delta) override;

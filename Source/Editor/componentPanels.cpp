@@ -4,6 +4,7 @@
 #include "texturePicker.h"
 #include "anchorEditor.h"
 #include "editor.h"
+#include <chrono>
 
 EditorPanel::EditorPanel(EditorControls &a_panel):
 	panel(a_panel),
@@ -1694,14 +1695,20 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 
 	saveButton->onAccept.connect("save", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.root()->save(fileName->text());
+		panel.root()->saveJai(fileName->text(), panel.services());
 	});
 
 	loadButton->onAccept.connect("load", [&](std::shared_ptr<MV::Scene::Clickable>){
-		auto newRoot = MV::Scene::Node::load(fileName->text(), panel.services(), false);
+		auto t0 = std::chrono::steady_clock::now();
+		// doPostLoad=true: load_complete() fires on the root node automatically via
+		// post_load depth tracking, calling postLoadStep() for the full tree.
+		auto newRoot = MV::Scene::Node::load(fileName->text(), panel.services(), true);
+		auto t1 = std::chrono::steady_clock::now();
 		panel.root(newRoot);
-		newRoot->postLoadStep();
+		newRoot->camera().position(MV::point(0.0f, 0.0f));
+		auto loadMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 		std::cout << "\n____\n";
+		std::cout << "\nJaiScript load: " << loadMs << " ms";
 		std::cout << "\nRecalculateLocalBounds: " << MV::Scene::Node::recalculateLocalBoundsCalls;
 		std::cout << "\nRecalculateChildBounds: " << MV::Scene::Node::recalculateChildBoundsCalls;
 		std::cout << "\nRecalculateMatrixBounds: " << MV::Scene::Node::recalculateMatrixCalls;
@@ -1709,10 +1716,16 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 
 	loadCerealButton->onAccept.connect("loadCereal", [&](std::shared_ptr<MV::Scene::Clickable>){
-		auto newRoot = MV::Scene::Node::loadCereal(fileName->text(), panel.services(), false);
+		auto t0 = std::chrono::steady_clock::now();
+		// Pass true: Cereal's load_and_construct calls postLoadStep() internally
+		// for the root node (isRootNode && doPostLoad), so no external call needed.
+		auto newRoot = MV::Scene::Node::loadCereal(fileName->text(), panel.services(), true);
+		auto t1 = std::chrono::steady_clock::now();
 		panel.root(newRoot);
-		newRoot->postLoadStep();
+		newRoot->camera().position(MV::point(0.0f, 0.0f));
+		auto loadMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 		std::cout << "\n____\n";
+		std::cout << "\nCereal load: " << loadMs << " ms";
 		std::cout << "\nRecalculateLocalBounds: " << MV::Scene::Node::recalculateLocalBoundsCalls;
 		std::cout << "\nRecalculateChildBounds: " << MV::Scene::Node::recalculateChildBoundsCalls;
 		std::cout << "\nRecalculateMatrixBounds: " << MV::Scene::Node::recalculateMatrixCalls;
@@ -1731,7 +1744,7 @@ void DeselectedEditorPanel::handleInput(SDL_Event &a_event) {
 	}
 }
 
-std::string DeselectedEditorPanel::previousFileName = "Scenes/map.scene";
+std::string DeselectedEditorPanel::previousFileName = "./Scenes/map.scene";
 
 ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, const std::shared_ptr<MV::Scene::Node> &a_nodeToAttachTo, SelectedNodeEditorPanel *a_editorPanel):
 	EditorPanel(a_panel),

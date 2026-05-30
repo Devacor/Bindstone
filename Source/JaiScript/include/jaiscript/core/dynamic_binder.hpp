@@ -1114,7 +1114,7 @@ public:
     }
 
     // Register post-deserialization hook for migration and data transformation
-    // This is a convenience method that registers a "post_deserialize" method
+    // This is a convenience method that registers a "post_load" method
     // that will be automatically called after properties are loaded from archives
     //
     // The hook receives the version number that was serialized, which can be used
@@ -1122,21 +1122,21 @@ public:
     //
     // Examples:
     //   // Without version parameter (simple computed values)
-    //   .post_deserialize_hook([](MyClass& self) {
+    //   .post_load_hook([](MyClass& self) {
     //       self.computed_field = self.width * self.height;
     //   })
     //
     //   // With version parameter (for migration)
-    //   .post_deserialize_hook([](MyClass& self, int version) {
+    //   .post_load_hook([](MyClass& self, int version) {
     //       if (version < 2) {
     //           // Migrate from v1 to v2
     //           self.new_field = self.compute_from_old_fields();
     //       }
     //   })
     template<typename Callable>
-    dynamic_binder& post_deserialize_hook(Callable&& callable) {
-        // Register as a regular method named "post_deserialize"
-        return method("post_deserialize", std::forward<Callable>(callable));
+    dynamic_binder& post_load_hook(Callable&& callable) {
+        // Register as a regular method named "post_load"
+        return method("post_load", std::forward<Callable>(callable));
     }
 
     // ============================================================================

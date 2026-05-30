@@ -52,6 +52,14 @@
     JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false); \
     jai::property<JAI_REMOVE_PARENS(type)> name{ property_mgr, #name, ##__VA_ARGS__ }
 
+// Transient property — registered for runtime access but never serialized.
+// Use for derived/reconstructed values (cached bounds, computed matrices, etc.)
+// that are cheaper to recompute at load time than to store and parse.
+// Optional default value: JAI_TRANSIENT_PROPERTY((int), myCache, 0);
+#define JAI_TRANSIENT_PROPERTY(type, name, ...) \
+    JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false); \
+    jai::property<JAI_REMOVE_PARENS(type)> name{ property_mgr, #name, ##__VA_ARGS__, jai::serialize_mode::transient }
+
 // Deleted property - placeholder for removed properties during deserialization
 #define JAI_DELETED_PROPERTY(type, name) \
     JAI_SCHEMA_REGISTER(JAI_REMOVE_PARENS(type), name, false); \

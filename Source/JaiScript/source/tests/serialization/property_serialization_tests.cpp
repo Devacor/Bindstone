@@ -130,7 +130,7 @@ public:
     JAI_PROPERTY((int), value, 0);
 
     // Migration hook to handle renamed field
-    void post_deserialize(serialization::any_archive_reader& ar) override {
+    void post_load(serialization::any_archive_reader& ar) override {
         // Try to read the old field name if it exists
         if (ar.has_property("old_name")) {
             // The property was already consumed during load
@@ -155,7 +155,7 @@ public:
     // Non-serialized computed property
     int area = 0;
 
-    void post_deserialize(serialization::any_archive_reader& ar) override {
+    void post_load(serialization::any_archive_reader& ar) override {
         // Compute area after loading dimensions
         area = width.get() * height.get();
     }
@@ -167,7 +167,7 @@ public:
     JAI_PROPERTY((int), score, 0);
     JAI_PROPERTY((std::string), category, "");
 
-    void post_deserialize(serialization::any_archive_reader& ar) override {
+    void post_load(serialization::any_archive_reader& ar) override {
         // Clamp score to valid range
         if (score.get() < 0) {
             score = 0;
@@ -534,7 +534,7 @@ public:
             // The "description" field keeps its default value since archive doesn't have it
             check_eq(v3.description.get(), std::string("default_description"));
 
-            // Note: To handle renamed fields, use post_deserialize hook (to be implemented)
+            // Note: To handle renamed fields, use post_load hook (to be implemented)
         });
 
         test("version_deleted_field", [&]() {
@@ -875,8 +875,8 @@ public:
 
         // ===== POST-DESERIALIZATION HOOK TESTS =====
 
-        test("post_deserialize_computed_values_json", [&]() {
-            // Test that post_deserialize hook computes derived values after loading from JSON
+        test("post_load_computed_values_json", [&]() {
+            // Test that post_load hook computes derived values after loading from JSON
             computed_object original;
             original.width = 10;
             original.height = 20;
@@ -898,19 +898,19 @@ public:
             std::string type_name;
             uint32_t version;
             reader.begin_object(type_name, version);
-            loaded.load_with_hook(reader);  // This calls post_deserialize
+            loaded.load_with_hook(reader);  // This calls post_load
             reader.end_object();
 
             // Properties should be loaded
             check_eq(loaded.width.get(), 10);
             check_eq(loaded.height.get(), 20);
 
-            // Area should be computed by post_deserialize hook
+            // Area should be computed by post_load hook
             check_eq(loaded.area, 200);
         });
 
-        test("post_deserialize_computed_values_binary", [&]() {
-            // Test post_deserialize with binary format
+        test("post_load_computed_values_binary", [&]() {
+            // Test post_load with binary format
             computed_object original;
             original.width = 15;
             original.height = 25;
@@ -941,8 +941,8 @@ public:
             check_eq(loaded.area, 375);
         });
 
-        test("post_deserialize_validation_json", [&]() {
-            // Test that post_deserialize can validate and correct data
+        test("post_load_validation_json", [&]() {
+            // Test that post_load can validate and correct data
             std::string json = R"({
                 "_type_": "validated_object",
                 "_version_": 1,
@@ -967,7 +967,7 @@ public:
             check_eq(loaded.category.get(), std::string("excellent"));
         });
 
-        test("post_deserialize_validation_binary", [&]() {
+        test("post_load_validation_binary", [&]() {
             // Test validation with binary format
             validated_object original;
             original.score = -50;  // Invalid score
@@ -996,7 +996,7 @@ public:
             check_eq(loaded.category.get(), std::string("needs_improvement"));
         });
 
-        test("post_deserialize_migration_hook_called_json", [&]() {
+        test("post_load_migration_hook_called_json", [&]() {
             // Test that the migration hook is actually called
             std::string json = R"({
                 "_type_": "migrated_object_v2",
@@ -1027,7 +1027,7 @@ public:
             check_eq(loaded.value.get(), 42);
         });
 
-        test("post_deserialize_migration_hook_called_binary", [&]() {
+        test("post_load_migration_hook_called_binary", [&]() {
             // Test migration hook with binary format
             migrated_object_v2 original;
             original.new_name = "binary_test";
@@ -1056,7 +1056,7 @@ public:
             check_eq(loaded.value.get(), 99);
         });
 
-        test("post_deserialize_without_hook_not_called", [&]() {
+        test("post_load_without_hook_not_called", [&]() {
             // Test that hook is NOT called if we don't use load_with_hook
             std::string json = R"({
                 "_type_": "computed_object",
@@ -1085,8 +1085,8 @@ public:
 
         // ===== dynamic_binder POST-DESERIALIZE TESTS =====
 
-        test("dynamic_binder_post_deserialize_with_version", [&]() {
-            // Test that dynamic_binder registered classes can use post_deserialize hook with version
+        test("dynamic_binder_post_load_with_version", [&]() {
+            // Test that dynamic_binder registered classes can use post_load hook with version
             auto eng = engine::make();
 
             // Define a simple C++ class
@@ -1097,24 +1097,24 @@ public:
                 int version_loaded = 0;
             };
 
-            // Register with dynamic_binder and add post_deserialize hook
+            // Register with dynamic_binder and add post_load hook
             // Note: No explicit .constructor<>() - auto-registration should handle it
             dynamic_binder<Rectangle>(*eng, "Rectangle")
                 .property("width", &Rectangle::width)
                 .property("height", &Rectangle::height)
-                .post_deserialize_hook([](Rectangle& self, int version) {
+                .post_load_hook([](Rectangle& self, int version) {
                     // Compute area after loading
                     self.area = self.width * self.height;
                     self.version_loaded = version;
                 })
                 .build();
 
-            // Create a Rectangle and manually call post_deserialize to verify it works
+            // Create a Rectangle and manually call post_load to verify it works
             eng->execute(R"(
                 var rect = Rectangle();
                 rect.width = 15;
                 rect.height = 25;
-                rect.post_deserialize(2);
+                rect.post_load(2);
             )");
 
             // Get the rectangle and check that hook was called
@@ -1125,7 +1125,7 @@ public:
             auto cpp_obj = rect_instance->get_cpp_object_as<Rectangle>();
             check(cpp_obj != nullptr);
 
-            // Check that post_deserialize was called
+            // Check that post_load was called
             check_eq(cpp_obj->width, 15);
             check_eq(cpp_obj->height, 25);
             check_eq(cpp_obj->area, 375);  // Should be computed
@@ -1134,15 +1134,15 @@ public:
 
         // ===== SCRIPT-DEFINED CLASS POST-DESERIALIZE TESTS =====
 
-        test("script_class_post_deserialize_json", [&]() {
-            // Test that script-defined classes can use post_deserialize hook
+        test("script_class_post_load_json", [&]() {
+            // Test that script-defined classes can use post_load hook
             auto eng = engine::make();
 
             // Register JSON stdlib functions (needed for from_json)
             stdlib::register_json_functions(*eng);
 
             std::cerr << "[TEST] Step 1: Define class..." << std::endl;
-            // Define a script class with post_deserialize
+            // Define a script class with post_load
             eng->execute(R"(
                 class GameCharacter {
                     var health = 100;
@@ -1150,7 +1150,7 @@ public:
                     var was_migrated = false;
                     var loaded_version = 0;
 
-                    function post_deserialize(version) {
+                    function post_load(version) {
                         loaded_version = version;
 
                         // Simulate migration from v1 to v2
@@ -1173,7 +1173,7 @@ public:
             try {
                 eng->execute(R"(
                     var test_obj = GameCharacter();
-                    test_obj.post_deserialize(1);
+                    test_obj.post_load(1);
                 )");
                 std::cerr << "[TEST] Direct method call OK" << std::endl;
             } catch (const std::exception& e) {
@@ -1232,8 +1232,8 @@ public:
             check_eq(loaded_version.as<script_int>(), 1);
         });
 
-        test("script_class_post_deserialize_binary", [&]() {
-            // Test script class post_deserialize with binary format
+        test("script_class_post_load_binary", [&]() {
+            // Test script class post_load with binary format
             auto eng = engine::make();
 
             // Register JSON stdlib functions (needed for to_binary/from_binary)
@@ -1247,7 +1247,7 @@ public:
                     var total_weight = 0.0;
                     var hook_called = false;
 
-                    function post_deserialize(version) {
+                    function post_load(version) {
                         hook_called = true;
                         total_weight = quantity * weight;
                     }
@@ -1275,8 +1275,8 @@ public:
             check_eq(total_weight.as<script_float>(), 12.5);  // 5 * 2.5
         });
 
-        test("script_class_post_deserialize_no_hook", [&]() {
-            // Test that classes without post_deserialize still work
+        test("script_class_post_load_no_hook", [&]() {
+            // Test that classes without post_load still work
             auto eng = engine::make();
 
             // Register JSON stdlib functions (needed for to_json/from_json)

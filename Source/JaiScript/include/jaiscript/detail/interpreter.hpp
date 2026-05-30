@@ -319,6 +319,10 @@ namespace jai {
             }
         }
 
+        /// Number of live local slots in this frame (used by closure capture to
+        /// identify slots that belong to this frame vs. an inner lambda's scope).
+        size_t local_count() const noexcept { return locals.size(); }
+
         /// Set 'this' object for method calls
         void set_this(script_value this_obj) {
             this_object_ptr = std::make_unique<script_value>(std::move(this_obj));

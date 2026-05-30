@@ -2,7 +2,6 @@
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
-#include "MV/Serialization/property_cereal.hpp"
 
 #include "MV/Utility/log.h"
 
@@ -46,6 +45,15 @@ namespace MV {
 		}
 
 		void Parallax::initialize() {
+			reattachImplementation();
+		}
+
+		void Parallax::postLoadInitialize() {
+			// reattachImplementation() fires during reattached() when the component
+			// is set on its owner node, but at that point the parent node is not yet
+			// in the tree (fixChildOwnership runs later in postLoadStep). Re-run it
+			// here so the parentObserver and cameraObserver signals connect correctly
+			// after the full tree is assembled.
 			reattachImplementation();
 		}
 

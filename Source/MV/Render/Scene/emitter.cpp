@@ -158,7 +158,7 @@ namespace MV {
 					updateParticlesOnMultipleThreads(a_dt);
 				});
 			} else if (particlesToSpawn > 0) {
-				auto randomOffset = randomInteger(0, emitterThreads);
+				auto randomOffset = randomInteger(0, emitterThreads - 1);   // inclusive upper bound; -1 to stay in [0, threads)
 				for (size_t count = 0; count < particlesToSpawn; ++count) {
 					spawnParticle((count + randomOffset) % emitterThreads);
 				}
@@ -352,6 +352,13 @@ namespace MV {
 			bool falseValue = false;
 			accumulatedTimeDelta += a_dt;
 			if (updateInProgress.compare_exchange_strong(falseValue, true)) {
+				// We won the single-flight gate, so no worker pipeline is in flight: read + reset the
+				// accumulated dt HERE on the main thread and hand it to the worker by value. The worker
+				// used to read/reset accumulatedTimeDelta while the main thread kept doing '+= a_dt'
+				// every frame (even on frames where the gate was held) -> a data race on a plain double.
+				double dt = std::min(accumulatedTimeDelta, MAX_TIME_STEP);
+				accumulatedTimeDelta = 0.0;
+
 				if (relativeNodePosition->expired() && relativeParentCount >= 0) {
 					makeRelativeToParent(relativeParentCount);
 				}
@@ -364,10 +371,7 @@ namespace MV {
 				for (auto&& data : threadData) {
 					data.particleOffset = particleOffset;
 				}
-				pool.task([this, a_dt]() {
-					double dt = std::min(accumulatedTimeDelta, MAX_TIME_STEP);
-					accumulatedTimeDelta = 0.0;
-
+				pool.task([this, dt]() {
 					if (nextSpawnDelta == 0.0) {
 						nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
 					}
@@ -451,7 +455,9 @@ namespace MV {
 				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
 				if (dirtyVertexBuffer) {
 					dirtyVertexBuffer = false;
-					glBufferData(GL_ARRAY_BUFFER, points->size() * structSize, &(points[0]), GL_STATIC_DRAW);
+					// Particle vertices are re-uploaded almost every frame; STREAM_DRAW is the correct
+					// usage hint (STATIC_DRAW tells the driver the buffer is immutable — the opposite).
+					glBufferData(GL_ARRAY_BUFFER, points->size() * structSize, &(points[0]), GL_STREAM_DRAW);
 				}
 
 				glEnableVertexAttribArray(0);
@@ -465,7 +471,6 @@ namespace MV {
 				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
 				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
 
-				std::set<std::shared_ptr<MV::TextureDefinition>> actuallyRegistered;
 				addTexturesToShader();
 				auto emitterSpace = relativeNodePosition->expired() ? ourOwner : relativeNodePosition->lock();
 				shaderProgram->set("transformation", ourRenderer.cameraProjectionMatrix(ourOwner->cameraId()) * emitterSpace->worldTransform());

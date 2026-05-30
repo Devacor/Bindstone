@@ -227,7 +227,7 @@ static void RunJsonParseBenchmark(jai::engine* eng) {
 
 	const double rm = median(realT);
 	const double fm = median(fastT);
-	std::cout << "  json_archive_reader (std::map DOM): " << rm << " ms  (" << (mib / (rm / 1000.0)) << " MiB/s)\n";
+	std::cout << "  json_archive_reader (flat arena DOM): " << rm << " ms  (" << (mib / (rm / 1000.0)) << " MiB/s)\n";
 	std::cout << "  fast_json           (flat arena):   " << fm << " ms  (" << (mib / (fm / 1000.0)) << " MiB/s)\n";
 	std::cout << "  speedup (real / fast): " << (rm / fm) << "x   [sink=" << sink << "]\n\n";
 }

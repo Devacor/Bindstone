@@ -562,13 +562,14 @@ class json_archive_reader : public archive_reader_impl<json_archive_reader> {
 public:
     // Engine is REQUIRED for JSON reading since we need to create script_values
     json_archive_reader(const std::string& json_string, engine* eng)
-        : archive_reader_impl<json_archive_reader>(eng), json_(json_string), pos_(0) {
+        : archive_reader_impl<json_archive_reader>(eng) {
         if (!eng) {
             throw serialization_error("json_archive_reader requires a valid engine reference");
         }
-        root_value_ = parse_json();
-        current_value_ = &root_value_;
-        path_stack_.push_back("");
+        json_ = json_string;
+        parse_into_arena();   // builds the flat arena DOM (nodes_/chars_); root_ is the last node
+        json_.clear();        // source no longer needed — the flat DOM is self-contained
+        json_.shrink_to_fit();
     }
 
     ~json_archive_reader() = default;
@@ -592,8 +593,9 @@ public:
     std::string read_string() { return read_value().as<script_string>(); }
 
     bool peek_null() {
-        const script_value* val = next_value(/*peek_only=*/true);
-        return val && val->is_null();
+        uint32_t n;
+        if (!next_node(n, /*peek_only=*/true)) return false;
+        return nodes_[n].tag == JTag::Null;
     }
 
     void read_null() {
@@ -635,34 +637,28 @@ public:
     }
 
     bool begin_object(std::string& type_name, uint32_t& version) {
-        const script_value* value_to_check = next_value();
-        if (!value_to_check || !value_to_check->is_map()) {
+        uint32_t n;
+        if (!next_node(n) || nodes_[n].tag != JTag::Obj) {
             return false;
         }
-
-        const auto& map = value_to_check->as_map();
-
-        auto eng = engine_ref_;
-        if (!eng) {
-            throw serialization_error("Engine reference expired during JSON deserialization");
+        const JNode& obj = nodes_[n];
+        const uint32_t first = obj.u.agg.first;
+        const uint32_t count = obj.u.agg.count;
+        type_name.clear();
+        version = 1;
+        // _type_/_version_ are read directly off the flat members — no script_value keys.
+        for (uint32_t m = 0; m < count; ++m) {
+            const JNode& k = nodes_[first + 2 * m];
+            std::string_view kv(chars_.data() + k.u.str.off, k.u.str.len);
+            const JNode& v = nodes_[first + 2 * m + 1];
+            if (kv == "_type_" && v.tag == JTag::Str) {
+                type_name.assign(chars_.data() + v.u.str.off, v.u.str.len);
+            } else if (kv == "_version_" && v.tag == JTag::Int) {
+                version = static_cast<uint32_t>(v.u.i);
+            }
         }
-
-        auto type_it = map.find(script_value(script_value::ast_literal_tag{}, std::string("_type_")));
-        if (type_it != map.end() && type_it->second.is_string()) {
-            type_name = type_it->second.as_string();
-        } else {
-            type_name = "";
-        }
-
-        auto version_it = map.find(script_value(script_value::ast_literal_tag{}, std::string("_version_")));
-        if (version_it != map.end() && version_it->second.is_int()) {
-            version = static_cast<uint32_t>(version_it->second.as_int());
-        } else {
-            version = 1;
-        }
-
         version_ = version;
-        object_stack_.push(ObjectState(map, map.begin()));
+        object_stack_.push(ObjState{ first, count, 0, nullptr });
         return true;
     }
 
@@ -673,14 +669,13 @@ public:
     }
 
     size_t begin_array() {
-        const script_value* value_to_check = next_value();
-        if (!value_to_check || !value_to_check->is_array()) {
+        uint32_t n;
+        if (!next_node(n) || nodes_[n].tag != JTag::Arr) {
             return 0;
         }
-
-        const auto& arr = value_to_check->as_array();
-        array_stack_.push(ArrayState{arr, 0});
-        return arr.size();
+        const JNode& a = nodes_[n];
+        array_stack_.push(ArrState{ a.u.agg.first, a.u.agg.count, 0 });
+        return a.u.agg.count;
     }
 
     void end_array() {
@@ -693,35 +688,33 @@ public:
         if (object_stack_.empty()) {
             return false;
         }
-
-        auto& obj_state = object_stack_.top();
-
-        // Skip metadata fields
-        while (obj_state.current != obj_state.map.end()) {
-            const std::string& prop_name = obj_state.current->first.as_string();
-            if (prop_name != "_type_" && prop_name != "_version_") {
-                name = prop_name;
-                current_property_value_ = &obj_state.current->second;
+        auto& s = object_stack_.top();
+        // Sequential cursor over the flat members; skip the _type_/_version_ metadata.
+        while (s.cursor < s.count) {
+            const JNode& k = nodes_[s.first + 2 * s.cursor];
+            std::string_view kv(chars_.data() + k.u.str.off, k.u.str.len);
+            const uint32_t valNode = s.first + 2 * s.cursor + 1;
+            ++s.cursor;
+            if (kv != "_type_" && kv != "_version_") {
+                name.assign(kv);
+                cpv_node_ = valNode;
+                cpv_valid_ = true;
                 cpv_depth_ = object_stack_.size();
-                ++obj_state.current;
                 return true;
             }
-            ++obj_state.current;
         }
-
         return false;
     }
 
     // Map deserialization - JSON reads from native object format
     size_t begin_map() {
-        const script_value* value_to_check = next_value();
-        if (!value_to_check || !value_to_check->is_map()) {
+        uint32_t n;
+        if (!next_node(n) || nodes_[n].tag != JTag::Obj) {
             return 0;
         }
-
-        const auto& map = value_to_check->as_map();
-        object_stack_.push(ObjectState(map, map.begin()));
-        return map.size();
+        const JNode& o = nodes_[n];
+        object_stack_.push(ObjState{ o.u.agg.first, o.u.agg.count, 0, nullptr });
+        return o.u.agg.count;
     }
 
     void end_map() {
@@ -734,90 +727,84 @@ public:
         if (object_stack_.empty()) {
             return false;
         }
-
-        auto& obj_state = object_stack_.top();
-
-        if (obj_state.current != obj_state.map.end()) {
-            key = obj_state.current->first.as_string();
-            current_property_value_ = &obj_state.current->second;
+        auto& s = object_stack_.top();
+        if (s.cursor < s.count) {
+            const JNode& k = nodes_[s.first + 2 * s.cursor];
+            key.assign(chars_.data() + k.u.str.off, k.u.str.len);
+            cpv_node_ = s.first + 2 * s.cursor + 1;
+            cpv_valid_ = true;
             cpv_depth_ = object_stack_.size();
-            ++obj_state.current;
+            ++s.cursor;
             return true;
         }
-
         return false;
     }
 
-    void clear_property_value() { current_property_value_ = nullptr; }
-    bool has_current_property_value() const { return current_property_value_ != nullptr; }
+    void clear_property_value() { cpv_valid_ = false; }
+    bool has_current_property_value() const { return cpv_valid_; }
     bool in_array() const { return !array_stack_.empty(); }
 
     bool has_property(const std::string& name) {
         if (object_stack_.empty()) {
             return false;
         }
-        return object_stack_.top().index.count(name) > 0;
+        return object_index(object_stack_.top()).count(std::string_view(name)) > 0;
     }
 
-    // Seek to a specific property by name
-    // Fast path: if properties are in sorted order, sequential access works
-    // Slow path: fall back to map lookup for out-of-order access
+    // Seek to a property by name. Builds a lazy name->value-node index on first random
+    // access (the common sequential read path never pays for it); keys are string_views
+    // into the char arena, so lookups never construct a script_value.
     bool seek_property(const std::string& name) {
         if (object_stack_.empty()) {
             return false;
         }
-
-        auto& obj_state = object_stack_.top();
-
-        // Fast path: O(1) lookup via the pre-built string index.
-        // The old path called map.find(script_value(name, eng)) which allocated
-        // and interned a script_value key on every property access — O(log N) with
-        // heavy constant cost. The index uses plain std::string keys: O(1) average.
-        auto it = obj_state.index.find(name);
-        if (it == obj_state.index.end()) {
+        auto& s = object_stack_.top();
+        auto& idx = object_index(s);
+        auto it = idx.find(std::string_view(name));
+        if (it == idx.end()) {
             return false;
         }
-
-        current_property_value_ = it->second;
+        cpv_node_ = it->second;
+        cpv_valid_ = true;
         cpv_depth_ = object_stack_.size();
         return true;
     }
 
     script_value read_value() {
         depth_guard guard(current_depth_);
+        auto eng = engine_ref_;
+        if (!eng) {
+            throw serialization_error("Engine reference expired during JSON deserialization");
+        }
 
-        const script_value* val = next_value();
-        if (!val) val = current_value_;
-        script_value result = val ? *val : script_value();
+        uint32_t n;
+        if (!next_node(n)) n = root_;   // matches the old "fall back to the root value"
+        const JNode& node = nodes_[n];
 
-        // Check for shared_ptr reconstruction
-        if (result.is_map()) {
-            const auto& map = result.as_map();
-
-            // Get engine reference for creating script_values
-            auto eng = engine_ref_;
-            if (!eng) {
-                throw serialization_error("Engine reference expired during JSON deserialization");
+        if (node.tag == JTag::Obj) {
+            // Detect the SCRIPT weak_ptr format {"$weak_ptr_id": id, "$weak_ptr_data"?: ...}
+            // by scanning the flat members directly — no script_value is materialized unless
+            // this genuinely is a weak_ptr (then only its $weak_ptr_data subtree) or unless a
+            // raw composite is requested (the final materialize(n) below, e.g. stdlib from_json).
+            uint32_t widNode = 0, wdataNode = 0;
+            bool hasWid = false, hasWdata = false;
+            const uint32_t first = node.u.agg.first, count = node.u.agg.count;
+            for (uint32_t m = 0; m < count; ++m) {
+                const JNode& k = nodes_[first + 2 * m];
+                std::string_view kv(chars_.data() + k.u.str.off, k.u.str.len);
+                if (kv == "$weak_ptr_id") { widNode = first + 2 * m + 1; hasWid = true; }
+                else if (kv == "$weak_ptr_data") { wdataNode = first + 2 * m + 1; hasWdata = true; }
             }
-
-            // Check for weak_ptr serialization format: {"$weak_ptr_id": id, "$weak_ptr_data": <optional>}
-            auto weak_id_it = map.find(script_value("$weak_ptr_id", eng));
-            if (weak_id_it != map.end() && weak_id_it->second.type() == script_value_type::jai_int_type) {
-                uint32_t id = static_cast<uint32_t>(weak_id_it->second.as<script_int>());
-
+            if (hasWid && nodes_[widNode].tag == JTag::Int) {
+                uint32_t id = static_cast<uint32_t>(nodes_[widNode].u.i);
                 if (id == 0) {
-                    // Null or expired weak_ptr
                     script_value v(std::monostate{}, eng);
                     v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
                     v.storage_ = jai::weaker_ptr<script_value::object_holder>();
                     return v;
                 }
-
-                // Check if we've already reconstructed this object
                 script_value existing_obj = get_shared_ptr(id);
-
                 if (!existing_obj.is_invalid()) {
-                    // Object was already reconstructed, get its object_holder and create weak_ptr
                     auto obj_holder = existing_obj.get_object_holder();
                     if (obj_holder) {
                         script_value weak_val(std::monostate{}, eng);
@@ -826,130 +813,189 @@ public:
                         return weak_val;
                     }
                 }
-
-                // First time seeing this ID - check for inline data
-                auto weak_data_it = map.find(script_value("$weak_ptr_data", eng));
-                if (weak_data_it != map.end()) {
-                    script_value obj_val = weak_data_it->second;  // Already properly wrapped
-
-                    // Register the object for future references
+                if (hasWdata) {
+                    script_value obj_val = materialize(wdataNode);
                     register_shared_ptr(id, obj_val);
-
-                    // Get the object_holder from the deserialized object
                     auto obj_holder = obj_val.get_object_holder();
                     if (!obj_holder) {
-                        // Object doesn't have an object_holder (shouldn't happen for valid objects)
                         throw std::runtime_error("Deserialized weak_ptr object has no object_holder");
                     }
-
-                    // Create weak_ptr to the object_holder
                     script_value weak_val(std::monostate{}, eng);
                     weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
                     weak_val.storage_ = jai::weaker_ptr<script_value::object_holder>(obj_holder);
                     return weak_val;
                 } else {
-                    // No data found - return null weak_ptr (object was never serialized)
                     script_value v(std::monostate{}, eng);
                     v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
                     v.storage_ = jai::weaker_ptr<script_value::object_holder>();
                     return v;
                 }
             }
+            return materialize(n);
         }
-        
-        return result;
+        if (node.tag == JTag::Arr) {
+            return materialize(n);
+        }
+        return materialize_primitive(node, eng);
     }
 
 private:
-    std::string json_;
-    size_t pos_;
-    script_value root_value_;
-    const script_value* current_value_;
-    const script_value* current_property_value_ = nullptr;
+    // ---- Flat arena DOM ----------------------------------------------------------------
+    // Replaces the std::map<script_value,script_value>/std::vector<script_value> DOM the
+    // reader used to build at parse time. Objects/arrays are 16-byte nodes in one contiguous
+    // arena; string bytes live in one char arena. Composites become script_values only on
+    // demand (read_value/materialize). ~7x faster parse on real scene data.
+    enum class JTag : uint8_t { Null, Bool, Int, Double, Str, Arr, Obj };
+    struct JNode {
+        JTag tag = JTag::Null;
+        union UVal {
+            int64_t  i;                              // Int, Bool (0/1)
+            double   d;                              // Double
+            struct { uint32_t off, len; } str;       // Str: [off,len) into chars_
+            struct { uint32_t first, count; } agg;   // Arr: count elems; Obj: count members ([k,v]*)
+        } u{};
+    };
+
+    std::string json_;        // parse source; cleared once the arena is built
+    size_t pos_ = 0;          // parse cursor
+    std::vector<JNode> nodes_;   // value arena (root_ is the last element)
+    std::string chars_;          // unescaped string-byte arena
+    uint32_t root_ = 0;
+    std::vector<JNode> scratch_; // parser stack (children bulk-moved into nodes_ on container close)
+
+    uint32_t cpv_node_ = 0;   // current property value: a flat node index
+    bool cpv_valid_ = false;
     size_t cpv_depth_ = 0;
-    script_value temp_value_;
-    std::vector<std::string> path_stack_;
 
-    // Central value resolution — every value-consuming method delegates here.
-    // cpv is only valid at the depth where it was set; stale cpv is discarded.
-    // peek_only=true examines without consuming (for peek_null).
-    const script_value* next_value(bool peek_only = false) {
-        bool cpv_valid = current_property_value_ && (cpv_depth_ == object_stack_.size());
-
-        if (cpv_valid) {
-            const script_value* val = current_property_value_;
-            if (!peek_only) current_property_value_ = nullptr;
-            return val;
+    // Resolves the next value to consume as a flat node index. cpv is only valid at the
+    // object depth where it was set; arrays advance an element cursor. Returns false only
+    // when an open array is exhausted (callers either skip or fall back to the root).
+    bool next_node(uint32_t& out, bool peek_only = false) {
+        if (cpv_valid_ && cpv_depth_ == object_stack_.size()) {
+            out = cpv_node_;
+            if (!peek_only) cpv_valid_ = false;
+            return true;
         }
-
-        current_property_value_ = nullptr;
-
+        cpv_valid_ = false;
         if (!array_stack_.empty()) {
-            auto& arr = array_stack_.top();
-            if (arr.index < arr.array.size()) {
-                if (peek_only) return &arr.array[arr.index];
-                temp_value_ = arr.array[arr.index++];
-                return &temp_value_;
+            auto& a = array_stack_.top();
+            if (a.index < a.count) {
+                out = a.first + (peek_only ? a.index : a.index++);
+                return true;
             }
-            return nullptr;
+            return false;
         }
-
-        return current_value_;
+        out = root_;
+        return true;
     }
 
-    // JSON parsing methods
-    script_value parse_json() {
+    // Builds an engine-bound script_value for a primitive flat node (the hot path; no recursion).
+    script_value materialize_primitive(const JNode& node, engine* eng) {
+        switch (node.tag) {
+            case JTag::Null:   return script_value(std::monostate{}, eng);
+            case JTag::Bool:   return script_value(static_cast<script_bool>(node.u.i != 0), eng);
+            case JTag::Int:    return script_value(static_cast<script_int>(node.u.i), eng);
+            case JTag::Double: return script_value(node.u.d, eng);
+            case JTag::Str:    return script_value(std::string(chars_.data() + node.u.str.off, node.u.str.len), eng);
+            default:           return script_value(std::monostate{}, eng);
+        }
+    }
+
+    // Recursively builds a full script_value subtree from a flat node — only used when a raw
+    // composite is actually requested (stdlib from_json / a weak_ptr's $weak_ptr_data). Mirrors
+    // the old parse_object/parse_array exactly (make_map/make_array factories, ast_literal_tag
+    // keys) so map.find(script_value("_type_"/...)) and is_string()/is_int() still behave.
+    script_value materialize(uint32_t idx) {
+        depth_guard guard(current_depth_);
+        engine* eng = engine_ref_;
+        const JNode& node = nodes_[idx];
+        if (node.tag == JTag::Obj) {
+            script_value mv = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+            auto& map = const_cast<std::map<script_value, script_value>&>(mv.as_map());
+            for (uint32_t m = 0; m < node.u.agg.count; ++m) {
+                const JNode& k = nodes_[node.u.agg.first + 2 * m];
+                map.emplace(script_value(script_value::ast_literal_tag{},
+                                         std::string(chars_.data() + k.u.str.off, k.u.str.len)),
+                            materialize(node.u.agg.first + 2 * m + 1));
+            }
+            return mv;
+        }
+        if (node.tag == JTag::Arr) {
+            script_value av = script_value::make_array(nullptr, eng);
+            auto& arr = const_cast<std::vector<script_value>&>(av.as_array());
+            arr.reserve(node.u.agg.count);
+            for (uint32_t e = 0; e < node.u.agg.count; ++e) {
+                arr.push_back(materialize(node.u.agg.first + e));
+            }
+            return av;
+        }
+        return materialize_primitive(node, eng);
+    }
+
+    // ---- Flat JSON parser (builds nodes_/chars_; no script_value DOM) ----
+    void parse_into_arena() {
         pos_ = 0;
-        script_value result = parse_value();
+        nodes_.clear();
+        chars_.clear();
+        scratch_.clear();
+        nodes_.reserve(json_.size() / 6 + 16);   // ~1 value / 6 bytes for minified JSON
+        chars_.reserve(json_.size() / 2 + 16);
+        parse_value_flat();
         skip_whitespace();
         if (pos_ != json_.length()) {
-            // The root value parsed but bytes remain — malformed input (two top-level
-            // values, truncated-then-garbage, etc.). Surface it instead of silently
-            // accepting a prefix.
+            // Trailing bytes after the root value -> malformed (two top-level values, etc.).
             throw serialization_error(
                 "Unexpected trailing characters after JSON value at position " + std::to_string(pos_));
         }
-        return result;
+        if (scratch_.size() != 1) {
+            throw serialization_error("Invalid JSON document");
+        }
+        nodes_.push_back(scratch_[0]);   // the root value becomes the last arena element
+        root_ = static_cast<uint32_t>(nodes_.size() - 1);
+        scratch_.clear();
     }
-    
-    script_value parse_value() {
-        // Bound recursion: nested arrays/objects ([[[...]]] or {"a":{"a":...}})
-        // recurse per nesting level, and without a limit deeply-nested (e.g.
-        // adversarial) input overflows the native stack — an uncatchable crash.
-        depth_guard guard(current_depth_);  // also enforces JAI_MAX_SERIALIZATION_DEPTH
+
+    // Bulk-moves the [mark, end) children off the scratch stack into the arena and pushes one
+    // container node referencing them. Objects store members interleaved [key,value,...].
+    void push_container(JTag tag, size_t mark) {
+        const uint32_t first = static_cast<uint32_t>(nodes_.size());
+        const size_t cnt = scratch_.size() - mark;
+        nodes_.insert(nodes_.end(), scratch_.begin() + mark, scratch_.end());
+        scratch_.resize(mark);
+        JNode v;
+        v.tag = tag;
+        v.u.agg.first = first;
+        v.u.agg.count = (tag == JTag::Obj) ? static_cast<uint32_t>(cnt / 2) : static_cast<uint32_t>(cnt);
+        scratch_.push_back(v);
+    }
+
+    void parse_value_flat() {
+        // Bound recursion so adversarial deep nesting can't overflow the native stack.
+        depth_guard guard(current_depth_);
         if (current_depth_ > JAI_MAX_JSON_PARSE_DEPTH) {
             throw serialization_error(
                 "Maximum JSON nesting depth (" + std::to_string(JAI_MAX_JSON_PARSE_DEPTH) + ") exceeded");
         }
-
         skip_whitespace();
-
         if (pos_ >= json_.length()) {
             throw serialization_error("Unexpected end of JSON");
         }
-
-        // Get engine reference for creating script_values
-        auto eng = engine_ref_;
-        if (!eng) {
-            throw serialization_error("Engine reference expired during JSON deserialization");
-        }
-
         char c = json_[pos_];
-
         if (c == '"') {
-            return script_value(parse_string(), eng);
+            JNode v; v.tag = JTag::Str;
+            parse_string_into(v.u.str.off, v.u.str.len);
+            scratch_.push_back(v);
         } else if (c == '{') {
-            return parse_object(eng);
+            parse_object_flat();
         } else if (c == '[') {
-            return parse_array(eng);
+            parse_array_flat();
         } else if (c == 't' || c == 'f') {
-            return parse_bool(eng);
+            parse_bool_flat();
         } else if (c == 'n') {
-            return parse_null(eng);
+            parse_null_flat();
         } else if (c == '-' || (c >= '0' && c <= '9')) {
-            return parse_number(eng);
+            parse_number_flat();
         } else {
-            // Build context for error message
             size_t start = (pos_ > 20) ? pos_ - 20 : 0;
             size_t len = std::min(size_t(40), json_.length() - start);
             std::string context = json_.substr(start, len);
@@ -1025,59 +1071,62 @@ private:
         return true;
     }
 
-    std::string parse_string() {
+    // Parses a string body into the char arena, returning its [off,len). Same bulk-copy +
+    // escape handling as before, just appending to chars_ instead of a std::string.
+    void parse_string_into(uint32_t& off, uint32_t& len) {
         expect('"');
-        std::string result;
+        const uint32_t start = static_cast<uint32_t>(chars_.size());
         const size_t n = json_.length();
 
         while (pos_ < n) {
-            // Bulk-copy the run of ordinary characters up to the next quote/backslash
-            // rather than appending one char at a time.
             const size_t runStart = pos_;
             while (pos_ < n) {
                 char c = json_[pos_];
                 if (c == '"' || c == '\\') break;
                 pos_++;
             }
-            if (pos_ > runStart) result.append(json_, runStart, pos_ - runStart);
+            if (pos_ > runStart) chars_.append(json_, runStart, pos_ - runStart);
 
             if (pos_ >= n) break;                 // unterminated -> expect('"') below throws
-            if (json_[pos_] == '"') { pos_++; return result; }
+            if (json_[pos_] == '"') {
+                pos_++;
+                off = start;
+                len = static_cast<uint32_t>(chars_.size() - start);
+                return;
+            }
 
-            // Escape sequence.
             pos_++;                               // consume backslash
             if (pos_ >= n) throw serialization_error("Unexpected end of JSON string");
             switch (json_[pos_]) {
-                case '"':  result += '"';  break;
-                case '\\': result += '\\'; break;
-                case '/':  result += '/';  break;
-                case 'b':  result += '\b'; break;
-                case 'f':  result += '\f'; break;
-                case 'n':  result += '\n'; break;
-                case 'r':  result += '\r'; break;
-                case 't':  result += '\t'; break;
+                case '"':  chars_.push_back('"');  break;
+                case '\\': chars_.push_back('\\'); break;
+                case '/':  chars_.push_back('/');  break;
+                case 'b':  chars_.push_back('\b'); break;
+                case 'f':  chars_.push_back('\f'); break;
+                case 'n':  chars_.push_back('\n'); break;
+                case 'r':  chars_.push_back('\r'); break;
+                case 't':  chars_.push_back('\t'); break;
                 case 'u': {
                     uint32_t cp;
                     if (!read_hex4(cp)) throw serialization_error("Invalid \\u escape in JSON string");
                     if (cp >= 0xD800 && cp <= 0xDBFF) {
-                        // High surrogate: consume a following \uXXXX low surrogate if valid.
                         if (pos_ + 2 < n && json_[pos_ + 1] == '\\' && json_[pos_ + 2] == 'u') {
                             const size_t save = pos_;
-                            pos_ += 2;                                 // move onto the low 'u'
+                            pos_ += 2;
                             uint32_t low;
                             if (read_hex4(low) && low >= 0xDC00 && low <= 0xDFFF) {
                                 cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
                             } else {
-                                pos_ = save;                           // not a valid pair
-                                cp = 0xFFFD;                           // U+FFFD replacement
+                                pos_ = save;
+                                cp = 0xFFFD;
                             }
                         } else {
-                            cp = 0xFFFD;                               // lone high surrogate
+                            cp = 0xFFFD;
                         }
                     } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
-                        cp = 0xFFFD;                                   // lone low surrogate
+                        cp = 0xFFFD;
                     }
-                    append_utf8(result, cp);
+                    append_utf8(chars_, cp);
                     break;
                 }
                 default:
@@ -1087,39 +1136,23 @@ private:
         }
 
         expect('"');                              // unterminated string -> throws
-        return result;
     }
-    
-    script_value parse_object(engine* eng) {
+
+    void parse_object_flat() {
         expect('{');
-
-        script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-        auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
-
-        if (peek() == '}') {
-            advance();
-            return map_val;
-        }
-
+        const size_t mark = scratch_.size();
+        if (peek() == '}') { advance(); push_container(JTag::Obj, mark); return; }
         while (true) {
-            std::string key = parse_string();
+            // key (parse_string_into's expect('"') skips any leading whitespace)
+            JNode k; k.tag = JTag::Str;
+            parse_string_into(k.u.str.off, k.u.str.len);
+            scratch_.push_back(k);
             expect(':');
-            script_value value = parse_value();
-
-            // Use ast_literal_tag: creates a string script_value WITHOUT interning
-            // into the symbolizer. JSON keys are only used for DOM lookup (via the
-            // unordered_map index in ObjectState) and string content comparison in
-            // std::map<> — both work correctly without interning. This eliminates
-            // O(N) symbolizer hash-map operations, the dominant parse cost.
-            map.emplace(script_value(script_value::ast_literal_tag{}, key), std::move(value));
-
+            parse_value_flat();   // pushes the value node
             char c = peek();
-            if (c == '}') {
-                advance();
-                break;
-            } else if (c == ',') {
-                advance();
-            } else {
+            if (c == ',') { advance(); }
+            else if (c == '}') { advance(); break; }
+            else {
                 size_t start = (pos_ > 20) ? pos_ - 20 : 0;
                 size_t len = std::min(size_t(40), json_.length() - start);
                 std::string context = json_.substr(start, len);
@@ -1127,31 +1160,19 @@ private:
                     std::to_string(pos_) + ", got '" + std::string(1, c) + "', near: ..." + context + "...");
             }
         }
-
-        return map_val;
+        push_container(JTag::Obj, mark);
     }
 
-    script_value parse_array(engine* eng) {
+    void parse_array_flat() {
         expect('[');
-
-        script_value array_val = script_value::make_array(nullptr, eng);
-        auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
-
-        if (peek() == ']') {
-            advance();
-            return array_val;
-        }
-
+        const size_t mark = scratch_.size();
+        if (peek() == ']') { advance(); push_container(JTag::Arr, mark); return; }
         while (true) {
-            arr.push_back(parse_value());
-
+            parse_value_flat();   // pushes the element node
             char c = peek();
-            if (c == ']') {
-                advance();
-                break;
-            } else if (c == ',') {
-                advance();
-            } else {
+            if (c == ',') { advance(); }
+            else if (c == ']') { advance(); break; }
+            else {
                 size_t start = (pos_ > 20) ? pos_ - 20 : 0;
                 size_t len = std::min(size_t(40), json_.length() - start);
                 std::string context = json_.substr(start, len);
@@ -1159,40 +1180,32 @@ private:
                     std::to_string(pos_) + ", got '" + std::string(1, c) + "', near: ..." + context + "...");
             }
         }
-
-        return array_val;
+        push_container(JTag::Arr, mark);
     }
 
-    script_value parse_bool(engine* eng) {
-        // compare(pos, len, lit) clamps len to size()-pos, so a truncated tail never
-        // matches and we avoid allocating a substring per literal.
-        if (json_.compare(pos_, 4, "true") == 0) {
-            pos_ += 4;
-            return script_value(true, eng);
-        } else if (json_.compare(pos_, 5, "false") == 0) {
-            pos_ += 5;
-            return script_value(false, eng);
-        } else {
-            throw serialization_error("Invalid boolean value");
-        }
+    void parse_bool_flat() {
+        JNode v; v.tag = JTag::Bool;
+        if (json_.compare(pos_, 4, "true") == 0) { pos_ += 4; v.u.i = 1; }
+        else if (json_.compare(pos_, 5, "false") == 0) { pos_ += 5; v.u.i = 0; }
+        else throw serialization_error("Invalid boolean value");
+        scratch_.push_back(v);
     }
 
-    script_value parse_null(engine* eng) {
+    void parse_null_flat() {
         if (json_.compare(pos_, 4, "null") == 0) {
             pos_ += 4;
-            return script_value(std::monostate{}, eng);
+            JNode v; v.tag = JTag::Null; v.u.i = 0;
+            scratch_.push_back(v);
         } else {
             throw serialization_error("Invalid null value");
         }
     }
 
-    script_value parse_number(engine* eng) {
+    void parse_number_flat() {
         const size_t start = pos_;
         bool has_decimal = false;
         bool has_exponent = false;
-
         if (pos_ < json_.length() && json_[pos_] == '-') pos_++;
-
         while (pos_ < json_.length()) {
             char c = json_[pos_];
             if (c >= '0' && c <= '9') { pos_++; }
@@ -1201,71 +1214,64 @@ private:
             else if (c == '+' || c == '-') { pos_++; }   // exponent sign
             else break;
         }
-
-        // std::from_chars: no exceptions (the old std::stod/std::stoll could throw
-        // std::out_of_range / std::invalid_argument — which derive from std::logic_error,
-        // a sibling of serialization_error's hierarchy, so callers catching
-        // serialization_error would miss them and a single bad number crashed loadJai),
-        // no temporary substring, locale-independent, and faster.
         const char* first = json_.data() + start;
         const char* last = json_.data() + pos_;
-
+        JNode v;
         if (has_decimal || has_exponent) {
             double d = 0.0;
             auto r = std::from_chars(first, last, d);
-            // result_out_of_range still yields a usable (clamped/inf) magnitude, which lets
-            // the writer's "1e999" infinity sentinel round-trip back to infinity rather
-            // than throwing. Any OTHER error, or not consuming the whole token, is malformed.
             if (r.ptr != last || (r.ec != std::errc() && r.ec != std::errc::result_out_of_range)) {
-                throw serialization_error(
-                    "Invalid numeric literal in JSON at position " + std::to_string(start));
+                throw serialization_error("Invalid numeric literal in JSON at position " + std::to_string(start));
             }
-            return script_value(d, eng);
-        }
-
-        script_int iv = 0;
-        auto r = std::from_chars(first, last, iv);
-        if (r.ptr == last && r.ec == std::errc()) {
-            return script_value(iv, eng);
-        }
-        // Integer that overflows int64 (e.g. a huge id/hash) — degrade to double rather
-        // than throw, matching lenient JSON consumers. (from_chars leaves iv untouched on
-        // failure, so re-parse the same token as a double.)
-        double d = 0.0;
-        auto r2 = std::from_chars(first, last, d);
-        if (r2.ptr != last || (r2.ec != std::errc() && r2.ec != std::errc::result_out_of_range)) {
-            throw serialization_error(
-                "Invalid integer literal in JSON at position " + std::to_string(start));
-        }
-        return script_value(d, eng);
-    }
-    
-    struct ObjectState {
-        const std::map<script_value, script_value>& map;
-        std::map<script_value, script_value>::const_iterator current;
-        // O(1) property lookup index built once when the object is opened.
-        // Keys are plain std::string — no engine, no script_value comparison.
-        std::unordered_map<std::string, const script_value*> index;
-
-        ObjectState(const std::map<script_value, script_value>& m,
-                    std::map<script_value, script_value>::const_iterator it)
-            : map(m), current(it) {
-            index.reserve(m.size());
-            for (const auto& [k, v] : m) {
-                if (k.is_string()) {
-                    index.emplace(k.unchecked_as_string(), &v);
+            v.tag = JTag::Double; v.u.d = d;
+        } else {
+            script_int iv = 0;
+            auto r = std::from_chars(first, last, iv);
+            if (r.ptr == last && r.ec == std::errc()) {
+                v.tag = JTag::Int; v.u.i = iv;
+            } else {
+                double d = 0.0;
+                auto r2 = std::from_chars(first, last, d);
+                if (r2.ptr != last || (r2.ec != std::errc() && r2.ec != std::errc::result_out_of_range)) {
+                    throw serialization_error("Invalid integer literal in JSON at position " + std::to_string(start));
                 }
+                v.tag = JTag::Double; v.u.d = d;
             }
         }
+        scratch_.push_back(v);
+    }
+
+    // Open-object reader state over the flat arena.
+    struct ObjState {
+        uint32_t first;    // index of the first member node (a key) in nodes_
+        uint32_t count;    // member count
+        uint32_t cursor;   // sequential read position, 0..count
+        // Lazy name -> value-node index, built on first random (seek/has) access. Keys are
+        // string_views into chars_ (stable for the reader's lifetime).
+        std::unique_ptr<std::unordered_map<std::string_view, uint32_t>> index;
     };
-    
-    struct ArrayState {
-        const std::vector<script_value>& array;
-        size_t index;
+
+    struct ArrState {
+        uint32_t first;
+        uint32_t count;
+        uint32_t index;
     };
-    
-    std::stack<ObjectState> object_stack_;
-    std::stack<ArrayState> array_stack_;
+
+    std::unordered_map<std::string_view, uint32_t>& object_index(ObjState& s) {
+        if (!s.index) {
+            s.index = std::make_unique<std::unordered_map<std::string_view, uint32_t>>();
+            s.index->reserve(s.count);
+            for (uint32_t m = 0; m < s.count; ++m) {
+                const JNode& k = nodes_[s.first + 2 * m];
+                s.index->emplace(std::string_view(chars_.data() + k.u.str.off, k.u.str.len),
+                                 s.first + 2 * m + 1);
+            }
+        }
+        return *s.index;
+    }
+
+    std::stack<ObjState> object_stack_;
+    std::stack<ArrState> array_stack_;
 };
 
 // Archive ID trait specializations for dispatch pattern

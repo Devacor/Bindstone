@@ -417,7 +417,6 @@ public:
         // shared_ptr: serialize as {"$id": N, "$val": {...}} or {"$id": N} if reference
         // Polymorphic types get {"$id": N, "$type": "ConcreteType", "$val": {...}}
         if constexpr (is_std_shared_ptr_v<T>) {
-            using elem_type = typename T::element_type;
             if (!value) {
                 self()->write_null();
             } else {
@@ -426,42 +425,29 @@ public:
                 push_context(SerializationContext::ObjectBody);
                 self()->serialize("$id", id);
                 if (is_new) {
-                    if constexpr (std::is_polymorphic_v<elem_type>) {
-                        const auto& actual_type = typeid(*value);
-                        if (actual_type != typeid(elem_type)) {
-                            auto* entry = polymorphic_registry::instance().find(std::type_index(actual_type));
-                            if (entry && entry->save_fn) {
-                                self()->serialize("$type", entry->name);
-                                self()->write_property_name("$val");
-                                push_context(SerializationContext::PropertyValue);
-                                self()->begin_object();
-                                push_context(SerializationContext::ObjectBody);
-                                any_archive_writer wrapper(*self());
-                                entry->save_fn(wrapper, value.get());
-                                pop_context();
-                                self()->end_object();
-                                pop_context();
-                            } else {
-                                self()->serialize("$val", *value);
-                            }
-                        } else {
-                            self()->serialize("$val", *value);
-                        }
-                    } else {
-                        self()->serialize("$val", *value);
-                    }
+                    write_shared_payload(value);
                 }
                 pop_context();
                 self()->end_object();
             }
         }
-        // weak_ptr: serialize as {"$ref": N} or null
+        // weak_ptr: serialize as {"$ref": N, "$val"?: {...}} or null. The "$val" is present
+        // only when the weak_ptr is the FIRST reference to the object in traversal order (a
+        // forward reference): we then inline the data under the same id so the reader can
+        // reconstruct it. Without this the old code wrote {"$ref": 0} (lookup_shared_id
+        // returned 0 for the not-yet-written object) and the link was silently dropped on
+        // load. Mirrors the shared_ptr path and the script weak_ptr ($weak_ptr_data) path;
+        // because depth-first write/read order is identical, the data always precedes any
+        // back-reference, so no forward reference survives to load time.
         else if constexpr (is_std_weak_ptr_v<T>) {
             if (auto shared = value.lock()) {
-                uint32_t id = self()->lookup_shared_id(shared.get());
+                auto [id, is_new] = self()->get_or_assign_shared_id(shared.get());
                 self()->begin_object();
                 push_context(SerializationContext::ObjectBody);
                 self()->serialize("$ref", id);
+                if (is_new) {
+                    write_shared_payload(shared);
+                }
                 pop_context();
                 self()->end_object();
             } else {
@@ -690,6 +676,35 @@ private:
         else if constexpr (std::is_enum_v<T>) write_primitive(static_cast<std::underlying_type_t<T>>(value));
         else if constexpr (std::is_integral_v<T>) self()->write_int64(static_cast<int64_t>(value));
         else if constexpr (std::is_floating_point_v<T>) self()->write_float64(static_cast<double>(value));
+    }
+
+    // Writes the polymorphic-aware payload of a shared object (the caller is already
+    // inside the wrapping object body): "$type"+"$val" for a registered polymorphic
+    // dynamic type, else "$val". Shared by the shared_ptr and the forward-referencing
+    // weak_ptr write paths so the two cannot drift apart.
+    template<typename SharedPtr>
+    void write_shared_payload(const SharedPtr& value) {
+        using elem_type = typename SharedPtr::element_type;
+        if constexpr (std::is_polymorphic_v<elem_type>) {
+            const auto& actual_type = typeid(*value);
+            if (actual_type != typeid(elem_type)) {
+                auto* entry = polymorphic_registry::instance().find(std::type_index(actual_type));
+                if (entry && entry->save_fn) {
+                    self()->serialize("$type", entry->name);
+                    self()->write_property_name("$val");
+                    push_context(SerializationContext::PropertyValue);
+                    self()->begin_object();
+                    push_context(SerializationContext::ObjectBody);
+                    any_archive_writer wrapper(*self());
+                    entry->save_fn(wrapper, value.get());
+                    pop_context();
+                    self()->end_object();
+                    pop_context();
+                    return;
+                }
+            }
+        }
+        self()->serialize("$val", *value);
     }
 
 public:
@@ -1168,72 +1183,19 @@ public:
             self()->serialize("$id", id);
             if (self()->has_deserialized_shared(id)) {
                 value = self()->template get_deserialized_shared<elem_type>(id);
-            } else if constexpr (std::is_polymorphic_v<elem_type>) {
-                // Check for polymorphic type discriminator
-                std::string poly_type;
-                if (self()->has_property("$type")) {
-                    self()->serialize("$type", poly_type);
-                }
-                if (!poly_type.empty()) {
-                    auto* entry = polymorphic_registry::instance().find(poly_type);
-                    if (entry && entry->load_fn) {
-                        if (!self()->seek_property("$val")) {
-                            throw serialization_error("Expected '$val' for polymorphic shared_ptr");
-                        }
-                        self()->begin_object();
-                        any_archive_reader wrapper(*self());
-                        // Pass id so load_fn registers the object eagerly (before its
-                        // properties load), enabling subtree back-references to resolve.
-                        auto void_ptr = entry->load_fn(wrapper, id);
-                        value = std::static_pointer_cast<elem_type>(void_ptr);
-                        self()->end_object();
-                        self()->register_deserialized_shared(id, value);
-                    } else {
-                        throw serialization_error("Unknown polymorphic type: " + poly_type);
-                    }
-                } else if (self()->has_property("$val")) {
-                    if constexpr (has_load_and_construct<elem_type>::value) {
-                        if (!self()->seek_property("$val")) {
-                            throw serialization_error("Expected '$val' for shared_ptr with load_and_construct");
-                        }
-                        std::string type_name;
-                        uint32_t version = 0;
-                        self()->begin_object(type_name, version);
-                        construct<elem_type> c(value);
-                        c.set_on_construct([&]() { self()->register_deserialized_shared(id, value); });
-                        ::jai::access::load_and_construct(*self(), c);
-                        self()->end_object();
-                    } else if constexpr (std::is_default_constructible_v<elem_type>) {
-                        value = std::make_shared<elem_type>();
-                        self()->register_deserialized_shared(id, value);
-                        self()->serialize("$val", *value);
-                    } else {
-                        throw serialization_error("Cannot deserialize shared_ptr<" + std::string(typeid(elem_type).name()) + ">: type is not default constructible and has no load_and_construct");
-                    }
-                }
-            } else if (self()->has_property("$val")) {
-                if constexpr (has_load_and_construct<elem_type>::value) {
-                    if (!self()->seek_property("$val")) {
-                        throw serialization_error("Expected '$val' for shared_ptr with load_and_construct");
-                    }
-                    std::string type_name;
-                    uint32_t version = 0;
-                    self()->begin_object(type_name, version);
-                    construct<elem_type> c(value);
-                    c.set_on_construct([&]() { self()->register_deserialized_shared(id, value); });
-                    ::jai::access::load_and_construct(*self(), c);
-                    self()->end_object();
-                } else if constexpr (std::is_default_constructible_v<elem_type>) {
-                    value = std::make_shared<elem_type>();
-                    self()->register_deserialized_shared(id, value);
-                    self()->serialize("$val", *value);
-                } else {
-                    throw serialization_error("Cannot deserialize shared_ptr<" + std::string(typeid(elem_type).name()) + ">: type is not default constructible and has no load_and_construct");
-                }
+            } else {
+                // First (data-bearing) encounter of this id, or a $id-only record with no
+                // payload (-> null). read_shared_payload handles polymorphic / load_and_construct
+                // / default construction and registers the object eagerly under id.
+                value = self()->template read_shared_payload<elem_type>(id);
             }
             self()->end_object();
         }
-        // std::weak_ptr - format: {"$ref": N} or null
+        // std::weak_ptr - format: {"$ref": N, "$val"?: {...}} or null. "$val" appears when
+        // the weak_ptr is the first (forward) reference to the object; we then reconstruct
+        // and register it just like a shared_ptr so later shared/weak refs to this id
+        // resolve. Previously a forward weak_ptr loaded as expired (data was never written),
+        // silently dropping the link.
         else if constexpr (is_std_weak_ptr_v<T>) {
             using elem_type = weak_ptr_element_t<T>;
             if (self()->peek_null()) {
@@ -1244,12 +1206,14 @@ public:
             self()->begin_object();
             uint32_t id{};
             self()->serialize("$ref", id);
-            self()->end_object();
-            if (auto shared = self()->template get_deserialized_shared<elem_type>(id)) {
-                value = shared;
+            if (self()->has_deserialized_shared(id)) {
+                value = self()->template get_deserialized_shared<elem_type>(id);
+            } else if (self()->has_property("$val") || self()->has_property("$type")) {
+                value = self()->template read_shared_payload<elem_type>(id);
             } else {
                 value.reset();
             }
+            self()->end_object();
         }
         // std::unique_ptr - format: {"$val": {...}} or null
         else if constexpr (is_std_unique_ptr_v<T>) {
@@ -1389,6 +1353,63 @@ private:
         else if constexpr (std::is_enum_v<T>) { std::underlying_type_t<T> underlying; read_primitive(underlying); value = static_cast<T>(underlying); }
         else if constexpr (std::is_integral_v<T>) value = static_cast<T>(self()->read_int64());
         else if constexpr (std::is_floating_point_v<T>) value = static_cast<T>(self()->read_float64());
+    }
+
+    // Reconstructs the inlined payload ($type/$val) of a shared object at the current
+    // object position, registers it under `id` (eagerly, so cyclic back-references inside
+    // its own subtree resolve), and returns it. Shared by the shared_ptr read path and the
+    // forward-referenced weak_ptr read path so they cannot drift apart. Returns null when no
+    // payload is present (a pure back-reference whose target is registered elsewhere).
+    template<typename elem_type>
+    std::shared_ptr<elem_type> read_shared_payload(uint32_t id) {
+        std::shared_ptr<elem_type> result;
+        if constexpr (std::is_polymorphic_v<elem_type>) {
+            std::string poly_type;
+            if (self()->has_property("$type")) {
+                self()->serialize("$type", poly_type);
+            }
+            if (!poly_type.empty()) {
+                auto* entry = polymorphic_registry::instance().find(poly_type);
+                if (entry && entry->load_fn) {
+                    if (!self()->seek_property("$val")) {
+                        throw serialization_error("Expected '$val' for polymorphic shared_ptr");
+                    }
+                    self()->begin_object();
+                    any_archive_reader wrapper(*self());
+                    // Pass id so load_fn registers the object eagerly (before its
+                    // properties load), enabling subtree back-references to resolve.
+                    auto void_ptr = entry->load_fn(wrapper, id);
+                    result = std::static_pointer_cast<elem_type>(void_ptr);
+                    self()->end_object();
+                    self()->register_deserialized_shared(id, result);
+                    return result;
+                } else {
+                    throw serialization_error("Unknown polymorphic type: " + poly_type);
+                }
+            }
+            // No $type discriminator: fall through to concrete reconstruction below.
+        }
+        if (self()->has_property("$val")) {
+            if constexpr (has_load_and_construct<elem_type>::value) {
+                if (!self()->seek_property("$val")) {
+                    throw serialization_error("Expected '$val' for shared_ptr with load_and_construct");
+                }
+                std::string type_name;
+                uint32_t version = 0;
+                self()->begin_object(type_name, version);
+                construct<elem_type> c(result);
+                c.set_on_construct([&]() { self()->register_deserialized_shared(id, result); });
+                ::jai::access::load_and_construct(*self(), c);
+                self()->end_object();
+            } else if constexpr (std::is_default_constructible_v<elem_type>) {
+                result = std::make_shared<elem_type>();
+                self()->register_deserialized_shared(id, result);
+                self()->serialize("$val", *result);
+            } else {
+                throw serialization_error("Cannot deserialize shared_ptr<" + std::string(typeid(elem_type).name()) + ">: type is not default constructible and has no load_and_construct");
+            }
+        }
+        return result;
     }
 
 public:

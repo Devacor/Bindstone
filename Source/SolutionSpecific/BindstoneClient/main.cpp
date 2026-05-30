@@ -20,6 +20,13 @@
 
 #include "glm/mat4x4.hpp"
 
+// --- Manual JSON parse benchmark (run with -bench): real engine DOM vs flat parser ---
+#include <jaiscript/serialization/json_archive.hpp>
+#include "../../JaiScript/bench/fast_json.hpp"
+#include <chrono>
+#include <algorithm>
+#include <vector>
+
 struct Base {
 	virtual ~Base() {}
 
@@ -166,6 +173,116 @@ MV::Matrix<sizeAX, sizeBY> M_2(const MV::Matrix<sizeAX, sizeAY>& A, const MV::Ma
 }
 
 
+// Manual benchmark: parse the real scene JSON into the production script_value DOM
+// (std::map<script_value,script_value>) vs the flat arena parser, same input, same run.
+// This quantifies, in the real engine, how much of a JaiScript scene load is the DOM build
+// and how much a flat DOM would save. Run: BindstoneClient.exe -bench
+static void RunJsonParseBenchmark(jai::engine* eng) {
+	const char* candidates[] = {
+		"Scenes/map.scene2",
+		"D:/git/Bindstone/Scenes/map.scene2",
+	};
+	std::string text;
+	std::string used;
+	for (const char* path : candidates) {
+		std::ifstream f(path, std::ios::binary);
+		if (f) {
+			text.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+			used = path;
+			break;
+		}
+	}
+	if (text.empty()) {
+		std::cout << "\n[bench] could not open map.scene2 (cwd-relative or absolute)\n";
+		return;
+	}
+
+	const double mib = static_cast<double>(text.size()) / (1024.0 * 1024.0);
+	std::cout << "\n=== JSON DOM parse: real json_archive_reader vs fast_json (flat) ===\n";
+	std::cout << "file: " << used << "  size: " << text.size() << " bytes (" << mib << " MiB)\n";
+
+	const int iters = 10;
+	auto median = [](std::vector<double> v) { std::sort(v.begin(), v.end()); return v[v.size() / 2]; };
+	volatile uint64_t sink = 0;
+
+	std::vector<double> realT;
+	for (int i = 0; i < iters; ++i) {
+		auto a = std::chrono::steady_clock::now();
+		jai::serialization::json_archive_reader reader(text, eng);   // parses into the std::map DOM in its ctor
+		auto b = std::chrono::steady_clock::now();
+		sink += reader.peek_null() ? 1u : 2u;                        // touch the parsed reader
+		realT.push_back(std::chrono::duration<double, std::milli>(b - a).count());
+	}
+
+	std::vector<double> fastT;
+	for (int i = 0; i < iters; ++i) {
+		fastjson::Document doc;
+		fastjson::Parser p;
+		auto a = std::chrono::steady_clock::now();
+		p.parse(text.data(), text.size(), doc);
+		auto b = std::chrono::steady_clock::now();
+		sink += doc.nodes.size();
+		fastT.push_back(std::chrono::duration<double, std::milli>(b - a).count());
+	}
+
+	const double rm = median(realT);
+	const double fm = median(fastT);
+	std::cout << "  json_archive_reader (std::map DOM): " << rm << " ms  (" << (mib / (rm / 1000.0)) << " MiB/s)\n";
+	std::cout << "  fast_json           (flat arena):   " << fm << " ms  (" << (mib / (fm / 1000.0)) << " MiB/s)\n";
+	std::cout << "  speedup (real / fast): " << (rm / fm) << "x   [sink=" << sink << "]\n\n";
+}
+
+// Headless full-scene load benchmark. Mirrors the proven headless setup the game server
+// uses (gameServer.cpp: renderer.makeHeadless().initialize(...); Game ctor: engine ->
+// bind_registrar(managers.services) -> services.connect<engine>), then loads the scene
+// exactly like the editor's Load button. Run: BindstoneClient.exe -loadbench
+static void RunSceneLoadBenchmark(bool a_headless) {
+	Managers managers({ "", "" });
+	auto jaiEngine = jai::engine::make();
+	jai::stdlib::register_all(*jaiEngine);
+	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	if (a_headless) {
+		managers.renderer.makeHeadless();
+	}
+	if (!managers.renderer.initialize(MV::Size<int>(1280, 720))) {
+		std::cout << "[loadbench] renderer init failed\n";
+		return;
+	}
+
+	std::cout << "\n=== Full-scene load benchmark (" << (a_headless ? "HEADLESS: serialization+construction only, GL skipped"
+		: "REAL GL: includes texture load/upload") << ") ===\n";
+
+	auto timeLoad = [&](const char* label, auto loadFn) {
+		MV::Scene::Node::recalculateLocalBoundsCalls = 0;
+		MV::Scene::Node::recalculateChildBoundsCalls = 0;
+		MV::Scene::Node::recalculateMatrixCalls = 0;
+		MV::textureLoadProfile().reset();
+		try {
+			auto t0 = std::chrono::steady_clock::now();
+			auto root = loadFn();
+			auto t1 = std::chrono::steady_clock::now();
+			double ms = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0;
+			const auto& tp = MV::textureLoadProfile();
+			std::cout << label << " total: " << ms << " ms  (root id=" << (root ? root->id() : std::string("<null>")) << ")"
+				<< "  bounds[local=" << MV::Scene::Node::recalculateLocalBoundsCalls
+				<< " child=" << MV::Scene::Node::recalculateChildBoundsCalls
+				<< " matrix=" << MV::Scene::Node::recalculateMatrixCalls << "]\n";
+			std::cout << "    textures: loadFile=" << tp.loadFileCalls.load() << " uploads=" << tp.uploadCalls.load()
+				<< " uploadMiB=" << (tp.uploadBytes.load() / (1024.0 * 1024.0))
+				<< "  decode(cpu-sum)=" << (tp.decodeMicros.load() / 1000.0) << " ms  upload=" << (tp.uploadMicros.load() / 1000.0) << " ms\n";
+		} catch (std::exception& e) {
+			std::cout << label << " EXCEPTION: " << e.what() << "\n";
+		}
+	};
+
+	// JaiScript (map.scene2) FIRST so it pays the cold GL texture-upload cost; Cereal second
+	// reuses the shared texture cache. Compare against the previous run (Cereal first) to
+	// confirm the GL delta is texture caching, not serialization. (Headless: order is moot.)
+	timeLoad("[JaiScript map.scene2]", [&] { return MV::Scene::Node::load("Scenes/map.scene2", managers.services, true); });
+	timeLoad("[Cereal  map.scene ]", [&] { return MV::Scene::Node::loadCereal("Assets/Scenes/map.scene", managers.services, true); });
+}
+
 int main(int argc, char *argv[]) {
 	MV::info("Hello world!");
 	MV::debug(":D :D :D");
@@ -212,6 +329,21 @@ int main(int argc, char *argv[]) {
 	jai::stdlib::register_all(*testEngine);
 	jai::bind_registrar<MV::Services>(*testEngine, MV::Services::instance());
 	MV::Services::instance().connect<jai::engine>(testEngine.get());
+
+	for (int i = 0; i < argc; ++i) {
+		if (strcmp(argv[i], "-bench") == 0) {
+			RunJsonParseBenchmark(testEngine.get());
+			return 0;
+		}
+		if (strcmp(argv[i], "-loadbench") == 0) {
+			RunSceneLoadBenchmark(true);
+			return 0;
+		}
+		if (strcmp(argv[i], "-loadbenchgl") == 0) {
+			RunSceneLoadBenchmark(false);
+			return 0;
+		}
+	}
 
 	auto saved = MV::toJson(derived, MV::Services::instance());
 	auto loaded = MV::fromJson<std::shared_ptr<Derived1>>(saved, MV::Services::instance());

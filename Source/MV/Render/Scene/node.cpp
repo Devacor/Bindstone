@@ -2,6 +2,8 @@
 #include "stddef.h"
 #include <numeric>
 #include <regex>
+#include <chrono>
+#include <iostream>
 
 #include "MV/Utility/scopeGuard.hpp"
 #include "cereal/archives/adapters.hpp"
@@ -12,6 +14,8 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include "MV/Utility/services.hpp"
+#include "MV/Utility/threadPool.hpp"
+#include "MV/Render/sharedTextures.h"
 
 // JaiScript serialization support
 #include "MV/Serialization/serialize.h"
@@ -216,12 +220,41 @@ namespace MV {
 
 			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
 			auto* engine = a_services.get<jai::engine>();
+
+			// Phase split (printed only for large scenes). parse = JSON text -> script_value
+			// DOM; walk = DOM -> node/component tree, running setters + (via post_load depth
+			// tracking) the load_complete/postLoadStep fix-up on the root. Pair this with the
+			// recalculate* bounds counters to see whether bounds recompute dominates.
+			const auto tParse0 = std::chrono::steady_clock::now();
 			jai::serialization::json_archive_reader ar(contents, engine);
+			const auto tParse1 = std::chrono::steady_clock::now();
+
+			// Decode this scene's file textures in parallel: queue them during the walk, then
+			// decode-all on the thread pool + upload on this (GL) thread after. Skipped in
+			// headless (load() is a no-op there — decoding would be wasted work).
+			auto* sharedTextures = a_services.get<MV::SharedTextures>(false);
+			auto* threadPool = a_services.get<MV::ThreadPool>(false);
+			const bool deferTextures = sharedTextures && threadPool && !MV::RUNNING_IN_HEADLESS;
+			if (deferTextures) { sharedTextures->beginDeferredLoad(); }
+
 			ar.set_user_context<MV::Services>(&a_services);
 			std::shared_ptr<Node> result;
 			ar(result);  // load_complete() fires on root via post_load depth tracking
+
+			if (deferTextures) { sharedTextures->flushDeferredLoad(*threadPool); }
+			const auto tWalk1 = std::chrono::steady_clock::now();
+
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
+			}
+
+			if (contents.size() > 100000) {
+				auto ms = [](auto a, auto b) {
+					return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count() / 1000.0;
+				};
+				std::cout << "\n[Node::load " << a_filename << " " << contents.size() << " bytes]"
+					<< "  parse: " << ms(tParse0, tParse1) << " ms"
+					<< "  walk+postLoad: " << ms(tParse1, tWalk1) << " ms\n";
 			}
 			return result;
 		}
@@ -387,10 +420,18 @@ namespace MV {
 			require<ResourceException>(!contents.empty(), "File not found for Node::loadJai: ", a_filename);
 
 			auto* engine = a_services.get<jai::engine>();
+
+			// Phase timing (printed only for large scenes so prefab loads stay quiet) so we
+			// can see where a JaiScript scene load spends its time: parse (JSON text -> DOM),
+			// walk (DOM -> node/component tree, runs setters), postLoad (tree fix-up/bounds).
+			const auto tParse0 = std::chrono::steady_clock::now();
 			jai::serialization::json_archive_reader ar(contents, engine);
+			const auto tParse1 = std::chrono::steady_clock::now();
+
 			ar.set_user_context<MV::Services>(&a_services);
 			std::shared_ptr<Node> result;
 			ar(result);
+			const auto tWalk1 = std::chrono::steady_clock::now();
 
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
@@ -398,6 +439,17 @@ namespace MV {
 
 			if (a_doPostLoadStep) {
 				result->postLoadStep();
+			}
+			const auto tPost1 = std::chrono::steady_clock::now();
+
+			if (contents.size() > 100000) {
+				auto ms = [](auto a, auto b) {
+					return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count() / 1000.0;
+				};
+				std::cout << "\n[loadJai " << a_filename << " " << contents.size() << " bytes]"
+					<< "  parse: " << ms(tParse0, tParse1) << " ms"
+					<< "  walk: " << ms(tParse1, tWalk1) << " ms"
+					<< "  postLoad: " << ms(tWalk1, tPost1) << " ms\n";
 			}
 			return result;
 		}

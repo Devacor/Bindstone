@@ -570,8 +570,13 @@ public:
         }
     }
 
-    std::vector<uint8_t> read_binary(size_t expected_size) {
+    std::vector<uint8_t> read_binary(size_t /*expected_size*/) {
         uint32_t size = read_little_endian<uint32_t>();
+        // Validate against remaining data BEFORE allocating: a hostile/corrupt size
+        // (e.g. 0xFFFFFFFF) would otherwise allocate ~4 GB before read_raw fails.
+        if (size > remaining_bytes()) {
+            throw serialization_error("Binary archive blob size exceeds remaining data");
+        }
         std::vector<uint8_t> result(size);
         if (size > 0) {
             read_raw(result.data(), size);
@@ -601,6 +606,12 @@ public:
 
         // Read property count
         uint32_t prop_count = read_little_endian<uint32_t>();
+        // Each property contributes at minimum a 4-byte name-length prefix and a 4-byte
+        // size entry, so a valid prop_count can't exceed remaining/8. Reject a corrupt or
+        // hostile count before the reserve() calls below (reserve(~4 billion) would OOM).
+        if (prop_count > remaining_bytes() / 8) {
+            throw serialization_error("Binary archive object property count exceeds remaining data");
+        }
 
         // Pre-read all properties for out-of-order access
         object_stack_.emplace_back();
@@ -971,6 +982,12 @@ private:
                 std::string type_name = read_string_raw();
                 uint32_t version = read_little_endian<uint32_t>();
                 uint32_t property_count = read_little_endian<uint32_t>();
+                // Each property is at minimum a 4-byte name length + a 1-byte value tag,
+                // so property_count can't exceed remaining/5. Guard the reserve()s below
+                // against a corrupt/hostile count (reserve(~4 billion) would OOM).
+                if (property_count > remaining_bytes() / 5) {
+                    throw serialization_error("Binary archive object property count exceeds remaining data");
+                }
 
                 std::vector<std::string> property_names;
                 property_names.reserve(property_count);

@@ -15,6 +15,8 @@
 #include "MV/Serialization/serialize.h"
 
 namespace MV {
+	class ThreadPool;
+
 	class SharedTextures {
 		friend FileTextureDefinition;
 	public:
@@ -65,6 +67,21 @@ namespace MV {
 		static std::string fileId(const std::string &a_filename, bool a_repeat, bool a_pixel = false) {
 			return a_filename + (a_repeat ? "1" : "0") + (a_pixel ? "1" : "");
 		}
+
+		// ---- Parallel deferred texture loading -------------------------------------------
+		// While a deferred-load session is active, FileTextureDefinition loads triggered during
+		// scene deserialization are queued instead of decoded inline (see postLoadInitialize).
+		// flushDeferredLoad then decodes every unique queued image in parallel on the thread
+		// pool and uploads them on the calling (GL) thread, so each queued definition's load()
+		// becomes a globalLookup cache hit. Net effect: the dominant per-image decode cost runs
+		// across all cores instead of serially, with no change to the loaded scene.
+		void beginDeferredLoad() { deferActive = true; deferredDefinitions.clear(); }
+		bool deferralActive() const { return deferActive; }
+		void queueDeferredLoad(const std::shared_ptr<FileTextureDefinition> &a_definition) {
+			if (a_definition) { deferredDefinitions.push_back(a_definition); }
+		}
+		void flushDeferredLoad(ThreadPool &a_pool);
+
 	private:
 		std::vector<std::string> getImagesInFolder(const std::string& a_packPath) const;
 		std::vector<SharedTextures::PackItem> getSortedPackItems(std::vector<std::string> imagePaths) const;
@@ -73,6 +90,9 @@ namespace MV {
 		std::map<std::string, std::shared_ptr<FileTextureDefinition>> fileDefinitions;
 		std::map<std::string, std::shared_ptr<DynamicTextureDefinition>> dynamicDefinitions;
 		std::map<std::string, std::shared_ptr<SurfaceTextureDefinition>> surfaceDefinitions;
+
+		bool deferActive = false;
+		std::vector<std::shared_ptr<FileTextureDefinition>> deferredDefinitions;
 	};
 }
 

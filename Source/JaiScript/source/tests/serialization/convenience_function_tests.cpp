@@ -11,6 +11,9 @@
 #include <jaiscript/core/dynamic_binder_serialization.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
+#include <limits>
+#include <cmath>
+
 using namespace jai;
 using namespace jai::foundry;
 
@@ -949,6 +952,167 @@ public:
             check(loaded.data.get() != nullptr, "data not null");
             check_eq(loaded.data.get()->value, 555, "data.value preserved");
             check_eq(loaded.extra.get(), 10, "extra preserved");
+        });
+
+        // ================================================================
+        // JSON READER ROBUSTNESS (2026-05 audit regressions)
+        // ================================================================
+        // These guard the parse_number/parse_string/parse_json hardening:
+        // malformed input must raise jai::serialization_error (NOT a raw
+        // std::out_of_range / std::invalid_argument, which derive from a sibling
+        // hierarchy and would escape callers catching serialization_error), and
+        // must never invoke UB (std::isdigit on a sign-extended char) or crash.
+
+        // Helper: returns 1 if the parse threw serialization_error, 2 if it threw some
+        // OTHER exception type (the bug we are guarding against), 0 if it did not throw.
+        auto parseOutcome = [](engine* e, const std::string& json) -> int {
+            try {
+                serialization::json_archive_reader reader(json, e);
+                return 0;
+            } catch (const serialization_error&) {
+                return 1;
+            } catch (...) {
+                return 2;
+            }
+        };
+
+        test("json_reader_rejects_trailing_garbage", [this, parseOutcome]() {
+            auto eng = engine::make();
+            check_eq(parseOutcome(eng.get(), "42 garbage"), 1, "trailing garbage -> serialization_error");
+            check_eq(parseOutcome(eng.get(), "{} []"), 1, "two top-level values -> serialization_error");
+            check_eq(parseOutcome(eng.get(), "  123  "), 0, "leading/trailing whitespace is fine");
+        });
+
+        test("json_reader_bare_minus_is_serialization_error", [this, parseOutcome]() {
+            auto eng = engine::make();
+            // Previously std::stoll("-") threw std::invalid_argument (outcome 2).
+            check_eq(parseOutcome(eng.get(), "-"), 1, "bare '-' -> serialization_error");
+            check_eq(parseOutcome(eng.get(), "1.2.3"), 1, "malformed number -> serialization_error");
+        });
+
+        test("json_reader_huge_int_degrades_to_double", [this]() {
+            auto eng = engine::make();
+            // Previously std::stoll threw std::out_of_range and escaped the loader.
+            serialization::json_archive_reader reader("99999999999999999999", eng.get());
+            double v = reader.read_value().as<double>();
+            check(v > 9.9e19 && v < 1.1e20, "out-of-range integer parses as double");
+        });
+
+        test("json_reader_non_ascii_value_byte_no_ub", [this, parseOutcome]() {
+            auto eng = engine::make();
+            // A non-ASCII byte where a value is expected previously reached
+            // std::isdigit(signed char) -> UB / debug-CRT abort. Must be a clean throw.
+            std::string bad = "\xC3\xA9";   // 'é' bytes, not a valid value start
+            check_eq(parseOutcome(eng.get(), bad), 1, "non-ASCII value byte -> serialization_error, no UB");
+        });
+
+        test("json_reader_invalid_unicode_escape_is_serialization_error", [this, parseOutcome]() {
+            auto eng = engine::make();
+            // Previously std::stoul on non-hex threw std::invalid_argument (outcome 2).
+            check_eq(parseOutcome(eng.get(), "\"\\uZZZZ\""), 1, "non-hex \\u -> serialization_error");
+            check_eq(parseOutcome(eng.get(), "\"\\uD8\""), 1, "truncated \\u -> serialization_error");
+        });
+
+        test("json_reader_lone_surrogate_becomes_replacement_char", [this]() {
+            auto eng = engine::make();
+            // Lone high surrogate must become U+FFFD (valid UTF-8), not WTF-8.
+            serialization::json_archive_reader reader("\"\\uD800\"", eng.get());
+            std::string s = reader.read_value().as<std::string>();
+            check_eq(s, std::string("\xEF\xBF\xBD"), "lone high surrogate -> U+FFFD");
+        });
+
+        test("json_reader_valid_surrogate_pair", [this]() {
+            auto eng = engine::make();
+            // U+1F600 (grinning face) as a UTF-16 surrogate pair -> 4-byte UTF-8.
+            serialization::json_archive_reader reader("\"\\uD83D\\uDE00\"", eng.get());
+            std::string s = reader.read_value().as<std::string>();
+            check_eq(s, std::string("\xF0\x9F\x98\x80"), "surrogate pair -> U+1F600");
+        });
+
+        test("json_string_escapes_and_utf8_roundtrip", [this]() {
+            auto eng = engine::make();
+            // Exercises the bulk-copy parse_string rewrite + escape writer: quotes,
+            // backslash, control chars, and a multi-byte UTF-8 character.
+            std::string original = "a\"b\\c\nd\te\xC3\xA9z";
+            std::string json = to_json(*eng, original);
+            std::string back = from_json<std::string>(*eng, json);
+            check_eq(back, original, "string with escapes + UTF-8 round-trips");
+        });
+
+        test("json_infinity_roundtrips", [this]() {
+            auto eng = engine::make();
+            // Writer emits the 1e999 sentinel for infinity; the reader's from_chars now
+            // treats result_out_of_range as the (inf) value rather than throwing.
+            double inf = std::numeric_limits<double>::infinity();
+            std::string json = to_json(*eng, inf);
+            double back = from_json<double>(*eng, json);
+            check(std::isinf(back) && back > 0, "+infinity round-trips via 1e999 sentinel");
+        });
+
+        // ================================================================
+        // weak_ptr FORWARD REFERENCE (2026-05 audit, high-severity)
+        // ================================================================
+        // A std::weak_ptr serialized BEFORE the shared_ptr it points to used to write
+        // {"$ref": 0} (lookup_shared_id returned 0 for the not-yet-written object) and the
+        // link was silently dropped on load. Now the first (forward) reference inlines the
+        // object's data under a stable id, so it round-trips. Covers JSON and binary.
+
+        test("weak_ptr_forward_reference_json", [this]() {
+            auto eng = engine::make();
+            auto shared = std::make_shared<sp_simple_data>();
+            shared->value = 77;
+            std::weak_ptr<sp_simple_data> weak = shared;
+
+            serialization::json_archive_writer writer(2, eng.get());
+            writer.begin_object();
+            writer.serialize("weak", weak);       // forward: weak BEFORE shared
+            writer.serialize("shared", shared);
+            writer.end_object();
+            std::string json = writer.str();
+
+            std::weak_ptr<sp_simple_data> loaded_weak;
+            std::shared_ptr<sp_simple_data> loaded_shared;
+            serialization::json_archive_reader reader(json, eng.get());
+            reader.begin_object();
+            reader.serialize("weak", loaded_weak);
+            reader.serialize("shared", loaded_shared);
+            reader.end_object();
+
+            auto locked = loaded_weak.lock();
+            check(locked != nullptr, "forward-referenced weak_ptr resolves (was dropped before)");
+            check(loaded_shared != nullptr, "shared loaded");
+            check(locked.get() == loaded_shared.get(), "forward weak and shared are the same object");
+            check_eq(loaded_shared->value, 77, "value preserved through forward ref");
+        });
+
+        test("weak_ptr_forward_reference_binary", [this]() {
+            auto eng = engine::make();
+            auto shared = std::make_shared<sp_simple_data>();
+            shared->value = 88;
+            std::weak_ptr<sp_simple_data> weak = shared;
+
+            std::vector<uint8_t> buffer;
+            serialization::binary_archive_writer writer(buffer, eng.get());
+            writer.begin_object();
+            writer.serialize("weak", weak);       // forward: weak BEFORE shared
+            writer.serialize("shared", shared);
+            writer.end_object();
+
+            std::weak_ptr<sp_simple_data> loaded_weak;
+            std::shared_ptr<sp_simple_data> loaded_shared;
+            serialization::binary_archive_reader reader(buffer, eng.get());
+            std::string type_name;
+            uint32_t version;
+            reader.begin_object(type_name, version);
+            reader.serialize("weak", loaded_weak);
+            reader.serialize("shared", loaded_shared);
+            reader.end_object();
+
+            auto locked = loaded_weak.lock();
+            check(locked != nullptr, "forward-referenced weak_ptr resolves (binary)");
+            check(loaded_shared != nullptr, "shared loaded (binary)");
+            check(locked.get() == loaded_shared.get(), "forward weak and shared same object (binary)");
+            check_eq(loaded_shared->value, 88, "value preserved through forward ref (binary)");
         });
     }
 };

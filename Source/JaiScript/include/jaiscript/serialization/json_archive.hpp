@@ -51,15 +51,20 @@ public:
     }
 
     void write_binary(const void* data, size_t size) {
-        // Encode binary as base64 or hex string
-        std::ostringstream oss;
-        oss << '"';
+        // Encode binary as a hex string. Build directly instead of streaming each byte
+        // through std::ostringstream with std::hex/setw/setfill (re-imbues stream state
+        // per byte).
+        static const char hexd[] = "0123456789abcdef";
+        std::string s;
+        s.reserve(size * 2 + 2);
+        s += '"';
         const uint8_t* bytes = static_cast<const uint8_t*>(data);
         for (size_t i = 0; i < size; ++i) {
-            oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(bytes[i]);
+            s += hexd[(bytes[i] >> 4) & 0xF];
+            s += hexd[bytes[i] & 0xF];
         }
-        oss << '"';
-        write_json_value(oss.str());
+        s += '"';
+        write_json_value(s);
     }
 
     // Object/array structure - non-virtual
@@ -361,31 +366,44 @@ private:
     
     // Local helper functions to avoid circular includes
     std::string escape_json_string_local(const std::string& str) {
-        std::ostringstream oss;
+        // Build into a std::string instead of constructing a fresh std::ostringstream
+        // (heavy: stringbuf + locale imbue) for every key and every string value in the
+        // document. Also avoids the std::hex/setw/setfill stream-state churn for control
+        // characters. Fast path: a run with no escapes is bulk-appended.
+        std::string out;
+        out.reserve(str.size() + 2);
+        static const char hexd[] = "0123456789abcdef";
+        size_t runStart = 0;
         for (size_t i = 0; i < str.size(); ++i) {
             unsigned char c = static_cast<unsigned char>(str[i]);
+            const char* esc = nullptr;
+            char escbuf[7];
             switch (c) {
-                case '"':  oss << "\\\""; break;
-                case '\\': oss << "\\\\"; break;
-                case '\b': oss << "\\b"; break;
-                case '\f': oss << "\\f"; break;
-                case '\n': oss << "\\n"; break;
-                case '\r': oss << "\\r"; break;
-                case '\t': oss << "\\t"; break;
+                case '"':  esc = "\\\""; break;
+                case '\\': esc = "\\\\"; break;
+                case '\b': esc = "\\b";  break;
+                case '\f': esc = "\\f";  break;
+                case '\n': esc = "\\n";  break;
+                case '\r': esc = "\\r";  break;
+                case '\t': esc = "\\t";  break;
                 default:
-                    if (c >= 0x80) {
-                        // UTF-8 multi-byte: pass through unescaped (valid JSON per RFC 8259)
-                        oss << str[i];
-                    } else if (c >= 0x20) {
-                        oss << str[i];
-                    } else {
-                        // Control characters below 0x20 (other than those handled above)
-                        oss << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-                            << static_cast<int>(c);
+                    if (c < 0x20) {
+                        // Control characters below 0x20 (UTF-8 >= 0x80 passes through
+                        // unescaped, which is valid JSON per RFC 8259).
+                        escbuf[0] = '\\'; escbuf[1] = 'u'; escbuf[2] = '0'; escbuf[3] = '0';
+                        escbuf[4] = hexd[(c >> 4) & 0xF]; escbuf[5] = hexd[c & 0xF]; escbuf[6] = '\0';
+                        esc = escbuf;
                     }
+                    break;
+            }
+            if (esc) {
+                if (i > runStart) out.append(str, runStart, i - runStart);
+                out += esc;
+                runStart = i + 1;
             }
         }
-        return oss.str();
+        if (runStart < str.size()) out.append(str, runStart, str.size() - runStart);
+        return out;
     }
     
     std::string to_json_impl_fallback(const script_value& val, int indent, int current_depth) {
@@ -585,13 +603,25 @@ public:
         }
     }
 
-    std::vector<uint8_t> read_binary(size_t size) {
+    std::vector<uint8_t> read_binary(size_t /*size*/) {
         std::string hex_str = read_value().as<script_string>();
+        auto nibble = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
+        };
         std::vector<uint8_t> result;
-        for (size_t i = 0; i < hex_str.length(); i += 2) {
-            std::string byte_str = hex_str.substr(i, 2);
-            uint8_t byte = static_cast<uint8_t>(std::stoi(byte_str, nullptr, 16));
-            result.push_back(byte);
+        result.reserve(hex_str.length() / 2);
+        // Decode complete byte-pairs only. std::stoi on a 2-char substr threw on bad hex
+        // and silently mis-parsed an odd trailing nibble; this validates and skips it.
+        for (size_t i = 0; i + 1 < hex_str.length(); i += 2) {
+            int hi = nibble(hex_str[i]);
+            int lo = nibble(hex_str[i + 1]);
+            if (hi < 0 || lo < 0) {
+                throw serialization_error("Invalid hex digit in binary JSON field");
+            }
+            result.push_back(static_cast<uint8_t>((hi << 4) | lo));
         }
         return result;
     }
@@ -870,7 +900,16 @@ private:
     // JSON parsing methods
     script_value parse_json() {
         pos_ = 0;
-        return parse_value();
+        script_value result = parse_value();
+        skip_whitespace();
+        if (pos_ != json_.length()) {
+            // The root value parsed but bytes remain — malformed input (two top-level
+            // values, truncated-then-garbage, etc.). Surface it instead of silently
+            // accepting a prefix.
+            throw serialization_error(
+                "Unexpected trailing characters after JSON value at position " + std::to_string(pos_));
+        }
+        return result;
     }
     
     script_value parse_value() {
@@ -907,7 +946,7 @@ private:
             return parse_bool(eng);
         } else if (c == 'n') {
             return parse_null(eng);
-        } else if (c == '-' || std::isdigit(c)) {
+        } else if (c == '-' || (c >= '0' && c <= '9')) {
             return parse_number(eng);
         } else {
             // Build context for error message
@@ -921,8 +960,13 @@ private:
     }
     
     void skip_whitespace() {
-        while (pos_ < json_.length() && std::isspace(json_[pos_])) {
-            pos_++;
+        // JSON whitespace is exactly these four bytes (RFC 8259). Comparing directly
+        // avoids std::isspace, which is a locale-aware function call AND is undefined
+        // behavior when handed a raw (sign-extended) char >= 0x80.
+        while (pos_ < json_.length()) {
+            char c = json_[pos_];
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') pos_++;
+            else break;
         }
     }
     
@@ -942,74 +986,107 @@ private:
         }
     }
     
+    // Appends the UTF-8 encoding of a Unicode code point.
+    static void append_utf8(std::string& out, uint32_t cp) {
+        if (cp < 0x80) {
+            out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    }
+
+    // Reads the 4 hex digits at json_[pos_+1 .. pos_+4] and advances pos_ by 4 (to the
+    // last digit; the caller's trailing pos_++ steps past it). Returns false on missing or
+    // non-hex input — replaces std::stoul, which threw std::invalid_argument (outside the
+    // serialization_error hierarchy) on malformed \u escapes.
+    bool read_hex4(uint32_t& out) {
+        if (pos_ + 4 >= json_.length()) return false;
+        uint32_t v = 0;
+        for (size_t k = 1; k <= 4; ++k) {
+            char c = json_[pos_ + k];
+            v <<= 4;
+            if (c >= '0' && c <= '9') v |= static_cast<uint32_t>(c - '0');
+            else if (c >= 'a' && c <= 'f') v |= static_cast<uint32_t>(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F') v |= static_cast<uint32_t>(c - 'A' + 10);
+            else return false;
+        }
+        pos_ += 4;
+        out = v;
+        return true;
+    }
+
     std::string parse_string() {
         expect('"');
         std::string result;
-        
-        while (pos_ < json_.length() && json_[pos_] != '"') {
-            if (json_[pos_] == '\\') {
+        const size_t n = json_.length();
+
+        while (pos_ < n) {
+            // Bulk-copy the run of ordinary characters up to the next quote/backslash
+            // rather than appending one char at a time.
+            const size_t runStart = pos_;
+            while (pos_ < n) {
+                char c = json_[pos_];
+                if (c == '"' || c == '\\') break;
                 pos_++;
-                if (pos_ >= json_.length()) {
-                    throw serialization_error("Unexpected end of JSON string");
-                }
-                switch (json_[pos_]) {
-                    case '"':  result += '"'; break;
-                    case '\\': result += '\\'; break;
-                    case '/':  result += '/'; break;
-                    case 'b':  result += '\b'; break;
-                    case 'f':  result += '\f'; break;
-                    case 'n':  result += '\n'; break;
-                    case 'r':  result += '\r'; break;
-                    case 't':  result += '\t'; break;
-                    case 'u': {
-                        if (pos_ + 4 >= json_.length()) {
-                            throw serialization_error("Invalid unicode escape");
-                        }
-                        std::string hex = json_.substr(pos_ + 1, 4);
-                        pos_ += 4;
-                        uint32_t codepoint = static_cast<uint32_t>(std::stoul(hex, nullptr, 16));
-                        // Handle UTF-16 surrogate pairs
-                        if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
-                            // High surrogate - look for low surrogate \uXXXX
-                            if (pos_ + 2 < json_.length() && json_[pos_ + 1] == '\\' && json_[pos_ + 2] == 'u') {
-                                if (pos_ + 6 < json_.length()) {
-                                    std::string low_hex = json_.substr(pos_ + 3, 4);
-                                    uint32_t low = static_cast<uint32_t>(std::stoul(low_hex, nullptr, 16));
-                                    if (low >= 0xDC00 && low <= 0xDFFF) {
-                                        codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low - 0xDC00);
-                                        pos_ += 6; // Skip the \uXXXX low surrogate
-                                    }
-                                }
-                            }
-                        }
-                        // Encode as UTF-8
-                        if (codepoint < 0x80) {
-                            result += static_cast<char>(codepoint);
-                        } else if (codepoint < 0x800) {
-                            result += static_cast<char>(0xC0 | (codepoint >> 6));
-                            result += static_cast<char>(0x80 | (codepoint & 0x3F));
-                        } else if (codepoint < 0x10000) {
-                            result += static_cast<char>(0xE0 | (codepoint >> 12));
-                            result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-                            result += static_cast<char>(0x80 | (codepoint & 0x3F));
-                        } else {
-                            result += static_cast<char>(0xF0 | (codepoint >> 18));
-                            result += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
-                            result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-                            result += static_cast<char>(0x80 | (codepoint & 0x3F));
-                        }
-                        break;
-                    }
-                    default:
-                        throw serialization_error("Invalid escape sequence");
-                }
-                pos_++;
-            } else {
-                result += json_[pos_++];
             }
+            if (pos_ > runStart) result.append(json_, runStart, pos_ - runStart);
+
+            if (pos_ >= n) break;                 // unterminated -> expect('"') below throws
+            if (json_[pos_] == '"') { pos_++; return result; }
+
+            // Escape sequence.
+            pos_++;                               // consume backslash
+            if (pos_ >= n) throw serialization_error("Unexpected end of JSON string");
+            switch (json_[pos_]) {
+                case '"':  result += '"';  break;
+                case '\\': result += '\\'; break;
+                case '/':  result += '/';  break;
+                case 'b':  result += '\b'; break;
+                case 'f':  result += '\f'; break;
+                case 'n':  result += '\n'; break;
+                case 'r':  result += '\r'; break;
+                case 't':  result += '\t'; break;
+                case 'u': {
+                    uint32_t cp;
+                    if (!read_hex4(cp)) throw serialization_error("Invalid \\u escape in JSON string");
+                    if (cp >= 0xD800 && cp <= 0xDBFF) {
+                        // High surrogate: consume a following \uXXXX low surrogate if valid.
+                        if (pos_ + 2 < n && json_[pos_ + 1] == '\\' && json_[pos_ + 2] == 'u') {
+                            const size_t save = pos_;
+                            pos_ += 2;                                 // move onto the low 'u'
+                            uint32_t low;
+                            if (read_hex4(low) && low >= 0xDC00 && low <= 0xDFFF) {
+                                cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                            } else {
+                                pos_ = save;                           // not a valid pair
+                                cp = 0xFFFD;                           // U+FFFD replacement
+                            }
+                        } else {
+                            cp = 0xFFFD;                               // lone high surrogate
+                        }
+                    } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                        cp = 0xFFFD;                                   // lone low surrogate
+                    }
+                    append_utf8(result, cp);
+                    break;
+                }
+                default:
+                    throw serialization_error("Invalid escape sequence");
+            }
+            pos_++;                               // step past the escape's final char
         }
-        
-        expect('"');
+
+        expect('"');                              // unterminated string -> throws
         return result;
     }
     
@@ -1087,10 +1164,12 @@ private:
     }
 
     script_value parse_bool(engine* eng) {
-        if (json_.substr(pos_, 4) == "true") {
+        // compare(pos, len, lit) clamps len to size()-pos, so a truncated tail never
+        // matches and we avoid allocating a substring per literal.
+        if (json_.compare(pos_, 4, "true") == 0) {
             pos_ += 4;
             return script_value(true, eng);
-        } else if (json_.substr(pos_, 5) == "false") {
+        } else if (json_.compare(pos_, 5, "false") == 0) {
             pos_ += 5;
             return script_value(false, eng);
         } else {
@@ -1099,7 +1178,7 @@ private:
     }
 
     script_value parse_null(engine* eng) {
-        if (json_.substr(pos_, 4) == "null") {
+        if (json_.compare(pos_, 4, "null") == 0) {
             pos_ += 4;
             return script_value(std::monostate{}, eng);
         } else {
@@ -1108,28 +1187,57 @@ private:
     }
 
     script_value parse_number(engine* eng) {
-        size_t start = pos_;
+        const size_t start = pos_;
         bool has_decimal = false;
         bool has_exponent = false;
 
-        if (json_[pos_] == '-') pos_++;
+        if (pos_ < json_.length() && json_[pos_] == '-') pos_++;
 
-        while (pos_ < json_.length() &&
-               (std::isdigit(json_[pos_]) || json_[pos_] == '.' ||
-                json_[pos_] == 'e' || json_[pos_] == 'E' ||
-                json_[pos_] == '+' || json_[pos_] == '-')) {
-            if (json_[pos_] == '.') has_decimal = true;
-            if (json_[pos_] == 'e' || json_[pos_] == 'E') has_exponent = true;
-            pos_++;
+        while (pos_ < json_.length()) {
+            char c = json_[pos_];
+            if (c >= '0' && c <= '9') { pos_++; }
+            else if (c == '.') { has_decimal = true; pos_++; }
+            else if (c == 'e' || c == 'E') { has_exponent = true; pos_++; }
+            else if (c == '+' || c == '-') { pos_++; }   // exponent sign
+            else break;
         }
 
-        std::string num_str = json_.substr(start, pos_ - start);
+        // std::from_chars: no exceptions (the old std::stod/std::stoll could throw
+        // std::out_of_range / std::invalid_argument — which derive from std::logic_error,
+        // a sibling of serialization_error's hierarchy, so callers catching
+        // serialization_error would miss them and a single bad number crashed loadJai),
+        // no temporary substring, locale-independent, and faster.
+        const char* first = json_.data() + start;
+        const char* last = json_.data() + pos_;
 
         if (has_decimal || has_exponent) {
-            return script_value(std::stod(num_str), eng);
-        } else {
-            return script_value(static_cast<script_int>(std::stoll(num_str)), eng);
+            double d = 0.0;
+            auto r = std::from_chars(first, last, d);
+            // result_out_of_range still yields a usable (clamped/inf) magnitude, which lets
+            // the writer's "1e999" infinity sentinel round-trip back to infinity rather
+            // than throwing. Any OTHER error, or not consuming the whole token, is malformed.
+            if (r.ptr != last || (r.ec != std::errc() && r.ec != std::errc::result_out_of_range)) {
+                throw serialization_error(
+                    "Invalid numeric literal in JSON at position " + std::to_string(start));
+            }
+            return script_value(d, eng);
         }
+
+        script_int iv = 0;
+        auto r = std::from_chars(first, last, iv);
+        if (r.ptr == last && r.ec == std::errc()) {
+            return script_value(iv, eng);
+        }
+        // Integer that overflows int64 (e.g. a huge id/hash) — degrade to double rather
+        // than throw, matching lenient JSON consumers. (from_chars leaves iv untouched on
+        // failure, so re-parse the same token as a double.)
+        double d = 0.0;
+        auto r2 = std::from_chars(first, last, d);
+        if (r2.ptr != last || (r2.ec != std::errc() && r2.ec != std::errc::result_out_of_range)) {
+            throw serialization_error(
+                "Invalid integer literal in JSON at position " + std::to_string(start));
+        }
+        return script_value(d, eng);
     }
     
     struct ObjectState {

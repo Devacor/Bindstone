@@ -278,9 +278,14 @@ namespace MV {
 		friend class FileTextureDefinition;
 		friend class DynamicTextureDefinition;
 		friend class SurfaceTextureDefinition;
+		friend class SharedTextures;   // drives streaming load + the loading-placeholder state
 	protected:
 		jai::signal_emitter<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
 	public:
+		// True while the image is decoding/uploading on the streaming path; textureId() then
+		// reports the loading-placeholder checker so a sprite shows something until it arrives.
+		bool isLoadPending() const { return loadPending; }
+
 		jai::signal<void(std::shared_ptr<TextureDefinition>)> onReload;
 		typedef jai::receiver<void(std::shared_ptr<TextureDefinition>)> SignalType;
 
@@ -325,6 +330,7 @@ namespace MV {
 
 		std::vector< std::weak_ptr<TextureHandle> > handles;
 		bool isShared;
+		bool loadPending = false;   // streaming load in flight (set/cleared by SharedTextures)
 
 	private:
 		template<class Archive>

@@ -18,6 +18,7 @@
 struct test_filter_config {
     std::string suite_pattern;
     std::string test_pattern;
+    bool has_dot = false;   // true only for an explicit "suite.test" filter
 
     test_filter_config() : suite_pattern("*"), test_pattern("*") {}
 
@@ -30,10 +31,12 @@ struct test_filter_config {
         // Check for dot separator (suite.test pattern)
         size_t dot_pos = filter_str.find('.');
         if (dot_pos != std::string::npos) {
+            result.has_dot = true;
             result.suite_pattern = filter_str.substr(0, dot_pos);
             result.test_pattern = filter_str.substr(dot_pos + 1);
         } else {
-            // No dot - use as filter for both suites and tests
+            // No dot - ADDITIVE bare pattern: match the suite name OR a test name (handled in the
+            // run loop). Both fields hold the bare pattern; the loop decides per suite.
             result.suite_pattern = filter_str;
             result.test_pattern = filter_str;
         }
@@ -156,13 +159,27 @@ int main(int argc, char** argv) {
     }
 
     for (auto& suite : suites) {
-        // Skip if filter doesn't match suite
-        if (!filter.matches_suite(suite->get_name())) {
-            continue;
+        bool suite_matches = filter.matches_suite(suite->get_name());
+
+        std::string test_pattern_for_suite;
+        if (filter.has_dot) {
+            // Explicit "suite.test": the suite must match, then filter tests within it.
+            if (!suite_matches) {
+                continue;
+            }
+            test_pattern_for_suite = filter.test_pattern;
+        } else {
+            // Bare pattern is ADDITIVE: if it names this suite, run ALL of the suite's tests;
+            // otherwise fall back to matching individual test names (so e.g. a bare test-name
+            // filter still selects matching tests across every suite). This never SUBTRACTS the
+            // tests of a matched suite.
+            test_pattern_for_suite = suite_matches ? std::string("*") : filter.test_pattern;
         }
 
-        suites_run++;
-        auto result = suite->quench(filter.test_pattern, verbose);
+        auto result = suite->quench(test_pattern_for_suite, verbose);
+        if (result.total() > 0) {
+            suites_run++;
+        }
         total_failures += result.failed;
         total_passed += result.passed;
 
@@ -195,9 +212,10 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "\n-----------------------------------------\n";
-    if (suites_run == 0 && filter.suite_pattern != "*") {
-        // No suites matched the filter - list available suites
-        std::cout << "No suites matched filter: \"" << filter.suite_pattern << "\"\n\n";
+    if (total_tests == 0 && filter.suite_pattern != "*") {
+        // A filter was given but matched no suite name and no test name - list available suites.
+        std::cout << "No tests matched filter: \"" << filter.suite_pattern
+                  << (filter.has_dot ? ("." + filter.test_pattern) : std::string()) << "\"\n\n";
         std::cout << "Available suites:\n";
         for (const auto& suite : suites) {
             std::cout << "  - " << suite->get_name() << "\n";

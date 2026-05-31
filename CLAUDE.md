@@ -43,6 +43,21 @@ powershell.exe -Command "cd 'd:\git\Bindstone\Source\JaiScript\out\build\x64-Rel
 
 See `Source/JaiScript/CLAUDE.md` for detailed JaiScript development instructions.
 
+## Tests & Benchmarks (MV/engine)
+
+The engine has a Foundry-based regression runner separate from JaiScript's:
+
+- **`Source/MV/Tests/`** — `build_tests.bat` builds `mv_tests.exe` (JaiScript Foundry framework +
+  `main_test_runner.cpp`, linked against `mutedvision.lib`). Suites guard the matrix and
+  scene-graph transform invariants, including a deterministic **perf gate**
+  (`recalculateMatrixCalls == 0` over idle frames of a static `Clipped` subtree). Run:
+  `Source\MV\Tests\mv_tests.exe --verbose`. See `Source/MV/Tests/README.md`.
+- **`Source/MV/Bench/`** — standalone micro/scene/frame benchmarks (`bench_math`, `bench_scene`,
+  `bench_frame`) with before/after numbers in `RESULTS_math.md`. These measure; they don't assert.
+
+Both link the engine the same way (`/MD /DCEREAL_FUTURE_EXPERIMENTAL /DSDL_MAIN_HANDLED` + gl3w.c +
+SDL/Win libs); the renderer is constructed headless via `Draw2D::makeHeadless()`.
+
 ## Project Structure
 
 - `Source/MV/` - MutedVision engine (rendering, UI, AI, networking)

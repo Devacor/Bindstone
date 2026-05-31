@@ -88,7 +88,9 @@ namespace MV {
 		}
 
 		inline Matrix<SizeY, SizeX> transpose() const {
-			Matrix<SizeY, SizeX> result(*this);
+			// NoFill: every element is written by the loop below, so the prior
+			// copy-from-*this (which created a data dependency on *this) was wasted.
+			Matrix<SizeY, SizeX> result(MatrixInitialize::NoFill);
 			for (size_t x = 0; x < SizeX; ++x) {
 				for (size_t y = 0; y < SizeY; ++y) {
 					result.accessTransposed(x, y) = access(x, y);
@@ -330,40 +332,45 @@ namespace MV {
 			return *this;
 		}
 
+		// Right-multiply by a sparse axis rotation in place. Equivalent to *this *= R (the full
+		// 4x4 product) but only the two columns the rotation actually mixes are recomputed; the
+		// other columns (and any projective row entries) are left untouched. Results are
+		// bit-identical to the previous build-identity-then-multiply form for all inputs: the
+		// dropped terms are exact-zero products and operand order is preserved.
 		inline TransformMatrix& rotateXSupplyCosSin(PointPrecision a_cosRad, PointPrecision a_sinRad) {
 			//1	0	0
 			//0	cos	-sin
 			//0	sin	cos
-			TransformMatrix rotation;
-			rotation.access(1, 1) = a_cosRad;
-			rotation.access(2, 1) = -a_sinRad;
-			rotation.access(1, 2) = a_sinRad;
-			rotation.access(2, 2) = a_cosRad;
-			*this *= rotation;
+			for (size_t r = 0; r < 4; ++r) {
+				PointPrecision c1 = access(1, r);
+				PointPrecision c2 = access(2, r);
+				access(1, r) = a_cosRad * c1 + a_sinRad * c2;
+				access(2, r) = -a_sinRad * c1 + a_cosRad * c2;
+			}
 			return *this;
 		}
 		inline TransformMatrix& rotateYSupplyCosSin(PointPrecision a_cosRad, PointPrecision a_sinRad) {
 			//cos	0  sin
 			//0		1  0
 			//-sin	0  cos
-			TransformMatrix rotation;
-			rotation.access(0, 0) = a_cosRad;
-			rotation.access(2, 0) = a_sinRad;
-			rotation.access(0, 2) = -a_sinRad;
-			rotation.access(2, 2) = a_cosRad;
-			*this *= rotation;
+			for (size_t r = 0; r < 4; ++r) {
+				PointPrecision c0 = access(0, r);
+				PointPrecision c2 = access(2, r);
+				access(0, r) = a_cosRad * c0 + (-a_sinRad) * c2;
+				access(2, r) = a_sinRad * c0 + a_cosRad * c2;
+			}
 			return *this;
 		}
 		inline TransformMatrix& rotateZSupplyCosSin(PointPrecision a_cosRad, PointPrecision a_sinRad) {
 			//cos	 -sin  0
 			//sin	 cos	0
 			//0		0	  1
-			TransformMatrix rotation;
-			rotation.access(0, 0) = a_cosRad;
-			rotation.access(1, 0) = -a_sinRad;
-			rotation.access(0, 1) = a_sinRad;
-			rotation.access(1, 1) = a_cosRad;
-			*this *= rotation;
+			for (size_t r = 0; r < 4; ++r) {
+				PointPrecision c0 = access(0, r);
+				PointPrecision c1 = access(1, r);
+				access(0, r) = a_cosRad * c0 + a_sinRad * c1;
+				access(1, r) = -a_sinRad * c0 + a_cosRad * c1;
+			}
 			return *this;
 		}
 
@@ -476,6 +483,34 @@ namespace MV {
 		}
 
 	};
+
+	// Affine 4x4 multiply. PRECONDITION: both operands are affine (4th row == [0 0 0 1]).
+	// Computes only the 12 entries of rows 0-2 (skipping the rhs(c,3) term, which is 0 for
+	// c<3 and contributes exactly +lhs(3,r) for c==3) and hard-sets the known [0 0 0 1] 4th
+	// row. For genuinely affine inputs this is BIT-IDENTICAL to the generic Matrix<4,4>
+	// operator* (the omitted terms are exact-zero products; operand order is preserved), while
+	// doing ~44% fewer flops. It never reads the projective row of either operand, so do NOT
+	// use it where a perspective matrix may appear (use the generic operator* there).
+	inline TransformMatrix affineMultiply(const Matrix<4, 4>& a_lhs, const Matrix<4, 4>& a_rhs) {
+		TransformMatrix dest(MatrixInitialize::NoFill);
+		dest(0, 0) = a_rhs(0, 0) * a_lhs(0, 0) + a_rhs(0, 1) * a_lhs(1, 0) + a_rhs(0, 2) * a_lhs(2, 0);
+		dest(0, 1) = a_rhs(0, 0) * a_lhs(0, 1) + a_rhs(0, 1) * a_lhs(1, 1) + a_rhs(0, 2) * a_lhs(2, 1);
+		dest(0, 2) = a_rhs(0, 0) * a_lhs(0, 2) + a_rhs(0, 1) * a_lhs(1, 2) + a_rhs(0, 2) * a_lhs(2, 2);
+		dest(1, 0) = a_rhs(1, 0) * a_lhs(0, 0) + a_rhs(1, 1) * a_lhs(1, 0) + a_rhs(1, 2) * a_lhs(2, 0);
+		dest(1, 1) = a_rhs(1, 0) * a_lhs(0, 1) + a_rhs(1, 1) * a_lhs(1, 1) + a_rhs(1, 2) * a_lhs(2, 1);
+		dest(1, 2) = a_rhs(1, 0) * a_lhs(0, 2) + a_rhs(1, 1) * a_lhs(1, 2) + a_rhs(1, 2) * a_lhs(2, 2);
+		dest(2, 0) = a_rhs(2, 0) * a_lhs(0, 0) + a_rhs(2, 1) * a_lhs(1, 0) + a_rhs(2, 2) * a_lhs(2, 0);
+		dest(2, 1) = a_rhs(2, 0) * a_lhs(0, 1) + a_rhs(2, 1) * a_lhs(1, 1) + a_rhs(2, 2) * a_lhs(2, 1);
+		dest(2, 2) = a_rhs(2, 0) * a_lhs(0, 2) + a_rhs(2, 1) * a_lhs(1, 2) + a_rhs(2, 2) * a_lhs(2, 2);
+		dest(3, 0) = a_rhs(3, 0) * a_lhs(0, 0) + a_rhs(3, 1) * a_lhs(1, 0) + a_rhs(3, 2) * a_lhs(2, 0) + a_lhs(3, 0);
+		dest(3, 1) = a_rhs(3, 0) * a_lhs(0, 1) + a_rhs(3, 1) * a_lhs(1, 1) + a_rhs(3, 2) * a_lhs(2, 1) + a_lhs(3, 1);
+		dest(3, 2) = a_rhs(3, 0) * a_lhs(0, 2) + a_rhs(3, 1) * a_lhs(1, 2) + a_rhs(3, 2) * a_lhs(2, 2) + a_lhs(3, 2);
+		dest(0, 3) = 0.0f;
+		dest(1, 3) = 0.0f;
+		dest(2, 3) = 0.0f;
+		dest(3, 3) = 1.0f;
+		return dest;
+	}
 
 	inline TransformMatrix inverse(const Matrix<4, 4> &a_in, float& det) {
 		float A2323 = a_in(2, 2) * a_in(3, 3) - a_in(2, 3) * a_in(3, 2);

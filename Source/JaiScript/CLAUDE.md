@@ -43,13 +43,17 @@ harmless.) Adding a **new** test `.cpp` requires a CMake reconfigure (the test l
 ### Test filtering
 
 ```
-jaiscript_tests.exe "Script Class"            # substring match on suite AND test name
-jaiscript_tests.exe "Suite.Test"              # dot separates suite filter . test filter
+jaiscript_tests.exe "Script Class"            # bare pattern (ADDITIVE): runs every suite whose
+                                              #   NAME matches (all its tests) OR any test whose
+                                              #   name matches — never subtracts a matched suite
+jaiscript_tests.exe "Suite.Test"              # dot = explicit AND: suite filter . test filter
 jaiscript_tests.exe --gtest_filter="Property.*"   # also: --jaitest_filter=, --filter=
 jaiscript_tests.exe --verbose                 # per-test names + timings (use to find a hang)
 ```
-NOTE: a bare pattern like `"Review Regressions"` filters BOTH suite and test, so it skips every
-test whose *name* lacks that substring. To run a whole suite use `--filter="Suite Name.*"`.
+NOTE: a bare pattern is **additive** — `"Array Tests"` runs that whole suite, and `"push"` runs
+every test named `*push*` across all suites. Use the dotted `"Suite.Test"` form when you want the
+precise AND (suite must match AND test must match). (Fixed 2026-05; the old bare-pattern form
+ANDed suite+test and silently skipped a matched suite's tests.)
 
 ### Building against Bindstone / MutedVision (CLI works!)
 

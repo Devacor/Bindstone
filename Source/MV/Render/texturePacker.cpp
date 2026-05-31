@@ -311,7 +311,19 @@ namespace MV{
 	}
 
 	BoxAABB<PointPrecision> TexturePack::percentBounds(const BoxAABB<int> &a_shape) const {
-		return cast<PointPrecision>(a_shape) / Scale(static_cast<MV::PointPrecision>(roundUpPowerOfTwo(contentExtent.width)), static_cast<MV::PointPrecision>(roundUpPowerOfTwo(contentExtent.height)));
+		const auto texSize = Scale(static_cast<MV::PointPrecision>(roundUpPowerOfTwo(contentExtent.width)), static_cast<MV::PointPrecision>(roundUpPowerOfTwo(contentExtent.height)));
+		BoxAABB<PointPrecision> box = cast<PointPrecision>(a_shape) / texSize;
+		// Half-texel inset: with GL_LINEAR filtering and edge-to-edge atlas packing, a sample at a
+		// sub-rect's exact pixel boundary (after the pixel/size division rounds) reaches into the
+		// neighbouring packed image and shows "one pixel over". Pulling each edge in by half a texel
+		// keeps the bilinear 2x2 tap inside this sub-rect's own texels at any scale (no mipmaps here,
+		// so half a texel is sufficient). Applied here because BOTH the live makeHandle(percentBounds())
+		// path and the post-load reload path (handlePercent = percentBounds()) route their UVs through this.
+		const PointPrecision halfU = 0.5f / texSize.x;
+		const PointPrecision halfV = 0.5f / texSize.y;
+		box.minPoint.x += halfU; box.minPoint.y += halfV;
+		box.maxPoint.x -= halfU; box.maxPoint.y -= halfV;
+		return box;
 	}
 
 	void TexturePack::initializeAfterLoad() {

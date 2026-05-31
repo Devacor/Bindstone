@@ -723,6 +723,7 @@ namespace MV {
 			void recalculateLocalBounds();
 			void recalculateAlpha();
 			void recalculateMatrix();
+			void recalculateLocalMatrix();   // local TRS only; used by the override-parent draw path
 
 			//manual post load only if you know what you're doing.
 			void postLoadStep();

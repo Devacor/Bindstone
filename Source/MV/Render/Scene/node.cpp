@@ -144,10 +144,18 @@ namespace MV {
 
 		void Node::draw(const TransformMatrix &a_overrideParentMatrix) {
 			if (allowDraw) {
-				SCOPE_EXIT{ usingTemporaryMatrix = false; worldMatrixDirty = true; localMatrixDirty = true; };
+				// Only usingTemporaryMatrix needs resetting on exit. We deliberately do NOT
+				// re-dirty the matrices: recalculateLocalMatrix() below leaves localMatrixTransform
+				// valid (it is parent-independent) and never writes worldMatrixTransform, so the
+				// persistent world transform is never polluted with this draw's temporary clip-space
+				// parent. markMatrixDirty() (wired to the transform setters) still flags real changes.
+				SCOPE_EXIT{ usingTemporaryMatrix = false; };
 				usingTemporaryMatrix = true;
 				temporaryWorldMatrixTransform = a_overrideParentMatrix;
-				temporaryWorldMatrixTransform *= localTransform();
+				recalculateLocalMatrix();
+				// override parent and local are both affine, so this is bit-identical to the
+				// generic (*= localTransform()) product it replaces, with ~44% fewer flops.
+				temporaryWorldMatrixTransform = affineMultiply(temporaryWorldMatrixTransform, localMatrixTransform);
 				bool allowChildrenToDraw = true;
 				for (size_t i = 0; i < childComponents->size();++i) {
 					if ((*childComponents)[i]->ownerIsAlive()) {
@@ -825,8 +833,10 @@ namespace MV {
 			markParentBoundsDirty();
 		}
 
-		void Node::recalculateMatrix() {
-			bool eitherMatrixUpdated = localMatrixDirty || worldMatrixDirty;
+		// Rebuild ONLY the local TRS matrix (parent-independent). Safe to call during an
+		// override-parent draw: it never touches worldMatrixTransform, so it cannot pollute it
+		// with the temporary clip-space parent transform.
+		void Node::recalculateLocalMatrix() {
 			if (localMatrixDirty) {
 				localMatrixDirty = false;
 				localMatrixTransform.makeIdentity();
@@ -843,12 +853,20 @@ namespace MV {
 
 				markParentBoundsDirty();
 			}
+		}
+
+		void Node::recalculateMatrix() {
+			bool eitherMatrixUpdated = localMatrixDirty || worldMatrixDirty;
+			recalculateLocalMatrix();
 
 			if (eitherMatrixUpdated) {
 				recalculateMatrixCalls++;
 				worldMatrixDirty = false;
 				if (myParent) {
-					worldMatrixTransform = myParent->worldTransform() * localMatrixTransform;
+					// Both operands are affine TRS transforms (built only via makeIdentity +
+					// position + setRotationXYZ + scale), so the affine multiply is bit-identical
+					// to the generic 4x4 product here while skipping the known [0 0 0 1] 4th row.
+					worldMatrixTransform = affineMultiply(myParent->worldTransform(), localMatrixTransform);
 					parentAccumulatedAlpha = myParent->parentAccumulatedAlpha * nodeAlpha;
 				} else {
 					worldMatrixTransform = localMatrixTransform;

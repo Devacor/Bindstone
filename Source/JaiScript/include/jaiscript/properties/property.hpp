@@ -254,6 +254,16 @@ namespace jai {
 			return static_cast<bool>(m_value);
 		}
 
+		// Stream insertion — transparently forwards to the wrapped value's operator<<. Templated on
+		// the stream type (so no <ostream> include is needed here) and SFINAE-constrained so it only
+		// participates when T itself is streamable to that stream. Hidden friend: found via ADL,
+		// pollutes no namespace, and lets `os << someProperty` work like `os << someProperty.get()`.
+		template<typename Stream>
+		friend auto operator<<(Stream& a_os, const property& a_prop)
+			-> decltype(a_os << std::declval<const T&>()) {
+			return a_os << a_prop.m_value;
+		}
+
 		// ===== ACCESSOR METHODS =====
 		T& get() {
 			return m_value;

@@ -22,6 +22,9 @@
     <Filter Include="MV\Render">
       <UniqueIdentifier>{6d8a637d-69f4-4d45-8fe4-a9895109d58e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="MV\Render\Backends">
+      <UniqueIdentifier>{a7e3c1b9-2d4f-4e8a-9b6c-3f5d7e1a2b4c}</UniqueIdentifier>
+    </Filter>
     <Filter Include="MV\Render\Scene">
       <UniqueIdentifier>{1a48d276-7fc5-4d74-af5f-2c4be586df81}</UniqueIdentifier>
     </Filter>
@@ -83,6 +86,15 @@
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\points.cpp">
       <Filter>MV\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\glDevice.cpp">
+      <Filter>MV\Render\Backends</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\headlessDevice.cpp">
+      <Filter>MV\Render\Backends</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\vulkanDevice.cpp">
+      <Filter>MV\Render\Backends</Filter>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.cpp">
       <Filter>MV\Render</Filter>
@@ -239,6 +251,18 @@
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\points.h">
       <Filter>MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\device.h">
+      <Filter>MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\glDevice.h">
+      <Filter>MV\Render\Backends</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\headlessDevice.h">
+      <Filter>MV\Render\Backends</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\handlePool.h">
+      <Filter>MV\Render\Backends</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.h">
       <Filter>MV\Render</Filter>

@@ -1,4 +1,5 @@
 #include "render.h"
+#include "MV/Render/device.h"
 #include <jaiscript/signals/signal_impl.hpp>
 #include "Scene/node.h"
 #include "textures.h"
@@ -588,6 +589,9 @@ namespace MV {
 	}
 
 	Draw2D::~Draw2D(){
+		// Free pipelines + drain backend resources while the GL context is still current.
+		clearPipelineCache();
+		if (backend) { backend->shutdown(); }
 	}
 
 	bool Draw2D::initialize(Size<int> a_window, Size<> a_world, bool a_requireExtensions, bool a_summarize){
@@ -605,6 +609,14 @@ namespace MV {
 		}
 
 		setupOpengl();
+
+		// Construct the render backend now that the (GL) context exists. The GL reference
+		// backend borrows the SDL window only to present; the context is still owned by Window.
+		backend = isHeadless ? Render::Device::makeHeadless() : Render::Device::makeGL();
+		Render::SwapchainDesc swapDesc;
+		swapDesc.sdlWindow = sdlWindow.window;
+		backend->initialize(swapDesc);
+
 		initializeExtensions();
 		summarizeDisplayMode();
 		if (a_summarize) {
@@ -779,13 +791,22 @@ namespace MV {
 	void Draw2D::clearScreen(){
 		updateCameraProjectionMatrices();
 		sdlWindow.refreshContext();
-		if (!headless()) {
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+		// The clear is the frame's first render-pass boundary. The GL backend issues glClear;
+		// the headless backend is inert — so this replaces the old `if (!headless())` guard.
+		if (backend) {
+			const float clear[4] = { clearBackgroundColor.R, clearBackgroundColor.G, clearBackgroundColor.B, clearBackgroundColor.A };
+			backend->beginDefaultPass(clear);
 		}
 	}
 
 	void Draw2D::updateScreen(){
-		sdlWindow.updateScreen();
+		// Present is the frame's end boundary (GL backend swaps; headless is inert).
+		if (backend) {
+			backend->endPass();
+			backend->endFrame();
+		} else {
+			sdlWindow.updateScreen();
+		}
 	}
 
 	Point<> Draw2D::worldFromLocal(const Point<> &a_localPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const{
@@ -894,6 +915,9 @@ namespace MV {
 		auto programId = loadShaderGetProgramId(a_vertexShaderCode, a_fragmentShaderCode);
 
 		auto shader = std::make_shared<Shader>(a_id, programId, headless());
+		if (device()) {
+			shader->initializeDeviceModules(device(), a_vertexShaderCode, a_fragmentShaderCode);
+		}
 		shaders[a_id] = shader;
 
 		if (makeDefault) {
@@ -919,6 +943,11 @@ namespace MV {
 					glDeleteProgram(shader->programId);
 					shader->programId = newId;
 					shader->initialize();
+					if (device()) {
+						// Recreate the backend modules and drop cached pipelines so drawables re-resolve.
+						shader->initializeDeviceModules(device(), vertexShaderCode, fragmentShaderCode);
+						clearPipelineCache();
+					}
 				} catch (ResourceException &e) {
 					std::cerr << "Failed to reload shader: " << e.what() << std::endl;
 				}
@@ -955,6 +984,69 @@ namespace MV {
 		return programId;
 	}
 
+	namespace {
+		// BlendMode -> RHI BlendState, reproducing applyBlendModeToRenderer (BLEND_DEFAULT == the device.h default).
+		Render::BlendState blendStateForMode(BlendMode a_mode) {
+			using namespace Render;
+			BlendState s; // default == premultiplied separate (BLEND_DEFAULT).
+			switch (a_mode) {
+			case BLEND_ADD:
+				s.srcColor = BlendFactor::One;      s.dstColor = BlendFactor::One;
+				s.srcAlpha = BlendFactor::One;      s.dstAlpha = BlendFactor::One; break;
+			case BLEND_MULTIPLY:
+				s.srcColor = BlendFactor::DstColor; s.dstColor = BlendFactor::OneMinusSrcAlpha;
+				s.srcAlpha = BlendFactor::DstColor; s.dstAlpha = BlendFactor::OneMinusSrcAlpha; break;
+			case BLEND_SCREEN:
+				s.srcColor = BlendFactor::One;      s.dstColor = BlendFactor::OneMinusSrcColor;
+				s.srcAlpha = BlendFactor::One;      s.dstAlpha = BlendFactor::OneMinusSrcColor; break;
+			case BLEND_DEFAULT:
+			default: break; // keep the device.h premultiplied-separate default.
+			}
+			s.colorOp = BlendOp::Add; s.alphaOp = BlendOp::Add; s.enabled = true; s.colorWriteMask = 0xF;
+			return s;
+		}
+
+		// The canonical sprite vertex layout (pos float3, uv float2, color float4) from DrawPoint offsets.
+		Render::VertexLayout spriteVertexLayout() {
+			using namespace Render;
+			VertexLayout layout;
+			layout.stride = static_cast<uint32_t>(sizeof(DrawPoint));
+			layout.attributes = {
+				{ 0, VertexAttributeFormat::Float3, static_cast<uint32_t>(offsetof(DrawPoint, x)) },
+				{ 1, VertexAttributeFormat::Float2, static_cast<uint32_t>(offsetof(DrawPoint, textureX)) },
+				{ 2, VertexAttributeFormat::Float4, static_cast<uint32_t>(offsetof(DrawPoint, R)) },
+			};
+			return layout;
+		}
+	} // namespace
+
+	Render::BoundPipeline Draw2D::pipelineFor(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend, GLenum a_drawType) {
+		if (!backend) { return Render::BoundPipeline{}; }
+		PipelineKey key{ a_shader->glProgramId(), a_blend, a_drawType };
+		auto found = pipelineCache.find(key);
+		if (found != pipelineCache.end()) { return found->second; }
+
+		Render::PipelineDesc desc;
+		desc.vertex   = a_shader->vertexShaderModule();
+		desc.fragment = a_shader->fragmentShaderModule();
+		desc.topology = (a_drawType == GL_TRIANGLE_STRIP) ? Render::PrimitiveTopology::TriangleStrip
+		                                                  : Render::PrimitiveTopology::Triangles;
+		desc.blend        = blendStateForMode(a_blend);
+		desc.vertexLayout = spriteVertexLayout();
+		// 2D defaults from device.h: depth test/write OFF, cull None — leave desc.depthStencil/raster default.
+
+		Render::BoundPipeline pipe = backend->createPipeline(desc);
+		pipelineCache[key] = pipe;
+		return pipe;
+	}
+
+	void Draw2D::clearPipelineCache() {
+		if (backend) {
+			for (auto& kv : pipelineCache) { backend->destroyPipeline(kv.second); }
+		}
+		pipelineCache.clear();
+	}
+
 	void Draw2D::loadDefaultShaders() {
 		loadShader(MV::DEFAULT_ID, "Shaders/default.vert", "Shaders/default.frag");
 		loadShader(MV::PREMULTIPLY_ID, "Shaders/default.vert", "Shaders/premultiply.frag");
@@ -980,8 +1072,11 @@ namespace MV {
                 throw;
             }
             auto shader = std::make_shared<Shader>(a_id, programId, headless(), a_vertexShaderFilename, a_fragmentShaderFilename);
+            if (device()) {
+                shader->initializeDeviceModules(device(), vertexShaderCode, fragmentShaderCode);
+            }
             shaders[a_id] = shader;
-                
+
             if (makeDefault) {
                 defaultShaderPtr = shader;
             }
@@ -1135,7 +1230,27 @@ namespace MV {
 		return SharedTextures::white()->texture()->textureId();
 	}
 
+	// Default (white) texture + sampler for the recording path; white() is a device-less singleton, so back it first.
+	Render::BoundTexture Shader::getDefaultBoundTexture() const {
+		auto def = SharedTextures::white()->texture();
+		def->ensureDeviceBacked(renderDevice);
+		return def->boundTexture();
+	}
+	Render::BoundSampler Shader::getDefaultBoundSampler() const {
+		auto def = SharedTextures::white()->texture();
+		def->ensureDeviceBacked(renderDevice);
+		return def->boundSampler();
+	}
+
 	bool Shader::set(const std::string &a_variableName, GLuint a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+		if (recording()) {
+			// Raw GL names have no BoundTexture; only the default (0) maps (the 2D path uses the TextureDefinition overload).
+			if (a_texture == 0) {
+				renderDevice->setTexture(recordingUniformSet, a_variableName, getDefaultBoundTexture(), getDefaultBoundSampler());
+				return true;
+			}
+			return false;
+		}
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
@@ -1155,6 +1270,15 @@ namespace MV {
 	}
 
 	bool Shader::set(const std::string &a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+		if (recording()) {
+			// Back-fill if this texture loaded before the device existed (e.g. editor-ctor atlases).
+			if (a_texture) { a_texture->ensureDeviceBacked(renderDevice); }
+			Render::BoundTexture bt = a_texture ? a_texture->boundTexture() : Render::BoundTexture{};
+			Render::BoundSampler bs = a_texture ? a_texture->boundSampler() : Render::BoundSampler{};
+			if (!bt.valid()) { bt = getDefaultBoundTexture(); bs = getDefaultBoundSampler(); }
+			renderDevice->setTexture(recordingUniformSet, a_variableName, bt, bs);
+			return true;
+		}
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
@@ -1174,6 +1298,15 @@ namespace MV {
 	}
 
 	bool Shader::set(const std::string &a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+		if (recording()) {
+			auto def = (a_value != nullptr) ? a_value->texture() : nullptr;
+			if (def) { def->ensureDeviceBacked(renderDevice); }
+			Render::BoundTexture bt = def ? def->boundTexture() : Render::BoundTexture{};
+			Render::BoundSampler bs = def ? def->boundSampler() : Render::BoundSampler{};
+			if (!bt.valid()) { bt = getDefaultBoundTexture(); bs = getDefaultBoundSampler(); }
+			renderDevice->setTexture(recordingUniformSet, a_variableName, bt, bs);
+			return true;
+		}
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {

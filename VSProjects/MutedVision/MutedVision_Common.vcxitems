@@ -27,6 +27,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\boxaabb.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\formattedText.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\points.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\glDevice.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\headlessDevice.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\vulkanDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.cpp" />
@@ -144,6 +147,10 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\matrix.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\package.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\points.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\device.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\glDevice.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\handlePool.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\headlessDevice.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.h" />

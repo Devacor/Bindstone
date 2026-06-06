@@ -10,6 +10,7 @@
 #include <atomic>
 
 #include "render.h"
+#include "device.h"   // Render::Device / Render::BoundTexture (held by value in LoadedTextureData)
 #include "boxaabb.h"
 
 #include <jaiscript/signals/signal_decl.hpp>
@@ -53,17 +54,15 @@ namespace MV {
 	//converting to a power of two surface may free the original surface, but returns an unfreed surface.
 	std::shared_ptr<OwnedSurface> convertToPowerOfTwoSurface(const std::shared_ptr<OwnedSurface> &a_img);
 	std::shared_ptr<OwnedSurface> convertToBGRSurface(const std::shared_ptr<OwnedSurface> &a_img);
-	std::unique_ptr<LoadedTextureData> loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &img, const TextureParameters &file);
+	// a_device: upload the GPU texture through this Render::Device; null keeps the legacy raw-GL path.
+	std::unique_ptr<LoadedTextureData> loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &img, const TextureParameters &file, Render::Device* a_device = nullptr);
 
 	//required to allow forward declared MV::SharedTextures
 	MV::SharedTextures* getSharedTextureFromServices(MV::Services& a_services);
 
-	// Canonicalizes a texture path so different spellings of the same file dedupe to one
-	// GPU texture in LoadedTexture::globalLookup. sdlFileHandle() opens with an "Assets/"
-	// prefix fallback, so "Atlases/x.png" and "Assets/Atlases\x.png" are the same file but
-	// previously keyed differently -> the same image was decoded + uploaded twice. We strip
-	// a leading "Assets/" and normalize separators (case preserved so the on-disk open path
-	// stays valid via the fallback).
+	// Canonicalize a texture path (strip leading "Assets/", normalize separators) so different
+	// spellings of the same file dedupe to one GPU texture in globalLookup. Case preserved so the
+	// on-disk open path stays valid via sdlFileHandle()'s "Assets/" fallback.
 	inline std::string normalizeTexturePath(std::string a_path) {
 		for (auto &c : a_path) { if (c == '\\') c = '/'; }
 		static const char prefix[] = "assets/";
@@ -167,6 +166,14 @@ namespace MV {
 			textureId(a_rhs.textureId){
 			a_rhs.textureId = 0;
 		}
+		OpenGlTextureId& operator=(OpenGlTextureId&& a_rhs) noexcept {
+			if (this != &a_rhs) {
+				if (textureId != 0) { glDeleteTextures(1, &textureId); }
+				textureId = a_rhs.textureId;
+				a_rhs.textureId = 0;
+			}
+			return *this;
+		}
 		~OpenGlTextureId() {
 			if (textureId != 0) {
 				glDeleteTextures(1, &textureId);
@@ -187,43 +194,63 @@ namespace MV {
 	};
 
 	class LoadedTexture;
+	// A texture's GPU object: a device BoundTexture, or a legacy raw-GL name until a device exists. id() resolves whichever is active.
 	struct LoadedTextureData {
 		friend LoadedTexture;
 	public:
 		LoadedTextureData() {}
 		LoadedTextureData(GLuint a_textureId) : textureId(a_textureId){}
+		LoadedTextureData(Render::Device* a_device, Render::BoundTexture a_bound, Render::BoundSampler a_sampler = {}) :
+			renderDevice(a_device), boundTexture(a_bound), boundSampler(a_sampler) {}
 		LoadedTextureData(LoadedTextureData&& a_rhs) = default;
+		~LoadedTextureData();
 
-		operator GLuint() const {
-			return textureId;
-		}
+		GLuint id() const;
+		operator GLuint() const { return id(); }
 
-		OpenGlTextureId textureId;
+		Render::BoundTexture bound() const { return boundTexture; }
+		Render::BoundSampler sampler() const { return boundSampler; }
+
+		// Build the GPU binding from the retained surface (no re-decode), then release it. No-op without
+		// a device, if already device-backed, or if no surface was retained.
+		void bindToDevice(Render::Device* a_device);
+		void uploadLegacyGl(SDL_Surface* a_surf, const TextureParameters& a_parameters);
+
+		OpenGlTextureId textureId;                  // legacy raw-GL path only
+		Render::Device* renderDevice = nullptr;
+		Render::BoundTexture boundTexture;
+		Render::BoundSampler boundSampler;
 		Size<int> size;
 		Size<int> originalSize;
+
+		// Decoded pixels retained so the binding rebuilds without re-reading the file; released once
+		// device-backed. Null for raw-pixel textures (dynamic/atlas).
+		std::shared_ptr<OwnedSurface> sourceSurface;
+		TextureParameters sourceParameters;
 
 	private:
 		LoadedTextureData(const LoadedTextureData& a_rhs) = delete;
 		LoadedTextureData& operator=(const LoadedTextureData& a_rhs) = delete;
 
-		std::atomic<int> useCount = 0;
+		std::atomic<int> useCount = 0;   // live holders of the shared globalLookup entry; last one erases it.
 	};
 
 	class LoadedTexture {
 	public:
-		LoadedTexture(const TextureParameters& a_parameters) {
+		// a_device: upload the GPU texture through this device; null keeps the legacy raw-GL path.
+		LoadedTexture(const TextureParameters& a_parameters, Render::Device* a_device = nullptr) {
 			if (a_parameters.cleared) {
 				locallyOwnedParametersValue = std::make_unique<TextureParameters>(a_parameters);
 				locallyOwnedDataValue = std::make_unique<LoadedTextureData>();
 			} else {
 				std::scoped_lock guard(lock);
 				auto found = globalLookup.find(a_parameters);
-				if (found != globalLookup.end()) {
-					++found->second->useCount;
-				} else {
+				if (found == globalLookup.end()) {
 					bool success = false;
-					std::tie(found, success) = globalLookup.insert({ a_parameters, std::move(loadFile(a_parameters)) });
+					std::tie(found, success) = globalLookup.insert({ a_parameters, std::move(loadFile(a_parameters, a_device)) });
 				}
+				// Guard: a failed load() can insert a null unique_ptr.
+				if (found->second) { ++found->second->useCount; }
 				dataValue = found->second.get();
 				parametersValue = &found->first;
 			}
@@ -231,11 +258,22 @@ namespace MV {
 		LoadedTexture(std::unique_ptr<LoadedTextureData> a_locallyOwnedDataValue) :
 			locallyOwnedDataValue(a_locallyOwnedDataValue.release()){
 		}
-		LoadedTexture(LoadedTexture&&) = default;
+		// Null the source's shared-cache pointers so its dtor doesn't double-decrement the entry this now owns.
+		LoadedTexture(LoadedTexture&& a_rhs) noexcept :
+			dataValue(a_rhs.dataValue),
+			parametersValue(a_rhs.parametersValue),
+			locallyOwnedDataValue(std::move(a_rhs.locallyOwnedDataValue)),
+			locallyOwnedParametersValue(std::move(a_rhs.locallyOwnedParametersValue)) {
+			a_rhs.dataValue = nullptr;
+			a_rhs.parametersValue = nullptr;
+		}
 		~LoadedTexture() {
-			if (--dataValue->useCount == 0) {
-				std::scoped_lock guard(lock);
-				globalLookup.erase(parameters());
+			// Only the shared-cache path refcounts; locally-owned textures leave dataValue null.
+			if (!locallyOwnedDataValue && dataValue) {
+				if (--dataValue->useCount == 0) {
+					std::scoped_lock guard(lock);
+					globalLookup.erase(parameters());
+				}
 			}
 		}
 
@@ -246,24 +284,31 @@ namespace MV {
 			return locallyOwnedDataValue ? *locallyOwnedDataValue : *dataValue;
 		}
 		GLuint id() const {
-			return locallyOwnedDataValue ? locallyOwnedDataValue->textureId : dataValue->textureId;
+			return locallyOwnedDataValue ? locallyOwnedDataValue->id() : dataValue->id();
+		}
+		Render::BoundTexture bound() const {
+			return locallyOwnedDataValue ? locallyOwnedDataValue->bound() : dataValue->bound();
+		}
+		Render::BoundSampler sampler() const {
+			return locallyOwnedDataValue ? locallyOwnedDataValue->sampler() : dataValue->sampler();
 		}
 
-		// Parallel-preload support (used by SharedTextures::flushDeferredLoad). isCached tells
-		// whether a (path,params) GL texture already exists; cacheDecodedSurface uploads an
-		// already-decoded surface on the calling (GL) thread and inserts it into globalLookup,
-		// so a subsequent LoadedTexture(params) is a cache hit and never re-decodes.
+		// Parallel-preload support. cacheDecodedSurface uploads an already-decoded surface on the
+		// calling (GL) thread into globalLookup, so a later LoadedTexture(params) is a hit, not a re-decode.
 		static bool isCached(const TextureParameters& a_parameters);
-		static void cacheDecodedSurface(const TextureParameters& a_parameters, const std::shared_ptr<OwnedSurface>& a_surface);
+		static void cacheDecodedSurface(const TextureParameters& a_parameters, const std::shared_ptr<OwnedSurface>& a_surface, Render::Device* a_device = nullptr);
+		// Device-back the shared cache entry for these params in place (every live holder upgrades at
+		// once; nothing erased, so no raw dataValue is invalidated). No-op if absent or already backed.
+		static bool deviceBackInPlace(const TextureParameters& a_parameters, Render::Device* a_device);
 	private:
 		LoadedTexture(const LoadedTexture&) = delete;
 		LoadedTexture& operator=(const LoadedTexture&) = delete;
 
-		std::unique_ptr<LoadedTextureData> loadFile(const TextureParameters& a_parameters);
+		std::unique_ptr<LoadedTextureData> loadFile(const TextureParameters& a_parameters, Render::Device* a_device);
 		//static void releaseFile(const TextureParameters& a_parameters);
 		
-		LoadedTextureData* dataValue;
-		const TextureParameters* parametersValue;
+		LoadedTextureData* dataValue = nullptr;          // shared-cache path only (null when locally-owned).
+		const TextureParameters* parametersValue = nullptr;
 		std::unique_ptr<LoadedTextureData> locallyOwnedDataValue;
 		std::unique_ptr<TextureParameters> locallyOwnedParametersValue;
 		static std::mutex lock;
@@ -282,8 +327,7 @@ namespace MV {
 	protected:
 		jai::signal_emitter<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
 	public:
-		// True while the image is decoding/uploading on the streaming path; textureId() then
-		// reports the loading-placeholder checker so a sprite shows something until it arrives.
+		// True while streaming-loading; textureId() then reports the loading-placeholder checker.
 		bool isLoadPending() const { return loadPending; }
 
 		jai::signal<void(std::shared_ptr<TextureDefinition>)> onReload;
@@ -297,6 +341,15 @@ namespace MV {
 		std::shared_ptr<TextureHandle> makeRawHandle(const BoxAABB<PointPrecision> &a_bounds);
 
 		GLuint textureId() const;
+		// The GPU texture as an opaque RHI handle (textureId() is the transition shim). Null until
+		// loaded, or when loaded via the legacy raw-GL path.
+		Render::BoundTexture boundTexture() const;
+		Render::BoundSampler boundSampler() const;
+		// Borrowed; injected by SharedTextures so uploads route through the active device (null = legacy raw-GL).
+		void renderDevice(Render::Device* a_device) { ourDevice = a_device; }
+		Render::Device* renderDevice() const { return ourDevice; }
+		// Draw-time back-fill when the device appears after load, so the RHI draw path can bind it. No-op once backed.
+		void ensureDeviceBacked(Render::Device* a_device);
 		std::string name() const;
 		Size<int> size() const;
 		Size<int> size();
@@ -331,6 +384,7 @@ namespace MV {
 		std::vector< std::weak_ptr<TextureHandle> > handles;
 		bool isShared;
 		bool loadPending = false;   // streaming load in flight (set/cleared by SharedTextures)
+		Render::Device* ourDevice = nullptr;   // borrowed; active RHI device for uploads (null = legacy raw-GL).
 
 	private:
 		template<class Archive>
@@ -361,6 +415,9 @@ namespace MV {
 		}
 
 		virtual void reloadImplementation() = 0;
+		// ensureDeviceBacked() hook: device-back this def's shared globalLookup entry in place (so sibling
+		// holders upgrade too). Non-shared defs return false and let ensureDeviceBacked rebuild locally.
+		virtual bool deviceBackSharedCache(Render::Device* /*a_device*/) { return false; }
 	};
 
 	class FileTextureDefinition : public TextureDefinition {
@@ -375,8 +432,7 @@ namespace MV {
 			return std::unique_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, a_pixel, false));
 		}
 
-		// The exact key this definition loads under — used by the parallel preload to decode
-		// it off-thread, matching what reloadImplementation() builds.
+		// The exact key this definition loads under, so the parallel preload can decode it off-thread.
 		TextureParameters fileTextureParameters() const {
 			return TextureParameters{ textureName, powerTwo, repeat, pixel };
 		}
@@ -390,6 +446,11 @@ namespace MV {
 		}
 
 		void reloadImplementation() override;
+		// Device-back this file's shared cache entry in place (upgrades every holder at once).
+		bool deviceBackSharedCache(Render::Device* a_device) override {
+			return LoadedTexture::deviceBackInPlace(
+				TextureParameters{ textureName, powerTwo, repeat, pixel }, a_device);
+		}
 
 	private:
 

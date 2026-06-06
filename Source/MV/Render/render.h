@@ -27,6 +27,7 @@
 #include <fstream>
 #include "MV/Render/points.h"
 #include "MV/Render/matrix.hpp"
+#include "MV/Render/device.h"   // RHI seam; Shader/Draw2D hold Render::Device + Bound* handles.
 #include "MV/Utility/generalUtility.h"
 #include <jaiscript/signals/signal_decl.hpp>
 
@@ -84,6 +85,7 @@ namespace MV {
 		class Node;
 	}
 	class Draw2D;
+	namespace Render { class Device; }
 
 	extern bool RUNNING_IN_HEADLESS;
 
@@ -334,6 +336,10 @@ namespace MV {
 		bool set(const std::string& a_variableName, const std::shared_ptr<TextureHandle>& a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 
 		inline bool set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true) {
+			if (recording()) {
+				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_value, 1);
+				return true;
+			}
 			if (!headless) {
 				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
@@ -348,6 +354,10 @@ namespace MV {
 		}
 
 		inline bool setVec2(const std::string& a_variableName, const Point<PointPrecision>& a_point, bool a_errorIfNotPresent = true) {
+			if (recording()) {
+				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_point.x, 2);
+				return true;
+			}
 			if (!headless) {
 				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
@@ -361,6 +371,10 @@ namespace MV {
 			return false;
 		}
 		inline bool setVec3(const std::string& a_variableName, const Point<PointPrecision>& a_point, bool a_errorIfNotPresent = true) {
+			if (recording()) {
+				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_point.x, 3);
+				return true;
+			}
 			if (!headless) {
 				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
@@ -375,6 +389,10 @@ namespace MV {
 		}
 
 		inline bool set(const std::string& a_variableName, const TransformMatrix& a_matrix, bool a_errorIfNotPresent = true) {
+			if (recording()) {
+				renderDevice->setUniformMatrix(recordingUniformSet, a_variableName, &((a_matrix.getMatrixArray())[0]));
+				return true;
+			}
 			if (!headless) {
 				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
@@ -392,8 +410,37 @@ namespace MV {
 		inline bool has(std::string a_variableName) {
 			return variableOffset(a_variableName) >= 0;
 		}
+
+		// --- RHI device path ----------------------------------------------------------
+		// Creates the backend shader modules from GLSL; after this, draw routes through pipelineFor + a recorded set.
+		void initializeDeviceModules(Render::Device* a_device, const std::string& a_vertexSource, const std::string& a_fragmentSource) {
+			renderDevice = a_device;
+			if (!renderDevice) { return; }
+			Render::ShaderModuleDesc vs; vs.stage = Render::ShaderStage::Vertex;   vs.glslSource = a_vertexSource;
+			Render::ShaderModuleDesc fs; fs.stage = Render::ShaderStage::Fragment; fs.glslSource = a_fragmentSource;
+			vertexModule   = renderDevice->createShaderModule(vs);
+			fragmentModule = renderDevice->createShaderModule(fs);
+		}
+		// While a uniform set is open, set(...) records into it instead of issuing GL. Re-entrant:
+		// returns the previous target so a nested draw (e.g. mid-draw atlas FBO refill on this same
+		// shared Shader) can restore it and not clobber the outer draw's set.
+		Render::BoundUniformSet beginRecording(Render::BoundUniformSet a_set) {
+			Render::BoundUniformSet prev = recordingUniformSet;
+			recordingUniformSet = a_set;
+			return prev;
+		}
+		void endRecording(Render::BoundUniformSet a_restore = Render::BoundUniformSet{}) { recordingUniformSet = a_restore; }
+		bool recording() const { return recordingUniformSet.valid(); }
+
+		Render::Device* device() const { return renderDevice; }
+		Render::BoundShaderModule vertexShaderModule() const { return vertexModule; }
+		Render::BoundShaderModule fragmentShaderModule() const { return fragmentModule; }
+		GLuint glProgramId() const { return programId; }   // pipeline-cache identity key.
+
 	private:
 		GLuint getDefaultTextureId() const;
+		Render::BoundTexture getDefaultBoundTexture() const;
+		Render::BoundSampler getDefaultBoundSampler() const;
 
 		void initialize() {
 			if (!headless) {
@@ -438,6 +485,12 @@ namespace MV {
 		GLuint programId;
 		std::unordered_map<std::string, GLuint> variables;
 		bool headless;
+
+		// renderDevice null => legacy raw-GL set()/use(); recordingUniformSet valid => set() records into it.
+		Render::Device*           renderDevice = nullptr;
+		Render::BoundShaderModule vertexModule;
+		Render::BoundShaderModule fragmentModule;
+		Render::BoundUniformSet   recordingUniformSet;
 	};
 
 	struct MaterialContext {
@@ -588,6 +641,11 @@ namespace MV {
 		std::shared_ptr<Shader> loadShader(const std::string& a_id, const std::string& a_vertexShaderFilename, const std::string& a_fragmentShaderFilename);
 		std::shared_ptr<Shader> loadShaderCode(const std::string& a_id, const std::string& a_vertexShaderCode, const std::string& a_fragmentShaderCode);
 
+		// Shared BoundPipeline keyed by (shader program, blend, topology) so variants dedupe instead of
+		// per-drawable allocating. Borrowed by Drawables; owned + destroyed here.
+		Render::BoundPipeline pipelineFor(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend, GLenum a_drawType);
+		void clearPipelineCache();
+
 		void reloadShaders();
 
 		bool hasShader(const std::string& a_id);
@@ -599,7 +657,12 @@ namespace MV {
 		bool headless() const {
 			return isHeadless;
 		}
-		
+
+		// The active RHI backend; owned here, borrowed by the texture system and scene draw path. Null until initialize().
+		Render::Device* device() const {
+			return backend.get();
+		}
+
 		// Material management
 		std::shared_ptr<Material> loadMaterial(const std::string& a_id, const std::string& a_shaderProgramId);
 		bool hasMaterial(const std::string& a_id) const;
@@ -647,11 +710,24 @@ namespace MV {
 
 		std::unordered_map<std::string, std::shared_ptr<Shader>> shaders;
 		std::shared_ptr<Shader> defaultShaderPtr = nullptr;
+
+		// (program, blend, topology) -> shared pipeline. See pipelineFor / clearPipelineCache.
+		struct PipelineKey {
+			GLuint program; BlendMode blend; GLenum topology;
+			bool operator==(const PipelineKey& o) const { return program == o.program && blend == o.blend && topology == o.topology; }
+		};
+		struct PipelineKeyHash {
+			size_t operator()(const PipelineKey& k) const {
+				return (std::hash<GLuint>()(k.program) * 31u + static_cast<size_t>(k.blend)) * 31u + static_cast<size_t>(k.topology);
+			}
+		};
+		std::unordered_map<PipelineKey, Render::BoundPipeline, PipelineKeyHash> pipelineCache;
 		
 		std::unordered_map<std::string, std::shared_ptr<Material>> materials;
 		std::shared_ptr<Material> defaultMaterialPtr = nullptr;
 
 		bool isHeadless = false;
+		std::unique_ptr<Render::Device> backend;
 
 		static bool firstInitializationSDL;
 		static bool firstInitializationOpenGL;

@@ -76,6 +76,10 @@ namespace MV {
 			return consolidatedTexture;
 		}
 
+		// The active RHI device, via the pack's renderer (set at make() and on cereal load). Lets
+		// PackedTextureDefinition route its GPU upload through the device like every other texture.
+		Render::Device* device() const { return renderer ? renderer->device() : nullptr; }
+
 		void consolidate(const std::string &a_fileName, SharedTextures *a_shared);
 
 		std::string identifier() const{
@@ -176,6 +180,10 @@ namespace MV {
 		}
 
 		void reloadImplementation() override {
+			// Packed textures are created via make() and via cereal load_and_construct — neither goes
+			// through SharedTextures::dynamic(), so inject the device here (the one chokepoint both
+			// paths funnel through) so the base upload routes through the RHI instead of raw GL.
+			if (!renderDevice() && texturePack) { renderDevice(texturePack->device()); }
 			DynamicTextureDefinition::reloadImplementation();
 			texturePack->reloadedPackedTextureChild();
 		}

@@ -17,10 +17,19 @@
 
 namespace MV {
 	class ThreadPool;
+	class Draw2D;
+	namespace Render { class Device; }
 
 	class SharedTextures {
 		friend FileTextureDefinition;
 	public:
+		// Injected by the owner (see Managers) so the texture system can route GPU uploads through
+		// the active Render::Device instead of issuing raw GL. Borrowed, not owned; may be null in
+		// headless/tool contexts (then loads stay CPU-side / no upload).
+		void renderer(Draw2D* a_renderer) { ourRenderer = a_renderer; }
+		Draw2D* renderer() const { return ourRenderer; }
+		Render::Device* device() const;
+
 		inline static const std::vector<std::string> validExtensions { ".jpg", ".png", ".bmp", ".tga", ".gif", ".webp" };
 		struct PackItem {
 			std::string id;
@@ -101,6 +110,7 @@ namespace MV {
 		std::map<std::string, std::shared_ptr<SurfaceTextureDefinition>> surfaceDefinitions;
 
 		ThreadPool* ourLoadThreadPool = nullptr;
+		Draw2D* ourRenderer = nullptr;   // borrowed; supplies the active Render::Device for uploads.
 		std::atomic<int> ourPendingTextureLoads{ 0 };
 
 		// In-flight decode coalescing: many definitions can reference one image file. The first

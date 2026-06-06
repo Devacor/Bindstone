@@ -12,6 +12,10 @@ namespace MV {
 	| ---SharedTextures--- |
 	\**********************/
 
+	Render::Device* SharedTextures::device() const {
+		return ourRenderer ? ourRenderer->device() : nullptr;
+	}
+
 	std::shared_ptr<TexturePack> SharedTextures::pack(const std::string &a_name) {
 		std::string identifier = a_name;
 		auto foundDefinition = texturePacks.find(identifier);
@@ -40,6 +44,7 @@ namespace MV {
 		auto foundDefinition = fileDefinitions.find(identifier);
 		if(foundDefinition == fileDefinitions.end()){
 			std::shared_ptr<FileTextureDefinition> newDefinition = FileTextureDefinition::make(a_filename, true, a_repeat, a_pixel);
+			newDefinition->renderDevice(device());   // route GPU uploads through the active RHI device
 			fileDefinitions[identifier] = newDefinition;
 			return newDefinition;
 		} else{
@@ -66,6 +71,7 @@ namespace MV {
 		auto foundDefinition = dynamicDefinitions.find(identifier);
 		if(foundDefinition == dynamicDefinitions.end()){
 			std::shared_ptr<DynamicTextureDefinition> newDefinition = DynamicTextureDefinition::make(a_name, a_size, {0.0f, 0.0f, 0.0f, 0.0f});
+			newDefinition->renderDevice(device());
 			dynamicDefinitions[identifier] = newDefinition;
 			return newDefinition;
 		} else{
@@ -77,6 +83,7 @@ namespace MV {
 		auto foundDefinition = surfaceDefinitions.find(a_identifier);
 		if(foundDefinition == surfaceDefinitions.end()){
 			std::shared_ptr<SurfaceTextureDefinition> newDefinition = SurfaceTextureDefinition::make(a_identifier, a_surfaceGenerator);
+			newDefinition->renderDevice(device());
 			surfaceDefinitions[a_identifier] = newDefinition;
 			return newDefinition;
 		} else{
@@ -141,7 +148,15 @@ namespace MV {
 			if (stream) {
 				stream >> sliceBounds.minPoint.x >> sliceBounds.minPoint.y >> sliceBounds.maxPoint.x >> sliceBounds.maxPoint.y;
 			}
-			packItems.push_back({ path(filePath).filename().string(), FileTextureDefinition::make(filePath, true, false), sliceBounds });
+			auto definition = FileTextureDefinition::make(filePath, true, false);
+			// Hold each source loaded for the whole assembly (sort comparator's size(), add()'s
+			// contentSize(), and consolidate()'s composite). size()/contentSize() decode-then-unload
+			// when called on an unheld definition, so without this each source re-decodes several
+			// times; one load() keeps it resident (decode once). consolidate() releases them via
+			// shape.texture = nullptr, and they all need to be resident together for the composite
+			// anyway, so peak memory is unchanged.
+			definition->load();
+			packItems.push_back({ path(filePath).filename().string(), definition, sliceBounds });
 		}
 
 		std::sort(packItems.begin(), packItems.end(), std::greater<>());

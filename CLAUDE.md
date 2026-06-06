@@ -97,6 +97,27 @@ myObj->onEvent.connect([](std::shared_ptr<MyClass> obj) {
 - `jai::signal<T>::shared_receiver_type` - Type for holding signal connections
 - `jai::receiver<T>::shared_type` - Same as above (snake_case)
 
+## Code Style
+
+Match the surrounding engine, which is terse:
+- **Names carry the meaning.** Internal helpers get long descriptive names (`deviceBackSharedCache`,
+  `reloadedPackedTextureChild`); public/fluent APIs stay short and chainable (`texture()`, `bounds()`,
+  `blend()`). Prefer a clear name over a comment.
+- **Few comments.** Only explain non-obvious *why* (a gotcha, an invariant, a deliberate deviation),
+  in one line. No narration of *what* the code does, no change-history/war-story comments, no banners.
+- Match local indentation (tabs in most MV/scene files).
+
+## Rendering / texture lifetime (RHI port)
+
+- Texture **data** (decoded surface) is separate from its GPU **binding** (`BoundTexture` or legacy
+  GL name). `LoadedTextureData::bindToDevice()` builds the binding from the retained surface, then
+  releases the surface — the binding is the live copy.
+- **Recovery is reload(), not a retained surface.** If the binding is lost (context loss) or all
+  handles drop (refcounted `globalLookup`, so the entry frees and re-loads on next use), recovery goes
+  through `reloadImplementation()`: re-decode for file textures, regenerate for dynamic/surface
+  textures (their custom load option / `surfaceGenerator`). Any change here must keep reload able to
+  reconstruct from source.
+
 ## Git Safety
 
 - NEVER checkout files without explicit permission

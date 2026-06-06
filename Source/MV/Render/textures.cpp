@@ -151,7 +151,7 @@ namespace MV {
 		return OwnedSurface::make(img);
 	}
 
-	std::unique_ptr<LoadedTextureData> LoadedTexture::loadFile(const TextureParameters &a_parameters) {
+	std::unique_ptr<LoadedTextureData> LoadedTexture::loadFile(const TextureParameters &a_parameters, Render::Device* a_device) {
 		if (a_parameters.cleared) {
 			warning("Warning: Passing in a cleared texture parameter! [", a_parameters.path, "]");
 		}
@@ -159,7 +159,7 @@ namespace MV {
 		MV::info("Loading Image: ", a_parameters.path);
 		auto surface = decodeTextureSurface(a_parameters);
 		if (!surface) { return {}; }
-		return loadTextureFromSurface(surface, a_parameters);
+		return loadTextureFromSurface(surface, a_parameters, a_device);
 	}
 
 	bool LoadedTexture::isCached(const TextureParameters &a_parameters) {
@@ -167,14 +167,25 @@ namespace MV {
 		return globalLookup.find(a_parameters) != globalLookup.end();
 	}
 
+	bool LoadedTexture::deviceBackInPlace(const TextureParameters &a_parameters, Render::Device* a_device) {
+		if (!a_device || RUNNING_IN_HEADLESS) { return false; }
+		std::scoped_lock guard(lock);
+		auto found = globalLookup.find(a_parameters);
+		if (found == globalLookup.end() || !found->second) { return false; } // not cached -> caller load()s fresh
+		LoadedTextureData* existing = found->second.get();
+		// Upgrade the shared entry in place from its retained surface; every holder shares it, nothing is erased.
+		existing->bindToDevice(a_device);
+		return existing->boundTexture.valid();
+	}
+
 	// Uploads an already-decoded surface on the calling (GL) thread and caches it so a later
 	// LoadedTexture(params) is a hit. Called serially from flushDeferredLoad after the parallel
 	// decode; a null/failed surface is left uncached (the eventual load() retries inline).
-	void LoadedTexture::cacheDecodedSurface(const TextureParameters &a_parameters, const std::shared_ptr<OwnedSurface> &a_surface) {
+	void LoadedTexture::cacheDecodedSurface(const TextureParameters &a_parameters, const std::shared_ptr<OwnedSurface> &a_surface, Render::Device* a_device) {
 		if (!a_surface || !a_surface->get()) { return; }
 		std::scoped_lock guard(lock);
 		if (globalLookup.find(a_parameters) != globalLookup.end()) { return; }
-		auto data = loadTextureFromSurface(a_surface, a_parameters);
+		auto data = loadTextureFromSurface(a_surface, a_parameters, a_device);
 		if (data) {
 			globalLookup.insert({ a_parameters, std::move(data) });
 		}
@@ -236,13 +247,15 @@ namespace MV {
 				try { *surface = decodeTextureSurface(params); } catch (...) { *surface = nullptr; }
 			},
 			[self, params, surface]() {
-				LoadedTexture::cacheDecodedSurface(params, *surface);   // GL upload (main thread), once
+				// Main thread: upload through the active RHI device (matches the synchronous path).
+				LoadedTexture::cacheDecodedSurface(params, *surface, self->device());
 				auto it = self->ourInFlightLoads.find(params);
 				if (it == self->ourInFlightLoads.end()) { return; }
 				std::vector<PendingTextureLoad> waiters = std::move(it->second);
 				self->ourInFlightLoads.erase(it);
 				for (auto& waiter : waiters) {
 					waiter.definition->loadPending = false;
+					waiter.definition->renderDevice(self->device());   // ensure the waiter resolves via the device too
 					waiter.definition->load();   // globalLookup hit -> sets loadedTexture, fires onReload
 					--self->ourPendingTextureLoads;
 					if (waiter.onLoaded) { waiter.onLoaded(); }
@@ -251,8 +264,76 @@ namespace MV {
 			ThreadPool::Job::Continue::MAIN_THREAD));
 	}
 
+	// ---- LoadedTextureData: GL name resolution + GPU lifetime --------------------------
+	GLuint LoadedTextureData::id() const {
+		// Device path: native GL name behind the BoundTexture (transition shim). Legacy: owned name.
+		if (renderDevice && boundTexture.valid()) {
+			return static_cast<GLuint>(renderDevice->nativeTextureId(boundTexture));
+		}
+		return textureId.id();
+	}
+	LoadedTextureData::~LoadedTextureData() {
+		// Only the device-backed handle frees here; the legacy OpenGlTextureId member frees via its own dtor.
+		if (renderDevice && boundTexture.valid()) {
+			renderDevice->destroyTexture(boundTexture);
+		}
+	}
+
+	static Render::PixelFormat rhiFormatForSurface(SDL_Surface* a_surface); // defined below
+
+	void LoadedTextureData::bindToDevice(Render::Device* a_device) {
+		if (!a_device || RUNNING_IN_HEADLESS) { return; }
+		if (boundTexture.valid() && renderDevice == a_device) { return; } // already device-backed
+		if (!sourceSurface || !sourceSurface->get()) { return; }          // no retained data to bind from
+
+		SDL_Surface* surf = sourceSurface->get();
+		Render::TextureDesc desc;
+		desc.width = surf->w;
+		desc.height = surf->h;
+		desc.format = rhiFormatForSurface(surf);
+		desc.dimension = Render::TextureDimension::Tex2D;
+		desc.usage = Render::TextureUsage::Sampled | Render::TextureUsage::CopyDst;
+
+		auto uploadStart = std::chrono::steady_clock::now();
+		Render::BoundTexture bound = a_device->createTexture(desc, surf->pixels);
+		auto& prof = textureLoadProfile();
+		prof.uploadMicros += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - uploadStart).count();
+		++prof.uploadCalls;
+		prof.uploadBytes += static_cast<int64_t>(surf->w) * surf->h * 4;
+
+		Render::SamplerDesc samplerDesc;
+		samplerDesc.min = samplerDesc.mag = sourceParameters.pixel ? Render::Filter::Nearest : Render::Filter::Linear;
+		samplerDesc.mip = Render::MipFilter::None;
+		samplerDesc.u = samplerDesc.v = sourceParameters.repeat ? Render::AddressMode::Repeat : Render::AddressMode::ClampToEdge;
+
+		renderDevice = a_device;
+		boundTexture = bound;
+		boundSampler = a_device->createSampler(samplerDesc);
+		textureId = OpenGlTextureId(0u);   // drop any legacy GL name
+		sourceSurface.reset();             	}
+
+	void LoadedTextureData::uploadLegacyGl(SDL_Surface* a_surf, const TextureParameters& a_parameters) {
+		glBindTexture(GL_TEXTURE_2D, textureId);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (a_parameters.pixel) ? GL_NEAREST : GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (a_parameters.pixel) ? GL_NEAREST : GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (a_parameters.repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_parameters.repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+
+		auto uploadStart = std::chrono::steady_clock::now();
+		glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(a_surf), a_surf->w, a_surf->h, 0, getTextureFormat(a_surf), GL_UNSIGNED_BYTE, a_surf->pixels);
+		auto& prof = textureLoadProfile();
+		prof.uploadMicros += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - uploadStart).count();
+		++prof.uploadCalls;
+		prof.uploadBytes += static_cast<int64_t>(a_surf->w) * a_surf->h * 4;
+	}
+
+	static Render::PixelFormat rhiFormatForSurface(SDL_Surface* a_surface) {
+		return (getTextureFormat(a_surface) == GL_BGRA) ? Render::PixelFormat::BGRA8_UNORM
+		                                                : Render::PixelFormat::RGBA8_UNORM;
+	}
+
 	//Load an opengl texture
-	std::unique_ptr<LoadedTextureData> loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &a_img, const TextureParameters &a_parameters) {
+	std::unique_ptr<LoadedTextureData> loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &a_img, const TextureParameters &a_parameters, Render::Device* a_device) {
 		if (a_img == nullptr || a_img->get() == nullptr) {
 			error("ERROR: loadTextureFromSurface was provided a null SDL_Surface!");
 			return {};
@@ -263,32 +344,23 @@ namespace MV {
 			error("Unable to determine texture format!");
 			return {};
 		}
-		Size<int> originalSize{ a_img->get()->w, a_img->get()->h };
 		auto surfaceToWorkWith = normalizeSurface(a_img, a_parameters.powerTwo);
 
-		auto results = RUNNING_IN_HEADLESS ? std::make_unique<LoadedTextureData>(0) : std::make_unique<LoadedTextureData>();
+		// Retain the normalized surface so a later device back-fill (bindToDevice) never re-decodes the file.
+		std::unique_ptr<LoadedTextureData> results =
+			RUNNING_IN_HEADLESS ? std::make_unique<LoadedTextureData>(0) : std::make_unique<LoadedTextureData>();
 
 		results->originalSize.width = a_img->get()->w;
 		results->originalSize.height = a_img->get()->h;
-
 		results->size.width = surfaceToWorkWith->get()->w;
 		results->size.height = surfaceToWorkWith->get()->h;
+		results->sourceSurface = surfaceToWorkWith;
+		results->sourceParameters = a_parameters;
 
-		if (!RUNNING_IN_HEADLESS) {
-			glBindTexture(GL_TEXTURE_2D, results->textureId);
-
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (a_parameters.pixel) ? GL_NEAREST : GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (a_parameters.pixel) ? GL_NEAREST : GL_LINEAR);
-
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (a_parameters.repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_parameters.repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-
-			auto uploadStart = std::chrono::steady_clock::now();
-			glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(surfaceToWorkWith->get()), surfaceToWorkWith->get()->w, surfaceToWorkWith->get()->h, 0, getTextureFormat(surfaceToWorkWith->get()), GL_UNSIGNED_BYTE, surfaceToWorkWith->get()->pixels);
-			auto& prof = textureLoadProfile();
-			prof.uploadMicros += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - uploadStart).count();
-			++prof.uploadCalls;
-			prof.uploadBytes += static_cast<int64_t>(surfaceToWorkWith->get()->w) * surfaceToWorkWith->get()->h * 4;
+		if (a_device && !RUNNING_IN_HEADLESS) {
+			results->bindToDevice(a_device);                 // device binding from the retained surface
+		} else if (!RUNNING_IN_HEADLESS) {
+			results->uploadLegacyGl(surfaceToWorkWith->get(), a_parameters); // transitional raw-GL upload
 		}
 		return results;
 	}
@@ -318,6 +390,40 @@ namespace MV {
 		return 0;
 	}
 
+	Render::BoundTexture TextureDefinition::boundTexture() const {
+		return loadedTexture ? loadedTexture->bound() : Render::BoundTexture{};
+	}
+
+	void TextureDefinition::ensureDeviceBacked(Render::Device* a_device) {
+		// Back-fill a BoundTexture at draw time when the device appears after the texture loaded. Idempotent once bound.
+		if (!a_device || RUNNING_IN_HEADLESS) { return; }
+		if (loadedTexture && loadedTexture->bound().valid() && ourDevice == a_device) { return; }
+		ourDevice = a_device;
+		if (!loaded()) { return; }
+
+		// Shared (file) textures: upgrade the shared cache entry in place; our loadedTexture already points at it.
+		if (deviceBackSharedCache(a_device)) {
+			if (isShared) { onReloadAction(shared_from_this()); }
+			return;
+		}
+
+		// Locally-owned with a retained surface: bind in place, no regen/decode.
+		if (loadedTexture && loadedTexture->data().sourceSurface) {
+			loadedTexture->data().bindToDevice(a_device);
+			if (isShared) { onReloadAction(shared_from_this()); }
+			return;
+		}
+
+		// Raw-pixel textures (dynamic/atlas/white): no surface, so rebuild via the device.
+		loadedTexture.reset();
+		reloadImplementation();
+		if (isShared) { onReloadAction(shared_from_this()); }
+	}
+
+	Render::BoundSampler TextureDefinition::boundSampler() const {
+		return loadedTexture ? loadedTexture->sampler() : Render::BoundSampler{};
+	}
+
 	bool TextureDefinition::loaded() const {
 		return textureId() != 0;
 	}
@@ -328,7 +434,8 @@ namespace MV {
 	}
 
 	void TextureDefinition::cleanupOpenglTexture() {
-		loadedTexture.release();
+		// reset() (NOT release()): runs ~LoadedTexture so the shared-cache refcount drops and the GPU texture frees.
+		loadedTexture.reset();
 	}
 
 	Size<int> TextureDefinition::size() {
@@ -447,8 +554,8 @@ namespace MV {
 	\*****************************/
 
 	void FileTextureDefinition::reloadImplementation() {
-		loadedTexture = std::make_unique<LoadedTexture>(TextureParameters{ textureName, powerTwo, repeat, pixel });
-		if (loadedTexture->id() != 0) {
+		loadedTexture = std::make_unique<LoadedTexture>(TextureParameters{ textureName, powerTwo, repeat, pixel }, ourDevice);
+		if (loadedTexture->id() != 0 || loadedTexture->bound().valid()) {
 			textureSize = loadedTexture->data().size;
 			desiredSize = loadedTexture->data().originalSize;
 		} else {
@@ -464,16 +571,38 @@ namespace MV {
 		textureSize.width = roundUpPowerOfTwo(textureSize.width);
 		textureSize.height = roundUpPowerOfTwo(textureSize.height);
 		if (RUNNING_IN_HEADLESS) { return; }
+
+		// Create Storage Space For Texture Data (background-filled RGBA).
+		std::vector<unsigned char> pixels(static_cast<size_t>(textureSize.width) * textureSize.height * 4);
+		memset(pixels.data(), backgroundColor.hex(), pixels.size() * sizeof(unsigned char));
+
+		if (ourDevice) {
+			// Device path: allocate+upload through the RHI; hold the BoundTexture in locally-owned data.
+			Render::TextureDesc desc;
+			desc.width = textureSize.width;
+			desc.height = textureSize.height;
+			desc.format = Render::PixelFormat::RGBA8_UNORM;
+			desc.dimension = Render::TextureDimension::Tex2D;
+			desc.usage = Render::TextureUsage::Sampled | Render::TextureUsage::CopyDst | Render::TextureUsage::ColorTarget;
+			Render::BoundTexture bound = ourDevice->createTexture(desc, pixels.data());
+
+			Render::SamplerDesc samplerDesc; // dynamic textures used LINEAR + CLAMP_TO_EDGE in the legacy path.
+			Render::BoundSampler sampler = ourDevice->createSampler(samplerDesc);
+
+			auto data = std::make_unique<LoadedTextureData>(ourDevice, bound, sampler);
+			data->originalSize = { desiredSize.width, desiredSize.height };
+			data->size = { textureSize.width, textureSize.height };
+			loadedTexture = std::make_unique<LoadedTexture>(std::move(data));
+			return;
+		}
+
+		// Legacy raw-GL path (no device; transitional).
 		loadedTexture = std::make_unique<LoadedTexture>(TextureParameters());
 		loadedTexture->data().originalSize.width = desiredSize.width;
 		loadedTexture->data().originalSize.height = desiredSize.height;
 		loadedTexture->data().size.width = textureSize.width;
 		loadedTexture->data().size.height = textureSize.height;
 
-		// Create Storage Space For Texture Data (128x128x4)
-		std::vector<unsigned char> pixels(static_cast<size_t>(textureSize.width) * textureSize.height * 4);
-		memset(pixels.data(), backgroundColor.hex(), pixels.size() * sizeof(unsigned char));
-		
 		glBindTexture(GL_TEXTURE_2D, loadedTexture->id());			// Bind The Texture
 		// Build Texture Using Information In data
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -500,8 +629,8 @@ namespace MV {
 
 		generatedSurfaceSize = Size<int>(newSurface->get()->w, newSurface->get()->h);
 
-		loadedTexture = std::make_unique<LoadedTexture>(loadTextureFromSurface(newSurface, TextureParameters(true, false, false)));
-		if (loadedTexture->id() != 0) {
+		loadedTexture = std::make_unique<LoadedTexture>(loadTextureFromSurface(newSurface, TextureParameters(true, false, false), ourDevice));
+		if (loadedTexture->id() != 0 || loadedTexture->bound().valid()) {
 			textureSize = loadedTexture->data().size;
 			desiredSize = loadedTexture->data().originalSize;
 		} else {
@@ -607,6 +736,11 @@ namespace MV {
 			// thread, showing the loading-placeholder checker meanwhile. Non-file definitions
 			// (dynamic/surface) generate in memory, so they load inline.
 			if (a_sharedTextures) {
+				// Route GPU upload through the active device (the definition may have been created via
+				// a path that didn't inject it — e.g. cereal deserialization).
+				if (textureDefinition && !textureDefinition->renderDevice()) {
+					textureDefinition->renderDevice(a_sharedTextures->device());
+				}
 				if (auto fileDefinition = std::dynamic_pointer_cast<FileTextureDefinition>(textureDefinition)) {
 					a_sharedTextures->loadFile(fileDefinition);
 					return;

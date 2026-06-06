@@ -62,6 +62,11 @@ namespace MV {
 			if (bufferId != 0) {
 				glDeleteBuffers(1, &bufferId);
 			}
+			// Free device buffers via the cached device, not owner() (gone during teardown, would throw).
+			if (deviceForCleanup) {
+				if (deviceVertexBuffer.valid()) { deviceForCleanup->destroyBuffer(deviceVertexBuffer); }
+				if (deviceIndexBuffer.valid())  { deviceForCleanup->destroyBuffer(deviceIndexBuffer); }
+			}
 		}
 
 		bool Drawable::draw() {
@@ -186,70 +191,135 @@ namespace MV {
 			refreshBounds();
 		}
 
+		// The material/userMaterialSettings pass; shaderProgram->set records into the open uniform set (device) or issues GL (legacy).
+		void Drawable::applyMaterialPass(Draw2D &a_renderer) {
+			if (materialInstance) {
+				try {
+					MaterialContext context {
+						a_renderer,
+						static_cast<float>(accumulatedDelta),
+						owner()->worldTransform(),
+						owner()->worldAlpha(),
+						owner()->cameraId()
+					};
+					materialInstance->apply(*shaderProgram, context);
+				} catch (std::exception &e) {
+					MV::error("Drawable::defaultDrawImplementation. Exception in material->apply: ", e.what());
+				}
+			} else {
+				materialSettingsImplementation(*shaderProgram);
+				if (userMaterialSettings) {
+					try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
+				}
+			}
+		}
+
 		void Drawable::defaultDrawImplementation() {
 			auto& ourRenderer = owner()->renderer();
 			if (ourRenderer.headless()) { return; }
 
-			if (!vertexIndices->empty()) {
-				require<ResourceException>(shaderProgram, "No shader program for Drawable!");
-				shaderProgram->use();
+			if (vertexIndices->empty()) { return; }
+			require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 
-				if (bufferId == 0) {
-					glGenBuffers(1, &bufferId);
-				}
+			Render::Device* dev = ourRenderer.device();
 
-				applyPresetBlendMode(ourRenderer);
+			// =========================== DEVICE (RHI) PATH ===========================
+			// Only when this shader has device modules (else legacy: emitter/spine, or a pre-device shader).
+			if (dev && shaderProgram->device() == dev) {
+				deviceForCleanup = dev;   // cached so ~Drawable frees buffers without calling owner()
+				const auto structSize = static_cast<size_t>(sizeof(points[0]));
 
-				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
-
-				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
-				if (dirtyVertexBuffer) {
+				// updateBuffer cannot grow a buffer, so recreate when the byte size changes; else update in place.
+				const size_t vertexBytes = points->size() * structSize;
+				if (!deviceVertexBuffer.valid() || vertexBytes != deviceVertexBufferBytes) {
+					if (deviceVertexBuffer.valid()) { dev->destroyBuffer(deviceVertexBuffer); }
+					deviceVertexBuffer = dev->createBuffer(Render::BufferUsage::Vertex, Render::BufferUpdateHint::Dynamic, points->data(), vertexBytes);
+					deviceVertexBufferBytes = vertexBytes;
 					dirtyVertexBuffer = false;
-					glBufferData(GL_ARRAY_BUFFER, points->size() * structSize, &(points[0]), GL_STATIC_DRAW);
-				}
-				glEnableVertexAttribArray(0);
-				glEnableVertexAttribArray(1);
-				glEnableVertexAttribArray(2);
-
-				auto positionOffset = static_cast<size_t>(offsetof(DrawPoint, x));
-				auto textureOffset = static_cast<size_t>(offsetof(DrawPoint, textureX));
-				auto colorOffset = static_cast<size_t>(offsetof(DrawPoint, R));
-				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
-				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
-				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
-
-				// Apply material if present
-				if (materialInstance) {
-					try {
-						// Create material context
-						MaterialContext context {
-							ourRenderer,
-							static_cast<float>(accumulatedDelta),
-							owner()->worldTransform(),
-							owner()->worldAlpha(),
-							owner()->cameraId()
-						};
-						materialInstance->apply(*shaderProgram, context); 
-					} catch (std::exception &e) { 
-						MV::error("Drawable::defaultDrawImplementation. Exception in material->apply: ", e.what()); 
-					}
-				} else {
-					// Use old path
-					materialSettingsImplementation(*shaderProgram);
-					if (userMaterialSettings) {
-						try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
-					}
+				} else if (dirtyVertexBuffer) {
+					dirtyVertexBuffer = false;
+					dev->updateBuffer(deviceVertexBuffer, points->data(), vertexBytes, 0);
 				}
 
-				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices->size()), GL_UNSIGNED_INT, &vertexIndices[0]);
-
-				glDisableVertexAttribArray(0);
-				glDisableVertexAttribArray(1);
-				glDisableVertexAttribArray(2);
-				glUseProgram(0);
-				if ((materialInstance && materialInstance->blend() != BLEND_DEFAULT) || blendModePreset != BLEND_DEFAULT) {
-					ourRenderer.defaultBlendFunction();
+				// Index buffer: real GPU buffer (client-side arrays are illegal in Vk/Metal); same resize rule.
+				const size_t indexBytes = vertexIndices->size() * sizeof(GLuint);
+				if (!deviceIndexBuffer.valid() || indexBytes != deviceIndexBufferBytes) {
+					if (deviceIndexBuffer.valid()) { dev->destroyBuffer(deviceIndexBuffer); }
+					deviceIndexBuffer = dev->createBuffer(Render::BufferUsage::Index, Render::BufferUpdateHint::Dynamic, vertexIndices->data(), indexBytes);
+					deviceIndexBufferBytes = indexBytes;
+					dirtyIndexBuffer = false;
+				} else if (dirtyIndexBuffer) {
+					dirtyIndexBuffer = false;
+					dev->updateBuffer(deviceIndexBuffer, vertexIndices->data(), indexBytes, 0);
 				}
+
+				// Resolve the shared pipeline (blend = material override or preset; topology = drawType).
+				const BlendMode effectiveBlend = materialInstance ? materialInstance->blend() : blendModePreset;
+				if (devicePipeline != cachedPipelineForKey || cachedBlendMode != effectiveBlend
+				    || cachedTopologyDrawType != drawType || !deviceUniformSet.valid()) {
+					devicePipeline = ourRenderer.pipelineFor(shaderProgram, effectiveBlend, drawType);
+					cachedPipelineForKey = devicePipeline;
+					cachedBlendMode = effectiveBlend;
+					cachedTopologyDrawType = drawType;
+					deviceUniformSet = dev->createUniformSet(devicePipeline); // a uniform set is bound to a pipeline.
+				}
+
+				// Re-record uniforms+textures (the set is a name-keyed bag). Save/restore around it: a nested
+				// draw (mid-draw atlas FBO refill on this same shared Shader) must not clobber the outer set.
+				Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(deviceUniformSet);
+				applyMaterialPass(ourRenderer);
+				shaderProgram->endRecording(prevRecording);
+
+				Render::DrawItem item;
+				item.pipeline = devicePipeline;
+				item.vertexBuffer = deviceVertexBuffer;
+				item.indexBuffer = deviceIndexBuffer;
+				item.indexType = Render::IndexType::Uint32;
+				item.indexCount = static_cast<uint32_t>(vertexIndices->size());
+				item.firstIndex = 0;
+				item.baseVertex = 0;
+				item.uniforms = deviceUniformSet;
+				dev->draw(item);
+				return;
+			}
+
+			// ============================ LEGACY RAW-GL PATH ============================
+			shaderProgram->use();
+
+			if (bufferId == 0) {
+				glGenBuffers(1, &bufferId);
+			}
+
+			applyPresetBlendMode(ourRenderer);
+
+			glBindBuffer(GL_ARRAY_BUFFER, bufferId);
+
+			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
+			if (dirtyVertexBuffer) {
+				dirtyVertexBuffer = false;
+				glBufferData(GL_ARRAY_BUFFER, points->size() * structSize, &(points[0]), GL_STATIC_DRAW);
+			}
+			glEnableVertexAttribArray(0);
+			glEnableVertexAttribArray(1);
+			glEnableVertexAttribArray(2);
+
+			auto positionOffset = static_cast<size_t>(offsetof(DrawPoint, x));
+			auto textureOffset = static_cast<size_t>(offsetof(DrawPoint, textureX));
+			auto colorOffset = static_cast<size_t>(offsetof(DrawPoint, R));
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
+			glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
+			glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
+
+			applyMaterialPass(ourRenderer);
+
+			glDrawElements(drawType, static_cast<GLsizei>(vertexIndices->size()), GL_UNSIGNED_INT, &vertexIndices[0]);
+
+			glDisableVertexAttribArray(0);
+			glDisableVertexAttribArray(1);
+			glDisableVertexAttribArray(2);
+			glUseProgram(0);
+			if ((materialInstance && materialInstance->blend() != BLEND_DEFAULT) || blendModePreset != BLEND_DEFAULT) {
+				ourRenderer.defaultBlendFunction();
 			}
 		}
 
@@ -276,6 +346,7 @@ namespace MV {
 
 		void Drawable::refreshBounds() {
 			dirtyVertexBuffer = true;
+			dirtyIndexBuffer = true;   // refreshBounds runs after setPoints/appendPoints, which can change indices.
 			auto originalBounds = *localBounds;
 			if (!points->empty()) {
 				localBounds->initialize(points[0]);
@@ -320,7 +391,9 @@ namespace MV {
 		void Drawable::materialSettingsImplementation(Shader& a_shaderProgram) {
 			auto ourOwner = owner();
 			a_shaderProgram.set("time", static_cast<PointPrecision>(accumulatedDelta), false); //optional but helpful default
-			if (ourOwner->worldAlpha() != 1.0f) { a_shaderProgram.set("alpha", ourOwner->worldAlpha(), false); }
+			// Record alpha unconditionally: the device path reuses one uniform set, so a conditional set
+			// would let a stale prior-frame alpha persist (alpha==1 is the shader identity anyway).
+			a_shaderProgram.set("alpha", ourOwner->worldAlpha(), false);
 			addTexturesToShader();
 
 			a_shaderProgram.set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform());

@@ -282,6 +282,10 @@ namespace MV {
 
 			virtual void materialSettingsImplementation(Shader& a_shaderProgram);
 
+			// Runs material/userMaterialSettings; records into the shader's uniform set on the device
+			// path, or issues GL live on the legacy path. Shared by both branches of the draw impl.
+			void applyMaterialPass(Draw2D& a_renderer);
+
 			void addTexturesToShader();
 
 			virtual void onRemoved() {
@@ -407,6 +411,23 @@ namespace MV {
 			GLuint bufferId = 0;
 
 			bool dirtyVertexBuffer = true;
+
+			// --- RHI device-path caches (parallel to bufferId/dirtyVertexBuffer). ---
+			// Per-drawable buffers + a uniform set reused across frames (re-recorded each draw) so the
+			// backend's set pool doesn't grow per-frame; pipeline is borrowed from Draw2D's cache.
+			Render::BoundBuffer     deviceVertexBuffer;
+			Render::BoundBuffer     deviceIndexBuffer;
+			// Allocated size of each buffer: updateBuffer can't grow one, so recreate when the count changes; equal size => in-place.
+			size_t                  deviceVertexBufferBytes = 0;
+			size_t                  deviceIndexBufferBytes = 0;
+			Render::BoundUniformSet deviceUniformSet;
+			Render::BoundPipeline   devicePipeline;        // borrowed from Draw2D::pipelineFor (do not destroy).
+			Render::BoundPipeline   cachedPipelineForKey;  // == devicePipeline when the key below is current.
+			BlendMode               cachedBlendMode = BLEND_DEFAULT;
+			GLenum                  cachedTopologyDrawType = 0; // 0 == no pipeline resolved yet.
+			bool                    dirtyIndexBuffer = true;
+			// Lets ~Drawable free its device buffers without calling owner() (which throws during teardown).
+			Render::Device*         deviceForCleanup = nullptr;
 
 			JAI_DELETED_PROPERTY((std::shared_ptr<TextureHandle>), ourTexture);
 

@@ -58,6 +58,8 @@ namespace MV {
 				auto textureSize = round<int>(pointAABB.size());
 				if (!clippedTexture || clippedTexture->size() != textureSize) {
 					clippedTexture = DynamicTextureDefinition::make("", textureSize, { 0.0f, 0.0f, 0.0f, 0.0f });
+					// Device-back before the first load so the FBO attachment and the sampled texture are one object.
+					clippedTexture->renderDevice(owner()->renderer().device());
 				}
 
 				texture(clippedTexture->makeHandle(textureSize));

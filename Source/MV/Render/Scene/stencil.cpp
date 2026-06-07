@@ -12,32 +12,14 @@ namespace MV {
 	namespace Scene {
 
 		void Stencil::drawStencil() {
-// 			shaderUpdater = [&](MV::Shader* a_shader) {
-// 				a_shader->set("alphaFilter", 0.01f);
-// 			};
+			// Mask geometry writes stencil only (no color) via a colorWriteMask=0 pipeline.
+			devicePipelineColorWriteMask = 0;
 			Drawable::defaultDrawImplementation();
+			devicePipelineColorWriteMask = 0xF;
 		}
 
-		int Stencil::totalStencilDepth = 0;
-
  		bool Stencil::preDraw() {
-			if (shouldDraw) {
-				glStencilMask(0xFF);
-				if (totalStencilDepth++ == 0) {
-					glEnable(GL_STENCIL_TEST);
-					glClear(GL_STENCIL_BUFFER_BIT);
-				}
-
-				glStencilFunc(GL_ALWAYS, totalStencilDepth, totalStencilDepth);  //Always fail the stencil test
-				glStencilOp(GL_INCR, GL_INCR, GL_INCR);   //Set the pixels which failed to 1
-				
-				glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-				drawStencil();
-				glStencilMask(0x00);
-				glColorMask(true, true, true, true);
-				glStencilFunc(GL_EQUAL, totalStencilDepth, totalStencilDepth);   //Only pass the stencil test where the pixel is 1 in the stencil buffer
-				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);   //Don't change the stencil buffer any further
-			}
+			if (shouldDraw) { owner()->renderer().stencil().push([this]{ drawStencil(); }); }
 			return false;
 		}
 
@@ -45,21 +27,8 @@ namespace MV {
 			return true;
 		}
 
-		//TODO: Cache the stencil properly instead of assuming nothing changed in this node and naively drawing it again (may cause artifacts!)
 		void Stencil::endDraw() {
-			if (shouldDraw) {
-				glColorMask(false, false, false, false);
-				glStencilFunc(GL_ALWAYS, totalStencilDepth, totalStencilDepth);
-				glStencilOp(GL_DECR, GL_DECR, GL_DECR);
-				glStencilMask(0xFF);
-				drawStencil();
-				glStencilMask(0x00);
-				glColorMask(true, true, true, true);
-
-				if (--totalStencilDepth == 0) {
-					glDisable(GL_STENCIL_TEST);
-				}
-			}
+			if (shouldDraw) { owner()->renderer().stencil().pop([this]{ drawStencil(); }); }
 		}
 
 		void Stencil::defaultDrawImplementation() {

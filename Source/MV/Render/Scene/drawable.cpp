@@ -59,9 +59,6 @@ namespace MV {
 	namespace Scene {
 
 		Drawable::~Drawable() {
-			if (bufferId != 0) {
-				glDeleteBuffers(1, &bufferId);
-			}
 			// Free device buffers via the cached device, not owner() (gone during teardown, would throw).
 			if (deviceForCleanup) {
 				if (deviceVertexBuffer.valid()) { deviceForCleanup->destroyBuffer(deviceVertexBuffer); }
@@ -214,134 +211,70 @@ namespace MV {
 			}
 		}
 
+		void Drawable::syncDeviceBuffers(Render::Device* a_device, Render::BufferUpdateHint a_hint) {
+			deviceForCleanup = a_device;   // cached so ~Drawable frees buffers without calling owner()
+			const size_t structSize = sizeof(points[0]);
+
+			const size_t vertexBytes = points->size() * structSize;
+			if (!deviceVertexBuffer.valid() || vertexBytes != deviceVertexBufferBytes) {
+				if (deviceVertexBuffer.valid()) { a_device->destroyBuffer(deviceVertexBuffer); }
+				deviceVertexBuffer = a_device->createBuffer(Render::BufferUsage::Vertex, a_hint, points->data(), vertexBytes);
+				deviceVertexBufferBytes = vertexBytes;
+				dirtyVertexBuffer = false;
+			} else if (dirtyVertexBuffer) {
+				dirtyVertexBuffer = false;
+				a_device->updateBuffer(deviceVertexBuffer, points->data(), vertexBytes, 0);
+			}
+
+			// Index buffer: a real GPU buffer (client-side arrays are illegal in Vk/Metal); same resize rule.
+			const size_t indexBytes = vertexIndices->size() * sizeof(GLuint);
+			if (!deviceIndexBuffer.valid() || indexBytes != deviceIndexBufferBytes) {
+				if (deviceIndexBuffer.valid()) { a_device->destroyBuffer(deviceIndexBuffer); }
+				deviceIndexBuffer = a_device->createBuffer(Render::BufferUsage::Index, a_hint, vertexIndices->data(), indexBytes);
+				deviceIndexBufferBytes = indexBytes;
+				dirtyIndexBuffer = false;
+			} else if (dirtyIndexBuffer) {
+				dirtyIndexBuffer = false;
+				a_device->updateBuffer(deviceIndexBuffer, vertexIndices->data(), indexBytes, 0);
+			}
+		}
+
 		void Drawable::defaultDrawImplementation() {
 			auto& ourRenderer = owner()->renderer();
-			if (ourRenderer.headless()) { return; }
-
 			if (vertexIndices->empty()) { return; }
 			require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 
 			Render::Device* dev = ourRenderer.device();
+			syncDeviceBuffers(dev, Render::BufferUpdateHint::Dynamic);
 
-			// =========================== DEVICE (RHI) PATH ===========================
-			// Only when this shader has device modules (else legacy: emitter/spine, or a pre-device shader).
-			if (dev && shaderProgram->device() == dev) {
-				deviceForCleanup = dev;   // cached so ~Drawable frees buffers without calling owner()
-				const auto structSize = static_cast<size_t>(sizeof(points[0]));
-
-				// updateBuffer cannot grow a buffer, so recreate when the byte size changes; else update in place.
-				const size_t vertexBytes = points->size() * structSize;
-				if (!deviceVertexBuffer.valid() || vertexBytes != deviceVertexBufferBytes) {
-					if (deviceVertexBuffer.valid()) { dev->destroyBuffer(deviceVertexBuffer); }
-					deviceVertexBuffer = dev->createBuffer(Render::BufferUsage::Vertex, Render::BufferUpdateHint::Dynamic, points->data(), vertexBytes);
-					deviceVertexBufferBytes = vertexBytes;
-					dirtyVertexBuffer = false;
-				} else if (dirtyVertexBuffer) {
-					dirtyVertexBuffer = false;
-					dev->updateBuffer(deviceVertexBuffer, points->data(), vertexBytes, 0);
-				}
-
-				// Index buffer: real GPU buffer (client-side arrays are illegal in Vk/Metal); same resize rule.
-				const size_t indexBytes = vertexIndices->size() * sizeof(GLuint);
-				if (!deviceIndexBuffer.valid() || indexBytes != deviceIndexBufferBytes) {
-					if (deviceIndexBuffer.valid()) { dev->destroyBuffer(deviceIndexBuffer); }
-					deviceIndexBuffer = dev->createBuffer(Render::BufferUsage::Index, Render::BufferUpdateHint::Dynamic, vertexIndices->data(), indexBytes);
-					deviceIndexBufferBytes = indexBytes;
-					dirtyIndexBuffer = false;
-				} else if (dirtyIndexBuffer) {
-					dirtyIndexBuffer = false;
-					dev->updateBuffer(deviceIndexBuffer, vertexIndices->data(), indexBytes, 0);
-				}
-
-				// Resolve the shared pipeline (blend = material override or preset; topology = drawType).
-				const BlendMode effectiveBlend = materialInstance ? materialInstance->blend() : blendModePreset;
-				if (devicePipeline != cachedPipelineForKey || cachedBlendMode != effectiveBlend
-				    || cachedTopologyDrawType != drawType || !deviceUniformSet.valid()) {
-					devicePipeline = ourRenderer.pipelineFor(shaderProgram, effectiveBlend, drawType);
-					cachedPipelineForKey = devicePipeline;
-					cachedBlendMode = effectiveBlend;
-					cachedTopologyDrawType = drawType;
-					deviceUniformSet = dev->createUniformSet(devicePipeline); // a uniform set is bound to a pipeline.
-				}
-
-				// Re-record uniforms+textures (the set is a name-keyed bag). Save/restore around it: a nested
-				// draw (mid-draw atlas FBO refill on this same shared Shader) must not clobber the outer set.
-				Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(deviceUniformSet);
-				applyMaterialPass(ourRenderer);
-				shaderProgram->endRecording(prevRecording);
-
-				Render::DrawItem item;
-				item.pipeline = devicePipeline;
-				item.vertexBuffer = deviceVertexBuffer;
-				item.indexBuffer = deviceIndexBuffer;
-				item.indexType = Render::IndexType::Uint32;
-				item.indexCount = static_cast<uint32_t>(vertexIndices->size());
-				item.firstIndex = 0;
-				item.baseVertex = 0;
-				item.uniforms = deviceUniformSet;
-				dev->draw(item);
-				return;
+			// Resolve the shared pipeline (blend = material override or preset; topology = drawType).
+			const BlendMode effectiveBlend = materialInstance ? materialInstance->blend() : blendModePreset;
+			if (devicePipeline != cachedPipelineForKey || cachedBlendMode != effectiveBlend
+			    || cachedTopologyDrawType != drawType || cachedColorWriteMask != devicePipelineColorWriteMask || !deviceUniformSet.valid()) {
+				devicePipeline = ourRenderer.pipelineFor(shaderProgram, effectiveBlend, drawType, devicePipelineColorWriteMask);
+				cachedPipelineForKey = devicePipeline;
+				cachedBlendMode = effectiveBlend;
+				cachedTopologyDrawType = drawType;
+				cachedColorWriteMask = devicePipelineColorWriteMask;
+				deviceUniformSet = dev->createUniformSet(devicePipeline); // a uniform set is bound to a pipeline.
 			}
 
-			// ============================ LEGACY RAW-GL PATH ============================
-			shaderProgram->use();
-
-			if (bufferId == 0) {
-				glGenBuffers(1, &bufferId);
-			}
-
-			applyPresetBlendMode(ourRenderer);
-
-			glBindBuffer(GL_ARRAY_BUFFER, bufferId);
-
-			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
-			if (dirtyVertexBuffer) {
-				dirtyVertexBuffer = false;
-				glBufferData(GL_ARRAY_BUFFER, points->size() * structSize, &(points[0]), GL_STATIC_DRAW);
-			}
-			glEnableVertexAttribArray(0);
-			glEnableVertexAttribArray(1);
-			glEnableVertexAttribArray(2);
-
-			auto positionOffset = static_cast<size_t>(offsetof(DrawPoint, x));
-			auto textureOffset = static_cast<size_t>(offsetof(DrawPoint, textureX));
-			auto colorOffset = static_cast<size_t>(offsetof(DrawPoint, R));
-			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
-			glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
-			glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
-
+			// Re-record uniforms+textures (the set is a name-keyed bag). Save/restore around it: a nested
+			// draw (mid-draw atlas FBO refill on this same shared Shader) must not clobber the outer set.
+			Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(deviceUniformSet);
 			applyMaterialPass(ourRenderer);
+			shaderProgram->endRecording(prevRecording);
 
-			glDrawElements(drawType, static_cast<GLsizei>(vertexIndices->size()), GL_UNSIGNED_INT, &vertexIndices[0]);
-
-			glDisableVertexAttribArray(0);
-			glDisableVertexAttribArray(1);
-			glDisableVertexAttribArray(2);
-			glUseProgram(0);
-			if ((materialInstance && materialInstance->blend() != BLEND_DEFAULT) || blendModePreset != BLEND_DEFAULT) {
-				ourRenderer.defaultBlendFunction();
-			}
-		}
-
-		static void applyBlendModeToRenderer(BlendMode blendMode, Draw2D &renderer) {
-			if (blendMode != BLEND_DEFAULT) {
-				if (blendMode == BLEND_ADD) {
-					renderer.setBlendFunction(GL_ONE, GL_ONE);
-				} else if (blendMode == BLEND_MULTIPLY) {
-					renderer.setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-				} else if (blendMode == BLEND_SCREEN) {
-					renderer.setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
-				}
-			}
-		}
-
-		void Drawable::applyPresetBlendMode(Draw2D &ourRenderer) const {
-			// Use material blend mode if present, otherwise use drawable's preset
-			if (materialInstance) {
-				applyBlendModeToRenderer(materialInstance->blend(), ourRenderer);
-			} else {
-				applyBlendModeToRenderer(blendModePreset, ourRenderer);
-			}
+			Render::DrawItem item;
+			item.pipeline = devicePipeline;
+			item.vertexBuffer = deviceVertexBuffer;
+			item.indexBuffer = deviceIndexBuffer;
+			item.indexType = Render::IndexType::Uint32;
+			item.indexCount = static_cast<uint32_t>(vertexIndices->size());
+			item.firstIndex = 0;
+			item.baseVertex = 0;
+			item.uniforms = deviceUniformSet;
+			dev->draw(item);
 		}
 
 		void Drawable::refreshBounds() {

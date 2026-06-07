@@ -17,7 +17,7 @@ Bindstone is a game engine built on MutedVision (MV) framework. Dev builds this 
 naive invocation fails). Example (verified, ~35s clean rebuild of the engine lib):
 
 ```bash
-powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 && cd /d d:\git\Bindstone && msbuild \"VSProjects\MutedVision\MutedVision_Windows\MutedVision_Windows.vcxproj\" /p:Configuration=Release /p:Platform=x64 /p:SolutionDir=d:\git\Bindstone\ /m 2>&1'"
+powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 && cd /d d:\git\Bindstone && msbuild \"VSProjects\MutedVision\MutedVision_Windows\MutedVision_Windows.vcxproj\" /p:Configuration=Release /p:Platform=x64 /p:SolutionDir=d:\git\Bindstone\ /m 2>&1'"
 ```
 
 Use `/t:Rebuild` for a clean build. MSBuild auto-resolves project-to-project references.
@@ -35,7 +35,7 @@ When adding features or fixing bugs in JaiScript itself (not integration), use t
 
 ```bash
 # Build JaiScript tests (Release)
-powershell.exe -Command "cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" >nul 2>&1 && cd /d d:\git\Bindstone\Source\JaiScript\out\build\x64-Release && \"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe\" --build . --target jaiscript_tests 2>&1'"
+powershell.exe -Command "cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat\" >nul 2>&1 && cd /d d:\git\Bindstone\Source\JaiScript\out\build\x64-Release && \"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe\" --build . --target jaiscript_tests 2>&1'"
 
 # Run JaiScript tests
 powershell.exe -Command "cd 'd:\git\Bindstone\Source\JaiScript\out\build\x64-Release'; ./bin/jaiscript_tests.exe 2>&1"
@@ -117,6 +117,11 @@ Match the surrounding engine, which is terse:
   through `reloadImplementation()`: re-decode for file textures, regenerate for dynamic/surface
   textures (their custom load option / `surfaceGenerator`). Any change here must keep reload able to
   reconstruct from source.
+
+## Git Commits
+
+- One-line commit messages only (title, no body). Match the style of `git log --oneline`.
+- No co-author trailers.
 
 ## Git Safety
 

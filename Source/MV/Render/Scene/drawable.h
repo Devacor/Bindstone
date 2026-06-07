@@ -286,6 +286,10 @@ namespace MV {
 			// path, or issues GL live on the legacy path. Shared by both branches of the draw impl.
 			void applyMaterialPass(Draw2D& a_renderer);
 
+			// Create or resize+upload the device vertex+index buffers from points/vertexIndices
+			// (recreate on byte-size change since updateBuffer can't grow; else honor the dirty flags).
+			void syncDeviceBuffers(Render::Device* a_device, Render::BufferUpdateHint a_hint);
+
 			void addTexturesToShader();
 
 			virtual void onRemoved() {
@@ -295,8 +299,6 @@ namespace MV {
 			virtual BoxAABB<> boundsImplementation() override {
 				return localBounds;
 			}
-			void applyPresetBlendMode(Draw2D& ourRenderer) const;
-
 			virtual void boundsImplementation(const BoxAABB<>& a_bounds) override;
 
 			//return false if you want this to not draw
@@ -408,11 +410,9 @@ namespace MV {
 			std::shared_ptr<Material> materialInstance = nullptr;
 			JAI_PROPERTY((std::string), materialId, "");
 			
-			GLuint bufferId = 0;
-
 			bool dirtyVertexBuffer = true;
 
-			// --- RHI device-path caches (parallel to bufferId/dirtyVertexBuffer). ---
+			// --- RHI device-path caches (parallel to dirtyVertexBuffer). ---
 			// Per-drawable buffers + a uniform set reused across frames (re-recorded each draw) so the
 			// backend's set pool doesn't grow per-frame; pipeline is borrowed from Draw2D's cache.
 			Render::BoundBuffer     deviceVertexBuffer;
@@ -425,6 +425,8 @@ namespace MV {
 			Render::BoundPipeline   cachedPipelineForKey;  // == devicePipeline when the key below is current.
 			BlendMode               cachedBlendMode = BLEND_DEFAULT;
 			GLenum                  cachedTopologyDrawType = 0; // 0 == no pipeline resolved yet.
+			uint8_t                 devicePipelineColorWriteMask = 0xF; // Stencil sets 0 to draw its mask without color.
+			uint8_t                 cachedColorWriteMask = 0xF;
 			bool                    dirtyIndexBuffer = true;
 			// Lets ~Drawable free its device buffers without calling owner() (which throws during teardown).
 			Render::Device*         deviceForCleanup = nullptr;

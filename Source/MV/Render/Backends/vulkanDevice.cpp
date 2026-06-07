@@ -234,6 +234,8 @@ namespace MV {
 				void beginDefaultPass(const float clearColor[4]) override;
 				void setViewport(const Viewport&) override;
 				void setScissor(const Rect&) override;
+				void setStencilState(const StencilState&) override;
+				void clearStencil(uint8_t value) override;
 				void draw(const DrawItem&) override;
 				void endPass() override;
 				void endFrame() override;
@@ -293,6 +295,7 @@ namespace MV {
 				uint32_t currentFrame = 0;
 				uint32_t acquiredImage = 0;
 				bool frameActive = false;
+				StencilState pendingStencil;   // recorded into the command buffer by the Phase-3 draw path.
 
 				HandlePool<BoundBuffer,  BufferRes>  buffers;
 				HandlePool<BoundTexture, TextureRes> textures;
@@ -823,6 +826,15 @@ namespace MV {
 				sc.offset = { a_rect.x, a_rect.y };
 				sc.extent = { static_cast<uint32_t>(a_rect.width), static_cast<uint32_t>(a_rect.height) };
 				fns.vkCmdSetScissor(commandBuffers[currentFrame], 0, 1, &sc);
+			}
+
+			// Store the desired stencil; the Phase-3 draw path records it via extended-dynamic-state
+			// vkCmdSetStencilOp/CompareMask/WriteMask/Reference (pipelines are created stencil-test-enabled).
+			void VulkanDevice::setStencilState(const StencilState &a_state) {
+				pendingStencil = a_state;
+			}
+			void VulkanDevice::clearStencil(uint8_t /*value*/) {
+				// Phase 3: vkCmdClearAttachments(stencil) inside the active pass.
 			}
 
 			void VulkanDevice::endPass() {

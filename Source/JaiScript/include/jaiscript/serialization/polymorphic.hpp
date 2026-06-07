@@ -185,6 +185,13 @@ private:
     std::unordered_map<std::string, const type_entry*> by_name_;
 };
 
+// Free-function entry point named ahead of this header by jai::registrar (forward-declared
+// there), so the registrar's class-template bodies can call it before this header is included.
+template<typename T>
+void try_auto_register(const std::string& name) {
+    polymorphic_registry::try_auto_register<T>(name);
+}
+
 } // namespace serialization
 } // namespace jai
 

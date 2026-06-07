@@ -311,44 +311,27 @@ namespace MV {
 	class Shader {
 		friend Draw2D;
 	public:
-		Shader(const std::string& a_stringId, GLuint a_id, bool a_headless, const std::string& a_vertexFile = "", const std::string& a_fragmentFile = "") :
+		Shader(const std::string& a_stringId, GLuint a_id, const std::string& a_vertexFile = "", const std::string& a_fragmentFile = "") :
 			stringId(a_stringId),
 			programId(a_id),
-			headless(a_headless),
 			vertexShaderFile(a_vertexFile),
 			fragmentShaderFile(a_fragmentFile) {
-
-			initialize();
 		}
 
 		inline std::string id() const {
 			return stringId;
 		}
 
-		inline void use() {
-			if (!headless) {
-				glUseProgram(programId);
-			}
-		}
-
 		bool set(const std::string& a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
 		bool set(const std::string& a_variableName, const std::shared_ptr<TextureDefinition>& a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
+		// Raw-pointer overload for unmanaged definitions (spine atlas pages); the shared_ptr form delegates here.
+		bool set(const std::string& a_variableName, TextureDefinition* a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 		bool set(const std::string& a_variableName, const std::shared_ptr<TextureHandle>& a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 
 		inline bool set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true) {
 			if (recording()) {
 				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_value, 1);
 				return true;
-			}
-			if (!headless) {
-				GLint offset = variableOffset(a_variableName);
-				if (offset >= 0) {
-					glUniform1fv(offset, 1, &a_value);
-					return true;
-				}
-				else if (a_errorIfNotPresent) {
-					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-				}
 			}
 			return false;
 		}
@@ -358,32 +341,12 @@ namespace MV {
 				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_point.x, 2);
 				return true;
 			}
-			if (!headless) {
-				GLint offset = variableOffset(a_variableName);
-				if (offset >= 0) {
-					glUniform2fv(offset, 1, &a_point.x);
-					return true;
-				}
-				else if (a_errorIfNotPresent) {
-					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-				}
-			}
 			return false;
 		}
 		inline bool setVec3(const std::string& a_variableName, const Point<PointPrecision>& a_point, bool a_errorIfNotPresent = true) {
 			if (recording()) {
 				renderDevice->setUniform(recordingUniformSet, a_variableName, &a_point.x, 3);
 				return true;
-			}
-			if (!headless) {
-				GLint offset = variableOffset(a_variableName);
-				if (offset >= 0) {
-					glUniform3fv(offset, 1, &a_point.x);
-					return true;
-				}
-				else if (a_errorIfNotPresent) {
-					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-				}
 			}
 			return false;
 		}
@@ -393,22 +356,7 @@ namespace MV {
 				renderDevice->setUniformMatrix(recordingUniformSet, a_variableName, &((a_matrix.getMatrixArray())[0]));
 				return true;
 			}
-			if (!headless) {
-				GLint offset = variableOffset(a_variableName);
-				if (offset >= 0) {
-					const GLfloat* mat = &((a_matrix.getMatrixArray())[0]);
-					glUniformMatrix4fv(offset, 1, GL_FALSE, mat);
-					return true;
-				}
-				else if (a_errorIfNotPresent) {
-					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-				}
-			}
 			return false;
-		}
-
-		inline bool has(std::string a_variableName) {
-			return variableOffset(a_variableName) >= 0;
 		}
 
 		// --- RHI device path ----------------------------------------------------------
@@ -438,55 +386,15 @@ namespace MV {
 		GLuint glProgramId() const { return programId; }   // pipeline-cache identity key.
 
 	private:
-		GLuint getDefaultTextureId() const;
 		Render::BoundTexture getDefaultBoundTexture() const;
 		Render::BoundSampler getDefaultBoundSampler() const;
 
-		void initialize() {
-			if (!headless) {
-				variables.clear();
-				if (!glIsProgram(programId)) {
-					std::cerr << "GL Program Id IS NOT A PROGRAM: " << programId << std::endl;
-				}
-				else {
-					int total = -1;
-					glGetProgramiv(programId, GL_ACTIVE_UNIFORMS, &total);
-					std::cout << "Shader Id: " << programId << std::endl;
-					for (int i = 0; i < total; ++i) {
-						int name_len = -1, num = -1;
-						GLenum type = GL_ZERO;
-						char name[256];
-						glGetActiveUniform(programId, GLuint(i), sizeof(name) - 1, &name_len, &num, &type, name);
-						name[name_len] = 0;
-						GLuint location = glGetUniformLocation(programId, name);
-						std::cout << "Shader Uniform: [" << name << "] = " << location << std::endl;
-						variables[name] = location;
-					}
-					std::cout << "_" << std::endl;
-				}
-			}
-		}
-
-		inline GLint variableOffset(const std::string& a_variableName) {
-			auto found = variables.find(a_variableName);
-			if (found != variables.end()) {
-				return found->second;
-			}
-			else {
-				auto foundLocation = glGetUniformLocation(programId, a_variableName.c_str());
-				//might be -1 if missing, this is fine, avoid calling glGetUniformLocation next time.
-				variables[a_variableName] = foundLocation;
-				return foundLocation;
-			}
-		}
 		std::string stringId;
 		std::string vertexShaderFile;
 		std::string fragmentShaderFile;
 		GLuint programId;
-		std::unordered_map<std::string, GLuint> variables;
-		bool headless;
 
-		// renderDevice null => legacy raw-GL set()/use(); recordingUniformSet valid => set() records into it.
+		// recordingUniformSet valid => set() records into it. Device-only: no legacy GL path.
 		Render::Device*           renderDevice = nullptr;
 		Render::BoundShaderModule vertexModule;
 		Render::BoundShaderModule fragmentModule;
@@ -544,6 +452,28 @@ namespace MV {
 
 	//If attempting to make multiple instances of Draw2D bear in mind it modifies global state in the
 	//projection matrices, OpenGL, and SDL.
+	// Owned by Draw2D; the whole stencil-clip nesting state is one int of depth (each level's GPU
+	// config is a pure function of depth, so nothing is stored per level). The Stencil component
+	// brackets its children with push()/pop(): draw the mask shape incrementing the stencil, test
+	// children == depth, then decrement and restore the enclosing level. reset() each frame so a
+	// throw mid-clip can't poison later frames.
+	class StencilStack {
+	public:
+		StencilStack(Draw2D& a_renderer) : renderer(a_renderer) {}
+
+		void push(const std::function<void()>& a_drawMask);
+		void pop(const std::function<void()>& a_drawMask);
+
+		int current() const { return depth; }
+
+	private:
+		Render::StencilState writeState(Render::StencilOp a_op) const; // Always + a_op, ref=depth, writeMask 0xFF
+		Render::StencilState testState() const;                        // Equal, ref=depth, writeMask 0x00
+
+		Draw2D& renderer;
+		int depth = 0;
+	};
+
 	class Draw2D : public glExtensions {
 		friend Window;
 		friend RenderWorld;
@@ -607,6 +537,10 @@ namespace MV {
 			require<ResourceException>(!initialized, "Renderer: Failed to make headless because we're already initialized!");
 			isHeadless = true;
 			RUNNING_IN_HEADLESS = true;
+			// A headless renderer still has a device — the inert null backend — so the scene draw path
+			// (which requires a device) works without a GL context. Headless == "a device that does nothing".
+			backend = Render::Device::makeHeadless();
+			backend->initialize(Render::SwapchainDesc{});
 			return *this;
 		}
 
@@ -643,7 +577,7 @@ namespace MV {
 
 		// Shared BoundPipeline keyed by (shader program, blend, topology) so variants dedupe instead of
 		// per-drawable allocating. Borrowed by Drawables; owned + destroyed here.
-		Render::BoundPipeline pipelineFor(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend, GLenum a_drawType);
+		Render::BoundPipeline pipelineFor(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend, GLenum a_drawType, uint8_t a_colorWriteMask = 0xF);
 		void clearPipelineCache();
 
 		void reloadShaders();
@@ -663,6 +597,9 @@ namespace MV {
 			return backend.get();
 		}
 
+		// Clip-stencil nesting tracker; the Stencil component drives it via push/pop. See StencilStack.
+		StencilStack& stencil() { return stencilStack; }
+
 		// Material management
 		std::shared_ptr<Material> loadMaterial(const std::string& a_id, const std::string& a_shaderProgramId);
 		bool hasMaterial(const std::string& a_id) const;
@@ -671,8 +608,6 @@ namespace MV {
 		
 		std::shared_ptr<Material> defaultMaterial() const;
 		std::shared_ptr<Material> defaultMaterial(const std::string& a_id);
-
-		//void registerShader(std::shared_ptr<Scene::Node> a_node);
 
 		void checkGlError(std::string a_location = "[not supplied location]") {
 			GLenum error = glGetError();
@@ -683,7 +618,6 @@ namespace MV {
 
 		void resetViewport();
 		MV::Size<int> monitorSize();
-		void draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node);
 	private:
 		GLuint loadShaderGetProgramId(std::string a_vertexShaderCode, std::string a_fragmentShaderCode);
 
@@ -711,14 +645,15 @@ namespace MV {
 		std::unordered_map<std::string, std::shared_ptr<Shader>> shaders;
 		std::shared_ptr<Shader> defaultShaderPtr = nullptr;
 
-		// (program, blend, topology) -> shared pipeline. See pipelineFor / clearPipelineCache.
+		// (program, blend, topology, colorWriteMask) -> shared pipeline. colorWriteMask is in the key so
+		// the Stencil's no-color mask pipeline is distinct from the normal one. See pipelineFor.
 		struct PipelineKey {
-			GLuint program; BlendMode blend; GLenum topology;
-			bool operator==(const PipelineKey& o) const { return program == o.program && blend == o.blend && topology == o.topology; }
+			GLuint program; BlendMode blend; GLenum topology; uint8_t colorWriteMask;
+			bool operator==(const PipelineKey& o) const { return program == o.program && blend == o.blend && topology == o.topology && colorWriteMask == o.colorWriteMask; }
 		};
 		struct PipelineKeyHash {
 			size_t operator()(const PipelineKey& k) const {
-				return (std::hash<GLuint>()(k.program) * 31u + static_cast<size_t>(k.blend)) * 31u + static_cast<size_t>(k.topology);
+				return ((std::hash<GLuint>()(k.program) * 31u + static_cast<size_t>(k.blend)) * 31u + static_cast<size_t>(k.topology)) * 31u + k.colorWriteMask;
 			}
 		};
 		std::unordered_map<PipelineKey, Render::BoundPipeline, PipelineKeyHash> pipelineCache;
@@ -728,6 +663,7 @@ namespace MV {
 
 		bool isHeadless = false;
 		std::unique_ptr<Render::Device> backend;
+		StencilStack stencilStack{ *this };
 
 		static bool firstInitializationSDL;
 		static bool firstInitializationOpenGL;

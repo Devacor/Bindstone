@@ -268,6 +268,7 @@ namespace MV {
 				std::swap(*points, pointBuffer);
 				std::swap(*vertexIndices, vertexIndexBuffer);
 				dirtyVertexBuffer = true;
+				dirtyIndexBuffer = true;
 			}
 			updateInProgress.store(false);
 		}
@@ -435,59 +436,48 @@ namespace MV {
 			}
 		}
 
+		// Emitter records its own uniform pass (no material/alpha): textures + emitter-space transform + user settings.
+		void Emitter::recordEmitterUniforms() {
+			auto ourOwner = owner();
+			addTexturesToShader();
+			auto emitterSpace = relativeNodePosition->expired() ? ourOwner : relativeNodePosition->lock();
+			shaderProgram->set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * emitterSpace->worldTransform());
+			if (userMaterialSettings) {
+				try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Emitter::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
+			}
+		}
+
 		void Emitter::defaultDrawImplementation() {
 			auto ourOwner = owner();
 			auto& ourRenderer = ourOwner->renderer();
-			if (ourRenderer.headless()) { return; }
-
 			std::lock_guard<std::recursive_mutex> guard(lock); //important!
-			if (!vertexIndices->empty()) {
-				require<ResourceException>(shaderProgram, "No shader program for Drawable!");
-				shaderProgram->use();
+			if (vertexIndices->empty()) { return; }
+			require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 
-				if (bufferId == 0) {
-					glGenBuffers(1, &bufferId);
-				}
+			Render::Device* dev = ourRenderer.device();
+			syncDeviceBuffers(dev, Render::BufferUpdateHint::Stream); // particles churn every frame.
 
-				applyPresetBlendMode(ourRenderer);
-
-				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
-				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
-				if (dirtyVertexBuffer) {
-					dirtyVertexBuffer = false;
-					// Particle vertices are re-uploaded almost every frame; STREAM_DRAW is the correct
-					// usage hint (STATIC_DRAW tells the driver the buffer is immutable — the opposite).
-					glBufferData(GL_ARRAY_BUFFER, points->size() * structSize, &(points[0]), GL_STREAM_DRAW);
-				}
-
-				glEnableVertexAttribArray(0);
-				glEnableVertexAttribArray(1);
-				glEnableVertexAttribArray(2);
-
-				auto positionOffset = static_cast<size_t>(offsetof(DrawPoint, x));
-				auto textureOffset = static_cast<size_t>(offsetof(DrawPoint, textureX));
-				auto colorOffset = static_cast<size_t>(offsetof(DrawPoint, R));
-				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
-				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
-				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
-
-				addTexturesToShader();
-				auto emitterSpace = relativeNodePosition->expired() ? ourOwner : relativeNodePosition->lock();
-				shaderProgram->set("transformation", ourRenderer.cameraProjectionMatrix(ourOwner->cameraId()) * emitterSpace->worldTransform());
-				if (userMaterialSettings) {
-					try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Emitter::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
-				}
-
-				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices->size()), GL_UNSIGNED_INT, &vertexIndices[0]);
-
-				glDisableVertexAttribArray(0);
-				glDisableVertexAttribArray(1);
-				glDisableVertexAttribArray(2);
-				glUseProgram(0);
-				if (blendModePreset != BLEND_DEFAULT) {
-					ourOwner->renderer().defaultBlendFunction();
-				}
+			if (devicePipeline != cachedPipelineForKey || cachedBlendMode != blendModePreset
+			    || cachedTopologyDrawType != drawType || !deviceUniformSet.valid()) {
+				devicePipeline = ourRenderer.pipelineFor(shaderProgram, blendModePreset, drawType);
+				cachedPipelineForKey = devicePipeline;
+				cachedBlendMode = blendModePreset;
+				cachedTopologyDrawType = drawType;
+				deviceUniformSet = dev->createUniformSet(devicePipeline);
 			}
+
+			Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(deviceUniformSet);
+			recordEmitterUniforms();
+			shaderProgram->endRecording(prevRecording);
+
+			Render::DrawItem item;
+			item.pipeline = devicePipeline;
+			item.vertexBuffer = deviceVertexBuffer;
+			item.indexBuffer = deviceIndexBuffer;
+			item.indexType = Render::IndexType::Uint32;
+			item.indexCount = static_cast<uint32_t>(vertexIndices->size());
+			item.uniforms = deviceUniformSet;
+			dev->draw(item);
 		}
 
 		// JaiScript serialization is now inline templated in emitter.h

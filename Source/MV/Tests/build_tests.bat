@@ -3,7 +3,7 @@ REM Build the Bindstone (MV) Foundry test runner -> mv_tests.exe, then run it.
 REM Uses JaiScript's Foundry framework (header-only) + its generic main_test_runner.cpp, linked
 REM against the built engine static lib. Returns non-zero if any test fails (CI gate).
 REM Optional arg %1 = directory containing mutedvision.lib (default = optimized main tree).
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 cd /d d:\git\Bindstone\Source\MV\Tests
 set ROOT=d:\git\Bindstone
 set ENGINE_LIBDIR=%~1

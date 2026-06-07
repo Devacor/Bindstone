@@ -79,8 +79,6 @@ namespace MV {
 		private:
  			virtual bool preDraw() override;
  			virtual bool postDraw() override;
-
-			static int totalStencilDepth;
 		};
 	}
 }

@@ -364,14 +364,8 @@ namespace MV{
 		}
 
 		void Spine::defaultDrawImplementation(){
-			if (owner()->renderer().headless()) { return; }
-
 			if (loaded()) {
-				if (bufferId == 0) {
-					glGenBuffers(1, &bufferId);
-				}
-
-				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
+				deviceBatchCursor = 0;   // batches this frame draw from a fresh slice of the set pool.
 
 				points->clear();
 				vertexIndices->clear();
@@ -392,7 +386,7 @@ namespace MV{
 						}
 
 						if (skeletonRenderStateChangedSinceLastIteration(previousBlending, slot->data->blendMode, previousTexture, texture)) {
-							lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+							lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture : nullptr, previousBlending);
 						}
 
 						loadSpineSlotIntoPoints(slot);
@@ -407,7 +401,7 @@ namespace MV{
 							if (node) {
 								if (!interrupted) {
 									interrupted = true;
-									lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+									lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture : nullptr, previousBlending);
 								}
 								node->silence()->
 									position({ slot->bone->worldX, slot->bone->worldY })->
@@ -421,7 +415,7 @@ namespace MV{
 				}
 
 				if (lastRenderedIndex != vertexIndices->size()) {
-					renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+					renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture : nullptr, previousBlending);
 				}
 
 				for (auto&& node : *owner()) {
@@ -434,54 +428,66 @@ namespace MV{
 			}
 		}
 
-		void Spine::applySpineBlendMode(spBlendMode a_spineBlendMode) {
-			if (a_spineBlendMode == SP_BLEND_MODE_ADDITIVE) {
-				owner()->renderer().setBlendFunction(GL_SRC_ALPHA, GL_ONE);
-			}
-			else if (a_spineBlendMode == SP_BLEND_MODE_MULTIPLY) {
-				owner()->renderer().setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-			}
-			else if (a_spineBlendMode == SP_BLEND_MODE_SCREEN) {
-				owner()->renderer().setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+		// Spine uses the premultiply shader, so additive maps to premultiplied One/One (BLEND_ADD), not the
+		// legacy non-premultiplied SrcAlpha/One; normal/multiply/screen map straight across.
+		static BlendMode spineBlendToBlendMode(spBlendMode a_mode) {
+			switch (a_mode) {
+				case SP_BLEND_MODE_ADDITIVE: return BLEND_ADD;
+				case SP_BLEND_MODE_MULTIPLY: return BLEND_MULTIPLY;
+				case SP_BLEND_MODE_SCREEN:   return BLEND_SCREEN;
+				default:                     return BLEND_DEFAULT;
 			}
 		}
 
-		size_t Spine::renderSkeletonBatch(size_t a_lastRenderedIndex, GLuint a_textureId, spBlendMode a_blendMode) {
+		size_t Spine::renderSkeletonBatch(size_t a_lastRenderedIndex, FileTextureDefinition* a_texture, spBlendMode a_blendMode) {
 			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
 			auto bufferSizeToRender = (points->size()) * structSize;
+			if (bufferSizeToRender <= 0) { return a_lastRenderedIndex; }
 
-			if(bufferSizeToRender > 0){
-				auto ourOwner = owner();
-				shaderProgram->use();
-				SCOPE_EXIT{ glUseProgram(0); };
-				SCOPE_EXIT{ ourOwner->renderer().defaultBlendFunction(); };
-				applySpineBlendMode(a_blendMode);
-				glBufferData(GL_ARRAY_BUFFER, bufferSizeToRender, &(points[0]), GL_STATIC_DRAW);
-
-				glEnableVertexAttribArray(0);
-				glEnableVertexAttribArray(1);
-				glEnableVertexAttribArray(2);
-
-				auto positionOffset = static_cast<size_t>(offsetof(DrawPoint, x));
-				auto textureOffset = static_cast<size_t>(offsetof(DrawPoint, textureX));
-				auto colorOffset = static_cast<size_t>(offsetof(DrawPoint, R));
-				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
-				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
-				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
-
-				TransformMatrix transformationMatrix(ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform());
-
-				shaderProgram->set("texture0", a_textureId);
-				shaderProgram->set("transformation", transformationMatrix);
-
-				glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(vertexIndices->size() - a_lastRenderedIndex), GL_UNSIGNED_INT, &vertexIndices[a_lastRenderedIndex]);
-
-				glDisableVertexAttribArray(0);
-				glDisableVertexAttribArray(1);
-				glDisableVertexAttribArray(2);
-				return vertexIndices->size();
+			auto ourOwner = owner();
+			Render::Device* dev = ourOwner->renderer().device();
+			deviceForCleanup = dev;
+			// Grow-only buffer reuse: spine regenerates geometry every frame and uploads the (growing)
+			// full vertex/index arrays per batch, drawing only [a_lastRenderedIndex, end). updateBuffer
+			// can't grow, so recreate when the data exceeds the allocation; otherwise upload in place.
+			const size_t vertexBytes = points->size() * static_cast<size_t>(structSize);
+			if (!deviceVertexBuffer.valid() || vertexBytes > deviceVertexBufferBytes) {
+				if (deviceVertexBuffer.valid()) { dev->destroyBuffer(deviceVertexBuffer); }
+				deviceVertexBuffer = dev->createBuffer(Render::BufferUsage::Vertex, Render::BufferUpdateHint::Stream, points->data(), vertexBytes);
+				deviceVertexBufferBytes = vertexBytes;
+			} else {
+				dev->updateBuffer(deviceVertexBuffer, points->data(), vertexBytes, 0);
 			}
-			return a_lastRenderedIndex;
+			const size_t indexBytes = vertexIndices->size() * sizeof(GLuint);
+			if (!deviceIndexBuffer.valid() || indexBytes > deviceIndexBufferBytes) {
+				if (deviceIndexBuffer.valid()) { dev->destroyBuffer(deviceIndexBuffer); }
+				deviceIndexBuffer = dev->createBuffer(Render::BufferUsage::Index, Render::BufferUpdateHint::Stream, vertexIndices->data(), indexBytes);
+				deviceIndexBufferBytes = indexBytes;
+			} else {
+				dev->updateBuffer(deviceIndexBuffer, vertexIndices->data(), indexBytes, 0);
+			}
+
+			Render::BoundPipeline pipeline = ourOwner->renderer().pipelineFor(shaderProgram, spineBlendToBlendMode(a_blendMode), GL_TRIANGLES);
+			if (deviceBatchCursor >= deviceBatchSets.size()) {
+				deviceBatchSets.push_back(dev->createUniformSet(pipeline));
+			}
+			Render::BoundUniformSet set = deviceBatchSets[deviceBatchCursor++];
+
+			Render::BoundUniformSet prevRecording = shaderProgram->beginRecording(set);
+			shaderProgram->set("texture0", a_texture, 0);
+			shaderProgram->set("transformation", TransformMatrix(ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform()));
+			shaderProgram->endRecording(prevRecording);
+
+			Render::DrawItem item;
+			item.pipeline = pipeline;
+			item.vertexBuffer = deviceVertexBuffer;
+			item.indexBuffer = deviceIndexBuffer;
+			item.indexType = Render::IndexType::Uint32;
+			item.firstIndex = static_cast<uint32_t>(a_lastRenderedIndex);
+			item.indexCount = static_cast<uint32_t>(vertexIndices->size() - a_lastRenderedIndex);
+			item.uniforms = set;
+			dev->draw(item);
+			return vertexIndices->size();
 		}
 
 		std::shared_ptr<Component> Spine::cloneHelper(const std::shared_ptr<Component> &a_clone) {

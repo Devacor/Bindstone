@@ -215,8 +215,6 @@ namespace MV {
 
 			virtual void defaultDrawImplementation() override;
 
-			void applySpineBlendMode(spBlendMode previousBlending);
-
 			virtual void updateImplementation(double a_delta) override;
 			void unloadImplementation();
 		private:
@@ -291,7 +289,12 @@ namespace MV {
 
 			bool skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture);
 
-			size_t renderSkeletonBatch(size_t lastRenderedIndex, GLuint a_textureId, spBlendMode a_blendMode);
+			size_t renderSkeletonBatch(size_t a_lastRenderedIndex, FileTextureDefinition* a_texture, spBlendMode a_blendMode);
+
+			// One uniform set per render batch (each batch binds its own texture/blend); reused across
+			// frames, grown to the most batches ever seen. Reset to 0 at the top of each frame's draw.
+			std::vector<Render::BoundUniformSet> deviceBatchSets;
+			size_t deviceBatchCursor = 0;
 
 			FileTextureDefinition * loadSpineSlotIntoPoints(spSlot* slot);
 			FileTextureDefinition *getSpineTextureFromSlot(spSlot* slot) const;

@@ -612,7 +612,7 @@ namespace MV {
 
 		// Construct the render backend now that the (GL) context exists. The GL reference
 		// backend borrows the SDL window only to present; the context is still owned by Window.
-		backend = isHeadless ? Render::Device::makeHeadless() : Render::Device::makeGL();
+		if (!backend) { backend = isHeadless ? Render::Device::makeHeadless() : Render::Device::makeGL(); }
 		Render::SwapchainDesc swapDesc;
 		swapDesc.sdlWindow = sdlWindow.window;
 		backend->initialize(swapDesc);
@@ -914,7 +914,7 @@ namespace MV {
 		bool makeDefault = shaders.empty();
 		auto programId = loadShaderGetProgramId(a_vertexShaderCode, a_fragmentShaderCode);
 
-		auto shader = std::make_shared<Shader>(a_id, programId, headless());
+		auto shader = std::make_shared<Shader>(a_id, programId);
 		if (device()) {
 			shader->initializeDeviceModules(device(), a_vertexShaderCode, a_fragmentShaderCode);
 		}
@@ -942,7 +942,6 @@ namespace MV {
 					auto newId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
 					glDeleteProgram(shader->programId);
 					shader->programId = newId;
-					shader->initialize();
 					if (device()) {
 						// Recreate the backend modules and drop cached pipelines so drawables re-resolve.
 						shader->initializeDeviceModules(device(), vertexShaderCode, fragmentShaderCode);
@@ -985,7 +984,7 @@ namespace MV {
 	}
 
 	namespace {
-		// BlendMode -> RHI BlendState, reproducing applyBlendModeToRenderer (BLEND_DEFAULT == the device.h default).
+		// BlendMode -> RHI BlendState (BLEND_DEFAULT == the device.h default).
 		Render::BlendState blendStateForMode(BlendMode a_mode) {
 			using namespace Render;
 			BlendState s; // default == premultiplied separate (BLEND_DEFAULT).
@@ -1020,9 +1019,9 @@ namespace MV {
 		}
 	} // namespace
 
-	Render::BoundPipeline Draw2D::pipelineFor(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend, GLenum a_drawType) {
+	Render::BoundPipeline Draw2D::pipelineFor(const std::shared_ptr<Shader>& a_shader, BlendMode a_blend, GLenum a_drawType, uint8_t a_colorWriteMask /*= 0xF*/) {
 		if (!backend) { return Render::BoundPipeline{}; }
-		PipelineKey key{ a_shader->glProgramId(), a_blend, a_drawType };
+		PipelineKey key{ a_shader->glProgramId(), a_blend, a_drawType, a_colorWriteMask };
 		auto found = pipelineCache.find(key);
 		if (found != pipelineCache.end()) { return found->second; }
 
@@ -1032,6 +1031,7 @@ namespace MV {
 		desc.topology = (a_drawType == GL_TRIANGLE_STRIP) ? Render::PrimitiveTopology::TriangleStrip
 		                                                  : Render::PrimitiveTopology::Triangles;
 		desc.blend        = blendStateForMode(a_blend);
+		desc.blend.colorWriteMask = a_colorWriteMask; // 0 == stencil-mask pipeline (writes no color).
 		desc.vertexLayout = spriteVertexLayout();
 		// 2D defaults from device.h: depth test/write OFF, cull None — leave desc.depthStencil/raster default.
 
@@ -1045,6 +1045,44 @@ namespace MV {
 			for (auto& kv : pipelineCache) { backend->destroyPipeline(kv.second); }
 		}
 		pipelineCache.clear();
+	}
+
+	void StencilStack::push(const std::function<void()> &a_drawMask) {
+		auto *dev = renderer.device();
+		if (!dev) { return; }
+		if (depth++ == 0) { dev->clearStencil(0); }
+		dev->setStencilState(writeState(Render::StencilOp::IncrementClamp)); // mark: stencil += 1 where the shape covers.
+		a_drawMask();
+		dev->setStencilState(testState());                                   // children pass only where stencil == depth.
+	}
+
+	void StencilStack::pop(const std::function<void()> &a_drawMask) {
+		auto *dev = renderer.device();
+		if (!dev) { return; }
+		dev->setStencilState(writeState(Render::StencilOp::DecrementClamp));  // unmark: undo this level's increment.
+		a_drawMask();
+		// Restore the enclosing level's test (so an outer sibling after a nested clip stays clipped), or disable.
+		if (--depth == 0) { dev->setStencilState(Render::StencilState{}); }
+		else { dev->setStencilState(testState()); }
+	}
+
+	Render::StencilState StencilStack::writeState(Render::StencilOp a_op) const {
+		Render::StencilState s;
+		s.enabled = true;
+		s.compare = Render::CompareOp::Always;
+		s.pass = s.fail = s.depthFail = a_op;
+		s.reference = static_cast<uint8_t>(depth);
+		s.writeMask = 0xFF;
+		return s;
+	}
+
+	Render::StencilState StencilStack::testState() const {
+		Render::StencilState s;
+		s.enabled = true;
+		s.compare = Render::CompareOp::Equal;
+		s.reference = static_cast<uint8_t>(depth);
+		s.writeMask = 0x00; // children test but never modify the buffer.
+		return s;
 	}
 
 	void Draw2D::loadDefaultShaders() {
@@ -1071,7 +1109,7 @@ namespace MV {
                 e.append("ShaderID: " + a_id);
                 throw;
             }
-            auto shader = std::make_shared<Shader>(a_id, programId, headless(), a_vertexShaderFilename, a_fragmentShaderFilename);
+            auto shader = std::make_shared<Shader>(a_id, programId, a_vertexShaderFilename, a_fragmentShaderFilename);
             if (device()) {
                 shader->initializeDeviceModules(device(), vertexShaderCode, fragmentShaderCode);
             }
@@ -1121,53 +1159,6 @@ namespace MV {
 			viewport[2] = static_cast<GLint>(sdlWindow.drawableSize().width);
 			viewport[3] = static_cast<GLint>(sdlWindow.drawableSize().height);
 		}
-	}
-
-// 	void Draw2D::registerShader(std::shared_ptr<Scene::Node> a_node) {
-// 		if (hasShader(a_node->shader())) {
-// 			a_node->shader(a_node->shader());
-// 		} else {
-// 			needShaderRegistration.push_back(a_node);
-// 		}
-// 	}
-
-	void Draw2D::draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node) {
-// 		a_node->shaderProgram->use();
-// 
-// 		if(a_node->bufferId == 0){
-// 			glGenBuffers(1, &a_node->bufferId);
-// 		}
-// 
-// 		glBindBuffer(GL_ARRAY_BUFFER, a_node->bufferId);
-// 		auto structSize = static_cast<GLsizei>(sizeof(a_node->points[0]));
-// 		glBufferData(GL_ARRAY_BUFFER, a_node->points.size() * structSize, &(a_node->points[0]), GL_STATIC_DRAW);
-// 
-// 		glEnableVertexAttribArray(0);
-// 		glEnableVertexAttribArray(1);
-// 		glEnableVertexAttribArray(2);
-// 
-// 		auto positionOffset = static_cast<GLsizei>(offsetof(DrawPoint, x));
-// 		auto textureOffset = static_cast<GLsizei>(offsetof(DrawPoint, textureX));
-// 		auto colorOffset = static_cast<GLsizei>(offsetof(DrawPoint, R));
-// 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
-// 		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
-// 		glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
-// 
-// 		TransformMatrix transformationMatrix(projectionMatrix().top() * modelviewMatrix().top());
-// 
-// 		a_node->shaderProgram->set("texture", a_node->ourTexture);
-// 		a_node->shaderProgram->set("transformation", transformationMatrix);
-// 
-// 		if(!a_node->vertexIndices.empty()){
-// 			glDrawElements(drawType, static_cast<GLsizei>(a_node->vertexIndices.size()), GL_UNSIGNED_INT, &a_node->vertexIndices[0]);
-// 		} else{
-// 			glDrawArrays(drawType, 0, static_cast<GLsizei>(a_node->points.size()));
-// 		}
-// 
-// 		glDisableVertexAttribArray(0);
-// 		glDisableVertexAttribArray(1);
-// 		glDisableVertexAttribArray(2);
-// 		glUseProgram(0);
 	}
 
 	void Draw2D::refreshWorldAndWindowSize() {
@@ -1226,10 +1217,6 @@ namespace MV {
 		}
 	}
 
-	GLuint Shader::getDefaultTextureId() const {
-		return SharedTextures::white()->texture()->textureId();
-	}
-
 	// Default (white) texture + sampler for the recording path; white() is a device-less singleton, so back it first.
 	Render::BoundTexture Shader::getDefaultBoundTexture() const {
 		auto def = SharedTextures::white()->texture();
@@ -1249,27 +1236,15 @@ namespace MV {
 				renderDevice->setTexture(recordingUniformSet, a_variableName, getDefaultBoundTexture(), getDefaultBoundSampler());
 				return true;
 			}
-			return false;
-		}
-		if (!headless) {
-			GLuint offset = variableOffset(a_variableName);
-			if (offset >= 0) {
-				auto textureId = (a_texture != 0) ?
-					a_texture :
-					getDefaultTextureId();
-
-				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
-				glUniform1i(offset, a_textureBindIndex);
-				glBindTexture(GL_TEXTURE_2D, textureId);
-				return true;
-			} else if (a_errorIfNotPresent) {
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
 		}
 		return false;
 	}
 
 	bool Shader::set(const std::string &a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+		return set(a_variableName, a_texture.get(), a_textureBindIndex, a_errorIfNotPresent);
+	}
+
+	bool Shader::set(const std::string &a_variableName, TextureDefinition* a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
 		if (recording()) {
 			// Back-fill if this texture loaded before the device existed (e.g. editor-ctor atlases).
 			if (a_texture) { a_texture->ensureDeviceBacked(renderDevice); }
@@ -1278,21 +1253,6 @@ namespace MV {
 			if (!bt.valid()) { bt = getDefaultBoundTexture(); bs = getDefaultBoundSampler(); }
 			renderDevice->setTexture(recordingUniformSet, a_variableName, bt, bs);
 			return true;
-		}
-		if (!headless) {
-			GLuint offset = variableOffset(a_variableName);
-			if (offset >= 0) {
-				auto textureId = (a_texture != nullptr) ?
-					a_texture->textureId() :
-					getDefaultTextureId();
-
-				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
-				glUniform1i(offset, a_textureBindIndex);
-				glBindTexture(GL_TEXTURE_2D, textureId);
-				return true;
-			} else if (a_errorIfNotPresent) {
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
 		}
 		return false;
 	}
@@ -1306,21 +1266,6 @@ namespace MV {
 			if (!bt.valid()) { bt = getDefaultBoundTexture(); bs = getDefaultBoundSampler(); }
 			renderDevice->setTexture(recordingUniformSet, a_variableName, bt, bs);
 			return true;
-		}
-		if (!headless) {
-			GLuint offset = variableOffset(a_variableName);
-			if (offset >= 0) {
-				auto textureId = (a_value != nullptr && a_value->texture() != nullptr) ?
-					a_value->texture()->textureId() :
-					getDefaultTextureId();
-
-				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
-				glUniform1i(offset, a_textureBindIndex);
-				glBindTexture(GL_TEXTURE_2D, textureId);
-				return true;
-			} else if (a_errorIfNotPresent) {
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
 		}
 		return false;
 	}

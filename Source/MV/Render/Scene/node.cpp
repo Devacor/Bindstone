@@ -113,6 +113,7 @@ namespace MV {
 
 		void Node::draw() {
 			if (allowDraw) {
+				require<ResourceException>(renderer().device(), "Node::draw requires a render device.");
 				bool allowChildrenToDraw = true;
 				for (size_t i = 0; i < childComponents->size();++i) {
 					// Guard against re-entrant node destruction: a draw callback can
@@ -144,6 +145,7 @@ namespace MV {
 
 		void Node::draw(const TransformMatrix &a_overrideParentMatrix) {
 			if (allowDraw) {
+				require<ResourceException>(renderer().device(), "Node::draw requires a render device.");
 				// Only usingTemporaryMatrix needs resetting on exit. We deliberately do NOT
 				// re-dirty the matrices: recalculateLocalMatrix() below leaves localMatrixTransform
 				// valid (it is parent-independent) and never writes worldMatrixTransform, so the

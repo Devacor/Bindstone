@@ -57,6 +57,8 @@ namespace MV {
 		void HeadlessDevice::beginDefaultPass(const float[4]) {}
 		void HeadlessDevice::setViewport(const Viewport&) {}
 		void HeadlessDevice::setScissor(const Rect&) {}
+		void HeadlessDevice::setStencilState(const StencilState&) {}
+		void HeadlessDevice::clearStencil(uint8_t) {}
 		void HeadlessDevice::draw(const DrawItem&) {}
 		void HeadlessDevice::endPass() {}
 		void HeadlessDevice::endFrame() {}

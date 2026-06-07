@@ -74,6 +74,7 @@ namespace MV {
 			HandlePool<BoundUniformSet,   GLUniformSet>   uniformSets;
 			HandlePool<BoundRenderTarget, GLRenderTarget> renderTargets;
 			std::vector<GLuint> passStack; // bound-FBO stack for nested beginPass/endPass (default target == 0).
+			StencilState currentStencil;   // dynamic stencil applied via setStencilState; persists across draws.
 		};
 
 		namespace {
@@ -327,6 +328,12 @@ namespace MV {
 		}
 
 		void GLDevice::beginDefaultPass(const float a_clearColor[4]) {
+			// glClear obeys the color/depth/stencil write masks; force them full so a prior draw's
+			// partial mask (a stencil mask's colorWriteMask=0, the stencil test's writeMask=0, or a
+			// depthWrite=false pipeline) can't suppress this clear. draw() re-applies masks per draw.
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+			glDepthMask(GL_TRUE);
+			glStencilMask(0xFF);
 			glClearColor(a_clearColor[0], a_clearColor[1], a_clearColor[2], a_clearColor[3]);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 		}
@@ -485,6 +492,10 @@ namespace MV {
 				glViewport(0, 0, w, h);
 			}
 			if (!a_clearInfo.color.empty() && a_clearInfo.color[0].load == LoadOp::Clear) {
+				// Same caveat as beginDefaultPass: a clear obeys the write masks, so force them full.
+				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+				glDepthMask(GL_TRUE);
+				glStencilMask(0xFF);
 				const float *c = a_clearInfo.color[0].clearColor;
 				glClearColor(c[0], c[1], c[2], c[3]);
 				GLbitfield mask = GL_COLOR_BUFFER_BIT;
@@ -504,6 +515,26 @@ namespace MV {
 			glScissor(a_rect.x, a_rect.y, a_rect.width, a_rect.height);
 		}
 
+		// GL stencil state is global and persists across draws, so apply it here; draw() leaves it alone.
+		void GLDevice::setStencilState(const StencilState &a_state) {
+			state->currentStencil = a_state;
+			if (!a_state.enabled) {
+				glDisable(GL_STENCIL_TEST);
+				return;
+			}
+			glEnable(GL_STENCIL_TEST);
+			glStencilFunc(glCompare(a_state.compare), a_state.reference, a_state.compareMask);
+			// glStencilOpSeparate (not the 3-arg glStencilOp) avoids clashing with the glStencilOp() enum helper.
+			glStencilOpSeparate(GL_FRONT_AND_BACK, glStencilOp(a_state.fail), glStencilOp(a_state.depthFail), glStencilOp(a_state.pass));
+			glStencilMask(a_state.writeMask);
+		}
+
+		void GLDevice::clearStencil(uint8_t a_value) {
+			glStencilMask(0xFF);          // glClear honors the stencil write mask.
+			glClearStencil(a_value);
+			glClear(GL_STENCIL_BUFFER_BIT);
+		}
+
 		// ---- draw -------------------------------------------------------------------
 		void GLDevice::draw(const DrawItem &a_item) {
 			State::GLPipeline *pipe = state->pipelines.get(a_item.pipeline);
@@ -520,12 +551,12 @@ namespace MV {
 			} else {
 				glDisable(GL_BLEND);
 			}
-			// Force the color mask only when the pipeline opts in (< 0xF); the default leaves global
-			// state alone so the Stencil component's imperative glColorMask survives.
-			if (pipe->blend.colorWriteMask != 0xF) {
-				const GLboolean cw = pipe->blend.colorWriteMask != 0 ? GL_TRUE : GL_FALSE;
-				glColorMask(cw, cw, cw, cw);
-			}
+			// Color write mask is a pipeline property (Metal bakes it); apply it every draw so a stencil
+			// mask's colorWriteMask=0 never leaks into the next draw. Stencil itself is dynamic device
+			// state (setStencilState) and persists across draws — draw() must not touch it here.
+			const uint8_t cwm = pipe->blend.colorWriteMask;
+			glColorMask((cwm & 0x1) ? GL_TRUE : GL_FALSE, (cwm & 0x2) ? GL_TRUE : GL_FALSE,
+			            (cwm & 0x4) ? GL_TRUE : GL_FALSE, (cwm & 0x8) ? GL_TRUE : GL_FALSE);
 
 			if (pipe->depthStencil.depthTest) {
 				glEnable(GL_DEPTH_TEST);
@@ -534,20 +565,6 @@ namespace MV {
 				glDisable(GL_DEPTH_TEST);
 			}
 			glDepthMask(pipe->depthStencil.depthWrite ? GL_TRUE : GL_FALSE);
-
-			// Drive stencil only when the pipeline opts in; otherwise leave global state alone (don't
-			// even disable) so the Stencil component's imperative glStencilFunc clips the draws it wraps.
-			if (pipe->depthStencil.stencilEnabled) {
-				glEnable(GL_STENCIL_TEST);
-				const auto &f = pipe->depthStencil.front;
-				glStencilFuncSeparate(GL_FRONT, glCompare(f.compare), a_item.stencilRef, f.readMask);
-				glStencilOpSeparate(GL_FRONT, glStencilOp(f.fail), glStencilOp(f.depthFail), glStencilOp(f.pass));
-				glStencilMaskSeparate(GL_FRONT, f.writeMask);
-				const auto &b = pipe->depthStencil.back;
-				glStencilFuncSeparate(GL_BACK, glCompare(b.compare), a_item.stencilRef, b.readMask);
-				glStencilOpSeparate(GL_BACK, glStencilOp(b.fail), glStencilOp(b.depthFail), glStencilOp(b.pass));
-				glStencilMaskSeparate(GL_BACK, b.writeMask);
-			}
 
 			if (pipe->raster.cull == CullMode::None) {
 				glDisable(GL_CULL_FACE);

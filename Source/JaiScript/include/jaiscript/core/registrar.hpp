@@ -32,6 +32,14 @@ namespace jai {
 class engine;
 template<typename T> class dynamic_binder;
 
+// polymorphic.hpp is included at the bottom of this header (it depends on archive types
+// defined elsewhere, and archive_impl.hpp closes the loop by including it). Forward-declare
+// the auto-register entry point here so the registrar bodies below can name it as a template;
+// its definition rides in with that bottom include.
+namespace serialization {
+	template<typename T> void try_auto_register(const std::string& name);
+}
+
 // ============================================================================
 // Type Name Registry - Global mapping from type_index to script name
 // ============================================================================
@@ -176,7 +184,7 @@ public:
     explicit registrar(const char* name) {
         std::string name_str(name);
         type_name_registry::instance().register_type<T>(name);
-        serialization::polymorphic_registry::try_auto_register<T>(name_str);
+        serialization::try_auto_register<T>(name_str);
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [name_str](engine& eng, const Context&) {
@@ -192,7 +200,7 @@ public:
     registrar(const char* name, F&& configure) {
         std::string name_str(name);
         type_name_registry::instance().register_type<T>(name);
-        serialization::polymorphic_registry::try_auto_register<T>(name_str);
+        serialization::try_auto_register<T>(name_str);
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [name_str, configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
@@ -213,7 +221,7 @@ public:
     explicit registrar(const char* name) {
         std::string name_str(name);
         type_name_registry::instance().register_type<T>(name);
-        serialization::polymorphic_registry::try_auto_register<T>(name_str);
+        serialization::try_auto_register<T>(name_str);
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [name_str](engine& eng) {
@@ -229,7 +237,7 @@ public:
     registrar(const char* name, F&& configure) {
         std::string name_str(name);
         type_name_registry::instance().register_type<T>(name);
-        serialization::polymorphic_registry::try_auto_register<T>(name_str);
+        serialization::try_auto_register<T>(name_str);
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [name_str, configure = std::forward<F>(configure)](engine& eng) {

@@ -9,8 +9,11 @@
 //   - No GL/SDL types here; resources are opaque generation+index Bound* handles
 //     (distinct from the scene-graph's logical MV::TextureHandle).
 //   - No heavy MV includes; matrices cross as const float* (16, column-major).
-//   - Imperative GL state (blend/depth/stencil/cull/layout/topology) is immutable in
-//     Vk/Metal, so it lives in a BoundPipeline; batching is a renderer layer above this.
+//   - Imperative GL state (blend/depth/cull/layout/topology) is immutable in Vk/Metal,
+//     so it lives in a BoundPipeline; batching is a renderer layer above this. The stencil
+//     TEST is the exception: it's dynamic (setStencilState) so a 2D clip mask can span the
+//     draws of many components (the scene-graph's Stencil). Color-write-off for a stencil
+//     mask is a pipeline property (Metal bakes it), not dynamic.
 
 #ifndef _MV_RENDER_DEVICE_H_
 #define _MV_RENDER_DEVICE_H_
@@ -126,6 +129,18 @@ namespace MV {
 			CompareOp depthCompare = CompareOp::LessEqual;
 			bool stencilEnabled = false;
 			StencilFaceState front, back;                  // stencil REFERENCE is dynamic (DrawItem.stencilRef), not in the PSO.
+		};
+
+		// Dynamic stencil applied to every subsequent draw until changed — decoupled from the
+		// pipeline so a 2D clip mask can span draws issued by many components (the scene's Stencil).
+		// GL: glStencil* (global); Vulkan: extended dynamic stencil state; Metal: MTLDepthStencilState + ref.
+		struct StencilState {
+			bool      enabled = false;                     // false == test off (everything passes).
+			CompareOp compare = CompareOp::Always;         // compares reference&compareMask vs buffer&compareMask.
+			StencilOp pass = StencilOp::Keep, fail = StencilOp::Keep, depthFail = StencilOp::Keep;
+			uint8_t   reference = 0;
+			uint8_t   compareMask = 0xFF;
+			uint8_t   writeMask = 0xFF;                    // 0 == test only, never modify the buffer.
 		};
 		struct RasterState { CullMode cull = CullMode::None; }; // 2D: None; 3D mesh: Back.
 
@@ -289,6 +304,9 @@ namespace MV {
 			virtual void beginDefaultPass(const float clearColor[4]) = 0;        // convenience: swapchain pass w/ clear.
 			virtual void setViewport(const Viewport&) = 0;
 			virtual void setScissor(const Rect&) = 0;
+			// Dynamic stencil for 2D clip masking; applies to subsequent draw()s until changed (see StencilState).
+			virtual void setStencilState(const StencilState&) = 0;
+			virtual void clearStencil(uint8_t value = 0) = 0;    // clear the stencil buffer within the current pass.
 			virtual void draw(const DrawItem&) = 0;
 			virtual void endPass() = 0;
 			virtual void endFrame() = 0;                                         // submit + present.

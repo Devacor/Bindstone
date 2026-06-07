@@ -348,6 +348,7 @@ namespace MV {
 			virtual void updateImplementation(double a_dt) override;
 
 			virtual void defaultDrawImplementation() override;
+			void recordEmitterUniforms();
 
 			virtual bool serializePoints() const override { return false; }
 

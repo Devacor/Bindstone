@@ -57,6 +57,8 @@ namespace MV {
 			void beginDefaultPass(const float clearColor[4]) override;
 			void setViewport(const Viewport&) override;
 			void setScissor(const Rect&) override;
+			void setStencilState(const StencilState&) override;
+			void clearStencil(uint8_t value) override;
 			void draw(const DrawItem&) override;
 			void endPass() override;
 			void endFrame() override;

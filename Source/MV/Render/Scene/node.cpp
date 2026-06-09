@@ -267,10 +267,15 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
 			auto contents = fileContents(a_filename);
-			require<ResourceException>(!contents.empty(), "File not found for Node::load: ", a_filename);
-			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
+			require<ResourceException>(!contents.empty(), "File not found for Node::loadBinary: ", a_filename);
 
-			std::shared_ptr<Node> result = MV::fromBinaryString<std::shared_ptr<Node>>(contents, a_services);
+			// Low-level binary reader (mirrors loadJai's json_archive_reader); matches saveBinary's writer.
+			auto* engine = a_services.get<jai::engine>();
+			jai::serialization::binary_archive_reader ar(reinterpret_cast<const uint8_t*>(contents.data()), contents.size(), engine);
+			ar.set_user_context<MV::Services>(&a_services);
+			std::shared_ptr<Node> result;
+			ar(result);
+
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
 			}
@@ -323,25 +328,41 @@ namespace MV {
 			return self;
 		}
 
-		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, bool a_renameNodeToFile) {
-			return save(a_filename, a_renameNodeToFile ? fileNameFromPath(a_filename) : nodeId);
+		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile) {
+			return saveBinary(a_filename, a_services, a_renameNodeToFile ? fileNameFromPath(a_filename) : nodeId.get());
 		}
 
-		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, const std::string &a_newId) {
-			std::stringstream stream(fileContents(a_filename));
+		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_newId) {
+			auto self = shared_from_this();
 
-			std::string oldId = nodeId;
+			std::string oldId = nodeId.get();
 			auto oldParent = myParent;
 			SCOPE_EXIT{ nodeId = oldId; myParent = oldParent; };
 			nodeId = a_newId;
 			myParent = nullptr;
 
-			auto self = shared_from_this();
-			{
-				cereal::PortableBinaryOutputArchive archive(stream);
-				archive(self);
-			}
-			writeToFile(a_filename, stream.str());
+			// Filter non-serializable children/components (editor scaffolding), same as saveJai.
+			auto originalChildNodes = childNodes.get();
+			auto originalChildComponents = childComponents.get();
+			std::vector<std::shared_ptr<Node>> filteredChildren;
+			std::copy_if(originalChildNodes.begin(), originalChildNodes.end(), std::back_inserter(filteredChildren),
+				[](const auto& child) { return child->serializable(); });
+			std::vector<std::shared_ptr<Component>> filteredComponents;
+			std::copy_if(originalChildComponents.begin(), originalChildComponents.end(), std::back_inserter(filteredComponents),
+				[](const auto& comp) { return comp->serializable(); });
+			childNodes = filteredChildren;
+			childComponents = filteredComponents;
+			SCOPE_EXIT{
+				childNodes = originalChildNodes;
+				childComponents = originalChildComponents;
+			};
+
+			// Low-level binary writer (mirrors saveJai's json_archive_writer), matched by loadBinary.
+			auto* engine = a_services.get<jai::engine>();
+			jai::serialization::binary_archive_writer ar(engine);
+			ar(self);
+			auto& data = ar.data();
+			writeToFile(a_filename, std::string(data.begin(), data.end()));
 			return self;
 		}
 

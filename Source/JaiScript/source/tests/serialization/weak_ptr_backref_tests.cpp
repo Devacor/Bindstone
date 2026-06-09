@@ -15,6 +15,7 @@
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/serialization/polymorphic.hpp>
+#include "serialization_roundtrip.hpp"
 
 #include <memory>
 #include <string>
@@ -231,85 +232,85 @@ public:
             serialization::polymorphic_registry::try_auto_register<ReproDerived>("ReproDerived");
             serialization::polymorphic_registry::try_auto_register<ReproComponent>("ReproComponent");
 
-            // Build: node owns a derived component; component points back at node.
-            auto node = std::make_shared<ReproNode>(0);
-            node->setNodeId("root");
-            auto comp = std::make_shared<ReproDerived>(0);
-            comp->setId("comp_1");
-            comp->setDerivedData(99);
-            auto blob = std::make_shared<ReproBlob>();
-            blob->fill(500);  // large nested payload read before `owner`
-            comp->setBlob(blob);
-            comp->setOwner(node);  // backward reference
-            node->getComponents().push_back(comp);
+            // Same graph + assertions, run for each archive format (JSON and binary).
+            auto run = [&](const std::string& fmt, auto&& roundtrip) {
+                // Build: node owns a derived component; component points back at node.
+                auto node = std::make_shared<ReproNode>(0);
+                node->setNodeId("root");
+                auto comp = std::make_shared<ReproDerived>(0);
+                comp->setId("comp_1");
+                comp->setDerivedData(99);
+                auto blob = std::make_shared<ReproBlob>();
+                blob->fill(500);  // large nested payload read before `owner`
+                comp->setBlob(blob);
+                comp->setOwner(node);  // backward reference
+                node->getComponents().push_back(comp);
 
-            // Serialize the node.
-            serialization::json_archive_writer writer(2, eng.get());
-            writer(node);
-            std::string json = writer.str();
+                std::shared_ptr<ReproNode> loaded = roundtrip(*eng, node);
 
-            // Deserialize.
-            serialization::json_archive_reader reader(json, eng.get());
-            std::shared_ptr<ReproNode> loaded;
-            reader(loaded);
+                check(loaded != nullptr, fmt + ": node loaded");
+                if (!loaded) { return; }
+                check_eq(loaded->getNodeId(), std::string("root"));
+                check_eq(loaded->getComponents().size(), size_t(1));
+                if (loaded->getComponents().empty()) { return; }
 
-            check(loaded != nullptr);
-            check_eq(loaded->getNodeId(), std::string("root"));
-            check_eq(loaded->getComponents().size(), size_t(1));
+                auto loadedComp = loaded->getComponents()[0];
+                check(loadedComp != nullptr, fmt + ": component loaded");
+                if (!loadedComp) { return; }
+                check_eq(loadedComp->getId(), std::string("comp_1"));
 
-            auto loadedComp = loaded->getComponents()[0];
-            check(loadedComp != nullptr);
-            check_eq(loadedComp->getId(), std::string("comp_1"));
+                // The large nested blob must have round-tripped fully.
+                check(loadedComp->getBlob() != nullptr, fmt + ": blob loaded");
+                if (loadedComp->getBlob()) { check_eq(loadedComp->getBlob()->numberCount(), size_t(500)); }
 
-            // The large nested blob must have round-tripped fully.
-            check(loadedComp->getBlob() != nullptr);
-            check_eq(loadedComp->getBlob()->numberCount(), size_t(500));
+                // The crux: the component's weak_ptr owner must resolve to the node.
+                auto resolvedOwner = loadedComp->ownerLock();
+                check(resolvedOwner != nullptr, fmt + ": weak owner resolved");
+                check_eq(resolvedOwner.get(), loaded.get());
+            };
 
-            // The crux: the component's weak_ptr owner must resolve to the node.
-            auto resolvedOwner = loadedComp->ownerLock();
-            check(resolvedOwner != nullptr);          // <-- this is what crashes in Bindstone
-            check_eq(resolvedOwner.get(), loaded.get());
+            run("json", [](engine& e, const auto& v) { return roundtrip_json(e, v); });
+            run("binary", [](engine& e, const auto& v) { return roundtrip_binary(e, v); });
         });
 
         test("polymorphic_tree_parent_backrefs", [&]() {
             auto eng = engine::make();
             serialization::polymorphic_registry::try_auto_register<ReproTreeNode>("ReproTreeNode");
 
-            // Build a 3-level tree of polymorphic nodes; children point back at
-            // their parents via weak_ptr.
-            auto root = std::make_shared<ReproTreeNode>(0);
-            root->setValue(1); root->setTag("root");
+            auto run = [&](const std::string& fmt, auto&& roundtrip) {
+                // Build a 3-level tree of polymorphic nodes; children point back at
+                // their parents via weak_ptr.
+                auto root = std::make_shared<ReproTreeNode>(0);
+                root->setValue(1); root->setTag("root");
 
-            auto childA = std::make_shared<ReproTreeNode>(0);
-            childA->setValue(2); childA->setTag("A"); childA->setParent(root);
-            root->getChildren().push_back(childA);
+                auto childA = std::make_shared<ReproTreeNode>(0);
+                childA->setValue(2); childA->setTag("A"); childA->setParent(root);
+                root->getChildren().push_back(childA);
 
-            auto childB = std::make_shared<ReproTreeNode>(0);
-            childB->setValue(3); childB->setTag("B"); childB->setParent(root);
-            root->getChildren().push_back(childB);
+                auto childB = std::make_shared<ReproTreeNode>(0);
+                childB->setValue(3); childB->setTag("B"); childB->setParent(root);
+                root->getChildren().push_back(childB);
 
-            auto grandA = std::make_shared<ReproTreeNode>(0);
-            grandA->setValue(4); grandA->setTag("A1"); grandA->setParent(childA);
-            childA->getChildren().push_back(grandA);
+                auto grandA = std::make_shared<ReproTreeNode>(0);
+                grandA->setValue(4); grandA->setTag("A1"); grandA->setParent(childA);
+                childA->getChildren().push_back(grandA);
 
-            // Serialize through the BASE static type so every node is $type-tagged.
-            std::shared_ptr<ReproTreeBase> rootBase = root;
-            serialization::json_archive_writer writer(2, eng.get());
-            writer(rootBase);
-            std::string json = writer.str();
+                // Serialize through the BASE static type so every node is $type-tagged.
+                std::shared_ptr<ReproTreeBase> rootBase = root;
+                std::shared_ptr<ReproTreeBase> loaded = roundtrip(*eng, rootBase);
 
-            // Deserialize.
-            serialization::json_archive_reader reader(json, eng.get());
-            std::shared_ptr<ReproTreeBase> loaded;
-            reader(loaded);
+                check(loaded != nullptr, fmt + ": tree loaded");
+                if (!loaded) { return; }
+                check_eq(loaded->parentLock().get(), (ReproTreeBase*)nullptr);  // root has no parent
+                check_eq(loaded->getChildren().size(), size_t(2));
 
-            check(loaded != nullptr);
-            check_eq(loaded->parentLock().get(), (ReproTreeBase*)nullptr);  // root has no parent
-            check_eq(loaded->getChildren().size(), size_t(2));
+                // Every child's weak_ptr parent must resolve to its actual parent
+                // node in the loaded tree. This is the polymorphic-path back-ref case.
+                verifyTree(loaded, nullptr);
+            };
 
-            // Every child's weak_ptr parent must resolve to its actual parent
-            // node in the loaded tree. This is the polymorphic-path back-ref case.
-            verifyTree(loaded, nullptr);
+            run("json", [](engine& e, const auto& v) { return roundtrip_json(e, v); });
+            run("binary", [](engine& e, const auto& v) { return roundtrip_binary(e, v); });
         });
     }
 };

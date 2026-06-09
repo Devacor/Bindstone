@@ -190,8 +190,8 @@ namespace MV {
 			std::shared_ptr<Node> save(const std::string &a_filename, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> save(const std::string &a_filename, const std::string &a_overrideId);
 
-			std::shared_ptr<Node> saveBinary(const std::string &a_filename, bool a_renameNodeToFile = true);
-			std::shared_ptr<Node> saveBinary(const std::string &a_filename, const std::string &a_overrideId);
+			std::shared_ptr<Node> saveBinary(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile = true);
+			std::shared_ptr<Node> saveBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId);
 
 			// JaiScript serialization
 			std::shared_ptr<Node> saveJai(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile = true);

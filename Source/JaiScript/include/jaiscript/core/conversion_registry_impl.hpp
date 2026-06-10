@@ -67,55 +67,38 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
     if (v.type() != script_value_type::jai_map_type) {
         throw runtime_error("Cannot convert non-map to std::map");
     }
-    
+
     std::map<K, V> result;
     const auto& m = v.as_map();
-    
-    for (const auto& [k, val] : m) {
-        if constexpr (std::is_same_v<K, script_value> && std::is_same_v<V, script_value>) {
-            result[k] = val;
-        } else if constexpr (std::is_same_v<K, script_value>) {
-            // Try engine-aware conversion for V
-            if (eng) {
-                auto registry = get_engine_conversion_registry(eng);
-                if (registry && registry->template has_conversion<V>()) {
-                    result[k] = registry->template convert_from_script<V>(val);
-                } else {
-                    result[k] = val.as<V>();
-                }
-            } else {
-                result[k] = val.as<V>();
-            }
-        } else if constexpr (std::is_same_v<V, script_value>) {
-            result[k.as<K>()] = val;
+
+    // Construct entries in place: operator[] would require V to be default-constructible AND
+    // copy-assignable, and the assignability trait lies for types holding vector<unique_ptr<...>>
+    // members (hard error inside vector::operator=). Copy construction is all we require.
+    auto registry = eng ? get_engine_conversion_registry(eng) : nullptr;
+    auto convertedKey = [&](const script_value& k) -> K {
+        if constexpr (std::is_same_v<K, script_value>) {
+            return k;
         } else {
-            // Try engine-aware conversion for both K and V
-            K converted_key;
-            V converted_value;
-            
-            if (eng) {
-                auto registry = get_engine_conversion_registry(eng);
-                
-                // Convert key
-                if (registry && registry->template has_conversion<K>()) {
-                    converted_key = registry->template convert_from_script<K>(k);
-                } else {
-                    converted_key = k.as<K>();
-                }
-                
-                // Convert value
-                if (registry && registry->template has_conversion<V>()) {
-                    converted_value = registry->template convert_from_script<V>(val);
-                } else {
-                    converted_value = val.as<V>();
-                }
-            } else {
-                converted_key = k.as<K>();
-                converted_value = val.as<V>();
+            if (registry && registry->template has_conversion<K>()) {
+                return registry->template convert_from_script<K>(k);
             }
-            
-            result[converted_key] = converted_value;
+            return k.as<K>();
         }
+    };
+    auto convertedValue = [&](const script_value& val) -> V {
+        if constexpr (std::is_same_v<V, script_value>) {
+            return val;
+        } else {
+            if (registry && registry->template has_conversion<V>()) {
+                return registry->template convert_from_script<V>(val);
+            }
+            return val.as<V>();
+        }
+    };
+    for (const auto& [k, val] : m) {
+        K key = convertedKey(k);
+        result.erase(key); // last-wins if two script keys convert to the same K
+        result.emplace(std::move(key), convertedValue(val));
     }
     return result;
 }

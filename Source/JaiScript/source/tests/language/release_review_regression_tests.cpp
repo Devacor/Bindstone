@@ -5,7 +5,10 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal.hpp>
+#include <jaiscript/signals/signal_binding.hpp>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -13,6 +16,15 @@ using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+// Mirrors the game's scripted-entity glue: assignable std::function hooks,
+// a signal member exposed as a read-only property, and string-keyed state.
+struct scripted_thing {
+	jai::signal_emitter<void(int)> pingEmitter;
+	jai::signal<void(int)> onPing{pingEmitter};
+	std::function<void(int)> hook;
+	std::map<std::string, jai::script_value> vars;
+};
 
 class release_review_regression_tests : public suite {
 public:
@@ -210,6 +222,41 @@ public:
 			src += "1 + 2";
 			src += std::string(20, ')');
 			check_eq((int64_t)3, e->execute(src).as_int());
+		});
+
+		// ---- scripted-entity glue: hook properties + signal connect + getVar/setVar ----
+		test("game_pattern_hooks_signals_vars", [this]() {
+			auto e = engine::make();
+			jai::bind_signal_type<void(int)>(*e, "SignalInt");
+			{
+				jai::dynamic_binder<scripted_thing> builder(*e, "ScriptedThing");
+				builder.property("hook", &scripted_thing::hook);
+				builder.property("onPing", [](scripted_thing& s) -> jai::signal<void(int)>& { return s.onPing; }, nullptr);
+				builder.method("setVar", [](scripted_thing& s, const std::string& k, script_value v) {
+					s.vars[k] = std::move(v);
+				});
+				builder.method("getVar", [eng = e.get()](scripted_thing& s, const std::string& k) {
+					auto it = s.vars.find(k);
+					return it != s.vars.end() ? it->second : script_value(std::monostate{}, eng);
+				});
+				builder.build();
+			}
+			scripted_thing thing;
+			auto self = e->make_object(std::shared_ptr<scripted_thing>(&thing, [](scripted_thing*) {}));
+			e->add_global("self", self);
+			e->execute(R"(
+				self.setVar("count", 0);
+				self.hook = [=](int amount) -> void {
+					self.setVar("count", self.getVar("count") + amount);
+				};
+				self.onPing.connect("test", [=](int v) -> void {
+					self.setVar("count", self.getVar("count") + v * 100);
+				});
+			)");
+			check(static_cast<bool>(thing.hook));               // script lambda landed in the std::function
+			thing.hook(3);                                      // C++ invokes the script hook
+			thing.pingEmitter(2);                               // C++ emit reaches the script receiver
+			check_eq((int64_t)203, e->execute("self.getVar(\"count\");").as_int());
 		});
 
 		// ---- port-scout G1: compound assignment through a map subscript ----

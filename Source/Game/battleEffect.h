@@ -160,6 +160,9 @@ public:
 		return gameInstance;
 	}
 
+	// Registers private members with the script engine (called by dynamic_binder::auto_bind)
+	static void jai_auto_bind(jai::dynamic_binder<BattleEffect>& builder);
+
 protected:
 	BattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const BattleEffectData& a_statTemplate, std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> a_state);
 	virtual void initialize() override;

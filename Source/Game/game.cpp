@@ -4,15 +4,39 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/signals/signal_binding.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 // JaiScript binding for StandardMessages
 static jai::registrar<StandardMessages, MV::Services> _hookStandardMessages("StandardMessages",
-	[](jai::dynamic_binder<StandardMessages>& builder, const MV::Services&) {
+	[](jai::dynamic_binder<StandardMessages>& builder, const MV::Services& a_services) {
+	if (auto* eng = a_services.get<jai::engine>(false)) {
+		jai::bind_signal_type<void()>(*eng, "SignalVoid");
+		jai::bind_signal_type<void(const std::string&)>(*eng, "SignalString");
+		jai::bind_signal_type<void(bool, const std::string&)>(*eng, "SignalBoolString");
+	}
 	builder.auto_bind();
 	builder.property("lobbyConnected", &StandardMessages::lobbyConnected);
 	builder.property("lobbyDisconnect", &StandardMessages::lobbyDisconnect);
 	builder.property("lobbyAuthenticated", &StandardMessages::lobbyAuthenticated);
+});
+
+void Game::jai_auto_bind(jai::dynamic_binder<Game>& builder) {
+	builder.property("loginId", &Game::loginId);
+	builder.property("loginPassword", &Game::loginPassword);
+	builder.property("client", [](Game& a_self) { return a_self.lobbyClient(); }, nullptr);
+}
+
+static jai::registrar<Game, MV::Services> _hookGame("Game",
+	[](jai::dynamic_binder<Game>& builder, const MV::Services&) {
+	builder.auto_bind();
+	builder.method("gui", &Game::gui);
+	builder.method("instance", [](Game& a_self) {
+		return std::shared_ptr<GameInstance>(a_self.instance(), [](GameInstance*) {});
+	});
+	builder.method("root", &Game::root);
+	builder.method("player", &Game::player);
+	builder.method("killGame", &Game::killGame);
 });
 
 void sdl_quit(void){
@@ -28,6 +52,12 @@ Game::Game(Managers& a_managers) :
 	// Register stdlib and trigger all registrars
 	jai::stdlib::register_all(*jaiEngine_);
 	jai::bind_registrar<MV::Services>(*jaiEngine_, a_managers.services);
+
+	// Script globals (non-owning: this/messages outlive the engine)
+	jaiEngine_->add_global("game", jaiEngine_->make_object(std::shared_ptr<Game>(this, [](Game*) {})));
+	jaiEngine_->add_global("messages", jaiEngine_->make_object(std::shared_ptr<StandardMessages>(&a_managers.messages, [](StandardMessages*) {})));
+	jaiEngine_->add_global("DefaultLoginId", jai::script_value(a_managers.defaultLogin.id, jaiEngine_.get()));
+	jaiEngine_->add_global("DefaultPassword", jai::script_value(a_managers.defaultLogin.password, jaiEngine_.get()));
 
 	returnFromBackground();
 

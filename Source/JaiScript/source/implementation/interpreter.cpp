@@ -164,6 +164,29 @@ static script_value clone_for_assignment(const script_value& value) {
     return value.clone();
 }
 
+// Capture semantics: C++-backed objects (make_object wrappers, raw cpp holders) are
+// reference types in script — capturing one shares the underlying object, mirroring
+// shared_ptr capture. Pure script objects keep capture-by-value (deep copy).
+static script_value clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {
+    auto type_info = value.get_type_info();
+    if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
+        return value;
+    }
+    if (value.is_object()) {
+        auto holder = const_cast<script_value&>(value).get_object_holder();
+        if (holder) {
+            if (!holder->is_class_instance_wrapper) {
+                return value;  // raw C++ object holder: share
+            }
+            auto instance = std::static_pointer_cast<class_instance>(holder->data);
+            if (instance && symbolizer && instance->has_field(symbolizer->intern(class_constants::CPP_OBJECT_FIELD))) {
+                return value;  // class_instance wrapping a C++ object: share
+            }
+        }
+    }
+    return value.clone();
+}
+
 // Helper function to convert script_value_type to a human-readable string
 static std::string get_type_name(script_value_type type) {
     switch (type) {
@@ -7669,7 +7692,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         } else {
                             auto capture_result = environment_->get(var_id);
                             if (capture_result) {
-                                captureEnv->define(var_id, capture_result.value().clone());
+                                captureEnv->define(var_id, clone_for_capture(capture_result.value(), string_symbolizer_));
                             }
                         }
                     } else if (!call_stack_.empty()) {
@@ -7680,14 +7703,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                             if (ref.symbol_id == var_id) {
                                 script_value* slot_val = call_stack_.back().get_local(ref.outer_slot);
                                 if (slot_val) {
-                                    if (capture_by_ref) {
-                                        // By-ref of a slot: safe only for inline (non-escaping) use.
-                                        // Provide a value-clone and let the slot-scan patch handle
-                                        // the escaping-closure case above (UAF avoidance).
-                                        captureEnv->define(var_id, slot_val->deref().clone());
-                                    } else {
-                                        captureEnv->define(var_id, slot_val->deref().clone());
-                                    }
+                                    // By-ref of a slot is lifetime-unsafe for escaping closures;
+                                    // both modes capture by value (cpp-backed objects share).
+                                    captureEnv->define(var_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
                                 }
                                 break;
                             }
@@ -7728,7 +7746,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     // Local in outer call frame: always capture by value (clone).
                     // Capturing a stack slot by reference for an escaping closure is
                     // a use-after-free; value semantics are safe in all cases.
-                    captureEnv->define(capture.symbol_id, slot_val->deref().clone());
+                    captureEnv->define(capture.symbol_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
                 } else if (capture.by_reference) {
                     script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
                     if (targetPtr) {
@@ -7741,7 +7759,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 } else {
                     auto capture_result = environment_->get(capture.symbol_id);
                     if (!capture_result) return capture_result.error_value();
-                    captureEnv->define(capture.symbol_id, capture_result.value().clone());
+                    captureEnv->define(capture.symbol_id, clone_for_capture(capture_result.value(), string_symbolizer_));
                 }
             } else {
                 return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
@@ -7766,7 +7784,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     // slot is inherently lifetime-unsafe for an escaping closure.
                     // [&] users wanting live binding should capture an explicit ref
                     // or use a wrapper object; silent by-ref from slot is a UAF.
-                    captureEnv->define(ref.symbol_id, slot_val->deref().clone());
+                    captureEnv->define(ref.symbol_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
                 }
                 // Patch the AST node so future lookups go through the env path
                 if (ref.node) { ref.node->slot_index = SIZE_MAX; }

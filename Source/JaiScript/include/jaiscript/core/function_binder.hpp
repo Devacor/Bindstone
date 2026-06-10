@@ -33,6 +33,12 @@ namespace jai {
     uint64_t symbolize_text(E* eng, const char* text) {
         return eng ? eng->symbolize(text) : 0;
     }
+
+    // Wraps a script FUNCTION value as a std::function<Sig> so script lambdas can be
+    // assigned into C++ callback members/parameters. Implementation in engine_impl.hpp
+    // (argument conversion needs the complete engine).
+    template<typename Sig>
+    std::function<Sig> convert_script_function(const script_value& fn);
 }
 #include <type_traits>
 #include <typeinfo>
@@ -126,6 +132,27 @@ class engine;
             }
         };
         
+        // Specialization for std::function: script lambdas convert into C++ callbacks
+        // (the spawn/update hook pattern). Reading a callback back yields null —
+        // C++ callables are opaque to scripts.
+        template<typename Sig>
+        struct value_converter<std::function<Sig>> {
+            static checked_result<std::function<Sig>> checked_from(const script_value& v, engine* eng) {
+                return from(v, eng);
+            }
+
+            static std::function<Sig> from(const script_value& v, engine* /*eng*/) {
+                if (!v.is_function()) {
+                    return {};
+                }
+                return convert_script_function<Sig>(v);
+            }
+
+            static script_value to(const std::function<Sig>& /*v*/, engine* eng) {
+                return script_value(std::monostate{}, eng);
+            }
+        };
+
         // Specialization for int (convert to script_int/int64_t)
         template<>
         struct value_converter<int> {

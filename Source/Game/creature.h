@@ -21,6 +21,8 @@ struct InGamePlayer;
 struct CreatureData;
 class Creature;
 
+namespace jai { template<typename T> class dynamic_binder; }
+
 struct CreatureData {
 	std::string id;
 
@@ -324,6 +326,9 @@ public:
 		return spineAnimator;
 	}
 
+	// Registers private members with the script engine (called by dynamic_binder::auto_bind)
+	static void jai_auto_bind(jai::dynamic_binder<Creature>& builder);
+
 protected:
 	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const CreatureData& a_statTemplate, std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_state);
 
@@ -393,6 +398,9 @@ public:
 	std::shared_ptr<MV::Scene::PathAgent> agent() {
 		return pathAgent;
 	}
+
+	// Registers private members with the script engine (called by dynamic_binder::auto_bind)
+	static void jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder);
 
 protected:
 	ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance);

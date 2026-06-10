@@ -27,9 +27,15 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
     std::vector<declaration_ptr> declarations;
 
     while (!is_at_end()) {
+        const size_t errors_before = errors_.size();
         auto decl_result = declaration();
 
         if (!decl_result) {
+            // Surface errors that bypass report_error (e.g. depth-guard failures) —
+            // otherwise execute() would return null with no diagnostic at all.
+            if (errors_.size() == errors_before && decl_result.error() != std::error_code()) {
+                report_error(format_error(decl_result, *symbolizer_), peek());
+            }
             synchronize();
         } else {
             auto decl = std::move(decl_result.value());
@@ -39,10 +45,15 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
         }
     }
 
-    // If there were parse errors, return error with first error message
+    // If there were parse errors, return error carrying the FULL diagnostic list
+    // (interned; the engine boundary resolves it via format_error).
     if (!errors_.empty()) {
-        // Intern the first error message so it can be retrieved via symbol_id
-        uint64_t error_id = symbolizer_->intern(errors_[0]);
+        std::string all_errors = errors_[0];
+        for (size_t i = 1; i < errors_.size(); ++i) {
+            all_errors += '\n';
+            all_errors += errors_[i];
+        }
+        uint64_t error_id = symbolizer_->intern(all_errors);
         return checked_result<std::vector<declaration_ptr>>(
             make_error_code(parse_error_code::invalid_expression),
             "Parse error: {0}",
@@ -317,8 +328,16 @@ checked_result<expression_ptr> parser::primary() {
         return id_expr;
     }
 
-    // Grouped expression
+    // Grouped expression. Weighted: one paren level re-enters the entire precedence
+    // chain (~18 native frames) but only ticks the shared counter twice, so unweighted
+    // nesting overflowed the native stack BELOW the cap (~40 levels on a 1 MB Debug stack).
     if (match(token_type::left_paren)) {
+        depth_guard guard(parse_depth_, MAX_PARSE_DEPTH, 6);
+        if (guard.overflow_) {
+            return checked_result<expression_ptr>(
+                make_error_code(parse_error_code::unexpected_token),
+                "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
+        }
         JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
         JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after expression"));
         return expr;
@@ -770,6 +789,15 @@ bool parser::looks_like_map_literal() {
 }
 
 checked_result<expression_ptr> parser::parse_map_literal() {
+    // Nested C++-style map literals ({{...}}) recurse here without passing through
+    // expression(); unguarded brace runs overflow the native stack.
+    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
+    if (guard.overflow_) {
+        return checked_result<expression_ptr>(
+            make_error_code(parse_error_code::unexpected_token),
+            "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
+    }
+
     JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{'"));
     auto startLoc = previous().location;
 
@@ -1201,6 +1229,15 @@ checked_result<expression_ptr> parser::postfix() {
 
 // Stub for declaration
 checked_result<declaration_ptr> parser::declaration() {
+    // Statement-level recursion (blocks, if-chains) needs the same protection as
+    // expressions: declaration->statement->block->declaration is unbounded.
+    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
+    if (guard.overflow_) {
+        return checked_result<declaration_ptr>(
+            make_error_code(parse_error_code::unexpected_token),
+            "Maximum statement nesting depth exceeded ({})", MAX_PARSE_DEPTH);
+    }
+
     if (match(token_type::class_keyword)) {
         JAISCRIPT_TRY_ASSIGN(auto result, class_declaration());
         match(token_type::semicolon);  // Consume optional semicolon after class
@@ -1672,6 +1709,15 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
 
 // statement parsing implementations
 checked_result<statement_ptr> parser::statement() {
+    // statement->if_statement->statement (and friends) recurse without passing
+    // through declaration(); guard here too.
+    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
+    if (guard.overflow_) {
+        return checked_result<statement_ptr>(
+            make_error_code(parse_error_code::unexpected_token),
+            "Maximum statement nesting depth exceeded ({})", MAX_PARSE_DEPTH);
+    }
+
     if (match(token_type::left_brace)) return block_statement();
     if (match(token_type::if_keyword)) return if_statement();
     if (match(token_type::while_keyword)) return while_statement();

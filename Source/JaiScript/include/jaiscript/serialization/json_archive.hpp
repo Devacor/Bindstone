@@ -8,6 +8,7 @@
 #include <cmath>
 #include <charconv>     // std::to_chars for shortest round-trippable float output
 #include <string_view>
+#include <limits>
 
 // Maximum nesting depth for JSON TEXT parsing (from_json). Each level recurses a
 // couple of native stack frames, so this is intentionally well below
@@ -1216,6 +1217,18 @@ private:
         }
         const char* first = json_.data() + start;
         const char* last = json_.data() + pos_;
+        // from_chars leaves the out-of-range result implementation-defined (MS STL: +-inf,
+        // libstdc++: untouched). Pin the writer's 1e999 infinity sentinel on every platform:
+        // a negative exponent underflows to signed zero, anything else overflows to signed inf.
+        auto out_of_range_double = [](const char* f, const char* l) {
+            bool negative = (f != l && *f == '-');
+            bool negative_exponent = false;
+            for (const char* p = f; p != l; ++p) {
+                if (*p == 'e' || *p == 'E') { negative_exponent = (p + 1 != l && *(p + 1) == '-'); break; }
+            }
+            double magnitude = negative_exponent ? 0.0 : std::numeric_limits<double>::infinity();
+            return negative ? -magnitude : magnitude;
+        };
         JNode v;
         if (has_decimal || has_exponent) {
             double d = 0.0;
@@ -1223,6 +1236,7 @@ private:
             if (r.ptr != last || (r.ec != std::errc() && r.ec != std::errc::result_out_of_range)) {
                 throw serialization_error("Invalid numeric literal in JSON at position " + std::to_string(start));
             }
+            if (r.ec == std::errc::result_out_of_range) { d = out_of_range_double(first, last); }
             v.tag = JTag::Double; v.u.d = d;
         } else {
             script_int iv = 0;
@@ -1235,6 +1249,7 @@ private:
                 if (r2.ptr != last || (r2.ec != std::errc() && r2.ec != std::errc::result_out_of_range)) {
                     throw serialization_error("Invalid integer literal in JSON at position " + std::to_string(start));
                 }
+                if (r2.ec == std::errc::result_out_of_range) { d = out_of_range_double(first, last); }
                 v.tag = JTag::Double; v.u.d = d;
             }
         }

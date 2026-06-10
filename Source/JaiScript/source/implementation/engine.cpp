@@ -32,6 +32,9 @@ struct engine::implementation {
     // Current parameter storage for function calls (replaces thread_local)
     detail::parameter_storage* current_parameter_storage = nullptr;
 
+    // Script execution budget in seconds (0 = unlimited); mirrored into the backend
+    double execution_budget_seconds_ = 1.0;
+
     // Custom output stream for print() - nullptr means use std::cout
     std::shared_ptr<std::ostream> output_stream;
 
@@ -410,14 +413,9 @@ engine::implementation::implementation()
       class_definition_type_id_(string_symbolizer_.intern("class_definition")) {
     global_environment_ = std::make_shared<environment>(&string_symbolizer_);
 
-    // Use unique_ptr with custom deleter for automatic cleanup
-    char* backend_env_raw = nullptr;
-    size_t len = 0;
-    _dupenv_s(&backend_env_raw, &len, "JAISCRIPT_BACKEND");
-    std::unique_ptr<char, decltype(&free)> backend_env(backend_env_raw, &free);
-
+    const char* backend_env = std::getenv("JAISCRIPT_BACKEND");
     if (backend_env) {
-        std::string backend_str(backend_env.get());
+        std::string backend_str(backend_env);
         if (backend_str == "jvm" || backend_str == "vm") {
             current_backend_type = backend_type::jvm;
             backend = jvm::create_vm_backend(&string_symbolizer_, global_environment_);
@@ -919,9 +917,11 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
         parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
         auto parse_result = parser.parse();
 
-        // Convert checked_result to exception at API boundary
+        // Convert checked_result to exception at API boundary. format_error resolves
+        // the interned detail (file:line:col + message, one line per collected error)
+        // instead of the bare category string the error_code carries.
         if (!parse_result) {
-            throw parse_error("Parse error: " + parse_result.error().message());
+            throw parse_error(format_error(parse_result));
         }
 
         script_value result = impl->backend->execute(parse_result.value());
@@ -1809,6 +1809,18 @@ class_registry& engine::get_class_registry() {
 
 bool engine::throw_on_overflow() const {
     return kCheckedOverflow;  // compile-time policy (interpreter.hpp)
+}
+
+void engine::execution_budget(double seconds) {
+    impl->execution_budget_seconds_ = seconds;
+    auto budget = seconds > 0
+        ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds))
+        : std::chrono::nanoseconds(0);
+    impl->backend->set_execution_budget(budget);
+}
+
+double engine::execution_budget() const {
+    return impl->execution_budget_seconds_;
 }
 
 script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {

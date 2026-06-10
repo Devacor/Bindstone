@@ -780,7 +780,7 @@ namespace property_serialization {
 			}
 
 			if (ar.has_deserialized_shared(id)) {
-				ptr = ar.get_deserialized_shared<T>(id);
+				ptr = ar.template get_deserialized_shared<T>(id);
 				ar.end_object();
 				return;
 			}
@@ -843,7 +843,7 @@ namespace property_serialization {
 			}
 
 			if (ar.has_deserialized_shared(id)) {
-				ptr = ar.get_deserialized_shared<T>(id);
+				ptr = ar.template get_deserialized_shared<T>(id);
 				return;
 			}
 
@@ -979,7 +979,7 @@ namespace property_serialization {
 		}
 
 		// Look up the shared_ptr by ID and create weak_ptr from it
-		if (auto shared = ar.get_deserialized_shared<T>(id)) {
+		if (auto shared = ar.template get_deserialized_shared<T>(id)) {
 			ptr = shared;
 		} else {
 			// ID not found - the shared_ptr wasn't deserialized yet or doesn't exist
@@ -1102,8 +1102,10 @@ namespace jai {
 
 		// Read properties based on archive format (compile-time branch)
 		if constexpr (Archive::needs_property_keys) {
-			// Binary format: iterate through pre-read property names
-			const auto& prop_names = ar.get_object_property_names();
+			// Binary format: iterate through pre-read property names. COPY, not reference:
+			// loading a nested property pushes onto the reader's object stack (a vector),
+			// and reallocation would invalidate a reference into the current top.
+			const std::vector<std::string> prop_names = ar.get_object_property_names();
 			for (size_t i = 0; i < prop_names.size(); ++i) {
 				const std::string& prop_name = prop_names[i];
 				if (ar.seek_property_by_index(i)) {

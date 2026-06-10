@@ -9,6 +9,7 @@
 #include <string_view>
 #include <string>
 #include <concepts>
+#include <cstdint>
 
 namespace jai {
 

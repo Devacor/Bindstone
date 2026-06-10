@@ -21,6 +21,9 @@ namespace {
     inline checked_result<void> int_overflow_v(const char* msg) {
         return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
     }
+    inline checked_result<script_value> int_overflow_sv(const char* msg) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
+    }
 }
 
 // Helper function to check if a value is compatible with a target element type
@@ -2466,8 +2469,12 @@ void environment::clear_values() {
         flat_lookup_.erase(id);
     }
 
-    // Clear local storage (destroys script_values)
-    local_storage_.clear();
+    // Destroy locals in REVERSE declaration order (C++ LIFO semantics): script class
+    // destructors observably fire here, and deque::clear()'s element destruction
+    // order is implementation-defined (MS STL and libstdc++ disagree).
+    while (!local_storage_.empty()) {
+        local_storage_.pop_back();
+    }
     local_ids_.clear();
 }
 
@@ -3140,6 +3147,8 @@ std::shared_ptr<environment> interpreter::get_global_environment() const {
 }
 
 void interpreter::prepare_for_execution() {
+    arm_execution_deadline();
+
     // Clear execution state
     valueStack_.clear();
     returnValue_.reset();  // No need to create a value - value_or() will create it if needed
@@ -3151,9 +3160,14 @@ void interpreter::prepare_for_execution() {
     active_exception_value_.reset();  // No need to create a value here either
     current_catch_var_id_ = 0;
 
-    // Clear coroutine state
-    hasYieldRequest_ = false;
-    active_coroutine_ = nullptr;
+    // Clear coroutine state — unless re-entered from inside a RUNNING coroutine
+    // (include/import, or a host callback calling execute() mid-resume): clearing
+    // then would sever the live coroutine's yield machinery and its next `yield`
+    // would fail while the caller received the previous value as a bogus success.
+    if (!active_coroutine_ || active_coroutine_->get_status() != coroutine_handle::status::running) {
+        hasYieldRequest_ = false;
+        active_coroutine_ = nullptr;
+    }
 
     // Reset to the engine's global environment directly
     // This fixes issues where the interpreter's environment_ can become disconnected
@@ -3465,10 +3479,12 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
 				// Fast path for integer arithmetic (most common in loops)
 				if (can_use_fast_path(expr->op.type)) {
-					auto leftType = leftVal.type();
-					auto rightType = rightVal.type();
+					// Gate on STORAGE, not declared type: a typed-but-uninitialized variable
+					// (`int x;`) holds monostate and unchecked_* access would deref null.
+					const size_t leftIdx = leftVal.raw_storage_index();
+					const size_t rightIdx = rightVal.raw_storage_index();
 
-					if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
+					if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT) {
 						script_int leftInt = leftVal.unchecked_as_int();
 						script_int rightInt = rightVal.unchecked_as_int();
 
@@ -3517,11 +3533,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 						}
 					}
 					// Fast path for float/mixed arithmetic
-					else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
-						(rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
-						script_float leftFloat = leftType == script_value_type::jai_int_type ?
+					else if ((leftIdx == script_value::TYPEID_INT || leftIdx == script_value::TYPEID_FLOAT) &&
+						(rightIdx == script_value::TYPEID_INT || rightIdx == script_value::TYPEID_FLOAT)) {
+						script_float leftFloat = leftIdx == script_value::TYPEID_INT ?
 							static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
-						script_float rightFloat = rightType == script_value_type::jai_int_type ?
+						script_float rightFloat = rightIdx == script_value::TYPEID_INT ?
 							static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
 
 						switch (expr->op.type) {
@@ -3570,8 +3586,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 					}
 					// Fast path for string concatenation (common operation)
 					else if (expr->op.type == token_type::plus &&
-						leftType == script_value_type::jai_string_type &&
-						rightType == script_value_type::jai_string_type) {
+						leftIdx == script_value::TYPEID_STRING &&
+						rightIdx == script_value::TYPEID_STRING) {
 						const script_string& leftStr = leftVal.unchecked_as_string();
 						const script_string& rightStr = rightVal.unchecked_as_string();
 						push_value(make_value(leftStr + rightStr));
@@ -3908,8 +3924,14 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 
                 if (is_lvalue && want_lvalue_write) {
                     // Assignment target (m[k] = v): auto-insert a slot so the
-                    // assignment has somewhere to write through.
-                    script_value& value_ref = map[right];
+                    // assignment has somewhere to write through. The key is COPIED into
+                    // the map; an engine-less key (a raw AST literal reaching here via the
+                    // binary fast path) would poison the whole map for clone().
+                    script_value key = right;
+                    if (!key.has_valid_engine()) {
+                        key.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
+                    }
+                    script_value& value_ref = map[key];
 
                     // If this created a new entry with default constructor, it has invalid engine reference
                     if (!value_ref.has_valid_engine()) {
@@ -4207,30 +4229,38 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 auto leftType = target.type();
 
                 // === ULTRA FAST PATH: int += int literal (e.g., sum += 1) ===
-                // Skip dispatch_expr entirely for int literal RHS
-                if (leftType == script_value_type::jai_int_type && !has_custom_numeric_ops_) [[likely]] {
+                // Skip dispatch_expr entirely for int literal RHS.
+                // Gated on STORAGE (a typed-null target must not reach unchecked_*); ops
+                // route through jai::ints so the overflow policy covers compound assigns.
+                if (target.raw_storage_index() == script_value::TYPEID_INT && !has_custom_numeric_ops_) [[likely]] {
                     if (expr->value->get_type() == node_type::literal_expr) {
                         auto* rhs_lit = static_cast<literal_expr*>(expr->value.get());
                         if (rhs_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
                             script_int rhs_val = rhs_lit->value.unchecked_as_int();
+                            script_int& tref = target.unchecked_as_int_ref();
+                            script_int rr;
                             switch (expr->op.type) {
                                 case token_type::plus_equal:
-                                    target.unchecked_as_int_ref() += rhs_val;
+                                    if (!ints::try_add(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '+='");
+                                    tref = rr;
                                     push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::minus_equal:
-                                    target.unchecked_as_int_ref() -= rhs_val;
+                                    if (!ints::try_sub(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '-='");
+                                    tref = rr;
                                     push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::star_equal:
-                                    target.unchecked_as_int_ref() *= rhs_val;
+                                    if (!ints::try_mul(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '*='");
+                                    tref = rr;
                                     push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::slash_equal:
                                     if (rhs_val == 0) {
                                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
                                     }
-                                    target.unchecked_as_int_ref() /= rhs_val;
+                                    if (!ints::try_div(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '/='");
+                                    tref = rr;
                                     push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 default:
@@ -4248,24 +4278,30 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         script_value* rhs_ptr = resolve_local_or_env(rhs_id->slot_index, rhs_id->symbol_id);
                         if (rhs_ptr && rhs_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                             script_int rhs_val = rhs_ptr->unchecked_as_int();
+                            script_int& tref = target.unchecked_as_int_ref();
+                            script_int rr;
                             switch (expr->op.type) {
                                 case token_type::plus_equal:
-                                    target.unchecked_as_int_ref() += rhs_val;
+                                    if (!ints::try_add(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '+='");
+                                    tref = rr;
                                     push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::minus_equal:
-                                    target.unchecked_as_int_ref() -= rhs_val;
+                                    if (!ints::try_sub(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '-='");
+                                    tref = rr;
                                     push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::star_equal:
-                                    target.unchecked_as_int_ref() *= rhs_val;
+                                    if (!ints::try_mul(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '*='");
+                                    tref = rr;
                                     push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 case token_type::slash_equal:
                                     if (rhs_val == 0) {
                                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
                                     }
-                                    target.unchecked_as_int_ref() /= rhs_val;
+                                    if (!ints::try_div(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '/='");
+                                    tref = rr;
                                     push_value(expression_result_needed_ ? target.clone() : target);
                                     return {};
                                 default:
@@ -4292,13 +4328,16 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                         script_int binary_result = 0;
                                         bool handled = true;
                                         switch (rhs_binary->op.type) {
-                                            case token_type::star: binary_result = left_val * right_val; break;
-                                            case token_type::plus: binary_result = left_val + right_val; break;
-                                            case token_type::minus: binary_result = left_val - right_val; break;
+                                            case token_type::star: if (!ints::try_mul(left_val, right_val, binary_result)) return int_overflow_v("Integer overflow in '*'"); break;
+                                            case token_type::plus: if (!ints::try_add(left_val, right_val, binary_result)) return int_overflow_v("Integer overflow in '+'"); break;
+                                            case token_type::minus: if (!ints::try_sub(left_val, right_val, binary_result)) return int_overflow_v("Integer overflow in '-'"); break;
                                             default: handled = false; break;
                                         }
                                         if (handled && expr->op.type == token_type::plus_equal) {
-                                            target.unchecked_as_int_ref() += binary_result;
+                                            script_int& tref = target.unchecked_as_int_ref();
+                                            script_int rr;
+                                            if (!ints::try_add(tref, binary_result, rr)) return int_overflow_v("Integer overflow in '+='");
+                                            tref = rr;
                                             push_value(expression_result_needed_ ? target.clone() : target);
                                             return {};
                                         }
@@ -4365,16 +4404,24 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
 
                 // === IN-PLACE MUTATION (ChaiScript-style) ===
-                // Modify the value directly in storage, avoiding make_value() allocations
+                // Modify the value directly in storage, avoiding make_value() allocations.
+                // Gated on STORAGE (typed-null must not reach unchecked_*); integer ops route
+                // through jai::ints so the checked-overflow policy covers compound assignment.
+                const size_t leftIdx = target.raw_storage_index();
+                const size_t rightIdx = derefRight.raw_storage_index();
+                const bool bothInt = leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT;
                 switch (expr->op.type) {
                     case token_type::plus_equal: {
-                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
-                            target.unchecked_as_int_ref() += derefRight.unchecked_as_int();
-                        } else if (leftType == script_value_type::jai_float_type) {
+                        if (bothInt) {
+                            script_int& tref = target.unchecked_as_int_ref();
+                            script_int rr;
+                            if (!ints::try_add(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='");
+                            tref = rr;
+                        } else if (leftIdx == script_value::TYPEID_FLOAT) {
                             target.unchecked_as_float_ref() += derefRight.as_float();
-                        } else if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_float_type) {
+                        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             target = make_value(target.unchecked_as_int() + derefRight.unchecked_as_float());
-                        } else if (leftType == script_value_type::jai_string_type && rightType == script_value_type::jai_string_type) {
+                        } else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
                             target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -4383,11 +4430,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
 
                     case token_type::minus_equal: {
-                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
-                            target.unchecked_as_int_ref() -= derefRight.unchecked_as_int();
-                        } else if (leftType == script_value_type::jai_float_type) {
+                        if (bothInt) {
+                            script_int& tref = target.unchecked_as_int_ref();
+                            script_int rr;
+                            if (!ints::try_sub(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='");
+                            tref = rr;
+                        } else if (leftIdx == script_value::TYPEID_FLOAT) {
                             target.unchecked_as_float_ref() -= derefRight.as_float();
-                        } else if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_float_type) {
+                        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             target = make_value(target.unchecked_as_int() - derefRight.unchecked_as_float());
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -4396,11 +4446,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
 
                     case token_type::star_equal: {
-                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
-                            target.unchecked_as_int_ref() *= derefRight.unchecked_as_int();
-                        } else if (leftType == script_value_type::jai_float_type) {
+                        if (bothInt) {
+                            script_int& tref = target.unchecked_as_int_ref();
+                            script_int rr;
+                            if (!ints::try_mul(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='");
+                            tref = rr;
+                        } else if (leftIdx == script_value::TYPEID_FLOAT) {
                             target.unchecked_as_float_ref() *= derefRight.as_float();
-                        } else if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_float_type) {
+                        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             target = make_value(target.unchecked_as_int() * derefRight.unchecked_as_float());
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -4409,18 +4462,21 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
 
                     case token_type::slash_equal: {
-                        if (rightType == script_value_type::jai_int_type && derefRight.unchecked_as_int() == 0) {
+                        if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
                         }
-                        if (rightType == script_value_type::jai_float_type && derefRight.unchecked_as_float() == 0.0) {
+                        if (rightIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
                         }
 
-                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
-                            target.unchecked_as_int_ref() /= derefRight.unchecked_as_int();
-                        } else if (leftType == script_value_type::jai_float_type) {
+                        if (bothInt) {
+                            script_int& tref = target.unchecked_as_int_ref();
+                            script_int rr;
+                            if (!ints::try_div(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '/='");
+                            tref = rr;
+                        } else if (leftIdx == script_value::TYPEID_FLOAT) {
                             target.unchecked_as_float_ref() /= derefRight.as_float();
-                        } else if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_float_type) {
+                        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             target = make_value(target.unchecked_as_int() / derefRight.unchecked_as_float());
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -5990,7 +6046,12 @@ std::string interpreter::value_to_string_with_method(const script_value& val) {
 }
 
 // Binary operation helpers
-checked_result<script_value> interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right) {
+checked_result<script_value> interpreter::evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in) {
+    // References must be transparent here: compound assignment through a subscript
+    // (m["k"] -= dt) evaluates its target to a reference value.
+    const script_value& left = left_in.deref();
+    const script_value& right = right_in.deref();
+
     // Cache type indices for fast checking
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
@@ -6005,14 +6066,18 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
         script_int leftInt = left.unchecked_as_int();
         script_int rightInt = right.unchecked_as_int();
+        script_int rr;
 
         switch (op) {
             case token_type::plus:
-                return make_value(leftInt + rightInt);
+                if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_sv("Integer overflow in '+'");
+                return make_value(rr);
             case token_type::minus:
-                return make_value(leftInt - rightInt);
+                if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_sv("Integer overflow in '-'");
+                return make_value(rr);
             case token_type::star:
-                return make_value(leftInt * rightInt);
+                if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_sv("Integer overflow in '*'");
+                return make_value(rr);
             case token_type::slash:
                 if (rightInt == 0) {
                     return checked_result<script_value>(
@@ -6020,14 +6085,15 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
                         "Division by zero");
                 }
                 // Integer division returns integer (C++ semantics)
-                return make_value(leftInt / rightInt);
+                if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_sv("Integer overflow in '/'");
+                return make_value(rr);
             case token_type::percent:
                 if (rightInt == 0) {
                     return checked_result<script_value>(
                         make_error_code(runtime_error_code::modulo_by_zero),
                         "Division by zero");
                 }
-                return make_value(leftInt % rightInt);
+                return make_value(ints::mod(leftInt, rightInt));
             default:
                 return checked_result<script_value>(
                     make_error_code(runtime_error_code::unknown_operator),
@@ -7309,11 +7375,14 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     // slot_index to SIZE_MAX so the runtime lookup falls through to the env
     // path on every subsequent call.
     //
-    // This is purely a runtime operation — zero parser changes. Patching
-    // slot_index to SIZE_MAX is safe because:
-    //  (a) outer-local slot indices can NEVER be valid inside the lambda's
-    //      own frame, so this is always the correct semantics.
-    //  (b) re-parsing (hot reload) will regenerate the lambda AST fresh.
+    // Outer-ness is decided by SYMBOL identity, not slot ranges: outer-function
+    // slots and the lambda's own slots are independent numbering spaces that both
+    // start at 0, so an outer local can collide with the lambda's own params/locals
+    // (e.g. the enclosing function's first param captured by a one-param lambda).
+    // Any body identifier whose symbol the lambda does not itself declare is outer.
+    //
+    // This is purely a runtime operation — zero parser changes; re-parsing
+    // (hot reload) regenerates the lambda AST fresh.
     //
     // Performance: one AST walk at closure-creation time, O(1) env lookup
     // per captured local on every call — identical cost to the existing
@@ -7326,18 +7395,33 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     };
     std::vector<outer_slot_ref> outer_slot_refs;
 
-    // Build the set of slot indices that belong to THIS lambda's own scope
-    // (params get slots 0..N-1; body locals get N..local_count-1). Any
-    // slot_index NOT in [0, local_count) seen in the body came from an
-    // outer scope and refers to the outer function's frame.
-    const size_t lambda_local_count = expr->local_count;  // set by parser after exit_function_scope
-
     // Build the set of outer-slot-index identifiers we've already handled
     // (avoid duplicates for the same symbol used multiple times in the body)
     std::unordered_set<uint64_t> outer_slots_captured;
 
-    if (!call_stack_.empty()) {
+    if (!call_stack_.empty() && expr->outer_slot_plan_built) {
+        // Later creations from this AST: the first creation already patched the body
+        // identifiers (a re-scan would find nothing), so replay its capture plan.
         const size_t outer_slot_count = call_stack_.back().local_count();
+        for (const auto& [sym, slot] : expr->outer_slot_plan) {
+            if (slot < outer_slot_count && outer_slots_captured.insert(sym).second) {
+                outer_slot_refs.push_back({nullptr, sym, slot});
+            }
+        }
+    } else if (!call_stack_.empty()) {
+        const size_t outer_slot_count = call_stack_.back().local_count();
+
+        // Symbols the lambda itself declares (params + body locals + loop variables).
+        // Slot ranges cannot distinguish own locals from outer ones — both scopes
+        // number from 0 — so classification below is by symbol identity.
+        std::unordered_set<uint64_t> lambda_declared;
+        for (const auto& p : expr->parameters) {
+            if (p.symbol_id == UINT64_MAX) {
+                p.symbol_id = string_symbolizer_->intern(p.name);
+            }
+            lambda_declared.insert(p.symbol_id);
+        }
+        std::vector<identifier_expr*> outer_slot_candidates;
 
         // Reuse the existing AST-walk infrastructure but collect identifier_expr*
         // nodes whose slot_index is in [0, outer_slot_count) — those came from the
@@ -7350,16 +7434,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             if (!e) return;
             if (e->get_type() == node_type::identifier_expr) {
                 auto* ident = static_cast<identifier_expr*>(e);
-                if (ident->slot_index != SIZE_MAX &&
-                    ident->slot_index < outer_slot_count &&
-                    ident->slot_index >= lambda_local_count) {
-                    // This slot came from the outer frame; record if not seen yet.
-                    if (outer_slots_captured.insert(ident->symbol_id).second) {
-                        outer_slot_refs.push_back({ident, ident->symbol_id, ident->slot_index});
-                    } else {
-                        // Same symbol, different node — still patch the slot_index
-                        ident->slot_index = SIZE_MAX;
-                    }
+                if (ident->slot_index != SIZE_MAX && ident->slot_index < outer_slot_count) {
+                    // Candidate only — whether it is outer is decided after the walk,
+                    // once every symbol the lambda declares has been collected.
+                    outer_slot_candidates.push_back(ident);
                 }
                 return;
             }
@@ -7456,6 +7534,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             }
             case node_type::range_for_stmt: {
                 auto* rf = static_cast<range_for_stmt*>(s);
+                if (rf->variable_name_id != UINT64_MAX) {
+                    lambda_declared.insert(rf->variable_name_id);
+                }
                 if (rf->container) collect_outer_slots_expr(rf->container.get());
                 collect_outer_slots_stmt(rf->body.get());
                 break;
@@ -7481,15 +7562,41 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 if (tr->catch_block) collect_outer_slots_stmt(tr->catch_block.get());
                 break;
             }
-            case node_type::variable_decl:
-                if (static_cast<variable_decl*>(s)->initializer)
-                    collect_outer_slots_expr(static_cast<variable_decl*>(s)->initializer.get());
+            case node_type::variable_decl: {
+                auto* vd = static_cast<variable_decl*>(s);
+                if (vd->name_id == UINT64_MAX) {
+                    vd->name_id = string_symbolizer_->intern(std::string(vd->name));
+                }
+                lambda_declared.insert(vd->name_id);
+                if (vd->initializer)
+                    collect_outer_slots_expr(vd->initializer.get());
                 break;
+            }
             default: break;
             }
         };
 
         collect_outer_slots_stmt(expr->body.get());
+
+        // Classify: anything the lambda itself declares resolves in its own frame;
+        // every other slot-carrying identifier references the outer frame.
+        for (auto* ident : outer_slot_candidates) {
+            if (lambda_declared.count(ident->symbol_id)) continue;
+            if (outer_slots_captured.insert(ident->symbol_id).second) {
+                outer_slot_refs.push_back({ident, ident->symbol_id, ident->slot_index});
+            } else {
+                // Same symbol, different node — patch now (firsts are patched after capture)
+                ident->slot_index = SIZE_MAX;
+            }
+        }
+
+        // Persist the plan so later closure creations from this AST (whose identifier
+        // slots are patched below) can replay the same captures.
+        expr->outer_slot_plan.reserve(outer_slot_refs.size());
+        for (const auto& ref : outer_slot_refs) {
+            expr->outer_slot_plan.emplace_back(ref.symbol_id, ref.outer_slot);
+        }
+        expr->outer_slot_plan_built = true;
     }
 
     // If we found any outer-slot references, we need a capture env even for a
@@ -7648,8 +7755,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         if (!call_stack_.empty()) {
             for (auto& ref : outer_slot_refs) {
                 // Skip if already captured explicitly / by default-capture above
+                // (ref.node is null when replaying a stored plan — already patched then)
                 if (captureEnv->contains(ref.symbol_id)) {
-                    ref.node->slot_index = SIZE_MAX;
+                    if (ref.node) { ref.node->slot_index = SIZE_MAX; }
                     continue;
                 }
                 script_value* slot_val = call_stack_.back().get_local(ref.outer_slot);
@@ -7661,7 +7769,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     captureEnv->define(ref.symbol_id, slot_val->deref().clone());
                 }
                 // Patch the AST node so future lookups go through the env path
-                ref.node->slot_index = SIZE_MAX;
+                if (ref.node) { ref.node->slot_index = SIZE_MAX; }
             }
         }
 
@@ -8227,6 +8335,10 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
     }
 
     while (true) {
+        if (execution_budget_exhausted()) [[unlikely]] {
+            return execution_budget_error();
+        }
+
         if (skip_first_condition) {
             skip_first_condition = false;  // Only skip once
         } else {
@@ -8500,6 +8612,13 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             }
 
                             while (true) {
+                                if (execution_budget_exhausted()) [[unlikely]] {
+                                    if (body_env) { release_environment(body_env); }
+                                    release_environment(loop_env);
+                                    environment_ = previous;
+                                    return execution_budget_error();
+                                }
+
                                 script_int current_end = end_ptr ? *end_ptr : end_val;
                                 if (!cmp(i, current_end)) break;
 
@@ -8698,6 +8817,14 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
     // Native C++ for-loop structure
     while (true) {
+        if (execution_budget_exhausted()) [[unlikely]] {
+            if (owns_scope) {
+                release_environment(environment_);
+            }
+            environment_ = previous;
+            return execution_budget_error();
+        }
+
         if (skip_condition) {
             skip_condition = false;  // Only skip on first resumed iteration
         } else {
@@ -8802,6 +8929,11 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             // (clear/pop/erase). Trusting the cached array_size would index past
             // the end with unchecked operator[] -> OOB read / crash.
             for (size_t i = 0; i < array_storage->size(); ++i) {
+                if (execution_budget_exhausted()) [[unlikely]] {
+                    pop_scope();
+                    return execution_budget_error();
+                }
+
                 if (stmt->is_reference) {
                     // Reallocation-safe reference (container+index, not a raw element
                     // pointer): a push in the loop body can reallocate the vector, and a
@@ -8884,6 +9016,11 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             }
 
             for (auto it = map_storage->begin(); it != map_storage->end(); ++it) {
+                if (execution_budget_exhausted()) [[unlikely]] {
+                    pop_scope();
+                    return execution_budget_error();
+                }
+
                 // Create pair args
                 std::vector<script_value> args;
 
@@ -9134,19 +9271,25 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
 
                 // Create a new scope for the case body (like an if statement)
                 auto previous = environment_;
-                environment_ = get_pooled_environment(environment_);  // Use pool!
+                auto case_env = get_pooled_environment(environment_);  // Use pool!
+                environment_ = case_env;
 
                 try {
                     // Execute case body
                     auto case_result = dispatch_stmt(case_stmt.get());
                     if (!case_result) {
+                        release_environment(case_env);
                         environment_ = previous;
                         in_switch_ = old_in_switch;
                         should_fallthrough_ = old_should_fallthrough;
                         return case_result;
                     }
 
-                    // Restore the previous environment
+                    // Release the case scope (runs case-local destructors) and restore.
+                    // On yield the scope must survive for coroutine resume — skip the release.
+                    if (!hasYieldRequest_) {
+                        release_environment(case_env);
+                    }
                     environment_ = previous;
 
                     // An explicit `break;` inside a case terminates the switch
@@ -9169,7 +9312,8 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                     }
                     // If should_fallthrough_ is true, continue to next iteration
                 } catch (...) {
-                    // Restore environment before re-throwing
+                    // Release and restore environment before re-throwing
+                    release_environment(case_env);
                     environment_ = previous;
                     throw;
                 }
@@ -9180,18 +9324,24 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
         if ((!matched || (executed_case && should_fallthrough_)) && stmt->default_case) {
             // Create a new scope for the default body
             auto previous = environment_;
-            environment_ = get_pooled_environment(environment_);  // Use pool!
+            auto default_env = get_pooled_environment(environment_);  // Use pool!
+            environment_ = default_env;
 
             try {
                 auto default_result = dispatch_stmt(stmt->default_case.get());
                 if (!default_result) {
+                    release_environment(default_env);
                     environment_ = previous;
                     in_switch_ = old_in_switch;
                     should_fallthrough_ = old_should_fallthrough;
                     return default_result;
                 }
 
-                // Restore the previous environment
+                // Release the default scope (runs its destructors) and restore.
+                // On yield the scope must survive for coroutine resume — skip the release.
+                if (!hasYieldRequest_) {
+                    release_environment(default_env);
+                }
                 environment_ = previous;
 
                 // Consume an explicit `break;` in default so it does not leak to
@@ -9200,7 +9350,8 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                     hasBreakRequest_ = false;
                 }
             } catch (...) {
-                // Restore environment before re-throwing
+                // Release and restore environment before re-throwing
+                release_environment(default_env);
                 environment_ = previous;
                 throw;
             }
@@ -10777,6 +10928,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         );
     }
 
+    if (execution_budget_exhausted()) [[unlikely]] {
+        return execution_budget_error<script_value>();
+    }
+
     // RAII guard for call depth tracking - ensures decrement even on early return
     struct call_depth_guard {
         int& depth;
@@ -11028,8 +11183,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             return result.error_value();
         }
 
-        // Check if we hit a return statement or yield and break early
-        if (hasReturnValue_ || hasYieldRequest_) {
+        // Check if we hit a return statement, yield, or a script throw and break early.
+        // Without the is_unwinding_ check, statements after a top-level `throw` in the
+        // function body would still execute (blocks check the flag; this loop must too).
+        if (hasReturnValue_ || hasYieldRequest_ || is_unwinding_) {
             break;
         }
     }
@@ -11517,8 +11674,10 @@ void interpreter::release_environment(std::shared_ptr<environment> env, bool cle
         env->reset(nullptr);
     }
 
-    // All environments use the unified pool now
-    if (environment_pool_index_ > 0) {
+    // Only the pool TOP may be released. Decrementing for anything else (a non-pooled
+    // make_shared env, or an out-of-order release) hands the caller's still-live scope
+    // to the next get_pooled_environment, which reset()s it into a self-parent cycle.
+    if (environment_pool_index_ > 0 && environment_pool_[environment_pool_index_ - 1] == env) {
         --environment_pool_index_;
     }
 }

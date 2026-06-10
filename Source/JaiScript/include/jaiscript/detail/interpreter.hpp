@@ -13,6 +13,17 @@
 #define JAI_MAX_CALL_DEPTH 10000
 #endif
 
+// Portable force-inline (MSVC and clang-cl accept __forceinline; GCC/Clang need the attribute)
+#ifndef JAI_FORCEINLINE
+#if defined(_MSC_VER)
+#define JAI_FORCEINLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define JAI_FORCEINLINE inline __attribute__((always_inline))
+#else
+#define JAI_FORCEINLINE inline
+#endif
+#endif
+
 // NOTE: the compile-time integer-overflow policy (kCheckedOverflow and the
 // jai::ints helpers) lives in <jaiscript/detail/integer_ops.hpp>, which the
 // engine .cpp files include directly. It is intentionally kept out of this
@@ -33,6 +44,7 @@
 #include <iostream>
 #include <system_error>
 #include <optional>
+#include <chrono>
 
 namespace jai {
 
@@ -360,7 +372,26 @@ namespace jai {
         
         // Prepare interpreter for a new execution (clears transient state)
         void prepare_for_execution();
-        
+
+        // ===== Execution budget (engine::execution_budget) =====
+        // A top-level execute()/resume() that runs past the armed deadline raises a
+        // catchable runtime error. Ticked at loop back-edges and call entry; the clock
+        // is only sampled every 1024 ticks so the hot path pays one increment+branch.
+        void execution_budget(std::chrono::nanoseconds budget) {
+            execution_budget_ = budget;
+            if (budget.count() <= 0) { budget_active_ = false; }
+        }
+        std::chrono::nanoseconds execution_budget() const { return execution_budget_; }
+
+        void arm_execution_deadline() {
+            budget_tick_ = 0;
+            budget_active_ = execution_budget_.count() > 0;
+            if (budget_active_) {
+                execution_deadline_ = std::chrono::steady_clock::now() + execution_budget_;
+            }
+        }
+
+
         // Scope management for local variables
         void push_scope();
         void pop_scope();
@@ -797,6 +828,12 @@ namespace jai {
         // Call depth tracking for recursion limit
         int current_call_depth_ = 0;
 
+        // Execution budget state (see execution_budget()/arm_execution_deadline above)
+        std::chrono::nanoseconds execution_budget_{std::chrono::seconds(1)};
+        std::chrono::steady_clock::time_point execution_deadline_{};
+        uint32_t budget_tick_ = 0;
+        bool budget_active_ = false;
+
         // ============================================================
         // CALL FRAME OPTIMIZATION
         // ============================================================
@@ -939,7 +976,7 @@ namespace jai {
         }
 
         // Resolve variable: slot-based O(1) first, then environment fallback
-        [[nodiscard]] __forceinline script_value* resolve_local_or_env(size_t slot_index, uint64_t symbol_id) noexcept {
+        [[nodiscard]] JAI_FORCEINLINE script_value* resolve_local_or_env(size_t slot_index, uint64_t symbol_id) noexcept {
             if (slot_index != SIZE_MAX && !call_stack_.empty()) {
                 if (auto* ptr = call_stack_.back().get_local(slot_index)) {
                     return ptr;
@@ -949,7 +986,7 @@ namespace jai {
         }
 
         // Resolve variable with error on not found (avoids value copy vs environment_->get())
-        [[nodiscard]] __forceinline checked_result<script_value*> resolve_variable_required(
+        [[nodiscard]] JAI_FORCEINLINE checked_result<script_value*> resolve_variable_required(
             size_t slot_index, uint64_t symbol_id) noexcept {
             if (auto* ptr = resolve_local_or_env(slot_index, symbol_id)) {
                 return ptr;
@@ -957,6 +994,20 @@ namespace jai {
             return checked_result<script_value*>(
                 make_error_code(runtime_error_code::undefined_variable),
                 "Undefined variable '{0}'", symbol_id);
+        }
+
+        // Execution-budget check (see the public execution_budget API above)
+        [[nodiscard]] JAI_FORCEINLINE bool execution_budget_exhausted() noexcept {
+            if (!budget_active_ || ++budget_tick_ < 1024) { return false; }
+            budget_tick_ = 0;
+            return std::chrono::steady_clock::now() >= execution_deadline_;
+        }
+
+        template<typename T = void>
+        [[nodiscard]] checked_result<T> execution_budget_error() const {
+            return checked_result<T>(
+                make_error_code(runtime_error_code::execution_budget_exceeded),
+                "Script execution budget exceeded - raise engine::execution_budget or break up the work");
         }
 
         // Binary operation helpers

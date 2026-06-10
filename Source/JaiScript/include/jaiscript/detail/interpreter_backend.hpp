@@ -47,6 +47,10 @@ public:
     }
     
     // Configuration
+    void set_execution_budget(std::chrono::nanoseconds budget) override {
+        interpreter_->execution_budget(budget);
+    }
+
     void set_has_custom_numeric_ops(bool value) override {
         interpreter_->set_has_custom_numeric_ops(value);
     }

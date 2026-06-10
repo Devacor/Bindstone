@@ -65,6 +65,12 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
     }
     interpreter* interp = backend->get_interpreter();
 
+    // Host-level resume is its own budgeted entry; a resume nested inside an
+    // executing script keeps the outer deadline.
+    if (interp->current_call_depth_ == 0) {
+        interp->arm_execution_deadline();
+    }
+
     // Save caller's coroutine state (for nested coroutines)
     coroutine_handle* prev_coroutine = interp->active_coroutine_;
     bool prev_yield_request = interp->hasYieldRequest_;
@@ -73,6 +79,11 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
 
     auto prev_status = status_;
     status_ = status::running;
+
+    // A runtime error in the (re)started segment must reach the caller as an error;
+    // falling through to `return yield_value_` would hand back the PREVIOUS yield
+    // as a bogus success and silently swallow the failure.
+    std::optional<checked_result<script_value>> error_result;
 
     if (prev_status == status::created) {
         // ================================================================
@@ -101,6 +112,7 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
             status_ = status::suspended;
         } else if (!call_result) {
             status_ = status::failed;
+            error_result.emplace(std::move(call_result));
         } else {
             status_ = status::completed;
             yield_value_ = std::move(call_result.value());
@@ -149,6 +161,7 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
                 if (decl_result.error() != std::error_code()) {
                     status_ = status::failed;
                     had_error = true;
+                    error_result.emplace(decl_result.error_value());
                     break;
                 }
             }
@@ -201,6 +214,9 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
     interp->active_coroutine_ = prev_coroutine;
     interp->hasYieldRequest_ = prev_yield_request;
 
+    if (error_result) {
+        return std::move(*error_result);
+    }
     return yield_value_;
 }
 

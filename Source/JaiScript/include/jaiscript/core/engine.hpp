@@ -18,6 +18,7 @@
 #include <unordered_set>
 #include <typeindex>
 #include <iosfwd>
+#include <chrono>
 
 namespace jai {
 
@@ -141,6 +142,14 @@ namespace jai {
         // there is no runtime toggle (so the hot path carries no policy branch).
         bool throw_on_overflow() const;
 
+        // Wall-clock budget in seconds for one execute()/resume() call (fractional is
+        // fine — e.g. 1.0/60 for a frame). A script exceeding it raises a catchable
+        // runtime error (execution_budget_exceeded). Zero disables the limit. Default 1.
+        // Checked at loop back-edges and call entry, so straight-line C++ bindings are
+        // never interrupted mid-call.
+        void execution_budget(double seconds);
+        double execution_budget() const;
+
         // Object creation through registered class system
         template<typename T, typename... Args>
         script_value make_object(Args&&... args) {
@@ -152,34 +161,9 @@ namespace jai {
         // Object creation from existing shared_ptr
         // NOTE: This method currently doesn't support property access on C++ objects
         // For C++ objects with properties, create them via script constructor instead
+        // Defined in engine_impl.hpp where class_definition is complete.
         template<typename T>
-        script_value make_object(std::shared_ptr<T> data) {
-            std::string type_name = get_registered_name<T>();
-
-            // Try to get the class definition to wrap the object properly
-            try {
-                auto class_def = get_class_definition_by_type(std::type_index(typeid(T)));
-                if (class_def) {
-                    // Create a class_instance to wrap the object (same as constructors do)
-                    auto instance = class_def->create_instance();
-
-                    // Store the C++ object in the special field (same pattern as dynamic_binder)
-                    // Intern the constant field name to ID
-                    uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
-                    instance->set_field(cpp_object_field_id,
-                        script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), this));
-
-                    // Return the class_instance wrapped in a script_value
-                    return script_value::make_object(type_name, instance, this);
-                }
-            } catch (...) {
-                // Class not registered, fall back to raw object storage
-            }
-
-            // Fallback: store as raw C++ object (properties won't work)
-            auto type_id = get_symbolizer()->intern(type_name);
-            return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(data), this);
-        }
+        script_value make_object(std::shared_ptr<T> data);
 
         // Convenient script_value creation methods
         // Usage: engine->make_value(42) instead of script_value(42, engine)

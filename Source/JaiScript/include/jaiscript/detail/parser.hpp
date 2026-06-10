@@ -133,11 +133,19 @@ namespace jai {
         int parse_depth_ = 0;
         static constexpr int MAX_PARSE_DEPTH = 250;
 
+        // weight: how many depth units this level costs. Constructs whose single
+        // recursion level burns many native frames (parenthesised grouping re-enters
+        // the whole precedence chain, ~18 frames/level) use a higher weight so the
+        // guard fires well before the native stack runs out.
         struct depth_guard {
             int& depth_;
+            int weight_;
             bool overflow_ = false;
-            depth_guard(int& d, int max) : depth_(d) { overflow_ = (++depth_ > max); }
-            ~depth_guard() { --depth_; }
+            depth_guard(int& d, int max, int weight = 1) : depth_(d), weight_(weight) {
+                depth_ += weight_;
+                overflow_ = (depth_ > max);
+            }
+            ~depth_guard() { depth_ -= weight_; }
         };
 
         // Context tracking for context-sensitive parsing

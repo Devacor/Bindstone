@@ -1005,7 +1005,7 @@ namespace MV {
 			// JaiScript version of load_and_construct (templated for CRTP archives)
 			template<typename Archive>
 			static void load_and_construct(Archive& ar, jai::serialization::construct<Node>& construct) {
-				MV::Services* services = ar.get_user_context<MV::Services>();
+				MV::Services* services = ar.template get_user_context<MV::Services>();
 				auto* renderer = services->get<MV::Draw2D>();
 
 				// Track nesting depth so post_load can identify the root node.

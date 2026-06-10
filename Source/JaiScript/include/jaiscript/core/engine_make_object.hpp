@@ -41,7 +41,7 @@ script_value script_value::make_registered_object(engine* eng, Args&&... args) {
     // Call the constructor function
     auto result = constructor_func.as_function()(script_args);
     if (!result) {
-        throw runtime_error("Constructor failed for class '" + class_name + "': " + result.error_message());
+        throw runtime_error("Constructor failed for class '" + class_name + "': " + eng->format_error(result));
     }
     return result.value();
 }

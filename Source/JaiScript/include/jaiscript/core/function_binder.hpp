@@ -26,6 +26,13 @@ namespace jai {
     // Implementation in engine_impl.hpp
     template<typename T>
     script_value convert_reference_with_registry(T& t, engine* eng);
+
+    // engine is incomplete here; the dependent E defers the symbolize lookup to the
+    // instantiation point (where engine.hpp is complete) for conforming compilers.
+    template<typename E>
+    uint64_t symbolize_text(E* eng, const char* text) {
+        return eng ? eng->symbolize(text) : 0;
+    }
 }
 #include <type_traits>
 #include <typeinfo>
@@ -582,7 +589,7 @@ class engine;
                     try {
                         return FunctionBinder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                     } catch (const std::exception& e) {
-                        uint64_t msg_id = eng ? eng->symbolize(e.what()) : 0;
+                        uint64_t msg_id = symbolize_text(eng, e.what());
                         return checked_result<script_value>(
                             make_error_code(runtime_error_code::cpp_exception),
                             "{0}",
@@ -610,7 +617,7 @@ class engine;
                     try {
                         return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                     } catch (const std::exception& e) {
-                        uint64_t msg_id = eng ? eng->symbolize(e.what()) : 0;
+                        uint64_t msg_id = symbolize_text(eng, e.what());
                         return checked_result<script_value>(
                             make_error_code(runtime_error_code::cpp_exception),
                             "{0}",

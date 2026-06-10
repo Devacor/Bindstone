@@ -539,13 +539,16 @@ private:
 			if (!locked) continue;
 
 			if constexpr (ShortCircuit) {
-				if (!locked->predicate(std::forward<Args>(args)...)) {
+				// Pass as LVALUES: forwarding rvalue args inside the loop would let the
+				// first receiver's by-value parameter move-consume them, handing every
+				// later receiver an empty shell (null shared_ptr, empty string, ...).
+				if (!locked->predicate(args...)) {
 					result = false;
 					if (locked->is_oneshot()) has_oneshots = true;
 					break;
 				}
 			} else {
-				locked->notify(std::forward<Args>(args)...);
+				locked->notify(args...);
 			}
 
 			if (locked->is_oneshot()) {

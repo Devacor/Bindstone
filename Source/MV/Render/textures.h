@@ -486,7 +486,7 @@ namespace MV {
 			ar.serialize("repeat", repeat);
 			ar.serialize("pixel", pixel);
 			construct("", powerTwo, repeat, pixel);
-			auto* services = ar.get_user_context<MV::Services>();
+			auto* services = ar.template get_user_context<MV::Services>();
 			if (services) construct->textures = services->get<MV::SharedTextures>();
 			ar.serialize("name", construct->textureName);
 			ar.serialize("size", construct->textureSize);
@@ -770,7 +770,7 @@ namespace MV {
 			// Always resolve SharedTextures (not only for packs): postLoadInitialize uses it to
 			// route the load through the parallel deferred-load queue when one is active.
 			MV::SharedTextures* sharedTextures = nullptr;
-			if (auto* services = ar.get_user_context<MV::Services>()) {
+			if (auto* services = ar.template get_user_context<MV::Services>()) {
 				sharedTextures = getSharedTextureFromServices(*services);
 			}
 			construct->postLoadInitialize(sharedTextures);

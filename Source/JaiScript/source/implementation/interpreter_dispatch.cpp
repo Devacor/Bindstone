@@ -589,16 +589,22 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
         return make_value(lf == rf);
     }
 
+    // Null-ness is a STORAGE property: a typed-but-uninitialized variable (`int x;`)
+    // compares like null on BOTH sides (symmetric), and the unchecked_* reads below
+    // require actual storage, not just a matching declared type.
+    if (unwrapped_left.is_null() || unwrapped_right.is_null()) {
+        return make_value(unwrapped_left.is_null() && unwrapped_right.is_null());
+    }
+
     // Type mismatch = not equal (except for numeric and weak_ptr vs null handled above)
     if (unwrapped_left.type() != unwrapped_right.type()) {
         return make_value(false);
     }
 
-    if (unwrapped_left.is_null()) return make_value(true);
     // Note: int and float are already handled above in mixed-type comparison
-    if (unwrapped_left.is_string()) return make_value(unwrapped_left.unchecked_as_string() == unwrapped_right.unchecked_as_string());
-    if (unwrapped_left.is_bool()) return make_value(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool());
-    if (unwrapped_left.is_char()) return make_value(unwrapped_left.unchecked_as_char() == unwrapped_right.unchecked_as_char());
+    if (unwrapped_left.is_string() && unwrapped_right.is_string()) return make_value(unwrapped_left.unchecked_as_string() == unwrapped_right.unchecked_as_string());
+    if (unwrapped_left.is_bool() && unwrapped_right.is_bool()) return make_value(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool());
+    if (unwrapped_left.is_char() && unwrapped_right.is_char()) return make_value(unwrapped_left.unchecked_as_char() == unwrapped_right.unchecked_as_char());
 
     // Array equality - compare by reference (same array instance)
     if (left.is_array() && right.is_array()) {

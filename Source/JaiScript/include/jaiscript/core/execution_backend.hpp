@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <system_error>
+#include <chrono>
 
 namespace jai {
 
@@ -36,6 +37,7 @@ public:
     virtual void define_variable(const std::string& name, const script_value& value) = 0;
     
     // Configuration
+    virtual void set_execution_budget(std::chrono::nanoseconds) {}
     virtual void set_has_custom_numeric_ops(bool value) = 0;
     virtual void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) = 0;
     virtual void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) = 0;

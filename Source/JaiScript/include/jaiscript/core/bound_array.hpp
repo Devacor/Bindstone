@@ -280,27 +280,29 @@ public:
     
     void resize(size_type count) {
         if (!arr_) throw runtime_error("Cannot resize null bound_array");
-        
+
         if (count > arr_->size()) {
             // Add default-constructed elements
             while (arr_->size() < count) {
                 arr_->push_back(make_script_value(T{}, get_engine()));
             }
         } else {
-            arr_->resize(count);
+            // erase, not resize: vector::resize instantiates construct_at on
+            // script_value's private default ctor (rejected by conforming compilers)
+            arr_->erase(arr_->begin() + count, arr_->end());
         }
     }
-    
+
     void resize(size_type count, const T& value) {
         if (!arr_) throw runtime_error("Cannot resize null bound_array");
-        
+
         if (count > arr_->size()) {
             // Add copies of value
             while (arr_->size() < count) {
                 arr_->push_back(make_script_value(value, get_engine()));
             }
         } else {
-            arr_->resize(count);
+            arr_->erase(arr_->begin() + count, arr_->end());
         }
     }
     

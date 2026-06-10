@@ -287,6 +287,11 @@ struct integer_variant_binder<Template<Arg>> {
 // Single type parameter version
 template<template<typename> class Template, typename T>
 struct auto_bind_template {
+    // The constructor odr-uses _registrar: a static data member of a class template
+    // is only instantiated when odr-used, so without this conforming compilers
+    // (GCC/Clang) never run the registration — MSVC merely happens to be eager.
+    auto_bind_template() { (void)&_registrar; }
+
 private:
     // Static initialization triggers registration once per instantiation
     struct registrar {
@@ -299,16 +304,14 @@ private:
         }
     };
 
-    // Force instantiation of registrar
     static inline registrar _registrar{};
-
-    // Force ODR-use
-    static constexpr const registrar* _force_registration = &_registrar;
 };
 
 // Two type parameters version
 template<template<typename, typename> class Template, typename T1, typename T2>
 struct auto_bind_template_2 {
+    auto_bind_template_2() { (void)&_registrar; }
+
 private:
     struct registrar {
         registrar() {
@@ -318,7 +321,6 @@ private:
         }
     };
     static inline registrar _registrar{};
-    static constexpr const registrar* _force_registration = &_registrar;
 };
 
 // ============================================================================

@@ -21,8 +21,8 @@ defines `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` (catches env/closure cycles) plus M
 `0xDDDDDDDD` freed-memory fill (surfaces dangling-reference / use-after-free bugs that Release
 can mask). **Iterate in Debug; do a final Release pass for the shipped config.**
 
-Build only the test target (`--target jaiscript_tests`) to skip the redundant standalone test
-exes (`test_runner`, `test_simple_static`, …) which relink the whole lib and rebuild every time.
+Build the test target (`--target jaiscript_tests`). (The redundant standalone test exes —
+`test_runner`, `test_simple_static`, `test_string_ctor` — were removed from the CMake build.)
 
 ```bash
 # Configure Debug once (Ninja) if out/build/x64-Debug/CMakeCache.txt is missing:
@@ -172,6 +172,10 @@ engine.add_function("square", [](script_int n){ return n*n; });
 engine.add_variadic_function("print", [](const std::vector<script_value>& a){ /*...*/ });
 engine.add_global("PI", script_value(3.14159, &engine));
 engine.add_global_ref("hp", hpFloat);               // binds a live C++ variable (cpp_bound)
+engine.execution_budget(1.0/60);   // wall-clock seconds per execute()/resume(); overrun raises a
+                                   // catchable runtime error. 0 = unlimited. DEFAULT: 1.0 second.
+                                   // Checked at loop back-edges + call entry (clock sampled every
+                                   // 1024 ticks — no measurable hot-path cost).
 ```
 
 ---

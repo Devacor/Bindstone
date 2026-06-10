@@ -50,9 +50,10 @@ public:
             auto e = engine::make();
             std::string src(400, '!');  // > MAX_PARSE_DEPTH
             src += "true";
-            // The depth guard makes the parser recover gracefully (no stack
-            // overflow). execute() returns null; the engine stays usable.
-            e->execute(src);
+            // The depth guard makes the parser fail gracefully (no stack overflow):
+            // since the 2026-06 review fixes, guard failures surface as a thrown
+            // parse_error with a diagnostic instead of a silent null. Engine stays usable.
+            check_throws([&]() { e->execute(src); });
             check_eq((int64_t)3, e->execute("1 + 2").as_int());
         });
 

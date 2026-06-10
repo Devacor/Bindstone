@@ -18,6 +18,7 @@
 
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <jaiscript/serialization/traits.hpp>
+#include <jaiscript/serialization/polymorphic.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/type_info.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -66,6 +67,26 @@ namespace jai {
 namespace serialization {
 
 // Forward/concept declarations provided by archive.hpp (included above)
+
+// ADL-findable free-function detection. Must live at namespace scope: inside the
+// archive classes, unqualified save/load/serialize would bind to the archives' own
+// member functions at template-definition time on conforming compilers.
+namespace adl_detect {
+	template<typename Archive, typename T, typename = void>
+	struct has_adl_save : std::false_type {};
+	template<typename Archive, typename T>
+	struct has_adl_save<Archive, T, std::void_t<decltype(save(std::declval<Archive&>(), std::declval<const T&>()))>> : std::true_type {};
+
+	template<typename Archive, typename T, typename = void>
+	struct has_adl_load : std::false_type {};
+	template<typename Archive, typename T>
+	struct has_adl_load<Archive, T, std::void_t<decltype(load(std::declval<Archive&>(), std::declval<T&>()))>> : std::true_type {};
+
+	template<typename Archive, typename T, typename = void>
+	struct has_adl_serialize : std::false_type {};
+	template<typename Archive, typename T>
+	struct has_adl_serialize<Archive, T, std::void_t<decltype(serialize(std::declval<Archive&>(), std::declval<T&>()))>> : std::true_type {};
+}
 
 // ============================================================================
 // CRTP Archive Writer Base Template
@@ -314,17 +335,9 @@ private:
     template<typename T>
     struct has_property_mgr<T, std::void_t<decltype(std::declval<T&>().property_mgr)>> : std::true_type {};
 
-    // Check for ADL-findable save(Archive&, const T&) function
-    template<typename T, typename = void>
-    struct has_adl_save : std::false_type {};
-    template<typename T>
-    struct has_adl_save<T, std::void_t<decltype(save(std::declval<Derived&>(), std::declval<const T&>()))>> : std::true_type {};
-
-    // Check for ADL-findable serialize(Archive&, T&) function (works for both save and load)
-    template<typename T, typename = void>
-    struct has_adl_serialize : std::false_type {};
-    template<typename T>
-    struct has_adl_serialize<T, std::void_t<decltype(serialize(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
+    // ADL-findable save(Archive&, const T&) / serialize(Archive&, T&) free functions
+    template<typename T> using has_adl_save = adl_detect::has_adl_save<Derived, T>;
+    template<typename T> using has_adl_serialize = adl_detect::has_adl_serialize<Derived, T>;
 
 public:
     // operator() for types with member save method
@@ -978,17 +991,9 @@ private:
         ))
     >> : std::true_type {};
 
-    // Check for ADL-findable load(Archive&, T&) function
-    template<typename T, typename = void>
-    struct has_adl_load : std::false_type {};
-    template<typename T>
-    struct has_adl_load<T, std::void_t<decltype(load(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
-
-    // Check for ADL-findable serialize(Archive&, T&) function (works for both save and load)
-    template<typename T, typename = void>
-    struct has_adl_serialize : std::false_type {};
-    template<typename T>
-    struct has_adl_serialize<T, std::void_t<decltype(serialize(std::declval<Derived&>(), std::declval<T&>()))>> : std::true_type {};
+    // ADL-findable load(Archive&, T&) / serialize(Archive&, T&) free functions
+    template<typename T> using has_adl_load = adl_detect::has_adl_load<Derived, T>;
+    template<typename T> using has_adl_serialize = adl_detect::has_adl_serialize<Derived, T>;
 
     // Helper to load variant alternatives by index
     template<typename Variant, std::size_t I = 0>

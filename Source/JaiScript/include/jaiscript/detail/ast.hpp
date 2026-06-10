@@ -297,6 +297,13 @@ namespace jai {
         statement_ptr body;
         size_t local_count = 0;  // Total slots needed (params + locals) for stack allocation
 
+        // Outer-frame locals this lambda captures, as (symbol_id, outer slot) pairs.
+        // Built on the FIRST closure creation, which also patches the body identifiers'
+        // slot_index to SIZE_MAX — so later creations from this same AST must replay
+        // this plan rather than re-scan (a re-scan would find nothing).
+        mutable std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
+        mutable bool outer_slot_plan_built = false;
+
         lambda_expr(const source_location& loc) : expression(loc, node_type::lambda_expr), local_count(0) {}
     };
 

@@ -23,6 +23,7 @@
 #include <variant>
 #include <tuple>
 #include <iterator>
+#include <cstdint>
 
 namespace jai {
 
@@ -32,8 +33,48 @@ namespace serialization {
 	template<typename T> class construct_unique;
 }
 
-// Forward declaration for jai::access (defined in construct.hpp)
-class access;
+// Friend class for serialization access. Defined here (not construct.hpp) so it is
+// complete before archive_impl.hpp's trait specializations name ::jai::access.
+class access {
+public:
+	template<typename T, typename... Args>
+	static std::shared_ptr<T> make_shared(Args&&... args) {
+		return std::shared_ptr<T>(new T(std::forward<Args>(args)...));
+	}
+	template<typename T, typename... Args>
+	static std::unique_ptr<T> make_unique(Args&&... args) {
+		return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+	}
+
+	// Forward to T::load_and_construct - allows access to private methods via friendship
+	// Templated on Archive to work with CRTP-based archives
+	template<typename Archive, typename T>
+	static auto load_and_construct(Archive& ar, serialization::construct<T>& c)
+		-> decltype(T::load_and_construct(ar, c)) {
+		return T::load_and_construct(ar, c);
+	}
+
+	template<typename Archive, typename T>
+	static auto load_and_construct(Archive& ar, serialization::construct_unique<T>& c)
+		-> decltype(T::load_and_construct(ar, c)) {
+		return T::load_and_construct(ar, c);
+	}
+
+	// Member save/load/serialize accessors — allows SFINAE detection of protected methods.
+	// Types only need `friend jai::access;` for all serialization support.
+	template<typename Archive, typename T>
+	static auto member_save(Archive& ar, const T& obj, uint32_t v) -> decltype(obj.save(ar, v)) { return obj.save(ar, v); }
+	template<typename Archive, typename T>
+	static auto member_save(Archive& ar, const T& obj) -> decltype(obj.save(ar)) { return obj.save(ar); }
+	template<typename Archive, typename T>
+	static auto member_load(Archive& ar, T& obj, uint32_t v) -> decltype(obj.load(ar, v)) { return obj.load(ar, v); }
+	template<typename Archive, typename T>
+	static auto member_load(Archive& ar, T& obj) -> decltype(obj.load(ar)) { return obj.load(ar); }
+	template<typename Archive, typename T>
+	static auto member_serialize(Archive& ar, T& obj, uint32_t v) -> decltype(obj.serialize(ar, v)) { return obj.serialize(ar, v); }
+	template<typename Archive, typename T>
+	static auto member_serialize(Archive& ar, T& obj) -> decltype(obj.serialize(ar)) { return obj.serialize(ar); }
+};
 
 namespace serialization_traits {
 

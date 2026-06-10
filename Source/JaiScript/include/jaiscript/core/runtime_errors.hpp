@@ -81,6 +81,7 @@ namespace jai {
         stdlib_not_loaded = 122,
         cpp_exception = 123,
         internal_error = 124,
+        execution_budget_exceeded = 125,
     };
 
     // Error category for JaiScript runtime

@@ -19,6 +19,35 @@ std::string engine::get_registered_name() const {
 }
 
 template<typename T>
+script_value engine::make_object(std::shared_ptr<T> data) {
+    std::string type_name = get_registered_name<T>();
+
+    // Try to get the class definition to wrap the object properly
+    try {
+        auto class_def = get_class_definition_by_type(std::type_index(typeid(T)));
+        if (class_def) {
+            // Create a class_instance to wrap the object (same as constructors do)
+            auto instance = class_def->create_instance();
+
+            // Store the C++ object in the special field (same pattern as dynamic_binder)
+            // Intern the constant field name to ID
+            uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
+            instance->set_field(cpp_object_field_id,
+                script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), this));
+
+            // Return the class_instance wrapped in a script_value
+            return script_value::make_object(type_name, instance, this);
+        }
+    } catch (...) {
+        // Class not registered, fall back to raw object storage
+    }
+
+    // Fallback: store as raw C++ object (properties won't work)
+    auto type_id = get_symbolizer()->intern(type_name);
+    return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(data), this);
+}
+
+template<typename T>
 script_value convert_custom_type_with_registry(const T& t, engine* eng)
     requires std::is_copy_constructible_v<std::remove_const_t<T>>
 {

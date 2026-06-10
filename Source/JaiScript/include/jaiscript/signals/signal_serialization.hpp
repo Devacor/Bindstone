@@ -71,7 +71,7 @@ std::shared_ptr<receiver<T>> load_receiver(Archive& ar) {
 	ar.end_object();
 
 	// Get engine from user context
-	engine* eng = ar.get_user_context<engine>();
+	engine* eng = ar.template get_user_context<engine>();
 
 	if (param_names->empty()) {
 		param_names = nullptr;
@@ -183,7 +183,7 @@ void load_signal_emitter(Archive& ar, signal_emitter<T>& sig) {
 	ar.end_map();
 
 	// Get engine from user context
-	engine* eng = ar.get_user_context<engine>();
+	engine* eng = ar.template get_user_context<engine>();
 	if (eng) {
 		sig.script_engine(eng);
 	}

@@ -40,6 +40,12 @@ inline instance_variables build_script_locals(
 } // namespace detail
 
 template<typename T>
+typename signal_emitter<T>::shared_receiver_type signal_emitter<T>::connect(const std::string& id, const script_value& fn_callback) {
+	// Same argument-conversion machinery as std::function bindings (engine_impl.hpp)
+	return connect(id, convert_script_function<T>(fn_callback));
+}
+
+template<typename T>
 template<typename... Args>
 void receiver<T>::call_script(Args&&... args) {
 	if (script_engine_ && !script_callback_.empty()) {

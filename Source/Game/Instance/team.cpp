@@ -1,6 +1,18 @@
 #include "team.h"
 #include "gameInstance.h"
 
+#include <jaiscript/core/registrar.hpp>
+
+// JaiScript binding for Team (ported from the ChaiScript-era gameHooks)
+static jai::registrar<Team, MV::Services> _hookTeam("Team",
+	[](jai::dynamic_binder<Team>& builder, const MV::Services&) {
+	builder.method("ourWell", &Team::ourWell);
+	builder.method("enemyWell", &Team::enemyWell);
+	builder.method("creaturesInRange", [](Team& a_self, const MV::Point<>& a_location, double a_radius) {
+		return a_self.creaturesInRange(a_location, static_cast<float>(a_radius));
+	});
+});
+
 Team::Team(std::shared_ptr<InGamePlayer> a_player, TeamSide a_side, GameInstance& a_game) :
 	player(a_player),
 	game(a_game),

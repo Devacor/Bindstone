@@ -5,13 +5,21 @@
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/signals/signal_binding.hpp>
 #include "MV/Utility/services.hpp"
 
 // JaiScript binding for Text
 static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
-	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services&) {
+	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services& a_services) {
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
+
+	// Script-facing signal surface
+	if (auto* eng = a_services.get<jai::engine>(false)) {
+		jai::bind_signal_type<MV::Scene::Text::TextSignalSignature>(*eng, "SignalText");
+	}
+	builder.property("onEnter", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onEnter; }, nullptr);
+	builder.property("onChange", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onChange; }, nullptr);
 
 	// Text content
 	builder.method("text", static_cast<MV::UtfString(MV::Scene::Text::*)() const>(&MV::Scene::Text::text));

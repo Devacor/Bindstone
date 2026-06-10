@@ -203,6 +203,14 @@ namespace dynamic_binder_validation {
     template<typename Sig>
     struct is_signal_type<signal<Sig>> : std::true_type {};
 
+    // std::function members are callback hooks (script lambdas assign into them);
+    // like signals, they are opaque to scripts and need no registration.
+    template<typename T>
+    struct is_std_function : std::false_type {};
+
+    template<typename Sig>
+    struct is_std_function<std::function<Sig>> : std::true_type {};
+
     // Helper to unwrap smart pointers to get the inner type
     // For std::shared_ptr<T>, std::weak_ptr<T>, std::unique_ptr<T> -> extracts T
     // For other types -> returns the type as-is
@@ -253,6 +261,7 @@ namespace dynamic_binder_validation {
                !std::is_same_v<inner_type, std::string> &&
                !is_std_container<inner_type>::value &&
                !is_signal_type<inner_type>::value &&
+               !is_std_function<inner_type>::value &&
                !std::is_same_v<inner_type, script_value> &&
                std::is_class_v<inner_type>;
     }
@@ -830,6 +839,9 @@ private:
                 if constexpr (std::is_same_v<P, script_value>) {
                     // deref() returns *this if not a reference, so this handles both cases
                     (cpp_obj->*member).deref() = args[1].clone();
+                } else if constexpr (dynamic_binder_validation::is_std_function<P>::value) {
+                    // Script lambdas assign into C++ callback hooks (spawn/update pattern)
+                    cpp_obj->*member = detail::value_converter<P>::from(args[1], engine_ptr);
                 } else {
                     cpp_obj->*member = args[1].as<P>();
                 }

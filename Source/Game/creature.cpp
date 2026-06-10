@@ -4,8 +4,115 @@
 #include "Game/player.h"
 #include "MV/Utility/generalUtility.h"
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/signals/signal_binding.hpp>
+
 CEREAL_CLASS_VERSION(Catalog<CreatureData>, CREATURE_CATALOG_VERSION);
 CEREAL_CLASS_VERSION(Catalog<BuildingData>, BUILDING_CATALOG_VERSION);
+
+// ============================================================================
+// JaiScript bindings (ported from the ChaiScript-era gameHooks)
+// ============================================================================
+
+static jai::registrar<CreatureData, MV::Services> _hookCreatureData("CreatureData",
+	[](jai::dynamic_binder<CreatureData>& builder, const MV::Services&) {
+	builder.property("id", &CreatureData::id);
+	builder.property("name", &CreatureData::name);
+	builder.property("description", &CreatureData::description);
+	builder.property("moveSpeed", &CreatureData::moveSpeed);
+	builder.property("actionSpeed", &CreatureData::actionSpeed);
+	builder.property("castSpeed", &CreatureData::castSpeed);
+	builder.property("health", &CreatureData::health);
+	builder.property("defense", &CreatureData::defense);
+	builder.property("will", &CreatureData::will);
+	builder.property("strength", &CreatureData::strength);
+	builder.property("ability", &CreatureData::ability);
+	builder.property("isServer", &CreatureData::isServer);
+});
+
+static jai::registrar<StandardScriptMethods<Creature>, MV::Services> _hookCreatureScriptMethods("CreatureScriptMethods",
+	[](jai::dynamic_binder<StandardScriptMethods<Creature>>& builder, const MV::Services&) {
+	builder.property("spawn", &StandardScriptMethods<Creature>::scriptSpawn);
+	builder.property("update", &StandardScriptMethods<Creature>::scriptUpdate);
+	builder.property("death", &StandardScriptMethods<Creature>::scriptDeath);
+});
+
+static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy("TargetPolicy",
+	[](jai::dynamic_binder<TargetPolicy>& builder, const MV::Services&) {
+	builder.method("target", [](TargetPolicy& a_self, int64_t a_target, double a_range, jai::script_value a_succeed) {
+		a_self.target(a_target, static_cast<float>(a_range), jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
+	});
+	builder.method("target", [](TargetPolicy& a_self, int64_t a_target, double a_range, jai::script_value a_succeed, jai::script_value a_fail) {
+		a_self.target(a_target, static_cast<float>(a_range),
+			jai::convert_script_function<void(TargetPolicy&)>(a_succeed),
+			jai::convert_script_function<void(TargetPolicy&)>(a_fail));
+	});
+	builder.method("target", [](TargetPolicy& a_self, const MV::Point<>& a_location, jai::script_value a_succeed) {
+		a_self.target(a_location, 0.0f, jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
+	});
+	builder.method("self", &TargetPolicy::self);
+	builder.method("active", &TargetPolicy::active);
+	builder.method("stunned", &TargetPolicy::stunned);
+	builder.method("rooted", &TargetPolicy::rooted);
+});
+
+void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
+	builder.property("onStatus", [](Creature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onStatus; }, nullptr);
+	builder.property("onHealthChange", [](Creature& a_self) -> jai::signal<void(std::shared_ptr<Creature>, int)>& { return a_self.onHealthChange; }, nullptr);
+	builder.property("onDeath", [](Creature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onDeath; }, nullptr);
+	builder.property("onFall", [](Creature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onFall; }, nullptr);
+	builder.method("game", [](Creature& a_self) -> GameInstance& { return a_self.gameInstance; });
+	builder.method("stats", [](Creature& a_self) { return a_self.statTemplate; });
+	builder.method("team", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamForPlayer(a_self.player()); });
+	builder.method("enemyTeam", [](Creature& a_self) -> Team& { return a_self.gameInstance.teamAgainstPlayer(a_self.player()); });
+	builder.method("setVar", [](Creature& a_self, jai::script_value a_key, jai::script_value a_value) {
+		a_self.localVariables[a_key.as_string()] = std::move(a_value);
+	});
+	builder.method("getVar", [](Creature& a_self, jai::script_value a_key) {
+		auto found = a_self.localVariables.find(a_key.as_string());
+		return found != a_self.localVariables.end() ? found->second : jai::script_value(std::monostate{}, a_key.get_engine());
+	});
+}
+
+static jai::registrar<Creature, MV::Services> _hookCreature("Creature",
+	[](jai::dynamic_binder<Creature>& builder, const MV::Services& a_services) {
+	if (auto* eng = a_services.get<jai::engine>(false)) {
+		jai::bind_signal_type<Creature::CallbackSignature>(*eng, "SignalCreature");
+		jai::bind_signal_type<void(std::shared_ptr<Creature>, int)>(*eng, "SignalCreatureHealth");
+	}
+	builder.method("spine", &Creature::spine);
+	builder.method("alive", &Creature::alive);
+	builder.method("networkId", &Creature::netId);
+	builder.method("changeHealth", &Creature::changeHealth);
+	builder.method("assetPath", &Creature::assetPath);
+	builder.method("player", &Creature::player);
+});
+
+void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder) {
+	builder.property("onArrive", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onArrive; }, nullptr);
+	builder.property("onBlocked", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onBlocked; }, nullptr);
+	builder.property("onStop", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onStop; }, nullptr);
+	builder.property("onStart", [](ServerCreature& a_self) -> jai::signal<Creature::CallbackSignature>& { return a_self.onStart; }, nullptr);
+	builder.method("targeting", [](ServerCreature& a_self) -> TargetPolicy& { return a_self.targeting; });
+	builder.method("enemiesInRange", [](ServerCreature& a_self, double a_range) {
+		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), static_cast<float>(a_range));
+	});
+	builder.method("alliesInRange", [](ServerCreature& a_self, double a_range) {
+		return a_self.gameInstance.teamForPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), static_cast<float>(a_range));
+	});
+}
+
+static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerCreature",
+	[](jai::dynamic_binder<ServerCreature>& builder, const MV::Services&) {
+	builder.base_class<Creature>();
+	builder.method("agent", &ServerCreature::agent);
+	builder.method("fall", &ServerCreature::fall);
+});
+
+static jai::registrar<ClientCreature, MV::Services> _hookClientCreature("ClientCreature",
+	[](jai::dynamic_binder<ClientCreature>& builder, const MV::Services&) {
+	builder.base_class<Creature>();
+});
 
 Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const CreatureData& a_statTemplate, std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_state) :
 	Component(a_owner),

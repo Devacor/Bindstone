@@ -6,6 +6,17 @@
 #include <cmath>
 #include <iostream>
 
+#include <jaiscript/core/registrar.hpp>
+
+// JaiScript binding for GameInstance (ported from the ChaiScript-era gameHooks)
+static jai::registrar<GameInstance, MV::Services> _hookGameInstance("GameInstance",
+	[](jai::dynamic_binder<GameInstance>& builder, const MV::Services&) {
+	builder.method("creature", [](GameInstance& a_self, int64_t a_id) { return a_self.creature(a_id); });
+	builder.method("spawnCreature", [](GameInstance& a_self, int64_t a_slot, const std::string& a_id) {
+		a_self.spawnCreature(static_cast<int>(a_slot), a_id);
+	});
+});
+
 void GameInstance::handleScroll(float a_amount, const MV::Point<int>& a_position) {
 	if (requestCamera()) {
 		auto screenScale = .05f * a_amount + (worldScene->scale().x / 10.0f * a_amount);
@@ -236,6 +247,14 @@ ServerGameInstance::ServerGameInstance(GameServer& a_game) :
 
 	synchronizedObjects.onSpawn<BattleEffectNetworkState>([this](std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> a_newItem) {
 		a_newItem->self()->netId = a_newItem->id();
+	});
+
+	// Server scripts spawn effects as a free function: spawnOnNetwork(BattleEffectNetworkState(...))
+	script().engine().add_function("spawnOnNetwork", [this](std::shared_ptr<BattleEffectNetworkState> a_effect) {
+		auto networkBattleEffect = networkPool().spawn(a_effect);
+		auto effectNode = gameObjectContainer()->make("E_" + std::to_string(networkBattleEffect->id()));
+		effectNode->position(networkBattleEffect->self()->position);
+		return effectNode->attach<ServerBattleEffect>(networkBattleEffect, *this).self();
 	});
 }
 

@@ -37,6 +37,7 @@ namespace jai {
 
 // Forward declarations
 class engine;
+class script_value;
 template<typename T> class signal_emitter;
 
 // ============================================================================
@@ -335,6 +336,11 @@ public:
 		owned_connections_[id] = recv;
 		return recv;
 	}
+
+	// Connect a script FUNCTION value as an owned, named connection. The function
+	// value carries its engine; arguments convert through the same machinery as
+	// source-string receivers. Defined in signal_impl.hpp (needs the full engine).
+	shared_receiver_type connect(const std::string& id, const script_value& fn_callback);
 
 	// Get owned connection by ID
 	shared_receiver_type connection(const std::string& id) {
@@ -749,6 +755,11 @@ public:
 	// Connect with named ID
 	shared_receiver_type connect(const std::string& id, std::function<T> callback) {
 		return emitter_.connect(id, std::move(callback));
+	}
+
+	// Connect a script FUNCTION value (implementation rides in signal_impl.hpp)
+	shared_receiver_type connect(const std::string& id, const script_value& fn_callback) {
+		return emitter_.connect(id, fn_callback);
 	}
 
 	shared_receiver_type connect(const std::string& id, const std::string& script_callback) {

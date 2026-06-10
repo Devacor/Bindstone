@@ -203,6 +203,9 @@ public:
 		return owner()->worldFromLocal(spawnPoint);
 	}
 
+	// Registers private members with the script engine (called by dynamic_binder::auto_bind)
+	static void jai_auto_bind(jai::dynamic_binder<Building>& builder);
+
 protected:
 	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance);
 

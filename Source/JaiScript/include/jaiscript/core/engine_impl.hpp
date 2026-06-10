@@ -9,6 +9,37 @@
 
 namespace jai {
 
+namespace detail {
+	// Sig decomposition for convert_script_function (declared in function_binder.hpp)
+	template<typename Sig> struct script_function_wrapper;
+
+	template<typename R, typename... Args>
+	struct script_function_wrapper<R(Args...)> {
+		static std::function<R(Args...)> wrap(script_value fn) {
+			return [fn = std::move(fn)](Args... args) -> R {
+				engine* eng = fn.get_engine();
+				if (!eng || !fn.is_function()) {
+					if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
+				}
+				std::vector<script_value> values;
+				values.reserve(sizeof...(Args));
+				(values.push_back(eng->make_value(args)), ...);
+				auto result = fn.as_function()(values);
+				if constexpr (std::is_void_v<R>) {
+					(void)result;
+				} else {
+					return result ? result.value().template as<R>() : R{};
+				}
+			};
+		}
+	};
+}
+
+template<typename Sig>
+std::function<Sig> convert_script_function(const script_value& fn) {
+	return detail::script_function_wrapper<Sig>::wrap(fn);
+}
+
 template<typename T>
 std::string engine::get_registered_name() const {
     auto class_def = get_class_definition_by_type(std::type_index(typeid(T)));

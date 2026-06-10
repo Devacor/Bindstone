@@ -6,6 +6,56 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/signals/signal_binding.hpp>
+
+// ============================================================================
+// JaiScript bindings (ported from the ChaiScript-era gameHooks)
+// ============================================================================
+
+static jai::registrar<BuildTree, MV::Services> _hookBuildTree("BuildTree",
+	[](jai::dynamic_binder<BuildTree>& builder, const MV::Services&) {
+	builder.property("id", &BuildTree::id);
+	builder.property("cost", &BuildTree::cost);
+	builder.property("income", &BuildTree::income);
+});
+
+static jai::registrar<StandardScriptMethods<Building>, MV::Services> _hookBuildingScriptMethods("BuildingScriptMethods",
+	[](jai::dynamic_binder<StandardScriptMethods<Building>>& builder, const MV::Services&) {
+	builder.property("spawn", &StandardScriptMethods<Building>::scriptSpawn);
+	builder.property("update", &StandardScriptMethods<Building>::scriptUpdate);
+	builder.property("death", &StandardScriptMethods<Building>::scriptDeath);
+});
+
+void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
+	builder.property("onUpgraded", [](Building& a_self) -> jai::signal<void(std::shared_ptr<Building>)>& { return a_self.onUpgraded; }, nullptr);
+	builder.method("data", [](Building& a_self) { return a_self.buildingData; });
+	builder.method("networkId", [](Building& a_self) { return static_cast<int64_t>(a_self.slot); });
+	builder.method("spawnCreature", [](Building& a_self, const std::string& a_key) {
+		a_self.gameInstance.spawnCreature(a_self.slotIndex(), a_key);
+	});
+	builder.method("setVar", [](Building& a_self, jai::script_value a_key, jai::script_value a_value) {
+		a_self.localVariables[a_key.as_string()] = std::move(a_value);
+	});
+	builder.method("getVar", [](Building& a_self, jai::script_value a_key) {
+		auto found = a_self.localVariables.find(a_key.as_string());
+		return found != a_self.localVariables.end() ? found->second : jai::script_value(std::monostate{}, a_key.get_engine());
+	});
+}
+
+static jai::registrar<Building, MV::Services> _hookBuilding("Building",
+	[](jai::dynamic_binder<Building>& builder, const MV::Services& a_services) {
+	if (auto* eng = a_services.get<jai::engine>(false)) {
+		jai::bind_signal_type<void(std::shared_ptr<Building>)>(*eng, "SignalBuilding");
+	}
+	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
+	builder.method("upgrade", &Building::upgrade);
+	builder.method("player", &Building::player);
+	builder.method("assetPath", &Building::assetPath);
+	builder.method("skin", &Building::skin);
+	builder.method("slot", &Building::slotIndex);
+});
+
 Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance) :
 	Component(a_owner),
 	buildingData(a_instance.data().buildings().data(a_player->loadout.buildings[a_loadoutSlot])),

@@ -1,26 +1,26 @@
 print("loginButton.script 0");
-auto scene = game.gui.page("Login").root();
+auto scene = game.gui().page("Login").root();
 print("loginButton.script 1");
 auto email = scene.get("EmailInput").componentText().text();
 auto password = scene.get("PasswordInput").componentText().text();
 print("loginButton.script 2");
-if(game.client.connected()){
+if (game.client.connected()) {
 	print("loginButton.script connected 1");
 	game.client.send(LoginRequest(email, password).toNetworkString());
-	messages.lobbyAuthenticated.connect("LoginButton", fun[email,password](success, message){
+	messages.lobbyAuthenticated.connect("LoginButton", [email, password](bool success, string message) -> void {
 		messages.lobbyAuthenticated.disconnect("LoginButton");
 		//game.testGame();
-		//game.gui.page("Login").hide();
+		//game.gui().page("Login").hide();
 		print("Got Message:");
 		print(success);
 		print(message);
-		if(success){
+		if (success) {
 			game.loginId = email;
 			game.loginPassword = password;
-			game.gui.page("Login").hide();
-			game.gui.page("Main").show();
+			game.gui().page("Login").hide();
+			game.gui().page("Main").show();
 		}
 	});
-}else{
+} else {
 	print("!!!Not Connected. Click Again!!!");
 }

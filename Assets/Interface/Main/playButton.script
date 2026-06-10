@@ -1,4 +1,4 @@
 print("HI!");
-auto scene = game.gui.page("Main").root();
+auto scene = game.gui().page("Main").root();
 
 game.client.send(FindMatchRequest("normal").toNetworkString());

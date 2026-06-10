@@ -2,63 +2,43 @@
 #define _MV_SCRIPT_H_
 
 #include <string>
+#include <map>
 #include <vector>
-#include <memory>
-#include <optional>
 
-#include "MV/Utility/services.hpp"
-#include "chaiscript/dispatchkit/boxed_cast.hpp"
+namespace jai {
+	class engine;
+	class script_value;
+}
 
 namespace MV {
+	class Services;
+
+	// Thin facade over the services-connected jai::engine (replaces the ChaiScript-era
+	// PIMPL; the name survives so `friend MV::Script` and accessor signatures do too).
+	// Lightweight on purpose: only forward declarations here, the implementation TU
+	// (Source/Game/Script/script.cpp) includes the engine.
 	class Script {
 	public:
-		template <typename T>
-		class Registrar;
+		explicit Script(jai::engine& a_engine) : engine_(&a_engine) {}
+		// Fetches the jai::engine connected to services. Paths parameter is vestigial
+		// (kept so ChaiScript-era construction sites compile unchanged).
+		explicit Script(const Services& a_services, const std::vector<std::string>& = {});
 
-		struct IScriptImplementation {
-			virtual chaiscript::Boxed_Value eval(const std::string& a_scriptIdentifier, const std::string& scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& localVariables) = 0;
-			virtual chaiscript::Boxed_Value fileEval(const std::string& a_scriptIdentifier, const std::string& scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& localVariables) = 0;
-		};
+		jai::engine& engine() const { return *engine_; }
 
-		Script(const MV::Services &a_services, const std::vector<std::string>& a_paths = { "", "Interface/", "Scripts/" });
+		// Evaluates source; errors are logged with a_scriptIdentifier. Locals are
+		// temporarily visible as globals (the load-time `self` injection pattern;
+		// single-threaded engines only).
+		bool eval(const std::string& a_scriptIdentifier, const std::string& a_scriptContents) const;
+		bool eval(const std::string& a_scriptIdentifier, const std::string& a_scriptContents,
+			const std::map<std::string, jai::script_value>& a_localVariables) const;
 
-		template <typename T>
-		std::optional<T> eval(const std::string& a_scriptIdentifier, const std::string& a_scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables = {}) {
-			try {
-				return chaiscript::boxed_cast<T>(guts->eval(a_scriptIdentifier, a_scriptContents, a_localVariables));
-			} catch (...) {
-				return {};
-			}
-		}
+		// Evaluates source and returns its boolean result (a_default on error/non-bool).
+		bool evalBool(const std::string& a_scriptIdentifier, const std::string& a_scriptContents,
+			bool a_default) const;
 
-		template <typename T>
-		std::optional<T> fileEval(const std::string& a_scriptIdentifier, const std::string& a_scriptFile, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables = {}) {
-			try {
-				return chaiscript::boxed_cast<T>(guts->fileEval(a_scriptIdentifier, a_scriptFile, a_localVariables));
-			} catch (...) {
-				return {};
-			}
-		}
-
-		bool eval(const std::string& a_scriptIdentifier, const std::string& a_scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables = {}) {
-			try {
-				guts->eval(a_scriptIdentifier, a_scriptContents, a_localVariables);
-				return true;
-			} catch (...) {
-				return false;
-			}
-		}
-
-		bool fileEval(const std::string& a_scriptIdentifier, const std::string& a_scriptFile, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables = {}) {
-			try {
-				guts->fileEval(a_scriptIdentifier, a_scriptFile, a_localVariables);
-				return true;
-			} catch (...) {
-				return false;
-			}
-		}
 	private:
-		std::unique_ptr<IScriptImplementation> guts;
+		jai::engine* engine_;
 	};
 }
 

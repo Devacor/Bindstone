@@ -1,33 +1,34 @@
-self.spawn = fun(self){
-	self["nextSpawn"] = 5.0;
+self.spawn = [=](var& self) -> void {
+	self.setVar("nextSpawn", 5.0);
 
-	self["None"] = fun(self, dt){};
+	self.setVar("None", [=](var& self, double dt) -> void {});
 
-	self["Basic"] = fun(self, dt){
-		self["nextSpawn"] -= dt;
-		if(self["nextSpawn"] <= 0){
-			self["nextSpawn"] = 5.0;
-			self.spawn("Life_T1");
+	self.setVar("Basic", [=](var& self, double dt) -> void {
+		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
+		if (self.getVar("nextSpawn") <= 0) {
+			self.setVar("nextSpawn", 5.0);
+			self.spawnCreature("Life_T1");
 		}
-	};
+	});
 
-	self["Eternal"] = fun(self, dt){
-		self["nextSpawn"] -= dt;
-		if(self["nextSpawn"] <= 0){
-			self["nextSpawn"] = 5.0;
-			self.spawn("Life_T1");
+	self.setVar("Eternal", [=](var& self, double dt) -> void {
+		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
+		if (self.getVar("nextSpawn") <= 0) {
+			self.setVar("nextSpawn", 5.0);
+			self.spawnCreature("Life_T1");
 		}
-	};
+	});
 
-	self["Overwhelming"] = fun(self, dt){
-		self["nextSpawn"] -= dt;
-		if(self["nextSpawn"] <= 0){
-			self["nextSpawn"] = 5.0;
-			self.spawn("Life_T1");
+	self.setVar("Overwhelming", [=](var& self, double dt) -> void {
+		self.setVar("nextSpawn", self.getVar("nextSpawn") - dt);
+		if (self.getVar("nextSpawn") <= 0) {
+			self.setVar("nextSpawn", 5.0);
+			self.spawnCreature("Life_T1");
 		}
-	};
+	});
 };
 
-self.update = fun(self, dt){
-	self[self.current().id](self, dt);
+self.update = [=](var& self, double dt) -> void {
+	var fn = self.getVar(self.current().id);
+	fn(self, dt);
 };

@@ -3,14 +3,14 @@
 
 #include <memory>
 #include <functional>
+#include <map>
+#include <string>
 #include "MV/Script/script.h"
 #include "MV/Utility/generalUtility.h"
+#include <jaiscript/core/engine.hpp>
 
 template <typename DataType>
 struct StandardScriptMethods {
-	friend DataType;
-	friend MV::Script;
-
 	void spawn(std::shared_ptr<DataType> a_object) const {
 		if (scriptSpawn) { scriptSpawn(a_object); }
 	}
@@ -25,36 +25,30 @@ struct StandardScriptMethods {
 
 	StandardScriptMethods<DataType>& loadScript(MV::Script &a_script, const std::string &a_assetType, const std::string &a_id, bool a_isServer) {
 		std::string filePath = a_assetType + "/" + a_id + (a_isServer ? "/main.script" : "/mainClient.script");
-#ifdef WIN32
-//#define MV_SCRIPT_HOTLOAD
-#endif
-#ifdef MV_SCRIPT_HOTLOAD
-		time_t currentWriteTime = MV::lastFileWriteTime(filePath);
-		bool shouldLoad = loadedFileTimestamp == 0 || loadedFileTimestamp != currentWriteTime;
-		loadedFileTimestamp = currentWriteTime;
-#else
 		bool shouldLoad = loadedFileTimestamp == 0;
 		loadedFileTimestamp = 1;
-#endif
 		if (shouldLoad) {
 			scriptContents = MV::fileContents(filePath);
 			if (!scriptContents.empty()) {
 				MV::info("Loaded Script: [", filePath, "]");
-				auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
-					{ "self", chaiscript::Boxed_Value(this) }
-				};
-				a_script.eval(filePath, scriptContents, localVariables);
+				// Non-owning alias: `self` only has to outlive the eval (we own `this`,
+				// and the catalog entry outlives the engine's use of it).
+				auto self = a_script.engine().make_object(
+					std::shared_ptr<StandardScriptMethods<DataType>>(this, [](StandardScriptMethods<DataType>*) {}));
+				a_script.eval(filePath, scriptContents, { { "self", self } });
 			} else {
 				MV::error("Failed to load script for ", a_assetType, ": ", a_id);
 			}
 		}
 		return *this;
 	}
-private:
+
+	// Script-assigned hooks; registered as properties named "spawn"/"update"/"death"
 	std::function<void(std::shared_ptr<DataType>)> scriptSpawn;
 	std::function<void(std::shared_ptr<DataType>, double)> scriptUpdate;
 	std::function<void(std::shared_ptr<DataType>)> scriptDeath;
 
+private:
 	std::string scriptContents;
 	std::time_t loadedFileTimestamp = 0;
 };

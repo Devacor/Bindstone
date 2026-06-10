@@ -10,7 +10,6 @@
 
 
 #include "MV/Utility/scopeGuard.hpp"
-#include "chaiscript/chaiscript.hpp"
 #include "Game/NetworkLayer/synchronizeAction.h"
 #include "MV/Network/networkObject.h"
 

@@ -1,71 +1,73 @@
-self.spawn = fun(self){
-	self["tryToFindAndAttackTarget"] = fun(self, dt){
+self.spawn = [=](var& self) -> void {
+	self.setVar("tryToFindAndAttackTarget", [=](var& self, double dt) -> bool {
 		var targets = self.enemiesInRange(20);
-		if(!targets.empty()){
-			var target = targets[0].networkId;
+		if (!targets.empty()) {
+			var target = targets[0].networkId();
 			print("Target Id:");
 			print(target);
-			var activeTarget = self["activeTarget"];
+			var activeTarget = self.getVar("activeTarget");
 			print(activeTarget);
-			if(activeTarget != target){
+			if (activeTarget != target) {
 				print("ComparisonDone");
-				self["activeTarget"] = target;
-				self.targeting().target(target, 10, fun[target](targeting){
-					targeting.self()["activeTarget"] = 0;
-					targeting.self()["attacking"] = true;
-					print("ATTACKING VAR: " + to_string(targeting.self()["attacking"]));
+				self.setVar("activeTarget", target);
+				self.targeting().target(target, 10, [target](var& targeting) -> void {
+					targeting.self().setVar("activeTarget", 0);
+					targeting.self().setVar("attacking", true);
+					print("ATTACKING VAR: " + to_string(targeting.self().getVar("attacking")));
 					auto spine = targeting.self().spine();
 					spine.animate("attack", false);
-					spine.onEvent.connect("launch", fun[target, targeting](spine, index, eventData){
-						if(eventData.name == "launch"){
+					spine.onEvent.connect("launch", [target, targeting](var& spine, int index, var& eventData) -> void {
+						if (eventData.name == "launch") {
 							print("LAUNCHING");
-							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId);
+							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId());
 							newMissile.duration = 1.25;
 							newMissile.targetType = TargetType_CREATURE;
 							newMissile.targetCreatureId = target;
 							auto effect = spawnOnNetwork(newMissile);
-							effect.onArrive.connect("Arrive", fun(battleEffect) {
-								if(!battleEffect.targetCreature().is_var_null()){
+							effect.onArrive.connect("Arrive", [=](var& battleEffect) -> void {
+								if (battleEffect.targetCreature() != null) {
 									print("Damage!");
 									battleEffect.targetCreature().changeHealth(-5);
 								}
 							});
 						}
 					});
-					spine.onEnd.connect("unlock", fun[targeting](spine, index){
+					spine.onEnd.connect("unlock", [targeting](var& spine, int index) -> void {
 						print("ATTACK" + spine.track(index).name());
-						if(spine.track(index).name() == "attack"){
+						if (spine.track(index).name() == "attack") {
 							print("ATTACK FALSE");
-							targeting.self()["attacking"] = false;
+							targeting.self().setVar("attacking", false);
 						}
 					});
-				}, fun(targeting){
-					targeting.self()["activeTarget"] = 0;
+				}, [=](var& targeting) -> void {
+					targeting.self().setVar("activeTarget", 0);
 				});
 			}
 			return true;
 		}
 		return false;
-	};
+	});
 
-	self["applyDefaultTarget"] = fun(self){
-		self.targeting.target(self.team.enemyWell, fun(targeting){
+	self.setVar("applyDefaultTarget", [=](var& self) -> void {
+		self.targeting().target(self.team().enemyWell(), [=](var& targeting) -> void {
 			print(to_string(targeting.self().networkId()) + " made it!");
 			targeting.self().fall();
 		});
-	};
+	});
 
-	self["attacking"] = false;
-	self["activeTarget"] = 0;
-	self.agent.gridSpeed(10);
+	self.setVar("attacking", false);
+	self.setVar("activeTarget", 0);
+	self.agent().gridSpeed(10);
 };
 
-self.update = fun(self, dt){
-	if(!self["attacking"]){
-		if(!self["tryToFindAndAttackTarget"](self, dt)){
-			self["applyDefaultTarget"](self);
+self.update = [=](var& self, double dt) -> void {
+	if (!self.getVar("attacking")) {
+		var tryToFindAndAttackTarget = self.getVar("tryToFindAndAttackTarget");
+		if (!tryToFindAndAttackTarget(self, dt)) {
+			var applyDefaultTarget = self.getVar("applyDefaultTarget");
+			applyDefaultTarget(self);
 		}
-	}else{
-		print("Attacking: " + to_string(self["activeTarget"]));
+	} else {
+		print("Attacking: " + to_string(self.getVar("activeTarget")));
 	}
 };

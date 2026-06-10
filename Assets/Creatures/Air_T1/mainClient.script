@@ -1,5 +1,2 @@
-self.spawn = fun(self){
-};
-
-self.update = fun(self, dt){
-};
+self.spawn = [=](var& self) -> void {};
+self.update = [=](var& self, double dt) -> void {};

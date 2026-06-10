@@ -1,2 +1,2 @@
-game.gui.page(pageId).focus(arg_0.owner().componentText());
+game.gui().page(pageId).focus(arg_0.owner().componentText());
 print(arg_0.owner().componentText().text());

@@ -172,7 +172,7 @@ protected:
 
 	double ourElapsedTime = 0.0;
 
-	std::map<std::string, chaiscript::Boxed_Value> localVariables;
+	std::map<std::string, jai::script_value> localVariables;
 
 	std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> state;
 

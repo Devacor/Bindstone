@@ -230,7 +230,7 @@ private:
 
 	void initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode);
 
-	std::map<std::string, chaiscript::Boxed_Value> localVariables;
+	std::map<std::string, jai::script_value> localVariables;
 	std::shared_ptr<MV::NetworkObject<BuildingNetworkState>> state;
 
 	BuildingData buildingData;

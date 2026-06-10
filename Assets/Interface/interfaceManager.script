@@ -1,11 +1,11 @@
-self.initialize = fun(self){
-	auto test := self.make("Login");
+self.initialize = [=](var& self) -> void {
+	auto test = self.make("Login");
 	self.make("Main");
 	test.show();
 };
 
 print("TEST");
-messages.lobbyDisconnect.connect("LoginScreen", fun(message){
+messages.lobbyDisconnect.connect("LoginScreen", [=](string message) -> void {
 	print("Disconnected From Lobby: " + message);
 	game.gui().page("Login").show();
 });

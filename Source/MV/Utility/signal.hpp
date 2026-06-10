@@ -15,7 +15,7 @@
 #include "cereal/archives/adapters.hpp"
 #include "cereal/access.hpp"
 #include <jaiscript/serialization/archive.hpp>
-#include "MV/Script/script.h"
+namespace jai { class engine; }
 
 namespace MV {
 
@@ -30,7 +30,7 @@ namespace MV {
 		static std::shared_ptr< Receiver<T> > make(std::function<T> a_callback){
 			return std::shared_ptr< Receiver<T> >(new Receiver<T>(a_callback, ++uniqueId));
 		}
-		static std::shared_ptr< Receiver<T> > make(const std::string &a_script, MV::Script *a_engine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames = nullptr) {
+		static std::shared_ptr< Receiver<T> > make(const std::string &a_script, jai::engine *a_engine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames = nullptr) {
 			return std::shared_ptr< Receiver<T> >(new Receiver<T>(a_script, a_engine, a_parameterNames, ++uniqueId));
 		}
 
@@ -40,7 +40,7 @@ namespace MV {
 				if (scriptCallback.empty()) {
 					callback(std::forward<Arg>(a_parameters)...);
 				} else {
-					callScript(std::forward<Arg>(a_parameters)...);
+					executeScript(scriptEnginePointer, scriptCallback);
 				}
 			}
 		}
@@ -51,7 +51,7 @@ namespace MV {
 				if (scriptCallback.empty()) {
 					return callback(std::forward<Arg>(a_parameters)...);
 				} else {
-					return callScriptPredicate(std::forward<Arg>(a_parameters)...);
+					return executeScriptPredicate(scriptEnginePointer, scriptCallback, false);
 				}
 			}
 			return false;
@@ -67,7 +67,7 @@ namespace MV {
 				if (scriptCallback.empty()) {
 					callback(std::forward<Arg>(a_parameters)...);
 				}else{
-					callScript(std::forward<Arg>(a_parameters)...);
+					executeScript(scriptEnginePointer, scriptCallback);
 				}
 			}
 		}
@@ -78,7 +78,7 @@ namespace MV {
 				if (scriptCallback.empty()) {
 					return callback();
 				} else {
-					return callScriptPredicate();
+					return executeScriptPredicate(scriptEnginePointer, scriptCallback, false);
 				}
 			}
 			return false;
@@ -89,7 +89,7 @@ namespace MV {
 				if (scriptCallback.empty()) {
 					callback();
 				} else {
-					callScript();
+					executeScript(scriptEnginePointer, scriptCallback);
 				}
 			}
 		}
@@ -99,7 +99,7 @@ namespace MV {
 				if (scriptCallback.empty()) {
 					callback();
 				} else {
-					callScript();
+					executeScript(scriptEnginePointer, scriptCallback);
 				}
 			}
 		}
@@ -138,10 +138,10 @@ namespace MV {
 			return !scriptCallback.empty();
 		}
 
-		void scriptEngine(MV::Script* a_scriptEnginePointer) {
+		void scriptEngine(jai::engine* a_scriptEnginePointer) {
 			scriptEnginePointer = a_scriptEnginePointer;
 		}
-		MV::Script* scriptEngine() const {
+		jai::engine* scriptEngine() const {
 			return scriptEnginePointer;
 		}
 	private:
@@ -160,7 +160,7 @@ namespace MV {
 				cereal::make_nvp("script", scriptCallback)
 			);
 			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			scriptEnginePointer = services.get<MV::Script>(false);
+			scriptEnginePointer = services.get<jai::engine>(false);
 		}
 
 		Receiver() :
@@ -170,63 +170,50 @@ namespace MV {
 			callback(a_callback),
             id(a_id){
 		}
-		Receiver(const std::string& a_callback, MV::Script* a_scriptEngine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames, long long a_id) :
+		Receiver(const std::string& a_callback, jai::engine* a_scriptEngine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames, long long a_id) :
 			id(a_id),
 			scriptCallback(a_callback),
 			scriptEnginePointer(a_scriptEngine),
 			orderedParameterNames(a_parameterNames) {
 		}
 
-		template <typename ...Arg>
-		void callScript(Arg &&... a_parameters) {
-			if (scriptEnginePointer && !scriptCallback.empty()) {
-				std::map<std::string, chaiscript::Boxed_Value> localVariables;
-				auto tupleReference = std::forward_as_tuple(std::forward<Arg>(a_parameters)...);
-				auto parameterValues = toVector<chaiscript::Boxed_Value>(tupleReference);
-				for (size_t i = 0; i < parameterValues.size(); ++i) {
-					localVariables.emplace(
-						(orderedParameterNames && i < orderedParameterNames->size()) ? (*orderedParameterNames)[i] : "arg_" + std::to_string(i),
-						parameterValues[i]);
+		// Legacy (Cereal-era) script receivers run their source directly on the jai
+		// engine; parameters are not forwarded (live script callbacks use jai::signal's
+		// own receiver machinery). Dependent E defers the member lookup to instantiation
+		// — jai::engine is only forward-declared in this widely-included header.
+		template <typename E>
+		static void executeScript(E* a_engine, const std::string& a_script) {
+			if (a_engine && !a_script.empty()) {
+				try {
+					a_engine->execute(a_script);
+				} catch (const std::exception& e) {
+					std::cerr << "Signal script failed: " << e.what() << "\n";
 				}
-				scriptEnginePointer->eval("Signal", scriptCallback);
-			} else if (!scriptCallback.empty()) {
-				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
+			} else if (!a_script.empty()) {
+				std::cerr << "Failed to run script in receiver, you need to supply a script engine handle!\n";
 			}
 		}
 
-		template <typename ...Arg>
-		bool callScriptPredicate(Arg &&... a_parameters) {
-			if (scriptEnginePointer && !scriptCallback.empty()) {
-				std::map<std::string, chaiscript::Boxed_Value> localVariables;
-				auto tupleReference = std::forward_as_tuple(std::forward<Arg>(a_parameters)...);
-				auto parameterValues = toVector<chaiscript::Boxed_Value>(tupleReference);
-				for (size_t i = 0; i < parameterValues.size(); ++i) {
-					localVariables.emplace(
-						(orderedParameterNames && i < orderedParameterNames->size()) ? (*orderedParameterNames)[i] : "arg_" + std::to_string(i),
-						parameterValues[i]);
+		template <typename E>
+		static bool executeScriptPredicate(E* a_engine, const std::string& a_script, bool a_default) {
+			if (a_engine && !a_script.empty()) {
+				try {
+					auto result = a_engine->execute(a_script);
+					return result.is_bool() ? result.as_bool() : a_default;
+				} catch (const std::exception& e) {
+					std::cerr << "Signal script failed: " << e.what() << "\n";
 				}
-				return scriptEnginePointer->eval<bool>("signal", scriptCallback, localVariables).value_or(false);
-			} else if (!scriptCallback.empty()) {
-				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
-				return false;
+			} else if (!a_script.empty()) {
+				std::cerr << "Failed to run script in receiver, you need to supply a script engine handle!\n";
 			}
-			return false;
-		}
-
-		template <class ...Arg>
-		void callScript() {
-			if (scriptEnginePointer && !scriptCallback.empty()) {
-				scriptEnginePointer->eval("signal", scriptCallback);
-			} else if (!scriptCallback.empty()) {
-				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
-			}
+			return a_default;
 		}
 
 		int isBlocked = 0;
 		std::function< T > callback;
 		std::string scriptCallback;
 		std::shared_ptr<std::vector<std::string>> orderedParameterNames;
-		MV::Script*scriptEnginePointer = nullptr;
+		jai::engine* scriptEnginePointer = nullptr;
 
 		int64_t id;
 		static int64_t uniqueId;
@@ -415,7 +402,7 @@ namespace MV {
 			return observers.size();
 		}
 
-		Signal<T>& scriptEngine(MV::Script *a_scriptEngine) {
+		Signal<T>& scriptEngine(jai::engine *a_scriptEngine) {
 			scriptEnginePointer = a_scriptEngine;
 			for (auto&& observer : observers) {
 				if (auto lockedObserver = observer.lock()) {
@@ -424,7 +411,7 @@ namespace MV {
 			}
 			return *this;
 		}
-		MV::Script* scriptEngine() const{
+		jai::engine* scriptEngine() const{
 			return scriptEnginePointer;
 		}
 
@@ -480,7 +467,7 @@ namespace MV {
 				ownedConnections[ownedScriptObserver.first] = ownedScriptObserver.second;
 			}
 			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			scriptEnginePointer = services.get<MV::Script>(false);
+			scriptEnginePointer = services.get<jai::engine>(false);
 		}
 
 		std::set< std::weak_ptr< Receiver<T> >, std::owner_less<std::weak_ptr<Receiver<T>>> > observers;
@@ -493,7 +480,7 @@ namespace MV {
 
 		std::shared_ptr<std::vector<std::string>> orderedParameterNames;
 
-		MV::Script *scriptEnginePointer = nullptr;
+		jai::engine *scriptEnginePointer = nullptr;
 
 		std::map<std::string, SharedReceiverType> ownedConnections;
 	};
@@ -554,10 +541,10 @@ namespace MV {
 		}
 
 		//script support
-		void scriptEngine(MV::Script *a_scriptEngine) {
+		void scriptEngine(jai::engine *a_scriptEngine) {
 			signal.scriptEngine(a_scriptEngine);
 		}
-		MV::Script* scriptEngine() const {
+		jai::engine* scriptEngine() const {
 			return signal.scriptEngine();
 		}
 

@@ -333,7 +333,7 @@ protected:
 
 	const CreatureData& statTemplate;
 
-	std::map<std::string, chaiscript::Boxed_Value> localVariables;
+	std::map<std::string, jai::script_value> localVariables;
 
 	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> state;
 

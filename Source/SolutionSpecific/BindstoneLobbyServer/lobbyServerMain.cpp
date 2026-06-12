@@ -1,89 +1,52 @@
 #include "Game/gameEditor.h"
 #include "MV/Utility/threadPool.hpp"
 
-#include "MV/ArtificialIntelligence/pathfinding.h"
 #include "MV/Serialization/serialize.h"
-//#include "vld.h"
 
 #include "Game/NetworkLayer/lobbyServer.h"
 
 #include "MV/Utility/scopeGuard.hpp"
 
-#include "MV/Network/webServer.h"
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
-struct TestObject {
-	TestObject() { std::cout << "\nConstructor\n"; }
-	~TestObject() { std::cout << "\nDestructor\n"; }
-	TestObject(TestObject&);
-	TestObject(TestObject&&) { std::cout << "\nMove\n"; }
-	TestObject& operator=(const TestObject&) { std::cout << "\nAssign\n"; }
-
-	int payload = 0;
-};
-
-TestObject::TestObject(TestObject&) {
-	std::cout << "\nCopy\n";
-	payload++;
-}
-
-#include <fstream>
-
-class TestWebConnection : public MV::WebConnectionStateBase {
-public:
-	using WebConnectionStateBase::WebConnectionStateBase;
-
-	void processRequest(const MV::HttpRequest& a_recieve) override {
-		std::ostringstream output;
-		auto postParams = a_recieve.parsePostParameters();
-		output << "<html><body>Hello World!<br/>I see your name is " << postParams["name"] << " and you enjoy " << postParams["food"] << "!</body></html>";
-		connection()->send(MV::HttpResponse::make200(output.str()));
-	}
-};
-
-int main(int, char *[]) {
-	//auto result = MV::DownloadRequest::make({ MV::Url{"https://ptsv2.com/t/snapjaw" }, { {"param1", "value1"}, {"param2", "value2"} } });
-	auto result = MV::DownloadRequest::make({ MV::Url{"http://www.snapjaw.net/test.php?g1=v1" }, {{"p1", "v1"}, {"p2", "v2"}} });
-
-	//std::cout << "Response:[" <<result->response() << "]\n";
-
-
-	try {
-		auto webServer = std::make_shared<MV::WebServer>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 80),
-			[](const std::shared_ptr<MV::WebConnection>& a_connection) {
-				return std::make_unique<TestWebConnection>(a_connection);
-			});
-
-		//auto result = MV::DownloadRequest::make({ MV::Url{"http://localhost:80/test.php?g1=v1" }, {{"p1", "v1"}, {"p2", "v2"}} });
-
-		//std::cout << result->response();
-
-		bool done = false;
-		while (!done) {
-			std::this_thread::yield();
+// Lines of "email handle password"; each missing account is created through the same
+// query/hash path CreatePlayer uses, so local clients can log straight in.
+static void seedLocalTestAccounts(LobbyServer& a_server) {
+	auto seedContents = MV::fileContents("ServerConfig/localTestAccounts.config");
+	for (auto&& line : MV::explode(seedContents, [](char c) { return c == '\n'; })) {
+		auto fields = MV::explode(line, [](char c) { return c == ' '; });
+		if (fields.size() == 3 && CreatePlayer::ensureAccount(*a_server.database(), fields[0], fields[1], fields[2])) {
+			MV::info("Seeded local test account: [", fields[0], "]");
 		}
 	}
-	catch (std::exception& e) {
+}
+
+int main(int, char *[]) {
+	Managers managers({});
+	managers.timer.start();
+
+	auto jaiEngine = jai::engine::make();
+	jai::stdlib::register_all(*jaiEngine);
+	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	MV::Services::instance().connect<jai::engine>(jaiEngine.get());
+
+	try {
+		auto server = std::make_shared<LobbyServer>(managers);
+		seedLocalTestAccounts(*server);
+		std::cout << "LobbyServer listening: users on 22325, game servers on 22326\n";
+		bool done = false;
+		while (!done) {
+			managers.pool.run();
+			auto tick = managers.timer.delta("tick");
+			server->update(tick);
+			std::this_thread::yield();
+		}
+	} catch (std::exception & e) {
 		MV::error("Exception Toasted the Server: ", e.what());
 	}
-
-	return 0;
-
-    Managers managers({});
-	managers.timer.start();
-	bool done = false;
-
-    try {
-        auto server = std::make_shared<LobbyServer>(managers);
-        std::cout << "Made server\n";
-        while (!done) {
-            managers.pool.run();
-            auto tick = managers.timer.delta("tick");
-            server->update(tick);
-            std::this_thread::yield();
-        }
-    } catch (std::exception & e) {
-        MV::error("Exception Toasted the Server: ", e.what());
-    }
 
 	return 0;
 }

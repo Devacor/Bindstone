@@ -109,20 +109,18 @@ public:
 
     // Implicit registration (property_owner): same entry machinery, weak precedence.
     // The name is `static constexpr const char* jai_type_name` if the class declares one,
-    // else the bare class identifier (parsed from the compiler signature — never a mangled
-    // typeid name, and identical across MSVC/GCC/Clang). Template instantiations have no
-    // stable derived spelling, so without jai_type_name they are skipped at compile time —
-    // give each instantiation a jai_type_name or an explicit jai::registrar.
+    // else derived from the class identifier (parsed from the compiler signature — never a
+    // mangled typeid name, identical across MSVC/GCC/Clang): "Baz" for plain classes,
+    // "foo::AN::Baz" for anonymous-namespace classes (AN = canonical anon segment).
+    // Template instantiations have no stable derived spelling, so without jai_type_name
+    // they are skipped at compile time — pin a name or use an explicit jai::registrar.
     template<typename T>
     static void try_auto_register_implicit() {
         if constexpr (std::is_polymorphic_v<T>) {
             if constexpr (requires { std::string_view{T::jai_type_name}; }) {
                 register_implicit_entry<T>(std::string(T::jai_type_name));
-            } else {
-                constexpr auto derivedName = ::jai::detail::static_unqualified_type_name<T>();
-                if constexpr (!derivedName.empty()) {
-                    register_implicit_entry<T>(std::string(derivedName));
-                }
+            } else if constexpr (::jai::detail::is_canonicalizable_type_name(::jai::detail::static_type_name<T>())) {
+                register_implicit_entry<T>(::jai::detail::registration_type_name<T>());
             }
         }
     }

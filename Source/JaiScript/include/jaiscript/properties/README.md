@@ -183,6 +183,9 @@ correct dynamic type with **zero extra code**. Rules:
 
 - The `$type` name is the bare class identifier (`"Player"` for `class Player`), parsed from
   the compiler signature — never a mangled `typeid` name, identical on MSVC/GCC/Clang.
+  Anonymous-namespace types keep their qualified path with a canonical `AN` segment
+  (`"foo::AN::Baz"`); they are per-TU distinct types, so two TUs deriving the same name
+  trip the collision warning.
 - Pin a custom name in-class when the identifier might change or for template
   instantiations (which have no stable derived spelling and are otherwise skipped):
 

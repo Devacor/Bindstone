@@ -312,6 +312,8 @@ namespace MV {
 	SDL_RWops* sdlFileHandle(const std::string& a_path);
 	//returns a blank string if a_throwOnMissing is false.
 	std::string fileContents(const std::string& a_path, bool a_throwOnMissing = false);
+	//fileContents split into lines, CR-tolerant, trailing empties dropped. Empty if missing.
+	std::vector<std::string> fileLines(const std::string& a_path);
 
 	inline float angle2D(int x1, int y1, int x2, int y2) {
 		return wrap(toDegrees(atan2(static_cast<float>(y2 - y1), static_cast<float>(x2 - y2))), 0.0f, 360.0f);

@@ -206,6 +206,15 @@ namespace MV {
 		return data;
 	}
 
+	std::vector<std::string> fileLines(const std::string& a_path) {
+		auto lines = explode(fileContents(a_path), [](char c) { return c == '\n'; });
+		for (auto&& line : lines) {
+			if (!line.empty() && line.back() == '\r') { line.pop_back(); }
+		}
+		while (!lines.empty() && lines.back().empty()) { lines.pop_back(); }
+		return lines;
+	}
+
 	bool writeToFile(const std::string& a_path, const std::string& a_contents) {
 		// Use path as-is if absolute or explicitly relative (./ or .\), otherwise use playerPreferencesPath
 		bool useAsIs = std::filesystem::path(a_path).is_absolute() ||

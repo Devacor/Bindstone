@@ -146,7 +146,8 @@ private:
 	void handleInput();
 
 	void initializeClientToLobbyServer() {
-		auto localHostServerAddress = MV::explode(MV::fileContents("ServerConfig/lobbyServerAddress.config"), [](char c) {return c == '\n'; })[0];
+		auto lobbyAddressConfig = MV::fileLines("ServerConfig/lobbyServerAddress.config");
+		auto localHostServerAddress = lobbyAddressConfig.empty() ? "http://localhost:22326" : lobbyAddressConfig[0];
 		ourLobbyClient = MV::Client::make(MV::Url{ localHostServerAddress }, [=](const std::string &a_message) {
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, manager.services);
 			try {
@@ -165,7 +166,8 @@ private:
 
 	void makeUsAvailableToTheLobby() {
 		if (!ourLobbyClient) { return; }
-		auto gameServerAddressNoPort = MV::explode(MV::fileContents("ServerConfig/gameServerAddress.config"), [](char c) {return c == '\n'; })[0];
+		auto gameAddressConfig = MV::fileLines("ServerConfig/gameServerAddress.config");
+		auto gameServerAddressNoPort = gameAddressConfig.empty() ? std::string("http://localhost") : gameAddressConfig[0];
 		auto found = gameServerAddressNoPort.rfind(':');
 		if (found != std::string::npos && found < (gameServerAddressNoPort.length() - 1) && gameServerAddressNoPort[found + 1] != '/') {
 			gameServerAddressNoPort = gameServerAddressNoPort.substr(0, found);

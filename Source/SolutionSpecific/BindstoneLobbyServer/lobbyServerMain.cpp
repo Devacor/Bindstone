@@ -14,8 +14,7 @@
 // Lines of "email handle password"; each missing account is created through the same
 // query/hash path CreatePlayer uses, so local clients can log straight in.
 static void seedLocalTestAccounts(LobbyServer& a_server) {
-	auto seedContents = MV::fileContents("ServerConfig/localTestAccounts.config");
-	for (auto&& line : MV::explode(seedContents, [](char c) { return c == '\n'; })) {
+	for (auto&& line : MV::fileLines("ServerConfig/localTestAccounts.config")) {
 		auto fields = MV::explode(line, [](char c) { return c == ' '; });
 		if (fields.size() == 3 && CreatePlayer::ensureAccount(*a_server.database(), fields[0], fields[1], fields[2])) {
 			MV::info("Seeded local test account: [", fields[0], "]");

@@ -16,16 +16,18 @@ both parsers and compares wall-clock parse time, throughput, and structural pari
 
 ```bat
 cl /nologo /O2 /Ob2 /Oi /Ot /std:c++20 /EHsc /DNDEBUG ^
-   /I"D:\git\Bindstone\External\cereal\include" bench_json.cpp /Fe:bench_json.exe
+   /I"<path-to-rapidjson-include>" bench_json.cpp /Fe:bench_json.exe
 
-bench_json.exe "D:\git\Bindstone\Scenes\map.scene2" 80
+bench_json.exe "D:\git\Bindstone\Scenes\map.scene" 80
 ```
 
-rapidjson is the copy cereal vendors (`cereal/external/rapidjson`). It runs scalar by
-default; add `/DCEREAL_RAPIDJSON_SSE42` to give rapidjson its SSE4.2 path (it barely helps
-on this short-string, minified data, so the lead below holds against rapidjson at its best).
+rapidjson originally came from cereal's vendored copy (`cereal/external/rapidjson`);
+cereal has since been removed from `External/`, so point the include at any rapidjson
+checkout to re-run. It runs scalar by default; add `/DCEREAL_RAPIDJSON_SSE42` to give
+rapidjson its SSE4.2 path (it barely helps on this short-string, minified data, so the
+lead below holds against rapidjson at its best).
 
-## Result (map.scene2, 3.69 MiB, 585,906 nodes; idle machine, 80 iters)
+## Result (historical: pre-conversion map scene, 3.69 MiB, 585,906 nodes; idle machine, 80 iters)
 
 | parser    | median ms | min ms | MiB/s |
 |-----------|-----------|--------|-------|

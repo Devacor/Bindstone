@@ -4,13 +4,25 @@
 #define JAISCRIPT_SERIALIZATION_POLYMORPHIC_HPP
 
 #include <jaiscript/serialization/serialization_metadata.hpp>
+#include <jaiscript/serialization/traits.hpp> //jai::access, named non-dependently by the load_and_construct probe below
+#include <jaiscript/detail/static_type_name.hpp>
 
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <string>
 #include <typeindex>
 #include <unordered_map>
 #include <type_traits>
+
+// construct.hpp includes archive_impl.hpp (which includes this header), so only the
+// declaration can appear here; the probe and factory bodies need no more until they
+// instantiate, and any type declaring load_and_construct includes construct.hpp itself.
+namespace jai {
+namespace serialization {
+template<typename T> class construct;
+}
+}
 
 namespace jai {
 namespace serialization {
@@ -30,6 +42,8 @@ public:
         std::string name;
         save_fn_t save_fn;
         load_fn_t load_fn;
+        std::type_index type = std::type_index(typeid(void));
+        bool implicit = false; //registered via property_owner's derived name; any explicit registration wins
     };
 
     static polymorphic_registry& instance() {
@@ -37,7 +51,34 @@ public:
         return reg;
     }
 
-    void register_entry(std::type_index ti, type_entry entry) {
+    // One registry, two doors: explicit (jai::registrar / register_manual — chosen name,
+    // always wins) and implicit (property_owner — derived class name, never overrides).
+    // Static-init order between the two is unspecified, so both orders must converge:
+    // implicit-after-explicit no-ops; explicit-after-implicit replaces.
+    void register_entry(std::type_index ti, type_entry entry, bool a_implicit = false) {
+        entry.type = ti;
+        entry.implicit = a_implicit;
+        auto existing = by_rtti_.find(ti);
+        if (existing != by_rtti_.end() && a_implicit) {
+            return;
+        }
+        if (auto named = by_name_.find(entry.name); named != by_name_.end() && named->second->type != ti) {
+            if (a_implicit) {
+                std::fprintf(stderr, "[jai::serialization] implicit registration of '%s' skipped: the name already belongs to a different type. Register one of them with an explicit jai::registrar name.\n", entry.name.c_str());
+                return;
+            }
+            // An explicit registration owns its name outright; the displaced type would
+            // otherwise resolve to the wrong factory on load, so evict it entirely (its
+            // next save fails loudly instead of corrupting data).
+            std::fprintf(stderr, "[jai::serialization] explicit registration of '%s' evicts a previous%s registration of the same name for a different type.\n", entry.name.c_str(), named->second->implicit ? " implicit" : " explicit");
+            auto victimType = named->second->type;
+            by_name_.erase(named);
+            by_rtti_.erase(victimType);
+            existing = by_rtti_.find(ti);
+        }
+        if (existing != by_rtti_.end() && existing->second.name != entry.name) {
+            by_name_.erase(existing->second.name);
+        }
         auto [it, _] = by_rtti_.insert_or_assign(ti, std::move(entry));
         by_name_[it->second.name] = &it->second;
     }
@@ -63,6 +104,26 @@ public:
             entry.save_fn = make_save_fn<T>();
             entry.load_fn = make_load_fn<T>();
             instance().register_entry(std::type_index(typeid(T)), std::move(entry));
+        }
+    }
+
+    // Implicit registration (property_owner): same entry machinery, weak precedence.
+    // The name is `static constexpr const char* jai_type_name` if the class declares one,
+    // else the bare class identifier (parsed from the compiler signature — never a mangled
+    // typeid name, and identical across MSVC/GCC/Clang). Template instantiations have no
+    // stable derived spelling, so without jai_type_name they are skipped at compile time —
+    // give each instantiation a jai_type_name or an explicit jai::registrar.
+    template<typename T>
+    static void try_auto_register_implicit() {
+        if constexpr (std::is_polymorphic_v<T>) {
+            if constexpr (requires { std::string_view{T::jai_type_name}; }) {
+                register_implicit_entry<T>(std::string(T::jai_type_name));
+            } else {
+                constexpr auto derivedName = ::jai::detail::static_unqualified_type_name<T>();
+                if constexpr (!derivedName.empty()) {
+                    register_implicit_entry<T>(std::string(derivedName));
+                }
+            }
         }
     }
 
@@ -109,6 +170,15 @@ public:
 
 private:
     polymorphic_registry() = default;
+
+    template<typename T>
+    static void register_implicit_entry(std::string name) {
+        type_entry entry;
+        entry.name = std::move(name);
+        entry.save_fn = make_save_fn<T>();
+        entry.load_fn = make_load_fn<T>();
+        instance().register_entry(std::type_index(typeid(T)), std::move(entry), true);
+    }
 
     // --- Save function generation ---
     // Uses archive operator() via dispatch — handles save methods, property_mgr,
@@ -185,14 +255,26 @@ private:
     std::unordered_map<std::string, const type_entry*> by_name_;
 };
 
-// Free-function entry point named ahead of this header by jai::registrar (forward-declared
-// there), so the registrar's class-template bodies can call it before this header is included.
+// Free-function entry points named ahead of this header by jai::registrar and
+// jai::property_owner (forward-declared there), so their class-template bodies can call
+// them before this header is included.
 template<typename T>
 void try_auto_register(const std::string& name) {
     polymorphic_registry::try_auto_register<T>(name);
 }
 
+template<typename T>
+void try_auto_register_implicit() {
+    polymorphic_registry::try_auto_register_implicit<T>();
+}
+
 } // namespace serialization
 } // namespace jai
+
+// NOTE: make_save_fn/make_load_fn instantiate any_archive dispatch(), defined in
+// archive_dispatch.hpp. This header must stay light (archive_impl.hpp includes it before
+// its own classes), so the registration ENTRY POINTS (registrar.hpp, property_manager.hpp)
+// include archive_dispatch.hpp at their bottoms instead — otherwise a TU registering a
+// type without the concrete archives fails with C3779 (decltype(auto) used before defined).
 
 #endif // JAISCRIPT_SERIALIZATION_POLYMORPHIC_HPP

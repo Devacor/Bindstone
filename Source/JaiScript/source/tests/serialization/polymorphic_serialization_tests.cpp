@@ -3,7 +3,11 @@
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/dynamic_binder_serialization.hpp>
+#include <jaiscript/core/registrar.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/properties.hpp>
+#include <jaiscript/detail/static_type_name.hpp>
+#include "serialization_roundtrip.hpp"
 
 using namespace jai;
 using namespace jai::foundry;
@@ -719,6 +723,150 @@ public:
     }
 };
 
+// ============================================================================
+// Implicit polymorphic registration (property_owner) + loud unregistered failure
+// ============================================================================
+
+// No registrar anywhere: identity comes implicitly from property_owner.
+class ImplicitRegBase : public jai::property_owner<ImplicitRegBase> {
+public:
+    JAI_PROPERTY((int), baseValue, 1);
+};
+
+class ImplicitRegDerived : public jai::property_owner<ImplicitRegDerived, ImplicitRegBase> {
+public:
+    JAI_PROPERTY((std::string), derivedTag, "");
+};
+
+// property_owner AND an explicit registrar: the explicit name must win.
+class RenamedRegType : public jai::property_owner<RenamedRegType, ImplicitRegBase> {
+public:
+    JAI_PROPERTY((int), marker, 7);
+};
+static jai::registrar<RenamedRegType, void> _renamedRegistration("CustomRegName");
+
+// In-class name pin: implicit registration must use jai_type_name when declared
+// (the hatch for template instantiations and classes whose identifier may change).
+class InClassNamedType : public jai::property_owner<InClassNamedType, ImplicitRegBase> {
+public:
+    static constexpr const char* jai_type_name = "PinnedName";
+    JAI_PROPERTY((int), pinned, 3);
+};
+
+// Polymorphic, serializable, but never registered: saving through a base pointer
+// must throw instead of silently slicing.
+class UnregPolyBase {
+public:
+    virtual ~UnregPolyBase() = default;
+    int value = 1;
+    template<class Archive>
+    void serialize(Archive& ar) {
+        ar(jai::serialization::make_nvp("value", value));
+    }
+};
+
+class UnregPolyDerived : public UnregPolyBase {
+public:
+    int extra = 2;
+    template<class Archive>
+    void serialize(Archive& ar) {
+        ar(jai::serialization::make_nvp("extra", extra));
+        UnregPolyBase::serialize(ar);
+    }
+};
+
+class implicit_registration_tests : public suite {
+public:
+    implicit_registration_tests() : suite("Implicit Polymorphic Registration Tests") {}
+
+    void forge_tests() override {
+
+        test("static_type_name_extraction", [&]() {
+            check_eq(std::string("ImplicitRegBase"), std::string(jai::detail::static_unqualified_type_name<ImplicitRegBase>()));
+            check_eq(std::string("jai::foundry::tests::ImplicitRegBase"), std::string(jai::detail::static_type_name<ImplicitRegBase>()));
+            check(jai::detail::static_unqualified_type_name<std::vector<int>>().empty(), "template instantiations must be excluded from implicit naming");
+        });
+
+        test("property_owner_implicit_type_tag_written", [&]() {
+            auto eng = engine::make();
+            auto derived = std::make_shared<ImplicitRegDerived>();
+            derived->derivedTag = std::string("tagged");
+            std::shared_ptr<ImplicitRegBase> original = derived;
+
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            auto json = w.str();
+            check(json.find("\"$type\"") != std::string::npos, "expected a $type discriminator: " + json);
+            check(json.find("ImplicitRegDerived") != std::string::npos, "expected the implicit class name: " + json);
+        });
+
+        test("property_owner_implicit_round_trip", [&]() {
+            auto eng = engine::make();
+            auto derived = std::make_shared<ImplicitRegDerived>();
+            derived->derivedTag = std::string("round");
+            std::shared_ptr<ImplicitRegBase> original = derived;
+
+            auto fromJson = roundtrip_json(*eng, original);
+            check(fromJson != nullptr, "json round-trip returned null");
+            auto jsonDerived = std::dynamic_pointer_cast<ImplicitRegDerived>(fromJson);
+            check(jsonDerived != nullptr, "dynamic type lost through json round-trip");
+            check_eq(std::string("round"), jsonDerived->derivedTag.get());
+
+            auto fromBinary = roundtrip_binary(*eng, original);
+            check(fromBinary != nullptr, "binary round-trip returned null");
+            auto binaryDerived = std::dynamic_pointer_cast<ImplicitRegDerived>(fromBinary);
+            check(binaryDerived != nullptr, "dynamic type lost through binary round-trip");
+            check_eq(std::string("round"), binaryDerived->derivedTag.get());
+        });
+
+        test("explicit_registrar_overrides_implicit_name", [&]() {
+            auto eng = engine::make();
+            std::shared_ptr<ImplicitRegBase> original = std::make_shared<RenamedRegType>();
+
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            auto json = w.str();
+            check(json.find("CustomRegName") != std::string::npos, "explicit registrar name must win: " + json);
+            check(json.find("\"RenamedRegType\"") == std::string::npos, "implicit name must not be used once an explicit one exists: " + json);
+
+            auto loaded = roundtrip_json(*eng, original);
+            check(std::dynamic_pointer_cast<RenamedRegType>(loaded) != nullptr, "round-trip through the explicit name failed");
+        });
+
+        test("in_class_jai_type_name_pins_the_name", [&]() {
+            auto eng = engine::make();
+            std::shared_ptr<ImplicitRegBase> original = std::make_shared<InClassNamedType>();
+
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            auto json = w.str();
+            check(json.find("PinnedName") != std::string::npos, "jai_type_name must be used: " + json);
+            check(json.find("InClassNamedType") == std::string::npos, "derived class identifier must not leak into the data: " + json);
+
+            auto loaded = roundtrip_json(*eng, original);
+            check(std::dynamic_pointer_cast<InClassNamedType>(loaded) != nullptr, "round-trip through the pinned name failed");
+        });
+
+        test("unregistered_polymorphic_save_throws", [&]() {
+            auto eng = engine::make();
+            std::shared_ptr<UnregPolyBase> original = std::make_shared<UnregPolyDerived>();
+
+            check_throws([&]() {
+                jai::serialization::json_archive_writer w(0, eng.get());
+                w(original);
+            }, "saving an unregistered polymorphic type through a base pointer must throw");
+
+            // Static type == dynamic type stays legal without registration.
+            auto exact = std::make_shared<UnregPolyDerived>();
+            exact->extra = 9;
+            auto loaded = roundtrip_json(*eng, exact);
+            check(loaded != nullptr, "non-polymorphic-context save must still work");
+            check_eq(9, loaded->extra);
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 FOUNDRY_REGISTER(jai::foundry::tests::polymorphic_serialization_tests)
+FOUNDRY_REGISTER(jai::foundry::tests::implicit_registration_tests)

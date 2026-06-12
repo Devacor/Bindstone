@@ -265,6 +265,7 @@ public:
     // Default: auto_bind + build
     nttp_registrar() {
         type_name_registry::instance().register_type<T>(Name.view());
+        serialization::try_auto_register<T>(Name.str());
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [](engine& eng, const Context&) {
@@ -280,6 +281,7 @@ public:
         requires std::invocable<F, dynamic_binder<T>&, const Context&>
     explicit nttp_registrar(F&& configure) {
         type_name_registry::instance().register_type<T>(Name.view());
+        serialization::try_auto_register<T>(Name.str());
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
@@ -299,6 +301,7 @@ public:
     // Default: auto_bind + build
     nttp_registrar() {
         type_name_registry::instance().register_type<T>(Name.view());
+        serialization::try_auto_register<T>(Name.str());
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [](engine& eng) {
@@ -314,6 +317,7 @@ public:
         requires std::invocable<F, dynamic_binder<T>&>
     explicit nttp_registrar(F&& configure) {
         type_name_registry::instance().register_type<T>(Name.view());
+        serialization::try_auto_register<T>(Name.str());
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [configure = std::forward<F>(configure)](engine& eng) {
@@ -345,7 +349,10 @@ inline void bind_registrar(engine& eng) {
 
 // Include dynamic_binder.hpp to make registrar lambdas work
 #include <jaiscript/core/dynamic_binder.hpp>
-// Include polymorphic registry for auto-registration of polymorphic types
+// Include polymorphic registry for auto-registration of polymorphic types, plus the
+// any_archive dispatch() definitions its save/load factories instantiate (see the note
+// at the bottom of polymorphic.hpp).
 #include <jaiscript/serialization/polymorphic.hpp>
+#include <jaiscript/serialization/archive_dispatch.hpp>
 
 #endif // __JAISCRIPT_CORE_REGISTRAR_HPP__

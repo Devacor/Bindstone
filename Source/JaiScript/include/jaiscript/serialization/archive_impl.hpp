@@ -715,6 +715,11 @@ private:
                     pop_context();
                     return;
                 }
+                // Writing the static type's payload here would silently slice the object
+                // and load back as the wrong type — fail loudly instead (cereal semantics).
+                throw serialization_error(std::string("Cannot serialize unregistered polymorphic type '") + actual_type.name() +
+                    "' through pointer-to-base '" + typeid(elem_type).name() +
+                    "'. Register it with jai::registrar<T, Context>(\"Name\") or derive from jai::property_owner<T, ...>.");
             }
         }
         self()->serialize("$val", *value);

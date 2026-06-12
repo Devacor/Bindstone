@@ -76,12 +76,6 @@ GameEditor::GameEditor(std::string a_username, std::string a_password) :
 
 	// 		spineTestNode->make("PaletteTest")->position({ -50.0f, -100.0f })->
 	// 			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));
-	// 		auto populateArchive = [&](cereal::JSONInputArchive& archive) {
-	// 			archive.add(cereal::make_nvp("renderer", &managers.renderer));
-	// 			archive.add(cereal::make_nvp("pool", &managers.pool));
-	// 		};
-	// 		spineTestNode->loadChild("simple.scene", populateArchive);
-	// 		spineTestNode->loadChild("tree_particle.scene", populateArchive);
 	screenScaler = limbo->attach<MV::Scene::Sprite>();
 	screenScaler->hide()->id("ScreenScaler");
 

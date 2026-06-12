@@ -317,7 +317,6 @@ namespace MV {
 
 
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
-		friend cereal::access;
 		friend jai::access;
 		friend class jai::serialization::access;
 		friend class FileTextureDefinition;
@@ -389,29 +388,13 @@ namespace MV {
 	private:
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(
-					jai::serialization::make_nvp("name", textureName),
-					jai::serialization::make_nvp("size", textureSize),
-					jai::serialization::make_nvp("contentSize", desiredSize),
-					jai::serialization::make_nvp("scale", logicalScale),
-					JAI_NVP(handles)
-				);
-			} else {
-				archive(
-					cereal::make_nvp("name", textureName),
-					cereal::make_nvp("size", textureSize),
-					cereal::make_nvp("contentSize", desiredSize)
-				);
-
-				if(version > 0){
-					archive(cereal::make_nvp("scale", logicalScale));
-				}
-
-				archive(
-					CEREAL_NVP(handles)
-				);
-			}
+			archive(
+				jai::serialization::make_nvp("name", textureName),
+				jai::serialization::make_nvp("size", textureSize),
+				jai::serialization::make_nvp("contentSize", desiredSize),
+				jai::serialization::make_nvp("scale", logicalScale),
+				JAI_NVP(handles)
+			);
 		}
 
 		virtual void reloadImplementation() = 0;
@@ -421,7 +404,6 @@ namespace MV {
 	};
 
 	class FileTextureDefinition : public TextureDefinition {
-		friend cereal::access;
 		friend jai::access;
 		friend class jai::serialization::access;
 	public:
@@ -456,27 +438,8 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(JAI_NVP(powerTwo), JAI_NVP(repeat), JAI_NVP(pixel));
-				TextureDefinition::serialize(archive, version);
-			} else {
-				archive(CEREAL_NVP(powerTwo), CEREAL_NVP(repeat), CEREAL_NVP(pixel), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
-			}
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<FileTextureDefinition> &construct, std::uint32_t const /*version*/){
-			bool repeat = false;
-			bool pixel = false;
-			bool powerTwo = true;
-
-			archive(cereal::make_nvp("powerTwo", powerTwo), cereal::make_nvp("repeat", repeat), cereal::make_nvp("pixel", pixel));
-
-			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-
-			construct("", powerTwo, repeat, pixel);
-			construct->textures = services.get<MV::SharedTextures>();
-			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
+			archive(JAI_NVP(powerTwo), JAI_NVP(repeat), JAI_NVP(pixel));
+			TextureDefinition::serialize(archive, version);
 		}
 
 		template<typename Archive>
@@ -502,9 +465,9 @@ namespace MV {
 	};
 
 	class DynamicTextureDefinition : public TextureDefinition {
-		friend cereal::access;
 		friend jai::access;
 		friend class jai::serialization::access;
+		friend class PackedTextureDefinition;
 	public:
 		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f}){
 			return std::shared_ptr<DynamicTextureDefinition>(new DynamicTextureDefinition(a_name, a_size, a_backgroundColor));
@@ -525,20 +488,8 @@ namespace MV {
 	private:
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(JAI_NVP(backgroundColor));
-				TextureDefinition::serialize(archive, version);
-			} else {
-				archive(CEREAL_NVP(backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
-			}
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<DynamicTextureDefinition> &construct, std::uint32_t const /*version*/){
-			construct("", Size<int>(), Color());
-			Color backgroundColor;
-			archive(cereal::make_nvp("backgroundColor", backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
-			construct->backgroundColor = backgroundColor;
+			archive(JAI_NVP(backgroundColor));
+			TextureDefinition::serialize(archive, version);
 		}
 
 		template<typename Archive>
@@ -556,7 +507,6 @@ namespace MV {
 	};
 
 	class SurfaceTextureDefinition : public TextureDefinition {
-		friend cereal::access;
 		friend jai::access;
 		friend class jai::serialization::access;
 	public:
@@ -584,18 +534,8 @@ namespace MV {
 	private:
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				TextureDefinition::serialize(archive, version);
-			} else {
-				archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
-			}
+			TextureDefinition::serialize(archive, version);
 			//Must manually call setSurfaceGenerator; We can assume whatever owns this texture definition knows how to reconstitute it.
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<SurfaceTextureDefinition> &construct, std::uint32_t const /*version*/){
-			construct("", std::function<std::shared_ptr<OwnedSurface> ()>());
-			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
 
 		template<typename Archive>
@@ -613,7 +553,6 @@ namespace MV {
 	};
 
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
-		friend cereal::access;
 		friend jai::access;
 		friend class jai::serialization::access;
 		friend TextureDefinition;
@@ -690,72 +629,13 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(
-					jai::serialization::make_nvp("texture", textureDefinition),
-					jai::serialization::make_nvp("handle", handlePercent),
-					jai::serialization::make_nvp("slice", slicePercent),
-					jai::serialization::make_nvp("name", debugName),
-					JAI_NVP(packId)
-				);
-			} else {
-				if (version == 0) {
-					BoxAABB<int> oldIntegralBounds;
-					bool oldFlipValues;
-					archive(
-						cereal::make_nvp("handleRegion", oldIntegralBounds),
-						cereal::make_nvp("flipX", oldFlipValues),
-						cereal::make_nvp("flipY", oldFlipValues),
-						CEREAL_NVP(textureDefinition),
-						CEREAL_NVP(handlePercent)
-					);
-				}else{
-					archive(
-						cereal::make_nvp("texture", textureDefinition),
-						cereal::make_nvp("handle", handlePercent),
-						cereal::make_nvp("slice", slicePercent),
-						cereal::make_nvp("name", debugName)
-					);
-					if (version > 1) {
-						archive(cereal::make_nvp("packId", packId));
-					}
-				}
-			}
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TextureHandle> &construct, std::uint32_t const version){
-			std::shared_ptr<TextureDefinition> textureDefinition;
-			if(version == 0){
-				archive(cereal::make_nvp("textureDefinition", textureDefinition));
-				construct(textureDefinition);
-				BoxAABB<int> oldIntegralBounds;
-				bool oldFlipValues;
-				archive(
-					cereal::make_nvp("handleRegion", oldIntegralBounds),
-					cereal::make_nvp("flipX", oldFlipValues),
-					cereal::make_nvp("flipY", oldFlipValues),
-					cereal::make_nvp("handlePercent", construct->handlePercent),
-					cereal::make_nvp("name", construct->debugName)
-				);
-			}else{
-				archive(cereal::make_nvp("texture", textureDefinition));
-				construct(textureDefinition);
-				archive(
-					cereal::make_nvp("handle", construct->handlePercent),
-					cereal::make_nvp("slice", construct->slicePercent),
-					cereal::make_nvp("name", construct->debugName)
-				);
-				if (version > 1) {
-					archive(cereal::make_nvp("packId", construct->packId));
-				}
-				MV::SharedTextures* sharedTextures = nullptr;
-				if (!construct->packId.empty()) {
-					MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-					sharedTextures = getSharedTextureFromServices(services);
-				}
-				construct->postLoadInitialize(sharedTextures);
-			}
+			archive(
+				jai::serialization::make_nvp("texture", textureDefinition),
+				jai::serialization::make_nvp("handle", handlePercent),
+				jai::serialization::make_nvp("slice", slicePercent),
+				jai::serialization::make_nvp("name", debugName),
+				JAI_NVP(packId)
+			);
 		}
 
 		template<typename Archive>
@@ -787,7 +667,5 @@ namespace MV {
 		std::string packId;
 	};
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_scenetextures);
 
 #endif

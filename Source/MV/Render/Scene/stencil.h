@@ -10,7 +10,6 @@ namespace MV {
 
 		class Stencil : public Sprite {
 			friend Node;
-			friend cereal::access;
 			friend jai::access;
 
 		public:
@@ -31,31 +30,12 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					Sprite::save(archive, 0);
-				} else {
-					archive(
-						cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
-					);
-				}
+				Sprite::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					Sprite::load(archive, 0);
-				} else {
-					archive(
-						cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
-					);
-				}
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Stencil> &construct, std::uint32_t const version) {
-				construct(std::shared_ptr<Node>());
-				construct->load(archive, version);
-				construct->initialize();
+				Sprite::load(archive, 0);
 			}
 
 			template<typename Archive>
@@ -82,7 +62,5 @@ namespace MV {
 		};
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_scenestencil);
 
 #endif

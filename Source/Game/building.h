@@ -39,11 +39,7 @@ struct BuildTree {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id), JAI_NVP(cost), JAI_NVP(income), JAI_NVP(upgrades));
-		} else {
-			archive(CEREAL_NVP(id), CEREAL_NVP(cost), CEREAL_NVP(income), CEREAL_NVP(upgrades));
-		}
+		archive(JAI_NVP(id), JAI_NVP(cost), JAI_NVP(income), JAI_NVP(upgrades));
 	}
 };
 
@@ -53,11 +49,7 @@ struct SkinData {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id), JAI_NVP(costs));
-		} else {
-			archive(CEREAL_NVP(id), CEREAL_NVP(costs));
-		}
+		archive(JAI_NVP(id), JAI_NVP(costs));
 	}
 };
 
@@ -72,11 +64,7 @@ struct BuildingData {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id), JAI_NVP(skins), JAI_NVP(costs), JAI_NVP(game));
-		} else {
-			archive(CEREAL_NVP(id), CEREAL_NVP(skins), CEREAL_NVP(costs), CEREAL_NVP(game));
-		}
+		archive(JAI_NVP(id), JAI_NVP(skins), JAI_NVP(costs), JAI_NVP(game));
 	}
 
 	StandardScriptMethods<Building>& script(MV::Script& a_script) const {
@@ -135,30 +123,19 @@ struct BuildingNetworkState {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(
-				jai::serialization::make_nvp("slot", buildingSlot),
-				jai::serialization::make_nvp("animationName", animationName),
-				jai::serialization::make_nvp("animationLoops", animationLoops),
-				jai::serialization::make_nvp("variables", variables),
-				jai::serialization::make_nvp("buildTreeIndices", buildTreeIndices)
-			);
-		} else {
-			archive(
-				cereal::make_nvp("slot", buildingSlot),
-				cereal::make_nvp("animationName", animationName),
-				cereal::make_nvp("animationLoops", animationLoops),
-				cereal::make_nvp("variables", variables),
-				cereal::make_nvp("buildTreeIndices", buildTreeIndices)
-			);
-		}
+		archive(
+			jai::serialization::make_nvp("slot", buildingSlot),
+			jai::serialization::make_nvp("animationName", animationName),
+			jai::serialization::make_nvp("animationLoops", animationLoops),
+			jai::serialization::make_nvp("variables", variables),
+			jai::serialization::make_nvp("buildTreeIndices", buildTreeIndices)
+		);
 	}
 };
 
 class Building : public MV::Scene::Component {
 	friend MV::Scene::Node;
 	friend MV::Script;
-	friend cereal::access;
 	jai::signal_emitter<void(std::shared_ptr<Building>)> onUpgradedSignal;
 
 public:

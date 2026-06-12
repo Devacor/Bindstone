@@ -2,8 +2,6 @@
 #include <memory>
 
 #include "MV/Utility/scopeGuard.hpp"
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
 #include "MV/Utility/generalUtility.h"
 
 #include <jaiscript/core/registrar.hpp>
@@ -51,10 +49,6 @@ static jai::registrar<MV::Scene::Grid, MV::Services> _hookGrid("Grid",
 	builder.method("nodeFromGrid", &MV::Scene::Grid::nodeFromGrid);
 	builder.method("nodeFromLocal", &MV::Scene::Grid::nodeFromLocal);
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Grid);
-CEREAL_CLASS_VERSION(MV::Scene::Grid, 3)
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenegrid);
 
 namespace MV {
 	namespace Scene {

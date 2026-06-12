@@ -1,8 +1,5 @@
 #include "text.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal_binding.hpp>
@@ -62,10 +59,6 @@ static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
 	builder.method("useBoundsForLineHeight", static_cast<bool(MV::Scene::Text::*)() const>(&MV::Scene::Text::useBoundsForLineHeight));
 	builder.method("useBoundsForLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::useBoundsForLineHeight));
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Text);
-CEREAL_CLASS_VERSION(MV::Scene::Text, 1);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenetext);
 
 namespace MV{
 	namespace Scene {

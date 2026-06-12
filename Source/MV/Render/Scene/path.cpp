@@ -1,8 +1,5 @@
 #include "path.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
@@ -71,12 +68,6 @@ static jai::registrar<MV::Scene::PathAgent, MV::Services> _hookPathAgent("PathAg
 	builder.method("enableFootprint", &MV::Scene::PathAgent::enableFootprint);
 	builder.method("hasFootprint", &MV::Scene::PathAgent::hasFootprint);
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::PathMap);
-CEREAL_REGISTER_TYPE(MV::Scene::PathAgent);
-CEREAL_CLASS_VERSION(MV::Scene::PathAgent, 1);
-CEREAL_CLASS_VERSION(MV::Scene::PathMap, 1);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenepath);
 
 namespace MV {
 	namespace Scene {

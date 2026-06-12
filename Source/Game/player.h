@@ -18,11 +18,7 @@ struct LoadoutCollection {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(buildings), JAI_NVP(skins));
-		} else {
-			archive(CEREAL_NVP(buildings), CEREAL_NVP(skins));
-		}
+		archive(JAI_NVP(buildings), JAI_NVP(skins));
 	}
 };
 
@@ -62,13 +58,8 @@ struct ServerPlayer {
 
 		template<class Archive>
 		void serialize(Archive& archive) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(JAI_NVP(rating), JAI_NVP(volatility), JAI_NVP(games),
-					JAI_NVP(streak), JAI_NVP(lastResult));
-			} else {
-				archive(CEREAL_NVP(rating), CEREAL_NVP(volatility), CEREAL_NVP(games),
-					CEREAL_NVP(streak), CEREAL_NVP(lastResult));
-			}
+			archive(JAI_NVP(rating), JAI_NVP(volatility), JAI_NVP(games),
+				JAI_NVP(streak), JAI_NVP(lastResult));
 		}
 
 	private:
@@ -100,11 +91,7 @@ struct ServerPlayer {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(detailedRating), JAI_NVP(gamesChatRestricted), JAI_NVP(timesRestricted));
-		} else {
-			archive(CEREAL_NVP(detailedRating), CEREAL_NVP(gamesChatRestricted), CEREAL_NVP(timesRestricted));
-		}
+		archive(JAI_NVP(detailedRating), JAI_NVP(gamesChatRestricted), JAI_NVP(timesRestricted));
 	}
 
 	Rating& queue(std::string a_id) {
@@ -130,11 +117,7 @@ struct PublicRating {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(tier), JAI_NVP(points), JAI_NVP(series));
-		} else {
-			archive(CEREAL_NVP(tier), CEREAL_NVP(points), CEREAL_NVP(series));
-		}
+		archive(JAI_NVP(tier), JAI_NVP(points), JAI_NVP(series));
 	}
 };
 
@@ -152,41 +135,15 @@ struct IntermediateDbPlayer {
 
 	template<class Archive>
 	void save(Archive& archive) const {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(avatar), JAI_NVP(flair), JAI_NVP(wallet),
-				JAI_NVP(friendlyRating), JAI_NVP(loadouts), JAI_NVP(selectedLoadout));
-		} else {
-			archive(cereal::make_nvp("cereal_class_version", 0));
-			archive(
-				CEREAL_NVP(avatar),
-				CEREAL_NVP(flair),
-				CEREAL_NVP(wallet),
-				CEREAL_NVP(friendlyRating),
-				CEREAL_NVP(loadouts),
-				CEREAL_NVP(selectedLoadout)
-			);
-		}
+		archive(JAI_NVP(avatar), JAI_NVP(flair), JAI_NVP(wallet),
+			JAI_NVP(friendlyRating), JAI_NVP(loadouts), JAI_NVP(selectedLoadout));
 	}
 
 	template<class Archive>
 	uint32_t load(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(avatar), JAI_NVP(flair), JAI_NVP(wallet),
-				JAI_NVP(friendlyRating), JAI_NVP(loadouts), JAI_NVP(selectedLoadout));
-			return 0; // JaiScript handles versioning differently
-		} else {
-			uint32_t version = 0;
-			archive(cereal::make_nvp("cereal_class_version", version));
-			archive(
-				CEREAL_NVP(avatar),
-				CEREAL_NVP(flair),
-				CEREAL_NVP(wallet),
-				CEREAL_NVP(friendlyRating),
-				CEREAL_NVP(loadouts),
-				CEREAL_NVP(selectedLoadout)
-			);
-			return version; //so it can be used by LocalPlayer
-		}
+		archive(JAI_NVP(avatar), JAI_NVP(flair), JAI_NVP(wallet),
+			JAI_NVP(friendlyRating), JAI_NVP(loadouts), JAI_NVP(selectedLoadout));
+		return 0;
 	}
 };
 
@@ -208,29 +165,13 @@ struct LocalPlayer : public IntermediateDbPlayer {
 	template<class Archive>
 	void save(Archive& archive) const {
 		IntermediateDbPlayer::save(archive);
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id), JAI_NVP(email), JAI_NVP(handle));
-		} else {
-			archive(
-				CEREAL_NVP(id),
-				CEREAL_NVP(email),
-				CEREAL_NVP(handle)
-			);
-		}
+		archive(JAI_NVP(id), JAI_NVP(email), JAI_NVP(handle));
 	}
 
 	template<class Archive>
 	void load(Archive& archive) {
-		uint32_t version = IntermediateDbPlayer::load(archive);
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id), JAI_NVP(email), JAI_NVP(handle));
-		} else {
-			archive(
-				CEREAL_NVP(id),
-				CEREAL_NVP(email),
-				CEREAL_NVP(handle)
-			);
-		}
+		IntermediateDbPlayer::load(archive);
+		archive(JAI_NVP(id), JAI_NVP(email), JAI_NVP(handle));
 	}
 };
 
@@ -272,13 +213,8 @@ struct InGamePlayer {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id), JAI_NVP(handle), JAI_NVP(avatar), JAI_NVP(flair),
-				JAI_NVP(gameWallet), JAI_NVP(loadout), JAI_NVP(team));
-		} else {
-			archive(CEREAL_NVP(id), CEREAL_NVP(handle), CEREAL_NVP(avatar), CEREAL_NVP(flair),
-				CEREAL_NVP(gameWallet), CEREAL_NVP(loadout), CEREAL_NVP(team));
-		}
+		archive(JAI_NVP(id), JAI_NVP(handle), JAI_NVP(avatar), JAI_NVP(flair),
+			JAI_NVP(gameWallet), JAI_NVP(loadout), JAI_NVP(team));
 	}
 
 	bool operator==(const InGamePlayer& a_rhs) const {

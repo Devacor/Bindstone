@@ -2,8 +2,6 @@
 #define _MV_SCENE_GRID_H_
 
 #include "drawable.h"
-#include "cereal/access.hpp"
-#include "cereal/types/utility.hpp"
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 #include <vector>
@@ -12,7 +10,6 @@ namespace MV {
 	namespace Scene {
 		class Grid : public jai::property_owner<Grid, Drawable> {
 			friend Node;
-			friend cereal::access;
 			friend jai::access;
 
 		public:
@@ -78,46 +75,15 @@ namespace MV {
 				if (dirtyGrid) {
 					const_cast<Grid*>(this)->layoutCells();
 				}
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.save(archive);
-					Drawable::save(archive, 0);
-				} else {
-					archive(cereal::make_nvp("topLeftOffset", topLeftOffset.get()));
-					archive(cereal::make_nvp("policy", policy.get()));
-					archive(cereal::make_nvp("maximumWidth", maximumWidth.get()));
-					archive(cereal::make_nvp("cellDimensions", cellDimensions.get()));
-					archive(cereal::make_nvp("cellPadding", cellPadding.get()));
-					archive(cereal::make_nvp("margins", margins.get()));
-					archive(cereal::make_nvp("cellColumns", cellColumns.get()));
-					archive(cereal::make_nvp("includeChildrenInChildSize", includeChildrenInChildSize.get()));
-					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-				}
+				property_mgr.save(archive);
+				Drawable::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const a_version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.load(archive);
-					Drawable::load(archive, 0);
-				} else {
-					archive(cereal::make_nvp("topLeftOffset", topLeftOffset.get()));
-					archive(cereal::make_nvp("policy", policy.get()));
-					archive(cereal::make_nvp("maximumWidth", maximumWidth.get()));
-					archive(cereal::make_nvp("cellDimensions", cellDimensions.get()));
-					archive(cereal::make_nvp("cellPadding", cellPadding.get()));
-					archive(cereal::make_nvp("margins", margins.get()));
-					archive(cereal::make_nvp("cellColumns", cellColumns.get()));
-					archive(cereal::make_nvp("includeChildrenInChildSize", includeChildrenInChildSize.get()));
-					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-				}
+				property_mgr.load(archive);
+				Drawable::load(archive, 0);
 				dirtyGrid = false;
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Grid> &construct, std::uint32_t const version) {
-				construct(std::shared_ptr<Node>());
-				construct->load(archive, version);
-				construct->initialize();
 			}
 
 			template<typename Archive>
@@ -176,7 +142,5 @@ namespace MV {
 		};
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_scenegrid);
 
 #endif

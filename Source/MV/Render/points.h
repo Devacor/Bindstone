@@ -12,8 +12,6 @@
 #include <concepts>
 
 #include "MV/Utility/generalUtility.h"
-#include "cereal/cereal.hpp"
-#include "cereal/access.hpp"
 #include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
@@ -49,11 +47,7 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive& archive) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(JAI_NVP(textureX), JAI_NVP(textureY));
-			} else {
-				archive(CEREAL_NVP(textureX), CEREAL_NVP(textureY));
-			}
+			archive(JAI_NVP(textureX), JAI_NVP(textureY));
 		}
 
 		PointPrecision textureX, textureY;
@@ -87,14 +81,8 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive& archive) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(JAI_NVP(R), JAI_NVP(G), JAI_NVP(B), JAI_NVP(A));
-				if constexpr (jai::serialization::is_load<Archive>) {
-					normalize();
-				}
-			} else {
-				normalize();
-				archive(CEREAL_NVP(R), CEREAL_NVP(G), CEREAL_NVP(B), CEREAL_NVP(A));
+			archive(JAI_NVP(R), JAI_NVP(G), JAI_NVP(B), JAI_NVP(A));
+			if constexpr (jai::serialization::is_load<Archive>) {
 				normalize();
 			}
 		}
@@ -197,11 +185,7 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive& archive) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(JAI_NVP(width), JAI_NVP(height), JAI_NVP(depth));
-			} else {
-				archive(CEREAL_NVP(width), CEREAL_NVP(height), CEREAL_NVP(depth));
-			}
+			archive(JAI_NVP(width), JAI_NVP(height), JAI_NVP(depth));
 		}
 
 		T width, height, depth;
@@ -291,11 +275,7 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive& archive) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(JAI_NVP(x), JAI_NVP(y), JAI_NVP(z));
-			} else {
-				archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
-			}
+			archive(JAI_NVP(x), JAI_NVP(y), JAI_NVP(z));
 		}
 
 		[[nodiscard]] Point<PointPrecision> normalized() const {
@@ -349,11 +329,7 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive& archive) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				archive(JAI_NVP(x), JAI_NVP(y), JAI_NVP(z));
-			} else {
-				archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
-			}
+			archive(JAI_NVP(x), JAI_NVP(y), JAI_NVP(z));
 		}
 
 		PointPrecision x, y, z;

@@ -19,20 +19,6 @@
 	#define GL_BGRA 0x80E1
 #endif
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
-CEREAL_REGISTER_TYPE(MV::TextureDefinition);
-CEREAL_REGISTER_TYPE(MV::FileTextureDefinition);
-CEREAL_REGISTER_TYPE(MV::DynamicTextureDefinition);
-CEREAL_REGISTER_TYPE(MV::SurfaceTextureDefinition);
-
-CEREAL_REGISTER_TYPE(MV::TextureHandle);
-
-CEREAL_CLASS_VERSION(MV::TextureHandle, 2);
-
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenetextures);
-
 #include <jaiscript/core/registrar.hpp>
 static jai::registrar<MV::FileTextureDefinition, MV::Services> _regFileTexDef("FileTextureDefinition");
 static jai::registrar<MV::DynamicTextureDefinition, MV::Services> _regDynTexDef("DynamicTextureDefinition");
@@ -737,7 +723,7 @@ namespace MV {
 			// (dynamic/surface) generate in memory, so they load inline.
 			if (a_sharedTextures) {
 				// Route GPU upload through the active device (the definition may have been created via
-				// a path that didn't inject it — e.g. cereal deserialization).
+				// a path that didn't inject it — e.g. deserialization).
 				if (textureDefinition && !textureDefinition->renderDevice()) {
 					textureDefinition->renderDevice(a_sharedTextures->device());
 				}

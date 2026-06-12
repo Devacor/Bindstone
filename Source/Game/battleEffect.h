@@ -17,8 +17,6 @@
 
 #include "creature.h"
 
-#define BATTLE_EFFECT_CATALOG_VERSION 0
-
 class BattleEffect;
 
 struct BattleEffectData {
@@ -28,11 +26,7 @@ struct BattleEffectData {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id));
-		} else {
-			archive(CEREAL_NVP(id));
-		}
+		archive(JAI_NVP(id));
 	}
 
 	StandardScriptMethods<BattleEffect>& script(MV::Script&a_script) const {
@@ -96,31 +90,17 @@ public:
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(
-				jai::serialization::make_nvp("effectTypeId", effectTypeId),
-				jai::serialization::make_nvp("creatureOwnerId", creatureOwnerId),
-				jai::serialization::make_nvp("targetCreatureId", targetCreatureId),
-				jai::serialization::make_nvp("buildingSlot", buildingSlot),
-				jai::serialization::make_nvp("targetPosition", targetPosition),
-				jai::serialization::make_nvp("duration", duration),
-				jai::serialization::make_nvp("targetType", targetType),
-				jai::serialization::make_nvp("position", position),
-				jai::serialization::make_nvp("variables", variables)
-			);
-		} else {
-			archive(
-				cereal::make_nvp("effectTypeId", effectTypeId),
-				cereal::make_nvp("creatureOwnerId", creatureOwnerId),
-				cereal::make_nvp("targetCreatureId", targetCreatureId),
-				cereal::make_nvp("buildingSlot", buildingSlot),
-				cereal::make_nvp("targetPosition", targetPosition),
-				cereal::make_nvp("duration", duration),
-				cereal::make_nvp("targetType", targetType),
-				cereal::make_nvp("position", position),
-				cereal::make_nvp("variables", variables)
-			);
-		}
+		archive(
+			jai::serialization::make_nvp("effectTypeId", effectTypeId),
+			jai::serialization::make_nvp("creatureOwnerId", creatureOwnerId),
+			jai::serialization::make_nvp("targetCreatureId", targetCreatureId),
+			jai::serialization::make_nvp("buildingSlot", buildingSlot),
+			jai::serialization::make_nvp("targetPosition", targetPosition),
+			jai::serialization::make_nvp("duration", duration),
+			jai::serialization::make_nvp("targetType", targetType),
+			jai::serialization::make_nvp("position", position),
+			jai::serialization::make_nvp("variables", variables)
+		);
 	}
 };
 
@@ -189,7 +169,6 @@ protected:
 
 class ServerBattleEffect : public BattleEffect {
 	friend MV::Scene::Node;
-	friend cereal::access;
 
 public:
 	ComponentDerivedAccessors(ServerBattleEffect)
@@ -232,7 +211,6 @@ private:
 
 class ClientBattleEffect : public BattleEffect {
 	friend MV::Scene::Node;
-	friend cereal::access;
 public:
 	ComponentDerivedAccessors(ClientBattleEffect)
 

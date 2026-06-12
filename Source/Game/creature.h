@@ -7,6 +7,8 @@
 #include "MV/Utility/generalUtility.h"
 #include <jaiscript/signals/signal.hpp>
 #include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/json_archive.hpp>
+#include <jaiscript/core/engine.hpp>
 #include <string>
 #include <memory>
 #include "MV/ArtificialIntelligence/pathfinding.h"
@@ -43,17 +45,10 @@ struct CreatureData {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id), JAI_NVP(name), JAI_NVP(description),
-				JAI_NVP(moveSpeed), JAI_NVP(actionSpeed), JAI_NVP(castSpeed),
-				JAI_NVP(health), JAI_NVP(defense), JAI_NVP(will),
-				JAI_NVP(strength), JAI_NVP(ability));
-		} else {
-			archive(CEREAL_NVP(id), CEREAL_NVP(name), CEREAL_NVP(description),
-				CEREAL_NVP(moveSpeed), CEREAL_NVP(actionSpeed), CEREAL_NVP(castSpeed),
-				CEREAL_NVP(health), CEREAL_NVP(defense), CEREAL_NVP(will),
-				CEREAL_NVP(strength), CEREAL_NVP(ability));
-		}
+		archive(JAI_NVP(id), JAI_NVP(name), JAI_NVP(description),
+			JAI_NVP(moveSpeed), JAI_NVP(actionSpeed), JAI_NVP(castSpeed),
+			JAI_NVP(health), JAI_NVP(defense), JAI_NVP(will),
+			JAI_NVP(strength), JAI_NVP(ability));
 	}
 
 	StandardScriptMethods<Creature>& script(MV::Script&a_script) const {
@@ -64,12 +59,9 @@ private:
 	mutable StandardScriptMethods<Creature> scriptMethods;
 };
 
-#define CREATURE_CATALOG_VERSION 0
-#define BUILDING_CATALOG_VERSION 0
-
 template <typename DataType>
 class Catalog {
-	friend cereal::access;
+	friend class jai::serialization::access;
 	friend MV::Script;
 public:
 	Catalog<DataType>(const std::string &a_catalogType, bool a_isServer) :
@@ -79,8 +71,9 @@ public:
 		std::string contents = MV::fileContents(path);
         MV::require<MV::ResourceException>(!contents.empty(), "Failed to load Catalog: ", a_catalogType);
 
-		std::stringstream stream(contents);
-		cereal::JSONInputArchive archive(stream);
+		// Catalogs load before the shared engine is connected to Services; plain data needs no shared state
+		auto catalogEngine = jai::engine::make();
+		jai::serialization::json_archive_reader archive(contents, catalogEngine.get());
 		serialize(archive);
 	}
 
@@ -100,11 +93,7 @@ private:
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(jai::serialization::make_nvp("data", dataCollection));
-		} else {
-			archive(cereal::make_nvp("data", dataCollection));
-		}
+		archive(jai::serialization::make_nvp("data", dataCollection));
 		for (auto&& item : dataCollection) {
 			item.isServer = isServer;
 		}
@@ -241,36 +230,22 @@ struct CreatureNetworkState {
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			if constexpr (jai::serialization::is_save<Archive>) {
-				// JaiScript save - force all delta variables to serialize
-				const_cast<MV::DeltaVariable<std::string>&>(creatureTypeId).serialize(archive, "creatureTypeId", true);
-				const_cast<MV::DeltaVariable<int32_t>&>(health).serialize(archive, "health", true);
-				const_cast<MV::DeltaVariable<std::string>&>(animationName).serialize(archive, "animationName", true);
-				archive.serialize("animationTime", animationTime);
-				archive.serialize("animationLoops", animationLoops);
-				const_cast<MV::DeltaVariable<int32_t>&>(buildingSlot).serialize(archive, "slot", true);
-				const_cast<MV::DeltaVariable<MV::Point<MV::PointPrecision>>&>(position).serialize(archive, "position", true);
-				const_cast<MV::DeltaVariable<std::map<std::string, MV::DynamicVariable>>&>(variables).serialize(archive, "variables", true);
-			} else {
-				// JaiScript load
-				creatureTypeId.serialize(archive, "creatureTypeId");
-				health.serialize(archive, "health");
-				animationName.serialize(archive, "animationName");
-				archive.serialize("animationTime", animationTime);
-				archive.serialize("animationLoops", animationLoops);
-				buildingSlot.serialize(archive, "slot");
-				position.serialize(archive, "position");
-				variables.serialize(archive, "variables");
-			}
+		if constexpr (jai::serialization::is_save<Archive>) {
+			// Save forces all delta variables to serialize
+			const_cast<MV::DeltaVariable<std::string>&>(creatureTypeId).serialize(archive, "creatureTypeId", true);
+			const_cast<MV::DeltaVariable<int32_t>&>(health).serialize(archive, "health", true);
+			const_cast<MV::DeltaVariable<std::string>&>(animationName).serialize(archive, "animationName", true);
+			archive.serialize("animationTime", animationTime);
+			archive.serialize("animationLoops", animationLoops);
+			const_cast<MV::DeltaVariable<int32_t>&>(buildingSlot).serialize(archive, "slot", true);
+			const_cast<MV::DeltaVariable<MV::Point<MV::PointPrecision>>&>(position).serialize(archive, "position", true);
+			const_cast<MV::DeltaVariable<std::map<std::string, MV::DynamicVariable>>&>(variables).serialize(archive, "variables", true);
 		} else {
 			creatureTypeId.serialize(archive, "creatureTypeId");
 			health.serialize(archive, "health");
 			animationName.serialize(archive, "animationName");
-			archive(
-				cereal::make_nvp("animationTime", animationTime),
-				cereal::make_nvp("animationLoops", animationLoops)
-			);
+			archive.serialize("animationTime", animationTime);
+			archive.serialize("animationLoops", animationLoops);
 			buildingSlot.serialize(archive, "slot");
 			position.serialize(archive, "position");
 			variables.serialize(archive, "variables");
@@ -347,7 +322,6 @@ protected:
 
 class ServerCreature : public Creature {
 	friend MV::Scene::Node;
-	friend cereal::access;
 	friend TargetPolicy;
 	friend MV::Script;
 private:
@@ -454,7 +428,6 @@ private:
 
 class ClientCreature : public Creature {
 	friend MV::Scene::Node;
-	friend cereal::access;
 	friend MV::Script;
 public:
 	ComponentDerivedAccessors(ClientCreature)

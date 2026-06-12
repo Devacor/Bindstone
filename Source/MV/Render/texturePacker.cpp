@@ -2,15 +2,7 @@
 
 #include "Scene/sprite.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include "sharedTextures.h"
-
-CEREAL_REGISTER_TYPE(MV::PackedTextureDefinition);
-CEREAL_CLASS_VERSION(MV::PackedTextureDefinition, 1);
-CEREAL_CLASS_VERSION(MV::TexturePack::ShapeDefinition, 1);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenetexturepacker);
 
 namespace MV{
 

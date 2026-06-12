@@ -76,82 +76,40 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					archive(
-						JAI_NVP(rateOfChange),
-						jai::serialization::make_nvp("directionalChange", directionalChangeTemplate),
-						JAI_NVP(rotationalChange),
-						JAI_NVP(beginSpeed),
-						JAI_NVP(endSpeed),
-						JAI_NVP(beginScale),
-						JAI_NVP(endScale),
-						JAI_NVP(beginColor),
-						JAI_NVP(endColor),
-						JAI_NVP(maxLifespan),
-						JAI_NVP(gravityMagnitude),
-						JAI_NVP(gravityDirection),
-						JAI_NVP(animationFramesPerSecond)
-					);
-				} else {
-					archive(
-						cereal::make_nvp("rateOfChange", rateOfChange),
-						cereal::make_nvp("directionalChange", directionalChangeTemplate),
-						cereal::make_nvp("rotationalChange", rotationalChange),
-						cereal::make_nvp("beginSpeed", beginSpeed),
-						cereal::make_nvp("endSpeed", endSpeed),
-						cereal::make_nvp("beginScale", beginScale),
-						cereal::make_nvp("endScale", endScale),
-						cereal::make_nvp("beginColor", beginColor),
-						cereal::make_nvp("endColor", endColor),
-						cereal::make_nvp("maxLifespan", maxLifespan),
-						cereal::make_nvp("gravityMagnitude", gravityMagnitude),
-						cereal::make_nvp("gravityDirection", gravityDirection),
-						cereal::make_nvp("animationFramesPerSecond", animationFramesPerSecond)
-					);
-				}
+				archive(
+					JAI_NVP(rateOfChange),
+					jai::serialization::make_nvp("directionalChange", directionalChangeTemplate),
+					JAI_NVP(rotationalChange),
+					JAI_NVP(beginSpeed),
+					JAI_NVP(endSpeed),
+					JAI_NVP(beginScale),
+					JAI_NVP(endScale),
+					JAI_NVP(beginColor),
+					JAI_NVP(endColor),
+					JAI_NVP(maxLifespan),
+					JAI_NVP(gravityMagnitude),
+					JAI_NVP(gravityDirection),
+					JAI_NVP(animationFramesPerSecond)
+				);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					archive(
-						JAI_NVP(rateOfChange),
-						jai::serialization::make_nvp("directionalChange", directionalChangeTemplate),
-						JAI_NVP(rotationalChange),
-						JAI_NVP(beginSpeed),
-						JAI_NVP(endSpeed),
-						JAI_NVP(beginScale),
-						JAI_NVP(endScale),
-						JAI_NVP(beginColor),
-						JAI_NVP(endColor),
-						JAI_NVP(maxLifespan),
-						JAI_NVP(gravityMagnitude),
-						JAI_NVP(gravityDirection),
-						JAI_NVP(animationFramesPerSecond)
-					);
-				} else {
-					archive(
-						cereal::make_nvp("rateOfChange", rateOfChange),
-						cereal::make_nvp("directionalChange", directionalChangeTemplate),
-						cereal::make_nvp("rotationalChange", rotationalChange),
-						cereal::make_nvp("beginSpeed", beginSpeed),
-						cereal::make_nvp("endSpeed", endSpeed),
-						cereal::make_nvp("beginScale", beginScale),
-						cereal::make_nvp("endScale", endScale),
-						cereal::make_nvp("beginColor", beginColor),
-						cereal::make_nvp("endColor", endColor),
-						cereal::make_nvp("maxLifespan", maxLifespan),
-						cereal::make_nvp("gravityMagnitude", gravityMagnitude),
-						cereal::make_nvp("gravityDirection", gravityDirection),
-						cereal::make_nvp("animationFramesPerSecond", animationFramesPerSecond)
-					);
-					if (version < 1) {
-						toRadiansInPlace(rateOfChange);
-						toRadiansInPlace(directionalChangeTemplate);
-						toRadiansInPlace(rotationalChange);
-						toRadiansInPlace(gravityDirection);
-					}
-				}
+				archive(
+					JAI_NVP(rateOfChange),
+					jai::serialization::make_nvp("directionalChange", directionalChangeTemplate),
+					JAI_NVP(rotationalChange),
+					JAI_NVP(beginSpeed),
+					JAI_NVP(endSpeed),
+					JAI_NVP(beginScale),
+					JAI_NVP(endScale),
+					JAI_NVP(beginColor),
+					JAI_NVP(endColor),
+					JAI_NVP(maxLifespan),
+					JAI_NVP(gravityMagnitude),
+					JAI_NVP(gravityDirection),
+					JAI_NVP(animationFramesPerSecond)
+				);
 				directionalChangeCurrent = directionalChangeTemplate;
 			}
 		};
@@ -270,46 +228,12 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.save(archive);
-				} else {
-					archive(cereal::make_nvp("maximumParticles", maximumParticles.get()));
-					archive(cereal::make_nvp("minimumSpawnRate", minimumSpawnRate.get()));
-					archive(cereal::make_nvp("maximumSpawnRate", maximumSpawnRate.get()));
-					archive(cereal::make_nvp("minimumPosition", minimumPosition.get()));
-					archive(cereal::make_nvp("maximumPosition", maximumPosition.get()));
-					archive(cereal::make_nvp("minimumDirection", minimumDirection.get()));
-					archive(cereal::make_nvp("maximumDirection", maximumDirection.get()));
-					archive(cereal::make_nvp("minimumRotation", minimumRotation.get()));
-					archive(cereal::make_nvp("maximumRotation", maximumRotation.get()));
-					archive(cereal::make_nvp("minimum", minimum.get()));
-					archive(cereal::make_nvp("maximum", maximum.get()));
-				}
+				property_mgr.save(archive);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.load(archive);
-				} else {
-					archive(cereal::make_nvp("maximumParticles", maximumParticles.get()));
-					archive(cereal::make_nvp("minimumSpawnRate", minimumSpawnRate.get()));
-					archive(cereal::make_nvp("maximumSpawnRate", maximumSpawnRate.get()));
-					archive(cereal::make_nvp("minimumPosition", minimumPosition.get()));
-					archive(cereal::make_nvp("maximumPosition", maximumPosition.get()));
-					archive(cereal::make_nvp("minimumDirection", minimumDirection.get()));
-					archive(cereal::make_nvp("maximumDirection", maximumDirection.get()));
-					archive(cereal::make_nvp("minimumRotation", minimumRotation.get()));
-					archive(cereal::make_nvp("maximumRotation", maximumRotation.get()));
-					archive(cereal::make_nvp("minimum", minimum.get()));
-					archive(cereal::make_nvp("maximum", maximum.get()));
-					if (version < 1) {
-						toRadiansInPlace(*minimumDirection);
-						toRadiansInPlace(*maximumDirection);
-						toRadiansInPlace(*minimumRotation);
-						toRadiansInPlace(*maximumRotation);
-					}
-				}
+				property_mgr.load(archive);
 				dirty = true;
 			}
 		};
@@ -318,7 +242,6 @@ namespace MV {
 
 		class Emitter : public jai::property_owner<Emitter, Drawable> {
 			friend Node;
-			friend cereal::access;
 			friend jai::access;
 		public:
 			DrawableDerivedAccessors(Emitter)
@@ -354,44 +277,18 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.save(archive);
-					Drawable::save(archive, 0);
-				} else {
-					archive(cereal::make_nvp("spawnProperties", spawnProperties.get()));
-					archive(cereal::make_nvp("relativeNodePosition", relativeNodePosition.get()));
-					archive(cereal::make_nvp("relativeParentCount", relativeParentCount.get()));
-					archive(cereal::make_nvp("spawnParticles", spawnParticles.get()));
-					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-				}
+				property_mgr.save(archive);
+				Drawable::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.load(archive);
-					Drawable::load(archive, 0);
-				} else {
-					archive(cereal::make_nvp("spawnProperties", spawnProperties.get()));
-					archive(cereal::make_nvp("relativeNodePosition", relativeNodePosition.get()));
-					archive(cereal::make_nvp("relativeParentCount", relativeParentCount.get()));
-					archive(cereal::make_nvp("spawnParticles", spawnParticles.get()));
-					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-				}
+				property_mgr.load(archive);
+				Drawable::load(archive, 0);
 
 				if (*relativeParentCount >= 0) {
 					(*relativeNodePosition).reset();
 				}
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct, std::uint32_t const version) {
-				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-				auto* pool = services.get<MV::ThreadPool>();
-
-				construct(std::shared_ptr<Node>(), *pool);
-				construct->load(archive, version);
-				construct->initialize();
 			}
 
 			template<typename Archive>
@@ -491,7 +388,5 @@ namespace MV {
 
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_sceneemitter);
 
 #endif

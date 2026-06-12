@@ -2,8 +2,6 @@
 #include <memory>
 
 #include "MV/Utility/scopeGuard.hpp"
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -37,10 +35,6 @@ static jai::registrar<MV::Scene::Clipped, MV::Services> _hookClipped("Clipped",
 	builder.method("refreshShader", static_cast<std::string(MV::Scene::Clipped::*)()>(&MV::Scene::Clipped::refreshShader));
 	builder.method("refreshShader", static_cast<std::shared_ptr<MV::Scene::Clipped>(MV::Scene::Clipped::*)(const std::string&)>(&MV::Scene::Clipped::refreshShader));
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Clipped);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneclipped);
-CEREAL_CLASS_VERSION(MV::Scene::Clipped, 1);
 
 namespace MV {
 	namespace Scene {

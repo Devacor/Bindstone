@@ -1,8 +1,5 @@
 #include "button.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include "MV/Utility/visitor.hpp"
 
 #include "text.h"
@@ -29,10 +26,6 @@ static jai::registrar<MV::Scene::Button, MV::Services> _hookButton("Button",
 	builder.method("text", static_cast<std::string(MV::Scene::Button::*)() const>(&MV::Scene::Button::text));
 	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::string&)>(&MV::Scene::Button::text));
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Button);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenebutton);
-CEREAL_CLASS_VERSION(MV::Scene::Button, 1);
 
 namespace MV {
 	namespace Scene {

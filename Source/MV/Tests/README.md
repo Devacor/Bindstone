@@ -54,4 +54,4 @@ using my_suite = mv_tests::my_suite;   // FOUNDRY_REGISTER needs a global-scope 
 FOUNDRY_REGISTER(my_suite)
 ```
 Add the `.cpp` to `build_tests.bat`'s source list. Build flags must include
-`/MD /DCEREAL_FUTURE_EXPERIMENTAL /DSDL_MAIN_HANDLED` and link gl3w.c + the SDL/Win libs (see the bat).
+`/MD /DSDL_MAIN_HANDLED` and link gl3w.c + the SDL/Win libs (see the bat).

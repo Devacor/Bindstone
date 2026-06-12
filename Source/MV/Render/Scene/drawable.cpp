@@ -1,8 +1,6 @@
 #include "drawable.h"
 
 #include "MV/Utility/scopeGuard.hpp"
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
 #include <jaiscript/serialization/archive.hpp>
 
 #include "MV/Utility/log.h"
@@ -50,10 +48,6 @@ static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable("Drawable
 	// Anchors
 	builder.method("anchors", &MV::Scene::Drawable::anchors);
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
-CEREAL_CLASS_VERSION(MV::Scene::Drawable, 4);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenedrawable);
 
 namespace MV {
 	namespace Scene {

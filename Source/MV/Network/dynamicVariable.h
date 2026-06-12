@@ -5,12 +5,11 @@
 #include <tuple>
 #include <variant>
 #include <map>
-#include "cereal/cereal.hpp"
 #include <jaiscript/serialization/archive.hpp>
 #include "MV/Utility/exactType.hpp"
 
 namespace MV {
-	//I needed more debuggability and std::variant was throwing a lot within Cereal. This is a wrapper around a variant which plays better in scripts.
+	//I needed more debuggability and std::variant was throwing a lot during serialization. This is a wrapper around a variant which plays better in scripts.
 	class DynamicVariable {
 	public:
 		DynamicVariable() {}
@@ -151,31 +150,27 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive& archive) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				if constexpr (jai::serialization::is_save<Archive>) {
-					// JaiScript save - need manual variant handling
-					int typeIndex = static_cast<int>(value.index());
-					archive.serialize("type", typeIndex);
-					std::visit([&archive](const auto& v) {
-						using T = std::decay_t<decltype(v)>;
-						if constexpr (!std::is_same_v<T, std::monostate>) {
-							archive.serialize("value", v);
-						}
-					}, value);
-				} else {
-					// JaiScript load
-					int typeIndex = 0;
-					archive.serialize("type", typeIndex);
-					switch (typeIndex) {
-						case 0: value = std::monostate{}; break;
-						case 1: { bool v; archive.serialize("value", v); value = v; break; }
-						case 2: { int64_t v; archive.serialize("value", v); value = v; break; }
-						case 3: { double v; archive.serialize("value", v); value = v; break; }
-						case 4: { std::string v; archive.serialize("value", v); value = v; break; }
+			if constexpr (jai::serialization::is_save<Archive>) {
+				// JaiScript save - need manual variant handling
+				int typeIndex = static_cast<int>(value.index());
+				archive.serialize("type", typeIndex);
+				std::visit([&archive](const auto& v) {
+					using T = std::decay_t<decltype(v)>;
+					if constexpr (!std::is_same_v<T, std::monostate>) {
+						archive.serialize("value", v);
 					}
-				}
+				}, value);
 			} else {
-				archive(CEREAL_NVP(value));
+				// JaiScript load
+				int typeIndex = 0;
+				archive.serialize("type", typeIndex);
+				switch (typeIndex) {
+					case 0: value = std::monostate{}; break;
+					case 1: { bool v; archive.serialize("value", v); value = v; break; }
+					case 2: { int64_t v; archive.serialize("value", v); value = v; break; }
+					case 3: { double v; archive.serialize("value", v); value = v; break; }
+					case 4: { std::string v; archive.serialize("value", v); value = v; break; }
+				}
 			}
 		}
 
@@ -259,31 +254,17 @@ namespace MV {
 		// Named serialization (with field name)
 		template <typename ArchiveType>
 		auto& serialize(ArchiveType& a_archive, const std::string& a_archivedName, bool a_force = false) {
-			if constexpr (jai::serialization::jai_archive<ArchiveType>) {
-				if constexpr (jai::serialization::is_save<ArchiveType>) {
-					bool hasValue = modified || a_force;
-					a_archive.serialize((a_archivedName + "_has_value").c_str(), hasValue);
-					if (hasValue) {
-						a_archive.serialize(a_archivedName.c_str(), value);
-					}
-					modified = false;
-				} else {
-					a_archive.serialize((a_archivedName + "_has_value").c_str(), modified);
-					if (modified) {
-						a_archive.serialize(a_archivedName.c_str(), value);
-					}
-				}
-			} else if constexpr (std::is_base_of_v<cereal::detail::OutputArchiveBase, ArchiveType>) {
+			if constexpr (jai::serialization::is_save<ArchiveType>) {
 				bool hasValue = modified || a_force;
-				a_archive(cereal::make_nvp(a_archivedName + "_has_value", hasValue));
+				a_archive.serialize((a_archivedName + "_has_value").c_str(), hasValue);
 				if (hasValue) {
-					a_archive(cereal::make_nvp(a_archivedName, value));
+					a_archive.serialize(a_archivedName.c_str(), value);
 				}
 				modified = false;
 			} else {
-				a_archive(cereal::make_nvp(a_archivedName + "_has_value", modified));
+				a_archive.serialize((a_archivedName + "_has_value").c_str(), modified);
 				if (modified) {
-					a_archive(cereal::make_nvp(a_archivedName, value));
+					a_archive.serialize(a_archivedName.c_str(), value);
 				}
 			}
 			return a_archive;
@@ -292,31 +273,17 @@ namespace MV {
 		// Unnamed serialization (binary style)
 		template <typename ArchiveType>
 		auto& serialize(ArchiveType& a_archive, MV::ExactType<bool> a_force = false) {
-			if constexpr (jai::serialization::jai_archive<ArchiveType>) {
-				if constexpr (jai::serialization::is_save<ArchiveType>) {
-					bool hasValue = modified || static_cast<bool>(a_force);
-					a_archive.serialize("has_value", hasValue);
-					if (hasValue) {
-						a_archive.serialize("value", value);
-					}
-					modified = false;
-				} else {
-					a_archive.serialize("has_value", modified);
-					if (modified) {
-						a_archive.serialize("value", value);
-					}
-				}
-			} else if constexpr (std::is_base_of_v<cereal::detail::OutputArchiveBase, ArchiveType>) {
+			if constexpr (jai::serialization::is_save<ArchiveType>) {
 				bool hasValue = modified || static_cast<bool>(a_force);
-				a_archive(hasValue);
+				a_archive.serialize("has_value", hasValue);
 				if (hasValue) {
-					a_archive(value);
+					a_archive.serialize("value", value);
 				}
 				modified = false;
 			} else {
-				a_archive(modified);
+				a_archive.serialize("has_value", modified);
 				if (modified) {
-					a_archive(value);
+					a_archive.serialize("value", value);
 				}
 			}
 			return a_archive;

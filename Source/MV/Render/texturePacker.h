@@ -17,7 +17,7 @@ namespace MV {
 	}
 	class PackedTextureDefinition;
 	class TexturePack : public std::enable_shared_from_this<TexturePack> {
-		friend cereal::access;
+		friend class jai::serialization::access;
 	public:
 		struct ShapeDefinition {
 			std::string id;
@@ -27,11 +27,13 @@ namespace MV {
 
 			template<class Archive>
 			void serialize(Archive & archive, std::uint32_t const a_version) {
-				archive(CEREAL_NVP(id), CEREAL_NVP(bounds));
+				archive(
+					jai::serialization::make_nvp("id", id),
+					jai::serialization::make_nvp("bounds", bounds));
 				if (a_version > 0) {
-					archive(CEREAL_NVP(slice));
+					archive(jai::serialization::make_nvp("slice", slice));
 				}
-				archive(CEREAL_NVP(texture));
+				archive(jai::serialization::make_nvp("texture", texture));
 			}
 		};
 
@@ -76,7 +78,7 @@ namespace MV {
 			return consolidatedTexture;
 		}
 
-		// The active RHI device, via the pack's renderer (set at make() and on cereal load). Lets
+		// The active RHI device, via the pack's renderer (set at make() and on load). Lets
 		// PackedTextureDefinition route its GPU upload through the device like every other texture.
 		Render::Device* device() const { return renderer ? renderer->device() : nullptr; }
 
@@ -124,34 +126,22 @@ namespace MV {
 				packedTexture.reset();
 			}
 			if (version > 0) {
-				archive(CEREAL_NVP(id));
+				archive(jai::serialization::make_nvp("id", id));
 			}
-			archive(CEREAL_NVP(packedTexture), CEREAL_NVP(shapes), CEREAL_NVP(maximumExtent), CEREAL_NVP(contentExtent), CEREAL_NVP(containers), CEREAL_NVP(consolidatedTexture));
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TexturePack> &construct, std::uint32_t const version){
-			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			auto* renderer = services.get<MV::Draw2D>();
-
-			std::string id;
-			if (version > 0) {
-				archive(cereal::make_nvp("id", id));
-			}
-			construct(id, renderer);
-			archive(cereal::make_nvp("packedTexture", construct->packedTexture),
-				cereal::make_nvp("shapes", construct->shapes), 
-				cereal::make_nvp("maximumExtent", construct->maximumExtent), cereal::make_nvp("contentExtent", construct->contentExtent),
-				cereal::make_nvp("containers", construct->containers), cereal::make_nvp("consolidatedTexture", construct->consolidatedTexture));
-
-			construct->initializeAfterLoad();
+			archive(
+				jai::serialization::make_nvp("packedTexture", packedTexture),
+				jai::serialization::make_nvp("shapes", shapes),
+				jai::serialization::make_nvp("maximumExtent", maximumExtent),
+				jai::serialization::make_nvp("contentExtent", contentExtent),
+				jai::serialization::make_nvp("containers", containers),
+				jai::serialization::make_nvp("consolidatedTexture", consolidatedTexture));
 		}
 
 		void initializeAfterLoad();
 	};
 
 	class PackedTextureDefinition : public DynamicTextureDefinition {
-		friend cereal::access;
+		friend class jai::serialization::access;
 	public:
 		static std::shared_ptr<PackedTextureDefinition> make(const std::string &a_name, const std::shared_ptr<TexturePack> &a_texturePack, const Size<int> &a_size, const Color &a_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f}){
 			return std::shared_ptr<PackedTextureDefinition>(new PackedTextureDefinition(a_name, a_texturePack, a_size, a_backgroundColor));
@@ -167,22 +157,14 @@ namespace MV {
 		}
 
 		template<class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/){
-			archive(CEREAL_NVP(texturePack), cereal::make_nvp("base", cereal::base_class<DynamicTextureDefinition>(this)));
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<PackedTextureDefinition> &construct, std::uint32_t const /*version*/){
-			std::shared_ptr<TexturePack> texturePack;
-			archive(cereal::make_nvp("texturePack", texturePack));
-			construct("", texturePack, Size<int>(), Color());
-			archive(cereal::make_nvp("base", cereal::base_class<DynamicTextureDefinition>(construct.ptr())));
+		void serialize(Archive & archive, std::uint32_t const version){
+			archive(jai::serialization::make_nvp("texturePack", texturePack));
+			DynamicTextureDefinition::serialize(archive, version);
 		}
 
 		void reloadImplementation() override {
-			// Packed textures are created via make() and via cereal load_and_construct — neither goes
-			// through SharedTextures::dynamic(), so inject the device here (the one chokepoint both
-			// paths funnel through) so the base upload routes through the RHI instead of raw GL.
+			// Packed textures are created via make(), not SharedTextures::dynamic(), so inject the
+			// device here (the one chokepoint) so the base upload routes through the RHI instead of raw GL.
 			if (!renderDevice() && texturePack) { renderDevice(texturePack->device()); }
 			DynamicTextureDefinition::reloadImplementation();
 			texturePack->reloadedPackedTextureChild();
@@ -191,7 +173,5 @@ namespace MV {
 		std::shared_ptr<TexturePack> texturePack;
 	};
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_scenetexturepacker);
 
 #endif

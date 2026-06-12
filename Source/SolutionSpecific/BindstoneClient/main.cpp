@@ -32,24 +32,11 @@ struct Base {
 
 	template <class Archive>
 	void save(Archive & archive, std::uint32_t const) const {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive("baseMember", baseMember);
-		} else {
-			archive(CEREAL_NVP(baseMember));
-		}
+		archive("baseMember", baseMember);
 	}
 	template <class Archive>
 	void load(Archive & archive, std::uint32_t const /*version*/) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive("baseMember", baseMember);
-		} else {
-			archive(CEREAL_NVP(baseMember));
-		}
-	}
-	template <class Archive>
-	static void load_and_construct(Archive & archive, cereal::construct<Base> &construct, std::uint32_t const version) {
-		construct();
-		construct->load(archive, version);
+		archive("baseMember", baseMember);
 	}
 
 	int baseMember = 1;
@@ -58,37 +45,17 @@ struct Base {
 struct Derived1 : public Base {
 	template <class Archive>
 	void save(Archive & archive, std::uint32_t const) const {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive("derived1Member", derived1Member);
-			Base::save(archive, 0);
-		} else {
-			archive(CEREAL_NVP(derived1Member),
-				cereal::make_nvp("Base", cereal::base_class<Base>(this))
-			);
-		}
+		archive("derived1Member", derived1Member);
+		Base::save(archive, 0);
 	}
 	template <class Archive>
 	void load(Archive & archive, std::uint32_t const /*version*/) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive("derived1Member", derived1Member);
-			Base::load(archive, 0);
-		} else {
-			archive(CEREAL_NVP(derived1Member),
-				cereal::make_nvp("Base", cereal::base_class<Base>(this))
-			);
-		}
-	}
-	template <class Archive>
-	static void load_and_construct(Archive & archive, cereal::construct<Base> &construct, std::uint32_t const version) {
-		construct();
-		construct->load(archive, version);
+		archive("derived1Member", derived1Member);
+		Base::load(archive, 0);
 	}
 
 	int derived1Member = 1;
 };
-
-CEREAL_REGISTER_TYPE(Base);
-CEREAL_REGISTER_TYPE(Derived1);
 
 class NetTypeA {
 public:
@@ -106,11 +73,7 @@ public:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(name));
-		} else {
-			archive(CEREAL_NVP(name));
-		}
+		archive(JAI_NVP(name));
 	}
 
 	std::string name;
@@ -133,11 +96,7 @@ public:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(id));
-		} else {
-			archive(CEREAL_NVP(id));
-		}
+		archive(JAI_NVP(id));
 	}
 
 	int id;
@@ -282,11 +241,7 @@ static void RunSceneLoadBenchmark(bool a_headless) {
 		}
 	};
 
-	// JaiScript (map.scene2) FIRST so it pays the cold GL texture-upload cost; Cereal second
-	// reuses the shared texture cache. Compare against the previous run (Cereal first) to
-	// confirm the GL delta is texture caching, not serialization. (Headless: order is moot.)
 	timeLoad("[JaiScript map.scene2]", [&] { return MV::Scene::Node::load("Scenes/map.scene2", managers.services, true); });
-	timeLoad("[Cereal  map.scene ]", [&] { return MV::Scene::Node::loadCereal("Assets/Scenes/map.scene", managers.services, true); });
 }
 
 // CPU baseline for the particle hot loops (single-threaded, no GL): Particle::update (the per-frame
@@ -441,28 +396,6 @@ int main(int argc, char *argv[]) {
 
 	//PathfindingTest();
 	//return 0;
-
-// 	std::string content = "Hello World";
-// 	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";
-// 
-// 	MV::Signal<void(const std::string&, const std::string&, const std::string&)> callbackTest;
-// 	callbackTest.scriptEngine(&chaiScript);
-// 	callbackTest.connect("test", scriptString);
-// 	{
-// 		auto connection2 = callbackTest.connect("puts(\"![\"); puts(arg_0); puts(\"]!\n\");");
-// 		callbackTest(content, ":D :D :D", "TEST CHAR");
-// 	}
-// 	callbackTest("!!!", "VVV", "~~~");
-// 
-// 	auto jsonCallback = MV::toJson(callbackTest);
-// 
-// 	auto callbackLoadTest = MV::fromJson<MV::Signal<void(const std::string&, const std::string&, const std::string&)>>(jsonCallback, [&](cereal::JSONInputArchive& archive) {
-// 		archive.add(cereal::make_nvp("script", &chaiScript));
-// 	});
-// 
-// 	callbackLoadTest("LoadTest2", "DidThisWork?", "Maybe");
-// 
-// 	std::cout << std::endl;
 
 	// 	pqxx::connection c("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");
 	// 	pqxx::work txn(c);

@@ -11,22 +11,6 @@
 #include <sstream>
 #include <string>
 
-// Keep cereal includes for backwards compatibility
-#include "cereal/cereal.hpp"
-#include "cereal/types/set.hpp"
-#include "cereal/types/map.hpp"
-#include "cereal/types/vector.hpp"
-#include "cereal/types/memory.hpp"
-#include "cereal/types/string.hpp"
-#include "cereal/types/variant.hpp"
-#include "cereal/types/optional.hpp"
-#include "cereal/types/base_class.hpp"
-#include "cereal/types/polymorphic.hpp"
-#include "cereal/archives/adapters.hpp"
-#include "cereal/archives/portable_binary.hpp"
-#include "cereal/archives/json.hpp"
-#include "cereal/details/traits.hpp"
-
 namespace MV {
 
 	// ============================================================================
@@ -122,46 +106,6 @@ namespace MV {
 	template <typename C, typename T>
 	std::string toBase64Cast(const std::shared_ptr<T>& a_input, MV::Services& a_services) {
 		return toBase64(std::static_pointer_cast<C>(a_input), a_services);
-	}
-
-	// ============================================================================
-	// Cereal-based deserialization (for loading legacy files)
-	// ============================================================================
-
-	template <typename T>
-	T fromJsonCereal(const std::string& a_input) {
-		std::stringstream messageStream(a_input);
-		cereal::JSONInputArchive input(messageStream);
-		T result;
-		input(result);
-		return result;
-	}
-
-	template <typename T>
-	T fromJsonCereal(const std::string& a_input, MV::Services& a_services) {
-		std::stringstream messageStream(a_input);
-		cereal::UserDataAdapter<MV::Services, cereal::JSONInputArchive> input(a_services, messageStream);
-		T result;
-		input(result);
-		return result;
-	}
-
-	template <typename T>
-	T fromBinaryStringCereal(const std::string& a_input) {
-		std::istringstream messageStream(a_input, std::ios_base::in | std::ios_base::binary);
-		cereal::PortableBinaryInputArchive input(messageStream);
-		T result;
-		input(result);
-		return result;
-	}
-
-	template <typename T>
-	T fromBinaryStringCereal(const std::string& a_input, MV::Services& a_services) {
-		std::stringstream messageStream(a_input, std::ios_base::in | std::ios_base::binary);
-		cereal::UserDataAdapter<MV::Services, cereal::PortableBinaryInputArchive> input(a_services, messageStream);
-		T result;
-		input(result);
-		return result;
 	}
 
 }

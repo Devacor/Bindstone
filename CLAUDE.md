@@ -55,7 +55,7 @@ The engine has a Foundry-based regression runner separate from JaiScript's:
 - **`Source/MV/Bench/`** — standalone micro/scene/frame benchmarks (`bench_math`, `bench_scene`,
   `bench_frame`) with before/after numbers in `RESULTS_math.md`. These measure; they don't assert.
 
-Both link the engine the same way (`/MD /DCEREAL_FUTURE_EXPERIMENTAL /DSDL_MAIN_HANDLED` + gl3w.c +
+Both link the engine the same way (`/MD /DSDL_MAIN_HANDLED` + gl3w.c +
 SDL/Win libs); the renderer is constructed headless via `Draw2D::makeHeadless()`.
 
 ## Project Structure
@@ -64,7 +64,7 @@ SDL/Win libs); the renderer is constructed headless via `Draw2D::makeHeadless()`
 - `Source/JaiScript/` - JaiScript scripting language (has its own CLAUDE.md)
 - `Source/Game/` - Game-specific code
 - `Source/Editor/` - Level editor code
-- `External/` - Third-party dependencies (ChaiScript, Cereal, SDL, etc.)
+- `External/` - Third-party dependencies (glm, asio, gl3w, Box2D, spine, openssl, etc.)
 
 ## Key Patterns
 

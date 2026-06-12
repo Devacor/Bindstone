@@ -26,7 +26,7 @@ namespace MV {
 	// NavigationAgent serialization
 	// ============================================================
 	// NavigationAgent has a public default constructor, so it can use normal
-	// serialization. Its cereal save/load methods handle the map reference
+	// serialization. Its save/load methods handle the map reference
 	// which will be restored via shared_ptr ID tracking.
 
 } // namespace MV

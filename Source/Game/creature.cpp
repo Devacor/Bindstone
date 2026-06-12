@@ -7,9 +7,6 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/signals/signal_binding.hpp>
 
-CEREAL_CLASS_VERSION(Catalog<CreatureData>, CREATURE_CATALOG_VERSION);
-CEREAL_CLASS_VERSION(Catalog<BuildingData>, BUILDING_CATALOG_VERSION);
-
 // ============================================================================
 // JaiScript bindings (ported from the ChaiScript-era gameHooks)
 // ============================================================================

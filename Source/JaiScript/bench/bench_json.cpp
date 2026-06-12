@@ -5,7 +5,7 @@
 //      /I"D:\git\Bindstone\External\cereal\include" bench_json.cpp /Fe:bench_json.exe
 //
 // Run:  bench_json.exe [path-to-json] [iterations]
-//   defaults: D:\git\Bindstone\Scenes\map.scene2, 60 iterations
+//   defaults: D:\git\Bindstone\Scenes\map.scene, 60 iterations
 //
 // Both parsers build a full in-memory DOM from an owned copy of the input and free it
 // each iteration (representative of a cold scene load). We measure parse+build only.
@@ -101,7 +101,7 @@ static Timing timeIt(int iters, F&& fn) {
 }
 
 int main(int argc, char** argv) {
-    const char* path = (argc > 1) ? argv[1] : "D:\\git\\Bindstone\\Scenes\\map.scene2";
+    const char* path = (argc > 1) ? argv[1] : "D:\\git\\Bindstone\\Scenes\\map.scene";
     int iters = (argc > 2) ? std::atoi(argv[2]) : 60;
     if (iters < 5) iters = 5;
 

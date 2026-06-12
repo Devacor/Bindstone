@@ -67,3 +67,5 @@ Source/JaiScript/TestSuite/bin
 Source/JaiScript/squirrel
 Source/JaiScript/squirrel
 *.obj
+
+Source/JaiScript/out/

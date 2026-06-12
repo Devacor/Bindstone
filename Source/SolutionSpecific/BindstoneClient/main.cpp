@@ -138,8 +138,8 @@ MV::Matrix<sizeAX, sizeBY> M_2(const MV::Matrix<sizeAX, sizeAY>& A, const MV::Ma
 // and how much a flat DOM would save. Run: BindstoneClient.exe -bench
 static void RunJsonParseBenchmark(jai::engine* eng) {
 	const char* candidates[] = {
-		"Scenes/map.scene2",
-		"D:/git/Bindstone/Scenes/map.scene2",
+		"Scenes/map.scene",
+		"D:/git/Bindstone/Scenes/map.scene",
 	};
 	std::string text;
 	std::string used;
@@ -152,7 +152,7 @@ static void RunJsonParseBenchmark(jai::engine* eng) {
 		}
 	}
 	if (text.empty()) {
-		std::cout << "\n[bench] could not open map.scene2 (cwd-relative or absolute)\n";
+		std::cout << "\n[bench] could not open map.scene (cwd-relative or absolute)\n";
 		return;
 	}
 
@@ -241,7 +241,7 @@ static void RunSceneLoadBenchmark(bool a_headless) {
 		}
 	};
 
-	timeLoad("[JaiScript map.scene2]", [&] { return MV::Scene::Node::load("Scenes/map.scene2", managers.services, true); });
+	timeLoad("[JaiScript map.scene]", [&] { return MV::Scene::Node::load("Scenes/map.scene", managers.services, true); });
 }
 
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the

@@ -745,6 +745,12 @@ public:
 };
 static jai::registrar<RenamedRegType, void> _renamedRegistration("CustomRegName");
 
+namespace {
+	// Anonymous-namespace types have compiler-dependent spellings AND no cross-TU
+	// identity; implicit naming must refuse them.
+	struct AnonNamespaceProbe { virtual ~AnonNamespaceProbe() = default; };
+}
+
 // In-class name pin: implicit registration must use jai_type_name when declared
 // (the hatch for template instantiations and classes whose identifier may change).
 class InClassNamedType : public jai::property_owner<InClassNamedType, ImplicitRegBase> {
@@ -785,6 +791,7 @@ public:
             check_eq(std::string("ImplicitRegBase"), std::string(jai::detail::static_unqualified_type_name<ImplicitRegBase>()));
             check_eq(std::string("jai::foundry::tests::ImplicitRegBase"), std::string(jai::detail::static_type_name<ImplicitRegBase>()));
             check(jai::detail::static_unqualified_type_name<std::vector<int>>().empty(), "template instantiations must be excluded from implicit naming");
+            check(jai::detail::static_unqualified_type_name<AnonNamespaceProbe>().empty(), "anonymous-namespace types must be excluded from implicit naming");
         });
 
         test("property_owner_implicit_type_tag_written", [&]() {

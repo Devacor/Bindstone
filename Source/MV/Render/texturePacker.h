@@ -119,8 +119,6 @@ namespace MV {
 
 		bool dirty;
 
-	public:
-		// Public so jai's serializable-trait detection (SFINAE, blind to friends) can see them.
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			if(packedTexture.expired()){
@@ -152,7 +150,6 @@ namespace MV {
 			construct->initializeAfterLoad();
 		}
 
-	private:
 		void initializeAfterLoad();
 	};
 
@@ -173,8 +170,6 @@ namespace MV {
 			texturePack(a_texturePack){
 		}
 
-	public:
-		// Public so jai's serializable-trait detection (SFINAE, blind to friends) can see them.
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
 			archive(jai::serialization::make_nvp("texturePack", texturePack));

@@ -10,7 +10,6 @@
 #include "MV/Utility/services.hpp"
 #include "SDL_ttf.h"
 #include "MV/Render/points.h"
-#include "cereal/archives/adapters.hpp"
 #include <jaiscript/serialization/archive.hpp>
 
 namespace MV {
@@ -60,7 +59,6 @@ namespace MV {
 	class TextLibrary;
 	///////////////////////////////////
 	class FontDefinition : public std::enable_shared_from_this<FontDefinition>{
-		friend cereal::access;
 		friend class jai::serialization::access;
 		friend TextLibrary;
 		friend std::ostream& operator<<(std::ostream&, const FontDefinition&);
@@ -106,23 +104,11 @@ namespace MV {
 		template<class Archive>
 		void serialize(Archive & archive) const {
 			archive(
-				CEREAL_NVP(identifier),
-				CEREAL_NVP(file),
-				CEREAL_NVP(size),
-				CEREAL_NVP(style)
+				jai::serialization::make_nvp("identifier", identifier),
+				jai::serialization::make_nvp("file", file),
+				jai::serialization::make_nvp("size", size),
+				jai::serialization::make_nvp("style", style)
 			);
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<FontDefinition> &construct, std::uint32_t const){
-			construct();
-			archive(
-				cereal::make_nvp("identifier", construct->identifier),
-				cereal::make_nvp("file", construct->file),
-				cereal::make_nvp("size", construct->size),
-				cereal::make_nvp("style", construct->style)
-			);
-			construct->initializeFromLoad();
 		}
 
 		void initializeFromLoad() {
@@ -191,19 +177,8 @@ namespace MV {
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(
-				CEREAL_NVP(loadedFonts)
+				jai::serialization::make_nvp("loadedFonts", loadedFonts)
 			);
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct, std::uint32_t const version){
-			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			auto* renderer = services.get<MV::Draw2D>();
-
-			construct(*renderer);
-			archive.add(cereal::make_nvp("textLibrary", construct.ptr()));
-			std::map<std::string, std::shared_ptr<FontDefinition>> fontLoadScratchPad;
-			construct->serialize(archive, version);
 		}
 
 		std::map<std::string, std::shared_ptr<FontDefinition>> loadedFonts;
@@ -318,7 +293,6 @@ namespace MV {
 
 	///////////////////////////////////
 	class FormattedText{
-		friend cereal::access;
 		friend class jai::serialization::access;
 		friend FormattedLine;
 	public:
@@ -405,64 +379,16 @@ namespace MV {
 	private:
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const a_version) {
-			if constexpr (jai::serialization::jai_archive<Archive>) {
-				auto str = string();
-				archive(
-					JAI_NVP(minimumTextLineHeight),
-					JAI_NVP(showAsPassword),
-					JAI_NVP(defaultStateIdentifier),
-					JAI_NVP(textWidth),
-					JAI_NVP(textWrapping),
-					JAI_NVP(textJustification),
-					jai::serialization::make_nvp("string", str)
-				);
-			} else {
-				if (a_version > 0) {
-					archive(
-						cereal::make_nvp("minimumTextLineHeight", minimumTextLineHeight),
-						cereal::make_nvp("showAsPassword", showAsPassword)
-					);
-				}
-				archive(
-					cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
-					cereal::make_nvp("textWidth", textWidth),
-					cereal::make_nvp("textWrapping", textWrapping),
-					cereal::make_nvp("textJustification", textJustification),
-					cereal::make_nvp("string", string())
-				);
-			}
-		}
-
-		template<class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<FormattedText> &construct, std::uint32_t const a_version) {
-			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			auto* library = services.get<MV::TextLibrary>();
-
-			std::string defaultStateIdentifier;
-			float textWidth;
-			PointPrecision minimumTextLineHeight = 0.0f;
-			TextJustification textJustification;
-			TextWrapMethod textWrapping;
-			std::string stringContents;
-			bool showAsPassword = false;
-			if (a_version > 0) {
-				archive(
-					cereal::make_nvp("minimumTextLineHeight", minimumTextLineHeight),
-					cereal::make_nvp("showAsPassword", showAsPassword)
-				);
-			}
+			auto str = string();
 			archive(
-				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
-				cereal::make_nvp("textWidth", textWidth),
-				cereal::make_nvp("textWrapping", textWrapping),
-				cereal::make_nvp("textJustification", textJustification),
-				cereal::make_nvp("string", stringContents)
+				JAI_NVP(minimumTextLineHeight),
+				JAI_NVP(showAsPassword),
+				JAI_NVP(defaultStateIdentifier),
+				JAI_NVP(textWidth),
+				JAI_NVP(textWrapping),
+				JAI_NVP(textJustification),
+				jai::serialization::make_nvp("string", str)
 			);
-
-			construct(*library, defaultStateIdentifier, textWidth, textWrapping, textJustification);
-			construct->minimumTextLineHeight = minimumTextLineHeight;
-			construct->showAsPassword = showAsPassword;
-			construct->append(stringContents);
 		}
 
 		mutable TextLibrary *library;
@@ -478,7 +404,5 @@ namespace MV {
 		TextJustification textJustification = TextJustification::LEFT;
 	};
 }
-
-CEREAL_CLASS_VERSION(MV::FormattedText, 1);
 
 #endif

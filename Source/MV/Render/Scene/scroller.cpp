@@ -1,8 +1,5 @@
 #include "scroller.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include "text.h"
 
 #include <jaiscript/core/registrar.hpp>
@@ -19,10 +16,6 @@ static jai::registrar<MV::Scene::Scroller, MV::Services> _hookScroller("Scroller
 	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Scroller::*)() const>(&MV::Scene::Scroller::content));
 	builder.method("content", static_cast<std::shared_ptr<MV::Scene::Scroller>(MV::Scene::Scroller::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Scroller::content));
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Scroller);
-CEREAL_CLASS_VERSION(MV::Scene::Scroller, 1);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenescroller);
 
 namespace MV {
 	namespace Scene {

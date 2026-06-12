@@ -8,7 +8,6 @@ namespace MV {
 	namespace Scene {
 		class Parallax : public jai::property_owner<Parallax, Component> {
 			friend Node;
-			friend cereal::access;
 			friend jai::access;
 
 		public:
@@ -71,41 +70,14 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.save(archive);
-					Component::save(archive, 0);
-				} else {
-					archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
-				}
+				property_mgr.save(archive);
+				Component::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.load(archive);
-					Component::load(archive, 0);
-				} else {
-					if (version <= 2) {
-						archive(cereal::make_nvp("enabled", isEnabled.get()));
-						if(version <= 1){
-							int32_t discard;
-							archive(cereal::make_nvp("space", discard)); // Deleted property - reads and discards
-						}
-						archive(cereal::make_nvp("translateRatio", ourTranslateRatio.get()));
-						archive(cereal::make_nvp("localOffset", ourLocalOffset.get()));
-						if(version > 1){
-							archive(cereal::make_nvp("zoomOffset", ourZoomOffset.get()));
-						}
-					}
-					archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
-				}
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Parallax> &construct, std::uint32_t const version) {
-				construct(std::shared_ptr<Node>());
-				construct->load(archive, version);
-				construct->initialize();
+				property_mgr.load(archive);
+				Component::load(archive, 0);
 			}
 
 			template<typename Archive>
@@ -141,7 +113,5 @@ namespace MV {
 		};
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_sceneparallax);
 
 #endif

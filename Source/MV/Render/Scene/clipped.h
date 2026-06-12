@@ -11,7 +11,6 @@ namespace MV {
 
 		class Clipped : public jai::property_owner<Clipped, Sprite> {
 			friend Node;
-			friend cereal::access;
 			friend jai::access;
 
 		public:
@@ -53,37 +52,14 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.save(archive);
-					Sprite::save(archive, 0);
-				} else {
-					archive(cereal::make_nvp("refreshShaderId", refreshShaderId.get()));
-					archive(cereal::make_nvp("capturedBounds", capturedBounds.get()));
-					archive(cereal::make_nvp("capturedOffset", capturedOffset.get()));
-					archive(cereal::make_nvp("forceRefreshEveryFrame", forceRefreshEveryFrame.get()));
-					archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
-				}
+				property_mgr.save(archive);
+				Sprite::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.load(archive);
-					Sprite::load(archive, 0);
-				} else {
-					archive(cereal::make_nvp("refreshShaderId", refreshShaderId.get()));
-					archive(cereal::make_nvp("capturedBounds", capturedBounds.get()));
-					archive(cereal::make_nvp("capturedOffset", capturedOffset.get()));
-					archive(cereal::make_nvp("forceRefreshEveryFrame", forceRefreshEveryFrame.get()));
-					archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
-				}
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct, std::uint32_t const version) {
-				construct(std::shared_ptr<Node>());
-				construct->load(archive, version);
-				construct->initialize();
+				property_mgr.load(archive);
+				Sprite::load(archive, 0);
 			}
 
 			template<typename Archive>
@@ -122,7 +98,5 @@ namespace MV {
 		};
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_sceneclipped);
 
 #endif

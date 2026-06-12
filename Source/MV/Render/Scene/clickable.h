@@ -39,7 +39,6 @@ namespace MV {
 	namespace Scene {
 
 		class Clickable : public jai::property_owner<Clickable, Sprite> {
-			friend cereal::access;
 			friend jai::access;
 			friend Node;
 		public:
@@ -147,54 +146,14 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.save(archive);
-					Sprite::save(archive, 0);
-				} else {
-					// Note: Signals are no longer serialized - ChaiScript callbacks need manual migration to JaiScript
-					archive(cereal::make_nvp("hitDetectionType", hitDetectionType.get()));
-					archive(cereal::make_nvp("eatTouches", eatTouches.get()));
-					archive(cereal::make_nvp("globalClickPriority", globalClickPriority.get()));
-					archive(cereal::make_nvp("appendClickPriority", appendClickPriority.get()));
-					archive(cereal::make_nvp("overrideClickPriority", overrideClickPriority.get()));
-					archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
-				}
+				property_mgr.save(archive);
+				Sprite::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.load(archive);
-					Sprite::load(archive, 0);
-				} else {
-					// Load old MV::Signal data into temporaries and discard (backward compatibility)
-					if (version <= 1) {
-						MV::Signal<ButtonSignalSignature> unusedOnPress, unusedOnAccept, unusedOnCancel;
-						MV::Signal<DropSignalSignature> unusedOnRelease, unusedOnDrop;
-						MV::Signal<DragSignalSignature> unusedOnDrag;
-						archive(cereal::make_nvp("onPress", unusedOnPress),
-							cereal::make_nvp("onRelease", unusedOnRelease),
-							cereal::make_nvp("onDrag", unusedOnDrag),
-							cereal::make_nvp("onAccept", unusedOnAccept),
-							cereal::make_nvp("onCancel", unusedOnCancel),
-							cereal::make_nvp("onDrop", unusedOnDrop));
-					}
-					archive(cereal::make_nvp("hitDetectionType", hitDetectionType.get()));
-					archive(cereal::make_nvp("eatTouches", eatTouches.get()));
-					archive(cereal::make_nvp("globalClickPriority", globalClickPriority.get()));
-					archive(cereal::make_nvp("appendClickPriority", appendClickPriority.get()));
-					archive(cereal::make_nvp("overrideClickPriority", overrideClickPriority.get()));
-					archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
-				}
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive& archive, cereal::construct<Clickable>& construct, std::uint32_t const version) {
-				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-				auto* mouse = services.get<MV::TapDevice>();
-				construct(std::shared_ptr<Node>(), *mouse);
-				construct->load(archive, version);
-				construct->initialize();
+				property_mgr.load(archive);
+				Sprite::load(archive, 0);
 			}
 
 			template<typename Archive>
@@ -247,7 +206,5 @@ namespace MV {
 
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_sceneclickable);
 
 #endif

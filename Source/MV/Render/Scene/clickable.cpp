@@ -2,9 +2,6 @@
 #include "clipped.h"
 #include "stencil.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
@@ -48,11 +45,6 @@ static jai::registrar<MV::Scene::Clickable, MV::Services> _hookClickable("Clicka
 	// Mouse bounds check
 	builder.method("mouseInBounds", static_cast<bool(MV::Scene::Clickable::*)()>(&MV::Scene::Clickable::mouseInBounds));
 });
-
-CEREAL_CLASS_VERSION(MV::Scene::Clickable, 2);
-
-CEREAL_REGISTER_TYPE(MV::Scene::Clickable);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneclickable);
 
 namespace MV {
 	namespace Scene {

@@ -547,7 +547,7 @@ namespace MV {
 	template<typename T> size_t InstanceCounter<T>::internalActiveCount = 0;
 	template<typename T> size_t InstanceCounter<T>::internalTotalCount = 0;
 
-	//Primarily meant to queue actions for post construction in cereal
+	//Primarily meant to queue actions for post construction during deserialization
 	class CallbackQueue {
 	public:
 		CallbackQueue(){}

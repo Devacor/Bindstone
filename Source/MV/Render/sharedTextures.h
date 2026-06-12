@@ -61,7 +61,11 @@ namespace MV {
 
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
-			archive(CEREAL_NVP(texturePacks), CEREAL_NVP(fileDefinitions), CEREAL_NVP(dynamicDefinitions), CEREAL_NVP(surfaceDefinitions));
+			archive(
+				jai::serialization::make_nvp("texturePacks", texturePacks),
+				jai::serialization::make_nvp("fileDefinitions", fileDefinitions),
+				jai::serialization::make_nvp("dynamicDefinitions", dynamicDefinitions),
+				jai::serialization::make_nvp("surfaceDefinitions", surfaceDefinitions));
 		}
 
 		static std::shared_ptr<TextureHandle> white(){

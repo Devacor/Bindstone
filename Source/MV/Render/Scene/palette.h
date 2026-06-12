@@ -9,7 +9,6 @@ namespace MV {
 	namespace Scene {
 
 		class Palette : public Drawable {
-			friend cereal::access;
 			friend jai::access;
 			friend Node;
 		public:
@@ -87,64 +86,31 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					archive(
-						jai::serialization::make_nvp("color", currentColor),
-						jai::serialization::make_nvp("selectorPercentSize", selectorPercentSize),
-						jai::serialization::make_nvp("selectorPercentPadding", selectorPercentPadding),
-						jai::serialization::make_nvp("eatTouches", eatTouches),
-						jai::serialization::make_nvp("globalClickPriority", globalClickPriority),
-						jai::serialization::make_nvp("overrideClickPriority", overrideClickPriority)
-					);
-					Drawable::save(archive, 0);
-				} else {
-					archive(
-						cereal::make_nvp("color", currentColor),
-						cereal::make_nvp("selectorPercentSize", selectorPercentSize),
-						cereal::make_nvp("selectorPercentPadding", selectorPercentPadding),
-						cereal::make_nvp("eatTouches", eatTouches),
-						cereal::make_nvp("globalClickPriority", globalClickPriority),
-						cereal::make_nvp("overrideClickPriority", overrideClickPriority),
-						cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-					);
-				}
+				archive(
+					jai::serialization::make_nvp("color", currentColor),
+					jai::serialization::make_nvp("selectorPercentSize", selectorPercentSize),
+					jai::serialization::make_nvp("selectorPercentPadding", selectorPercentPadding),
+					jai::serialization::make_nvp("eatTouches", eatTouches),
+					jai::serialization::make_nvp("globalClickPriority", globalClickPriority),
+					jai::serialization::make_nvp("overrideClickPriority", overrideClickPriority)
+				);
+				Drawable::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					archive(
-						jai::serialization::make_nvp("color", currentColor),
-						jai::serialization::make_nvp("selectorPercentSize", selectorPercentSize),
-						jai::serialization::make_nvp("selectorPercentPadding", selectorPercentPadding),
-						jai::serialization::make_nvp("eatTouches", eatTouches),
-						jai::serialization::make_nvp("globalClickPriority", globalClickPriority),
-						jai::serialization::make_nvp("overrideClickPriority", overrideClickPriority)
-					);
-					Drawable::load(archive, 0);
-				} else {
-					archive(
-						cereal::make_nvp("color", currentColor),
-						cereal::make_nvp("selectorPercentSize", selectorPercentSize),
-						cereal::make_nvp("selectorPercentPadding", selectorPercentPadding),
-						cereal::make_nvp("eatTouches", eatTouches),
-						cereal::make_nvp("globalClickPriority", globalClickPriority),
-						cereal::make_nvp("overrideClickPriority", overrideClickPriority),
-						cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-					);
-				}
+				archive(
+					jai::serialization::make_nvp("color", currentColor),
+					jai::serialization::make_nvp("selectorPercentSize", selectorPercentSize),
+					jai::serialization::make_nvp("selectorPercentPadding", selectorPercentPadding),
+					jai::serialization::make_nvp("eatTouches", eatTouches),
+					jai::serialization::make_nvp("globalClickPriority", globalClickPriority),
+					jai::serialization::make_nvp("overrideClickPriority", overrideClickPriority)
+				);
+				Drawable::load(archive, 0);
 			}
 
 			virtual void initialize() override;
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Palette> &construct, std::uint32_t const version) {
-				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-				auto* mouse = services.get<MV::TapDevice>();
-				construct(std::shared_ptr<Node>(), *mouse);
-				construct->load(archive, version);
-				construct->initialize();
-			}
 
 			template<typename Archive>
 			static void load_and_construct(Archive& ar, jai::serialization::construct<Palette>& construct) {
@@ -196,7 +162,5 @@ namespace MV {
 
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_scenepalette);
 
 #endif

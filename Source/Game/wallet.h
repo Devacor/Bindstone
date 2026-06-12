@@ -3,7 +3,6 @@
 
 #include <jaiscript/signals/signal.hpp>
 #include <jaiscript/serialization/archive.hpp>
-#include "cereal/cereal.hpp"
 #include <string>
 #include <array>
 
@@ -45,11 +44,7 @@ public:
 
 	template<class Archive>
 	void serialize(Archive& archive) {
-		if constexpr (jai::serialization::jai_archive<Archive>) {
-			archive(JAI_NVP(values));
-		} else {
-			archive(CEREAL_NVP(values));
-		}
+		archive(JAI_NVP(values));
 	}
 
 private:

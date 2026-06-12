@@ -6,9 +6,6 @@
 #include <iostream>
 
 #include "MV/Utility/scopeGuard.hpp"
-#include "cereal/archives/adapters.hpp"
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -64,8 +61,6 @@ static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 
 	builder.method("clone", &MV::Scene::Node::clone);
 });
-
-CEREAL_CLASS_VERSION(MV::Scene::Node, 2);
 
 namespace MV {
 	namespace Scene {
@@ -283,49 +278,6 @@ namespace MV {
 				result->postLoadStep();
 			}
 			return result;
-		}
-
-		std::shared_ptr<Node> Node::loadCereal(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep) {
-			return loadCereal(a_filename, a_services, "", a_doPostLoadStep);
-		}
-
-		std::shared_ptr<Node> Node::loadCereal(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
-			auto contents = fileContents(a_filename);
-			require<ResourceException>(!contents.empty(), "File not found for Node::loadCereal: ", a_filename);
-			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
-
-			std::stringstream stream(contents);
-			std::shared_ptr<Node> result;
-			{
-				cereal::UserDataAdapter<MV::Services, cereal::JSONInputArchive> archive(a_services, stream);
-				archive(result);
-			}
-			if (!a_newNodeId.empty()) {
-				result->id(a_newNodeId);
-			}
-			return result;
-		}
-
-		std::shared_ptr<Node> Node::save(const std::string &a_filename, bool a_renameNodeToFile) {
-			return save(a_filename, a_renameNodeToFile ? fileNameFromPath(a_filename) : nodeId);
-		}
-
-		std::shared_ptr<Node> Node::save(const std::string &a_filename, const std::string &a_newId) {
-			std::stringstream stream(fileContents(a_filename));
-
-			std::string oldId = nodeId;
-			auto oldParent = myParent;
-			SCOPE_EXIT{ nodeId = oldId; myParent = oldParent; };
-			nodeId = a_newId;
-			myParent = nullptr;
-
-			auto self = shared_from_this();
-			{
-				cereal::JSONOutputArchive archive(stream);
-				archive(self);
-			}
-			writeToFile(a_filename, stream.str());
-			return self;
 		}
 
 		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile) {

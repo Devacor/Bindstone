@@ -7,8 +7,6 @@
 #include <string>
 
 #include "MV/Utility/scopeGuard.hpp"
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -78,10 +76,6 @@ static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	builder.method("loaded", &MV::Scene::Spine::loaded);
 	builder.method("bundle", &MV::Scene::Spine::bundle);
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Spine);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenespine);
-CEREAL_CLASS_VERSION(MV::Scene::Spine::FileBundle, 1);
 
 namespace MV{
 	void initializeSpineBindings() {

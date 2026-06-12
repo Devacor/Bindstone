@@ -1,14 +1,6 @@
 #include "collider.h"
 #include "MV/Utility/generalUtility.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
-CEREAL_REGISTER_TYPE(MV::Scene::Collider);
-CEREAL_REGISTER_TYPE(MV::Scene::Environment);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenecollider);
-
-
 bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
 	return !(a_lhs == a_rhs);
 }

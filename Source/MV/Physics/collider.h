@@ -72,7 +72,6 @@ namespace MV {
 
 		class Environment : public Component {
 			friend Node;
-			friend cereal::access;
 
 		public:
 			ComponentDerivedAccessors(Environment)
@@ -106,36 +105,6 @@ namespace MV {
 				return &world;
 			}
 		protected:
-			template<class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					cereal::make_nvp("gravityX", world.GetGravity().x),
-					cereal::make_nvp("gravityY", world.GetGravity().y),
-					cereal::make_nvp("Component", cereal::base_class<Component>(this))
-				);
-			}
-
-			template<class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
-				MV::require<MV::ResourceException>(false, "Cannot properly load an environment, must load_and_construct. This might happen if you derive from environment wrongly.");
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Environment> &construct, std::uint32_t const /*version*/) {
-				b2Vec2 loadedGravity;
-				archive(
-					cereal::make_nvp("gravityX", loadedGravity.x),
-					cereal::make_nvp("gravityY", loadedGravity.y)
-				);
-
-				construct(std::shared_ptr<Node>(), cast(loadedGravity));
-
-				archive(
-					cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
-				);
-				construct->initialize();
-			}
-
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<Environment>(cast(world.GetGravity())).self());
 			}
@@ -222,28 +191,6 @@ namespace MV {
 			CollisionBodyAttributes& allowSleep();
 			CollisionBodyAttributes& disallowSleep();
 
-			template<class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
-				syncronize();
-				archive(
-					cereal::make_nvp("x", details.position.x),
-					cereal::make_nvp("y", details.position.y),
-					cereal::make_nvp("angle", details.angle),
-					cereal::make_nvp("vX", details.linearVelocity.x),
-					cereal::make_nvp("vY", details.linearVelocity.y),
-					cereal::make_nvp("vAngle", details.angularVelocity),
-					cereal::make_nvp("linearDamping", details.linearDamping),
-					cereal::make_nvp("angularDamping", details.angularDamping),
-					cereal::make_nvp("allowSleep", details.allowSleep),
-					cereal::make_nvp("awake", details.awake),
-					cereal::make_nvp("fixedRotation", details.fixedRotation),
-					cereal::make_nvp("bullet", details.bullet),
-					cereal::make_nvp("type", details.type),
-					cereal::make_nvp("active", details.active),
-					cereal::make_nvp("gravityScale", details.gravityScale),
-					cereal::make_nvp("parent", parent)
-				);
-			}
 		private:
 			void syncronize() const;
 
@@ -302,9 +249,6 @@ namespace MV {
 				}
 				return *this;
 			}
-
-			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) requires jai::serialization::not_jai_archive<Archive>;
 
 		private:
 			void initialize(const std::shared_ptr<Collider> &a_lhs, const std::shared_ptr<Collider> &a_rhs, Point<> a_offset);
@@ -401,18 +345,6 @@ namespace MV {
 				return *this;
 			}
 
-			template<class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
-				archive(
-					cereal::make_nvp("restitution", details.restitution),
-					cereal::make_nvp("friction", details.friction),
-					cereal::make_nvp("density", details.density),
-					cereal::make_nvp("sensor", details.isSensor),
-					cereal::make_nvp("filterCategory", details.filter.categoryBits),
-					cereal::make_nvp("filterInteractions", details.filter.maskBits),
-					cereal::make_nvp("id", ourId)
-				);
-			}
 		private:
 			std::string ourId;
 			b2FixtureDef details;
@@ -439,7 +371,6 @@ namespace MV {
 
 		class Collider : public Component {
 			friend Node;
-			friend cereal::access;
 			friend CollisionBodyAttributes;
 			friend RotationJointAttributes;
 			friend ContactListener;
@@ -578,62 +509,6 @@ namespace MV {
 			void attachInternal(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 			void attachInternal(const std::vector<Point<>> &a_points, const Point<> &a_offset = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
-			template<class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				collisionAttributes.syncronize();
-				archive(
-					cereal::make_nvp("world", world),
-					cereal::make_nvp("collisionAttributes", collisionAttributes),
- 					cereal::make_nvp("useBodyAngle", useBodyAngle),
- 					cereal::make_nvp("collisionParts", collisionParts),
-					cereal::make_nvp("currentPosition", currentPosition),
-					cereal::make_nvp("currentAngle", currentAngle),
-					cereal::make_nvp("useBodyPosition", useBodyPosition),
-					cereal::make_nvp("rotationJoints", rotationJoints),
-					cereal::make_nvp("Component", cereal::base_class<Component>(this))
-				);
-			}
-
-			template<class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
-				MV::require<MV::ResourceException>(false, "Cannot properly load a collider with load... Must be load_and_construct. Might implement if ever derived from.");
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Collider> &construct) {
-				CollisionBodyAttributes collisionAttributes;
-				std::shared_ptr<Environment> world;
-				archive(
-					cereal::make_nvp("world", world),
-					cereal::make_nvp("collisionAttributes", collisionAttributes)
-				);
-				construct(std::shared_ptr<Node>(), world, collisionAttributes, false);
-				construct->loadedFromJson = true;
-				archive(
- 					cereal::make_nvp("useBodyAngle", construct->useBodyAngle),
- 					cereal::make_nvp("collisionParts", construct->collisionParts),
-					cereal::make_nvp("currentPosition", construct->currentPosition),
-					cereal::make_nvp("currentAngle", construct->currentAngle),
-					cereal::make_nvp("useBodyPosition", construct->useBodyPosition),
-					cereal::make_nvp("rotationJoints", construct->rotationJoints),
-					cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
-				);
-				construct->initialize();
-				for (auto&& attribute : construct->collisionParts) {
-					if (attribute.shapeType == FixtureParameters::CIRCLE) {
-						construct->attachInternal(attribute.diameter, attribute.position, attribute.attributes);
-					} else if (attribute.shapeType == FixtureParameters::RECTANGLE) {
-						construct->attachInternal(attribute.size, attribute.position, attribute.rotation, attribute.attributes);
-					} else if (attribute.shapeType == FixtureParameters::POLYGON) {
-						construct->attachInternal(attribute.points, attribute.position, attribute.attributes);
-					}
-				}
-
-				for (auto&& joint : construct->rotationJoints) {
-					joint->loadedCollider(construct.ptr());
-				}
-			}
-
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<Collider>(world, collisionAttributes).self());
 			}
@@ -650,19 +525,6 @@ namespace MV {
 				Point<> position;
 				std::vector<Point<>> points;
 				CollisionPartAttributes attributes;
-
-				template<class Archive>
-				void serialize(Archive & archive, std::uint32_t const /*version*/) {
-					archive(
-						cereal::make_nvp("type", shapeType),
-						cereal::make_nvp("size", size),
-						cereal::make_nvp("points", points),
-						cereal::make_nvp("rotation", rotation),
-						cereal::make_nvp("diameter", diameter),
-						cereal::make_nvp("position", position),
-						cereal::make_nvp("attributes", attributes)
-					);
-				}
 			};
 
 			Collider(const std::weak_ptr<Node> &a_owner, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes(), bool a_maintainOwnerPosition = true);
@@ -738,44 +600,7 @@ namespace MV {
 			bool useBodyPosition = true;
 			bool loadedFromJson = false;
 		};
-
-		template <class Archive>
-		void RotationJointAttributes::serialize(Archive & archive, std::uint32_t const /*version*/) requires jai::serialization::not_jai_archive<Archive> {
-			worldPosition = Point<>();
-			if (joint) {
-				jointDef.motorSpeed = joint->GetMotorSpeed();
-				jointDef.maxMotorTorque = joint->GetMaxMotorTorque();
-				jointDef.referenceAngle = A.lock()->physicsBody->GetAngle() - B.lock()->physicsBody->GetAngle() - joint->GetJointAngle();
-				worldPosition = A.lock()->world->owner()->localFromWorld(A.lock()->owner()->worldFromLocal(offset));
-			}
-			
-			archive(
-				cereal::make_nvp("A", A),
-				cereal::make_nvp("B", B),
-				cereal::make_nvp("Offset", offset),
-				cereal::make_nvp("Position", worldPosition),
-				cereal::make_nvp("Motor", jointDef.enableMotor),
-				cereal::make_nvp("Limit", jointDef.enableLimit),
-				cereal::make_nvp("Angle", jointDef.referenceAngle)
-			);
-
-			if (jointDef.enableMotor) {
-				archive(
-					cereal::make_nvp("Speed", jointDef.motorSpeed),
-					cereal::make_nvp("MaxTorque", jointDef.maxMotorTorque)
-				);
-			}
-
-			if (jointDef.enableLimit) {
-				archive(
-					cereal::make_nvp("Min", jointDef.lowerAngle),
-					cereal::make_nvp("Max", jointDef.upperAngle)
-				);
-			}
-		}
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_scenecollider);
 
 #endif

@@ -13,12 +13,6 @@
 #include <type_traits>
 #include "require.hpp"
 #include <jaiscript/signals/signal_decl.hpp>
-#include <cereal/cereal.hpp>
-#include <cereal/types/string.hpp>
-#include <cereal/types/vector.hpp>
-#include <cereal/archives/json.hpp>
-#include <cereal/archives/binary.hpp>
-#include <cereal/archives/portable_binary.hpp>
 
 namespace MV {
 
@@ -75,55 +69,6 @@ namespace MV {
 		template<typename T>
 		inline T* getValue(const std::string& key) const;
 
-		template<class Archive>
-		void save(Archive& ar) const {
-			std::vector<std::string> keys;
-			for (const auto& [name, prop] : properties) {
-				if (prop->allowSave()) {
-					keys.push_back(name);
-				}
-			}
-			ar(cereal::make_nvp("PropertyKeys", keys));
-			for (const auto& name : keys) {
-				properties.at(name)->save(ar);
-			}
-		}
-
-		template<class Archive>
-		void load(Archive& ar) {
-			std::vector<std::string> savedKeys;
-			ar(cereal::make_nvp("PropertyKeys", savedKeys));
-
-			for (const auto& name : savedKeys) {
-				auto it = properties.find(name);
-				MV::require<ResourceException>(it != properties.end(), "Unknown Property: ", name,
-					" If a property was deleted, you will need to either recreate this archive, or, add a DeletedProperty<TheDeletedPropertyType> with this name.");
-				it->second->load(ar, false);
-			}
-		}
-
-		template<class Archive>
-		void load(Archive& ar, const std::vector<std::string>& a_optionalKeyOrderOverride,
-			const std::unordered_map<std::string, std::string>& a_optionalKeyRenameBindings = {}) {
-			std::vector<std::string> savedKeys;
-			bool usingPropertyOverride = !a_optionalKeyOrderOverride.empty();
-			if (!usingPropertyOverride) {
-				ar(cereal::make_nvp("PropertyKeys", savedKeys));
-			}
-			else {
-				savedKeys = a_optionalKeyOrderOverride;
-			}
-
-			for (const auto& name : savedKeys) {
-				const auto found = a_optionalKeyRenameBindings.find(name);
-				bool wasRenamed = found != a_optionalKeyRenameBindings.end();
-				auto it = properties.find(wasRenamed ? found->second : name);
-				MV::require<ResourceException>(it != properties.end(), "Unknown Property: ", name,
-					" If a property was deleted, you will need to either recreate this archive, or, add a DeletedProperty<TheDeletedPropertyType> with this name.");
-				it->second->load(ar, usingPropertyOverride);
-			}
-		}
-
 		inline void cloneToTarget(PropertyManager& target) const;
 
 	private:
@@ -176,13 +121,6 @@ namespace MV {
 		}
 
 		virtual bool allowSave() const { return allowSerialization; }
-
-		virtual void save(cereal::JSONOutputArchive& ar) const = 0;
-		virtual void load(cereal::JSONInputArchive& ar, bool a_usingPropertyOverride) = 0;
-		virtual void save(cereal::BinaryOutputArchive& ar) const = 0;
-		virtual void load(cereal::BinaryInputArchive& ar, bool a_usingPropertyOverride) = 0;
-		virtual void save(cereal::PortableBinaryOutputArchive& ar) const = 0;
-		virtual void load(cereal::PortableBinaryInputArchive& ar, bool a_usingPropertyOverride) = 0;
 
 		virtual void cloneToTarget(PropertyBase& target) = 0;
 
@@ -604,43 +542,6 @@ namespace MV {
 			return value.end();
 		}
 
-		// Serialization methods
-		void save(cereal::JSONOutputArchive& ar) const override {
-			if (allowSerialization) { 
-				ar(cereal::make_nvp(name(), value));
-			}
-		}
-
-		void load(cereal::JSONInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || allowSerialization) {
-				ar(cereal::make_nvp(name(), value));
-			}
-		}
-
-		void save(cereal::BinaryOutputArchive& ar) const override {
-			if (allowSerialization) { 
-				ar(cereal::make_nvp(name(), value));
-			}
-		}
-
-		void load(cereal::BinaryInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || allowSerialization) {
-				ar(cereal::make_nvp(name(), value));
-			}
-		}
-
-		void save(cereal::PortableBinaryOutputArchive& ar) const override {
-			if (allowSerialization) { 
-				ar(cereal::make_nvp(name(), value));
-			}
-		}
-
-		void load(cereal::PortableBinaryInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || allowSerialization) {
-				ar(cereal::make_nvp(name(), value));
-			}
-		}
-
 		// Clone method
 		void setCustomClone(std::function<void(Property<T>&, Property<T>&)> a_customClone) {
 			customClone = a_customClone;
@@ -673,30 +574,6 @@ namespace MV {
 		// No accessors, no value.
 		const T& get() const = delete;
 		T& get() = delete;
-
-		void save(cereal::JSONOutputArchive&) const override {}
-		void load(cereal::JSONInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || allowSerialization) {
-				T dummy;
-				ar(cereal::make_nvp(name(), dummy));
-			}
-		}
-
-		void save(cereal::BinaryOutputArchive&) const override {}
-		void load(cereal::BinaryInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || allowSerialization) {
-				T dummy;
-				ar(cereal::make_nvp(name(), dummy));
-			}
-		}
-
-		void save(cereal::PortableBinaryOutputArchive&) const override {}
-		void load(cereal::PortableBinaryInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || allowSerialization) {
-				T dummy;
-				ar(cereal::make_nvp(name(), dummy));
-			}
-		}
 
 		void cloneToTarget(PropertyBase&) override {
 			// No-op
@@ -872,37 +749,6 @@ namespace MV {
 			--this->value;
 			onChangedSignal(this->value, oldVal, false);
 			return oldVal;
-		}
-
-		// Override load methods to emit change signals
-		void load(cereal::JSONInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || this->allowSerialization) {
-				T oldVal = this->value;
-				Property<T>::load(ar, a_usingPropertyOverride);
-				if (this->value != oldVal) {
-					onChangedSignal(this->value, oldVal, true);
-				}
-			}
-		}
-
-		void load(cereal::BinaryInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || this->allowSerialization) {
-				T oldVal = this->value;
-				Property<T>::load(ar, a_usingPropertyOverride);
-				if (this->value != oldVal) {
-					onChangedSignal(this->value, oldVal, true);
-				}
-			}
-		}
-
-		void load(cereal::PortableBinaryInputArchive& ar, bool a_usingPropertyOverride) override {
-			if (!a_usingPropertyOverride || this->allowSerialization) {
-				T oldVal = this->value;
-				Property<T>::load(ar, a_usingPropertyOverride);
-				if (this->value != oldVal) {
-					onChangedSignal(this->value, oldVal, true);
-				}
-			}
 		}
 
 		jai::signal<ChangeSignature> onChanged;

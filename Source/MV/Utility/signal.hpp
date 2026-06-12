@@ -11,9 +11,6 @@
 #include "MV/Utility/services.hpp"
 #include "MV/Utility/tupleHelpers.hpp"
 #include "MV/Utility/scopeGuard.hpp"
-#include "cereal/cereal.hpp"
-#include "cereal/archives/adapters.hpp"
-#include "cereal/access.hpp"
 #include <jaiscript/serialization/archive.hpp>
 namespace jai { class engine; }
 
@@ -21,7 +18,6 @@ namespace MV {
 
 	template <typename T>
 	class Receiver {
-		friend cereal::access;
 	public:
 		typedef std::function<T> FunctionType;
 		typedef std::shared_ptr<Receiver<T>> SharedType;
@@ -145,24 +141,6 @@ namespace MV {
 			return scriptEnginePointer;
 		}
 	private:
-		template<class Archive>
-		void save(Archive & archive, std::uint32_t const /*version*/) const {
-			archive(
-				cereal::make_nvp("parameterNames", orderedParameterNames),
-				cereal::make_nvp("script", scriptCallback)
-			);
-		}
-
-		template<class Archive>
-		void load(Archive & archive, std::uint32_t const /*version*/) {
-			archive(
-				cereal::make_nvp("parameterNames", orderedParameterNames),
-				cereal::make_nvp("script", scriptCallback)
-			);
-			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			scriptEnginePointer = services.get<jai::engine>(false);
-		}
-
 		Receiver() :
 			id(0) {
 		}
@@ -177,7 +155,7 @@ namespace MV {
 			orderedParameterNames(a_parameterNames) {
 		}
 
-		// Legacy (Cereal-era) script receivers run their source directly on the jai
+		// Legacy script receivers run their source directly on the jai
 		// engine; parameters are not forwarded (live script callbacks use jai::signal's
 		// own receiver machinery). Dependent E defers the member lookup to instantiation
 		// — jai::engine is only forward-declared in this widely-included header.
@@ -224,7 +202,6 @@ namespace MV {
 
 	template <typename T>
 	class Signal {
-		friend cereal::access;
 	public:
 		typedef std::function<T> FunctionType;
 		typedef Receiver<T> ReceiverType;
@@ -430,46 +407,6 @@ namespace MV {
 		}
 
 	private:
-		template<class Archive>
-		void save(Archive & archive, std::uint32_t const /*version*/) const {
-			std::vector< std::shared_ptr<Receiver<T>> > scriptObservers;
-			std::map<std::string, std::shared_ptr<Receiver<T>>> ownedScriptObservers;
-			for (auto&& observer : observers) {
-				if (!observer.expired() && observer.lock()->hasScript()) {
-					scriptObservers.emplace_back(observer);
-				}
-			}
-			for (auto&& observerKV : ownedConnections) {
-				if (observerKV.second->hasScript()) {
-					ownedScriptObservers[observerKV.first] = observerKV.second;
-				}
-			}
-			archive(
-				cereal::make_nvp("parameterNames", orderedParameterNames),
-				cereal::make_nvp("observers", scriptObservers),
-				cereal::make_nvp("ownedObservers", ownedScriptObservers)
-			);
-		}
-
-		template<class Archive>
-		void load(Archive & archive, std::uint32_t const /*version*/) {
-			std::vector< std::shared_ptr<Receiver<T>> > scriptObservers;
-			std::map<std::string, std::shared_ptr<Receiver<T>>> ownedScriptObservers;
-			archive(
-				cereal::make_nvp("parameterNames", orderedParameterNames),
-				cereal::make_nvp("observers", scriptObservers),
-				cereal::make_nvp("ownedObservers", ownedScriptObservers)
-			);
-			for (auto&& scriptObserver : scriptObservers) {
-				observers.insert(scriptObserver);
-			}
-			for (auto&& ownedScriptObserver : ownedScriptObservers) {
-				ownedConnections[ownedScriptObserver.first] = ownedScriptObserver.second;
-			}
-			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			scriptEnginePointer = services.get<jai::engine>(false);
-		}
-
 		std::set< std::weak_ptr< Receiver<T> >, std::owner_less<std::weak_ptr<Receiver<T>>> > observers;
 
 		bool inCall = false;

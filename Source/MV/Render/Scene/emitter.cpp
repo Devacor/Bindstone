@@ -2,8 +2,6 @@
 
 #include "MV/Serialization/serialize.h"
 #include "MV/Utility/generalUtility.h"
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
 #include <jaiscript/serialization/archive.hpp>
 
 #include <jaiscript/core/registrar.hpp>
@@ -32,12 +30,6 @@ static jai::registrar<MV::Scene::Emitter, MV::Services> _hookEmitter("Emitter",
 	builder.method("enable", &MV::Scene::Emitter::enable);
 	builder.method("disable", &MV::Scene::Emitter::disable);
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Emitter);
-CEREAL_CLASS_VERSION(MV::Scene::ParticleChangeValues, 2);
-CEREAL_CLASS_VERSION(MV::Scene::EmitterSpawnProperties, 2);
-CEREAL_CLASS_VERSION(MV::Scene::Emitter, 2);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneemitter);
 
 namespace MV {
 	namespace Scene {

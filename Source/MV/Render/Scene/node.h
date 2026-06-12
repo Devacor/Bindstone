@@ -8,7 +8,6 @@ namespace MV {
 	namespace Scene {
 
 		class Node : public jai::property_owner<Node>, public std::enable_shared_from_this<Node> {
-			friend cereal::access;
 			friend class jai::serialization::access;
 			friend jai::access;
 			friend Component;
@@ -182,13 +181,6 @@ namespace MV {
 			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep = true);
 			static std::shared_ptr<Node> load(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
 			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
-
-			// Cereal-based load (matches save() format)
-			static std::shared_ptr<Node> loadCereal(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep = true);
-			static std::shared_ptr<Node> loadCereal(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
-
-			std::shared_ptr<Node> save(const std::string &a_filename, bool a_renameNodeToFile = true);
-			std::shared_ptr<Node> save(const std::string &a_filename, const std::string &a_overrideId);
 
 			std::shared_ptr<Node> saveBinary(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> saveBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId);
@@ -881,100 +873,10 @@ namespace MV {
 
 			void fixChildOwnership();
 
-			// Serialization for both JaiScript and Cereal
-			// Uses if constexpr to dispatch to the appropriate format
 			// Note: Uses save/load_and_construct pattern because Node requires constructor args
 			template<class Archive>
-			void save(Archive & archive, std::uint32_t const version) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					// JaiScript path - use automatic property serialization
-					const_cast<Node*>(this)->property_mgr.save(archive);
-				} else {
-					// Filter children and components that are serializable
-					std::vector<std::shared_ptr<Node>> filteredChildren;
-					std::copy_if(childNodes.get().begin(), childNodes.get().end(), std::back_inserter(filteredChildren), [](const auto &a_child){
-						return a_child->allowSerialize;
-					});
-					std::vector<std::shared_ptr<Component>> filteredChildComponents;
-					std::copy_if(childComponents.get().begin(), childComponents.get().end(), std::back_inserter(filteredChildComponents), [](const auto &a_child) {
-						return a_child->allowSerialize;
-					});
-					std::weak_ptr<Node> weakParent;
-					if (myParent) {
-						weakParent = myParent->shared_from_this();
-					}
-					// Cereal path - ensure bounds are up to date before saving
-					if (dirtyChildBounds) {
-						const_cast<Node*>(this)->recalculateChildBounds();
-					}
-					if (dirtyLocalBounds) {
-						const_cast<Node*>(this)->recalculateLocalBounds();
-					}
-
-					archive(
-						cereal::make_nvp("nodeId", nodeId.get()),
-						cereal::make_nvp("isRootNode", myParent == nullptr),
-						cereal::make_nvp("parent", weakParent),
-						cereal::make_nvp("allowDraw", allowDraw.get()),
-						cereal::make_nvp("allowUpdate", allowUpdate.get()),
-						cereal::make_nvp("translateTo", translateTo.get()),
-						cereal::make_nvp("rotateTo", rotateTo.get()),
-						cereal::make_nvp("scaleTo", scaleTo.get()),
-						cereal::make_nvp("sortDepth", sortDepth.get()),
-						cereal::make_nvp("nodeAlpha", nodeAlpha.get()),
-						cereal::make_nvp("localBounds", localBounds.get()),
-						cereal::make_nvp("localChildBounds", localChildBounds.get()));
-					if (version > 0) {
-						archive(cereal::make_nvp("cameraId", ourCameraId.get()));
-					}
-					archive(
-						cereal::make_nvp("childNodes", filteredChildren),
-						cereal::make_nvp("childComponents", filteredChildComponents)
-					);
-				}
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const version) {
-				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-				auto* renderer = services.get<MV::Draw2D>();
-				LoadOptions* options = services.get<LoadOptions>(false);
-				bool doPostLoad = options ? options->doPostLoad : true;
-				std::string nodeId;
-				archive(cereal::make_nvp("nodeId", nodeId));
-				construct(*renderer, nodeId);
-				bool isRootNode = false;
-				std::weak_ptr<Node> weakParent;
-				archive(
-					cereal::make_nvp("isRootNode", isRootNode),
-					cereal::make_nvp("parent", weakParent));
-
-				if (auto lockedParent = weakParent.lock()) {
-					construct->myParent = lockedParent.get();
-				}
-				archive(
-					cereal::make_nvp("allowDraw", construct->allowDraw.get()),
-					cereal::make_nvp("allowUpdate", construct->allowUpdate.get()),
-					cereal::make_nvp("translateTo", construct->translateTo.get()),
-					cereal::make_nvp("rotateTo", construct->rotateTo.get()),
-					cereal::make_nvp("scaleTo", construct->scaleTo.get()),
-					cereal::make_nvp("sortDepth", construct->sortDepth.get()),
-					cereal::make_nvp("nodeAlpha", construct->nodeAlpha.get()),
-					cereal::make_nvp("localBounds", construct->localBounds.get()),
-					cereal::make_nvp("localChildBounds", construct->localChildBounds.get()));
-				if (version > 0) {
-					archive(cereal::make_nvp("cameraId", construct->ourCameraId.get()));
-				}
-				archive(
-					cereal::make_nvp("childNodes", construct->childNodes.get()),
-					cereal::make_nvp("childComponents", construct->childComponents.get())
-				);
-				if (version < 2) {
-					toRadiansInPlace(construct->rotateTo.get());
-				}
-				if (doPostLoad && isRootNode) {
-					construct->postLoadStep();
-				}
+			void save(Archive & archive, std::uint32_t const /*version*/) const {
+				const_cast<Node*>(this)->property_mgr.save(archive);
 			}
 
 			// Pass 2: per-object reconnection/finalization. Fires on every deserialized
@@ -1002,7 +904,6 @@ namespace MV {
 				postLoadStep();
 			}
 
-			// JaiScript version of load_and_construct (templated for CRTP archives)
 			template<typename Archive>
 			static void load_and_construct(Archive& ar, jai::serialization::construct<Node>& construct) {
 				MV::Services* services = ar.template get_user_context<MV::Services>();
@@ -1065,36 +966,6 @@ namespace MV {
 		};
 
 		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node);
-	}
-}
-
-// Force Cereal to use non-polymorphic serialization for shared_ptr<Node> and weak_ptr<Node>
-// Node is technically polymorphic (virtual destructor from property_owner), but
-// existing scene files were saved using the non-polymorphic ptr_wrapper format.
-// These overloads must be defined AFTER cereal/types/polymorphic.hpp is included
-// (which happens via component.h -> textures.h -> serialize.h) and AFTER Node is defined.
-namespace cereal {
-	template<class Archive>
-	void save(Archive& ar, const std::shared_ptr<MV::Scene::Node>& ptr) {
-		ar(make_nvp("ptr_wrapper", memory_detail::make_ptr_wrapper(ptr)));
-	}
-
-	template<class Archive>
-	void load(Archive& ar, std::shared_ptr<MV::Scene::Node>& ptr) {
-		ar(make_nvp("ptr_wrapper", memory_detail::make_ptr_wrapper(ptr)));
-	}
-
-	template<class Archive>
-	void save(Archive& ar, const std::weak_ptr<MV::Scene::Node>& ptr) {
-		auto const sptr = ptr.lock();
-		ar(make_nvp("ptr_wrapper", memory_detail::make_ptr_wrapper(sptr)));
-	}
-
-	template<class Archive>
-	void load(Archive& ar, std::weak_ptr<MV::Scene::Node>& ptr) {
-		std::shared_ptr<MV::Scene::Node> sptr;
-		ar(make_nvp("ptr_wrapper", memory_detail::make_ptr_wrapper(sptr)));
-		ptr = sptr;
 	}
 }
 

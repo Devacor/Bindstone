@@ -1,9 +1,6 @@
 #include "sprite.h"
 #include <numeric>
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
@@ -24,10 +21,6 @@ static jai::registrar<MV::Scene::Sprite, MV::Services> _hookSprite("Sprite",
 	// Slice
 	builder.method("hasSlice", &MV::Scene::Sprite::hasSlice);
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Sprite);
-CEREAL_CLASS_VERSION(MV::Scene::Sprite, 2);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenesprite);
 
 namespace MV {
 	namespace Scene {

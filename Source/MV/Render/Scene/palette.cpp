@@ -1,12 +1,6 @@
 #include "palette.h"
 #include <jaiscript/signals/signal_impl.hpp>
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
-CEREAL_REGISTER_TYPE(MV::Scene::Palette);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenepalette);
-
 namespace MV {
 	namespace Scene {
 

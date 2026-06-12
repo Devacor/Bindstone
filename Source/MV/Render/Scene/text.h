@@ -11,7 +11,6 @@ namespace MV {
 
 		class Text : public jai::property_owner<Text, Drawable> {
 			friend Node;
-			friend cereal::access;
 			friend jai::access;
 
 		public:
@@ -204,41 +203,16 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.save(archive);
-					archive(jai::serialization::make_nvp("formattedText", formattedText.get()));
-					Drawable::save(archive, 0);
-				} else {
-					archive(cereal::make_nvp("formattedText", formattedText.get()));
-					archive(cereal::make_nvp("usingBoundsForLineHeight", usingBoundsForLineHeight.get()));
-					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-				}
+				property_mgr.save(archive);
+				archive(jai::serialization::make_nvp("formattedText", formattedText.get()));
+				Drawable::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					property_mgr.load(archive);
-					archive(jai::serialization::make_nvp("formattedText", formattedText.get()));
-					Drawable::load(archive, 0);
-				} else {
-					archive(cereal::make_nvp("formattedText", formattedText.get()));
-					archive(cereal::make_nvp("usingBoundsForLineHeight", usingBoundsForLineHeight.get()));
-					archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-				}
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive& archive, cereal::construct<Text>& construct, std::uint32_t const version) {
-				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-				auto* library = services.get<MV::TextLibrary>();
-
-				construct(std::shared_ptr<Node>(), *library);
-
-				construct->formattedText->scene()->removeFromParent();
-				construct->load(archive, version);
-
-				construct->initialize();
+				property_mgr.load(archive);
+				archive(jai::serialization::make_nvp("formattedText", formattedText.get()));
+				Drawable::load(archive, 0);
 			}
 
 			template<typename Archive>
@@ -309,8 +283,6 @@ namespace MV {
 		};
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_scenetext);
 
 #endif
 

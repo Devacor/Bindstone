@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM">
@@ -240,11 +240,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++14</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -256,11 +256,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)Source\JaiScript\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)Source\JaiScript\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++14</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -275,11 +275,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++14</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -291,11 +291,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++14</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -307,11 +307,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++14</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -323,11 +323,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)Source\JaiScript\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)Source\JaiScript\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++14</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -339,11 +339,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++14</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -355,11 +355,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++14</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;CHAISCRIPT_NO_THREADS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>

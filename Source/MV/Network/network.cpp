@@ -3,9 +3,6 @@
 #include "MV/Utility/stopwatch.h"
 #include "MV/Utility/scopeGuard.hpp"
 
-#include "cereal/cereal.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"

@@ -1,9 +1,6 @@
 #include "component.h"
 #include "node.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
@@ -33,10 +30,6 @@ static jai::registrar<MV::Scene::Component, MV::Services> _hookComponent("Compon
 	builder.method("detach", &MV::Scene::Component::detach);
 	builder.method("task", &MV::Scene::Component::task);
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Component);
-CEREAL_CLASS_VERSION(MV::Scene::Component, 1);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_scenecomponent);
 
 namespace MV {
 	namespace Scene {

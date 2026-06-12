@@ -5,7 +5,7 @@
 //
 // Build (from a VS x64 dev shell), single TU, header-only deps:
 //   cl /nologo /O2 /Ob2 /Oi /Ot /std:c++20 /EHsc /DNDEBUG ^
-//      /I"D:\git\Bindstone\Source" /I"D:\git\Bindstone\External\cereal\include" ^
+//      /I"D:\git\Bindstone\Source" ^
 //      /I"D:\git\Bindstone\Source\JaiScript\include" bench_math.cpp /Fe:bench_math.exe
 //
 // Run:  bench_math.exe [repetitions]   (default 11)

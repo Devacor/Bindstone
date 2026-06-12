@@ -1,8 +1,5 @@
 #include "parallax.h"
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include "MV/Utility/log.h"
 
 #include <jaiscript/core/registrar.hpp>
@@ -33,10 +30,6 @@ static jai::registrar<MV::Scene::Parallax, MV::Services> _hookParallax("Parallax
 	builder.method("enable", &MV::Scene::Parallax::enable);
 	builder.method("disable", &MV::Scene::Parallax::disable);
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Parallax);
-CEREAL_CLASS_VERSION(MV::Scene::Parallax, 3);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneparallax);
 
 namespace MV {
 	namespace Scene {

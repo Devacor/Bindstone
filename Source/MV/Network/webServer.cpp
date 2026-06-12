@@ -2,9 +2,6 @@
 #include "MV/Utility/stopwatch.h"
 #include "MV/Utility/scopeGuard.hpp"
 
-#include "cereal/cereal.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 namespace MV {
 
 	WebServer::WebServer(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<WebConnectionStateBase>(const std::shared_ptr<WebConnection> &)> a_connectionStateFactory, int a_totalThreads) :

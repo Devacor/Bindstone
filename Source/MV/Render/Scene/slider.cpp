@@ -1,9 +1,6 @@
 #include "slider.h"
 #include <memory>
 
-#include "cereal/archives/json.hpp"
-#include "cereal/archives/portable_binary.hpp"
-
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
@@ -22,10 +19,6 @@ static jai::registrar<MV::Scene::Slider, MV::Services> _hookSlider("Slider",
 	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Slider::*)() const>(&MV::Scene::Slider::handle));
 	builder.method("handle", static_cast<std::shared_ptr<MV::Scene::Slider>(MV::Scene::Slider::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Slider::handle));
 });
-
-CEREAL_REGISTER_TYPE(MV::Scene::Slider);
-CEREAL_CLASS_VERSION(MV::Scene::Slider, 1);
-CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneslider);
 
 namespace MV {
 	namespace Scene {

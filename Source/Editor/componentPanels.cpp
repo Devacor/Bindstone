@@ -78,7 +78,7 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 
 	auto saveButton = makeButton(grid, panel.services(), "Save", buttonSize, U8_STR("Save"));
 	saveButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		controls->elementToEdit->save("Prefabs/" + controls->elementToEdit->id() + ".prefab");
+		controls->elementToEdit->saveJai("Prefabs/" + controls->elementToEdit->id() + ".prefab", panel.services());
 	});
 
 	auto loadButton = makeButton(grid, panel.services(), "Load", buttonSize, U8_STR("Load"));
@@ -1679,7 +1679,6 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 	auto saveButton = makeButton(grid, panel.services(), "Save", MV::size(110.0f, 27.0f), U8_STR("Save"));
 	auto loadButton = makeButton(grid, panel.services(), "Load", MV::size(110.0f, 27.0f), U8_STR("Load"));
-	auto loadCerealButton = makeButton(grid, panel.services(), "LoadCereal", MV::size(110.0f, 27.0f), U8_STR("Load Cereal"));
 	auto saveBinButton = makeButton(grid, panel.services(), "SaveBin", MV::size(110.0f, 27.0f), U8_STR("Save Bin"));
 	auto loadBinButton = makeButton(grid, panel.services(), "LoadBin", MV::size(110.0f, 27.0f), U8_STR("Load Bin"));
 	panel.updateBoxHeader(grid->bounds().width());
@@ -1717,23 +1716,6 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 		auto loadMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 		std::cout << "\n____\n";
 		std::cout << "\nJaiScript load: " << loadMs << " ms";
-		std::cout << "\nRecalculateLocalBounds: " << MV::Scene::Node::recalculateLocalBoundsCalls;
-		std::cout << "\nRecalculateChildBounds: " << MV::Scene::Node::recalculateChildBoundsCalls;
-		std::cout << "\nRecalculateMatrixBounds: " << MV::Scene::Node::recalculateMatrixCalls;
-		std::cout << "\n____\n";
-	});
-
-	loadCerealButton->onAccept.connect("loadCereal", [&](std::shared_ptr<MV::Scene::Clickable>){
-		auto t0 = std::chrono::steady_clock::now();
-		// Pass true: Cereal's load_and_construct calls postLoadStep() internally
-		// for the root node (isRootNode && doPostLoad), so no external call needed.
-		auto newRoot = MV::Scene::Node::loadCereal(fileName->text(), panel.services(), true);
-		auto t1 = std::chrono::steady_clock::now();
-		panel.root(newRoot);
-		newRoot->camera().position(MV::point(0.0f, 0.0f));
-		auto loadMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-		std::cout << "\n____\n";
-		std::cout << "\nCereal load: " << loadMs << " ms";
 		std::cout << "\nRecalculateLocalBounds: " << MV::Scene::Node::recalculateLocalBoundsCalls;
 		std::cout << "\nRecalculateChildBounds: " << MV::Scene::Node::recalculateChildBoundsCalls;
 		std::cout << "\nRecalculateMatrixBounds: " << MV::Scene::Node::recalculateMatrixCalls;

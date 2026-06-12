@@ -57,11 +57,6 @@ MV::BoxAABB<> worldBounds() { \
 	return MV::Scene::Component::worldBounds(); \
 }
 
-namespace cereal {
-	class PortableBinaryInputArchive;
-	class JSONInputArchive;
-}
-
 namespace MV {
 
 	namespace Scene {
@@ -147,7 +142,6 @@ namespace MV {
 		class Component : public std::enable_shared_from_this<Component>,
 		                  public jai::property_owner<Component> {
 			friend Node;
-			friend cereal::access;
 			friend jai::access;
 			friend class jai::serialization::access;
 
@@ -261,32 +255,15 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					archive(property_mgr);
-				} else {
-					archive(cereal::make_nvp("componentId", componentId.get()));
-					archive(cereal::make_nvp("componentOwner", componentOwner.get()));
-				}
+				archive(property_mgr);
 			}
 
 			template<class Archive>
-			void load(Archive & archive, std::uint32_t const version) {
-				if constexpr (jai::serialization::jai_archive<Archive>) {
-					archive(property_mgr);
-				} else {
-					archive(cereal::make_nvp("componentId", componentId.get()));
-					archive(cereal::make_nvp("componentOwner", componentOwner.get()));
-				}
+			void load(Archive & archive, std::uint32_t const /*version*/) {
+				archive(property_mgr);
 				if (accumulatedDelta == 0.0) {
 					accumulatedDelta = MV::randomNumber(0.0f, 1.0f); //avoid awkward synchronization
 				}
-			}
-
-			template<class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Component> &construct, std::uint32_t const version) {
-				construct(std::shared_ptr<Node>());
-				construct->load(archive, version);
-				construct->initialize();
 			}
 
 			template<typename Archive>
@@ -312,7 +289,5 @@ namespace MV {
 		};
 	}
 }
-
-CEREAL_FORCE_DYNAMIC_INIT(mv_scenecomponent);
 
 #endif

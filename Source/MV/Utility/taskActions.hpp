@@ -5,7 +5,7 @@
 
 namespace MV {
 	class BlockForSeconds : public ActionBase {
-		friend ::cereal::access;
+		friend class jai::serialization::access;
 	public:
 		virtual std::string name() const override { return "BlockForSeconds(" + std::to_string(seconds) + ")"; }
 		
@@ -16,7 +16,8 @@ namespace MV {
 	protected:
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {
-			archive(CEREAL_NVP(seconds), cereal::make_nvp("ActionBase", cereal::base_class<ActionBase>(this)));
+			archive(JAI_NVP(seconds));
+			ActionBase::serialize(archive, 0);
 		}
 
 	private:
@@ -33,7 +34,8 @@ namespace MV {
 	protected:
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {
-			archive(CEREAL_NVP(targetFrames), CEREAL_NVP(totalFrames), cereal::make_nvp("ActionBase", cereal::base_class<ActionBase>(this)));
+			archive(JAI_NVP(targetFrames), JAI_NVP(totalFrames));
+			ActionBase::serialize(archive, 0);
 		}
 
 	private:
@@ -41,8 +43,5 @@ namespace MV {
 		int totalFrames = 0;
 	};
 }
-
-CEREAL_REGISTER_TYPE(MV::BlockForSeconds);
-CEREAL_REGISTER_TYPE(MV::BlockForFrames);
 
 #endif

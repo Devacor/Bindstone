@@ -14,6 +14,8 @@
 #include <memory>
 #include <cstdint>
 
+#include "traits.hpp"
+
 namespace jai {
 
 class runtime_error;
@@ -25,52 +27,8 @@ struct archive_base {
     static constexpr bool is_jai_archive = true;
 };
 
-// ============================================================================
-// Access class for protected serialize/save/load methods
-// ============================================================================
-class access {
-public:
-    template<class Archive, class T>
-    static auto member_serialize(Archive& ar, T& t) -> decltype(t.serialize(ar)) {
-        return t.serialize(ar);
-    }
-    template<class Archive, class T>
-    static auto member_save(Archive& ar, const T& t) -> decltype(t.save(ar)) {
-        return t.save(ar);
-    }
-    template<class Archive, class T>
-    static auto member_load(Archive& ar, T& t) -> decltype(t.load(ar)) {
-        return t.load(ar);
-    }
-    template<class Archive, class T>
-    static auto member_serialize(Archive& ar, T& t, std::uint32_t version) -> decltype(t.serialize(ar, version)) {
-        return t.serialize(ar, version);
-    }
-    template<class Archive, class T>
-    static auto member_save(Archive& ar, const T& t, std::uint32_t version) -> decltype(t.save(ar, version)) {
-        return t.save(ar, version);
-    }
-    template<class Archive, class T>
-    static auto member_load(Archive& ar, T& t, std::uint32_t version) -> decltype(t.load(ar, version)) {
-        return t.load(ar, version);
-    }
-    template<class T, class Archive, class Construct>
-    static auto load_and_construct(Archive& ar, Construct& c) -> decltype(T::load_and_construct(ar, c)) {
-        return T::load_and_construct(ar, c);
-    }
-    template<class T, class Archive, class Construct>
-    static auto load_and_construct(Archive& ar, Construct& c, std::uint32_t version) -> decltype(T::load_and_construct(ar, c, version)) {
-        return T::load_and_construct(ar, c, version);
-    }
-    template<typename T, typename... Args>
-    static std::shared_ptr<T> make_shared(Args&&... args) {
-        return std::shared_ptr<T>(new T(std::forward<Args>(args)...));
-    }
-    template<typename T, typename... Args>
-    static std::unique_ptr<T> make_unique(Args&&... args) {
-        return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-    }
-};
+// The serialization access class is jai::access (traits.hpp, included above).
+// Private serialize/save/load support needs exactly one declaration: `friend jai::access;`
 
 // ============================================================================
 // Name-value pair for serialization

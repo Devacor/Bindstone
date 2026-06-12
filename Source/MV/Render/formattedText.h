@@ -60,7 +60,7 @@ namespace MV {
 	class TextLibrary;
 	///////////////////////////////////
 	class FontDefinition : public std::enable_shared_from_this<FontDefinition>{
-		friend class jai::serialization::access;
+		friend jai::access;
 		friend TextLibrary;
 		friend std::ostream& operator<<(std::ostream&, const FontDefinition&);
 	public:
@@ -295,7 +295,6 @@ namespace MV {
 	///////////////////////////////////
 	class FormattedText{
 		friend jai::access;
-		friend class jai::serialization::access;
 		friend FormattedLine;
 	public:
 		FormattedText(const FormattedText& a_rhs);

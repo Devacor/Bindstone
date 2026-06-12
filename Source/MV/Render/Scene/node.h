@@ -8,7 +8,6 @@ namespace MV {
 	namespace Scene {
 
 		class Node : public jai::property_owner<Node>, public std::enable_shared_from_this<Node> {
-			friend class jai::serialization::access;
 			friend jai::access;
 			friend Component;
 

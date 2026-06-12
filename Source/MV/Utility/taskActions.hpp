@@ -5,7 +5,7 @@
 
 namespace MV {
 	class BlockForSeconds : public ActionBase {
-		friend class jai::serialization::access;
+		friend jai::access;
 	public:
 		virtual std::string name() const override { return "BlockForSeconds(" + std::to_string(seconds) + ")"; }
 		

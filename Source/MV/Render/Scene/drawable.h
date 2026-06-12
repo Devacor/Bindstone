@@ -143,7 +143,6 @@ namespace MV {
 			friend Anchors;
 			friend Node;
 			friend jai::access;
-			friend class jai::serialization::access;
 
 		public:
 

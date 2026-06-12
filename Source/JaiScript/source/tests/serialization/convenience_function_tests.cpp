@@ -128,6 +128,18 @@ public:
 // Test Classes - Member serialize() function (unified save/load)
 // ============================================================================
 
+// `friend jai::access;` is the one declaration a type needs for private serialization
+// members — trait detection and dispatch both route through jai::access, cereal-style.
+class private_serialize_friend_jai_access {
+	friend jai::access;
+	int hidden = 0;
+	template<typename Archive>
+	void serialize(Archive& ar) { ar.serialize("hidden", hidden); }
+public:
+	void set(int v) { hidden = v; }
+	int get() const { return hidden; }
+};
+
 struct catalog_like_root_obj {
 	std::vector<int64_t> data;
 	template<typename Archive>
@@ -217,6 +229,24 @@ public:
     convenience_function_tests() : suite("Convenience Functions") {}
 
     void forge_tests() override {
+        test("private_serialize_friend_jai_access", [this]() {
+            auto eng = engine::make();
+            private_serialize_friend_jai_access obj;
+            obj.set(42);
+            jai::serialization::json_archive_writer writer(0, eng.get());
+            writer.begin_object();
+            writer("obj", obj);
+            writer.end_object();
+            private_serialize_friend_jai_access loaded;
+            jai::serialization::json_archive_reader reader(writer.str(), eng.get());
+            std::string rootType;
+            uint32_t rootVersion = 0;
+            reader.begin_object(rootType, rootVersion);
+            reader("obj", loaded);
+            reader.end_object();
+            check_eq(42, loaded.get(), "friend jai::access grants the trait probes private access");
+        });
+
         test("root_object_member_serialize_read", [this]() {
             // Reading a foreign root object {"data": [...]} into a member-serialize type:
             // ar(obj) is inline by design, so the caller enters the document root explicitly.

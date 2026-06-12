@@ -318,7 +318,6 @@ namespace MV {
 
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
 		friend jai::access;
-		friend class jai::serialization::access;
 		friend class FileTextureDefinition;
 		friend class DynamicTextureDefinition;
 		friend class SurfaceTextureDefinition;
@@ -405,7 +404,6 @@ namespace MV {
 
 	class FileTextureDefinition : public TextureDefinition {
 		friend jai::access;
-		friend class jai::serialization::access;
 	public:
 		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false, bool a_pixel = false){
 			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, a_pixel));
@@ -466,7 +464,6 @@ namespace MV {
 
 	class DynamicTextureDefinition : public TextureDefinition {
 		friend jai::access;
-		friend class jai::serialization::access;
 		friend class PackedTextureDefinition;
 	public:
 		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f}){
@@ -508,7 +505,6 @@ namespace MV {
 
 	class SurfaceTextureDefinition : public TextureDefinition {
 		friend jai::access;
-		friend class jai::serialization::access;
 	public:
 		static std::shared_ptr<SurfaceTextureDefinition> make(const std::string &a_name, std::function<std::shared_ptr<OwnedSurface> ()> a_surfaceGenerator){
 			return std::shared_ptr<SurfaceTextureDefinition>(new SurfaceTextureDefinition(a_name, a_surfaceGenerator));
@@ -554,7 +550,6 @@ namespace MV {
 
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
 		friend jai::access;
-		friend class jai::serialization::access;
 		friend TextureDefinition;
 		jai::signal_emitter<void(std::shared_ptr<TextureHandle>)> sizeChangeSignal;
 	public:

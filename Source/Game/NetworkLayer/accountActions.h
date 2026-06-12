@@ -25,6 +25,7 @@ private:
 	pqxx::result createPlayer(pqxx::work* transaction, LobbyUserConnectionState* a_connection);
 public:
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
+	static bool ensureAccount(pqxx::connection &a_db, const std::string &a_email, const std::string &a_handle, const std::string &a_password);
 #endif
 
 	template<class Archive>

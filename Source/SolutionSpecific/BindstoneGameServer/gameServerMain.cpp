@@ -15,6 +15,10 @@
 
 #include "MV/Utility/taskActions.hpp"
 
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
+
 #include <fstream>
 
 #include "glm/mat4x4.hpp"
@@ -259,6 +263,12 @@ int main(int, char *[]) {
 	*/
 
 	MV::initializeSpineBindings();
+
+	auto jaiEngine = jai::engine::make();
+	jai::stdlib::register_all(*jaiEngine);
+	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	MV::Services::instance().connect<jai::engine>(jaiEngine.get());
 
 	bool done = false;
 	auto server = std::make_shared<GameServer>(managers);

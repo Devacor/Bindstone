@@ -69,3 +69,7 @@ Source/JaiScript/squirrel
 *.obj
 
 Source/JaiScript/out/
+Tools/LocalServer/pgsql/
+Tools/LocalServer/pgdata/
+Tools/LocalServer/pg.log
+Tools/LocalServer/postgresql-binaries.zip

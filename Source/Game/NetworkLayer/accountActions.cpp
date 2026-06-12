@@ -85,6 +85,17 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 	});
 }
 
+bool CreatePlayer::ensureAccount(pqxx::connection &a_db, const std::string &a_email, const std::string &a_handle, const std::string &a_password) {
+	CreatePlayer action(a_email, a_handle, a_password);
+	pqxx::work transaction(a_db);
+	if (!action.selectUser(&transaction).empty()) {
+		return false;
+	}
+	transaction.exec(action.createPlayerQueryString(transaction, MV::randomString(32)));
+	transaction.commit();
+	return true;
+}
+
 void CreatePlayer::sendValidationEmail(LobbyUserConnectionState *a_connection, const std::string &a_passSalt) {
 	a_connection->server().email(MV::Email::Addresses("mike@m2tm.net", email), "Bindstone Account Activation", "This will be a link to activate your account, for now... Check this out: https://www.youtube.com/watch?v=VAZsBEELqPw \n" + a_passSalt);
 }

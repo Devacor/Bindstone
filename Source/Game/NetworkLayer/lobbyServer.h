@@ -319,8 +319,14 @@ public:
 		return dbPool;
 	}
 
+	// ServerConfig/smtp.config lines: host, port, user, password. Absent file = email disabled.
 	void email(const MV::Email::Addresses &a_addresses, const std::string &a_title, const std::string &a_message) {
-		auto emailer = MV::Email::make(emailPool.io_context(), "email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
+		auto smtpConfig = MV::explode(MV::fileContents("ServerConfig/smtp.config"), [](char c) { return c == '\n'; });
+		if (smtpConfig.size() < 4) {
+			MV::warning("Email disabled (no ServerConfig/smtp.config), skipped: ", a_title);
+			return;
+		}
+		auto emailer = MV::Email::make(emailPool.io_context(), smtpConfig[0], smtpConfig[1], { smtpConfig[2], smtpConfig[3] });
 		emailer->send(a_addresses, a_title, a_message);
 	}
 

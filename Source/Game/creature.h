@@ -91,7 +91,10 @@ public:
 		MV::require<MV::ResourceException>(false, "Failed to locate : ", a_id);
 		throw; //suppress no return warning.
 	}
-	// Public so jai's serializable-trait detection (SFINAE, blind to friends) can see it.
+private:
+	Catalog< DataType>() {
+	}
+
 	template<class Archive>
 	void serialize(Archive& archive) {
 		archive(jai::serialization::make_nvp("data", dataCollection));
@@ -99,10 +102,6 @@ public:
 			item.isServer = isServer;
 		}
 	}
-private:
-	Catalog< DataType>() {
-	}
-
 	bool isServer;
 	std::vector<DataType> dataCollection;
 };

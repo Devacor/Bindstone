@@ -378,8 +378,7 @@ namespace MV {
 			string(a_rhs.string());
 			return *this;
 		}
-	public:
-		// Public so jai's serializable-trait detection (SFINAE, blind to friends) can see them.
+	private:
 		template<class Archive>
 		void serialize(Archive & archive) { serialize(archive, 0); }
 
@@ -429,7 +428,6 @@ namespace MV {
 			construct->append(str);
 		}
 
-	private:
 		mutable TextLibrary *library;
 		TextWrapMethod textWrapping;
 		std::vector<std::shared_ptr<FormattedLine>> lines;

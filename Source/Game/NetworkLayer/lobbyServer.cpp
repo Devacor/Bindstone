@@ -41,6 +41,14 @@ bool LobbyUserConnectionState::authenticate(int64_t a_id, const std::string& a_e
 	}
 }
 
+void LobbyUserConnectionState::save() {
+	ourServer.savePlayer(ourPlayer);
+}
+
+void LobbyUserConnectionState::disconnectImplementation() {
+	save();
+}
+
 std::shared_ptr<MatchSeeker> LobbyUserConnectionState::seekMatch(MatchQueue& a_queue) {
 	if (auto strongConnection = connection()) {
 		seeking = std::make_shared<MatchSeeker>(strongConnection, a_queue);
@@ -62,6 +70,9 @@ void LobbyGameConnectionState::connectImplementation() {
 }
 
 bool LobbyGameConnectionState::handleExpiredPlayers() {
+	if (!leftPlayer || !rightPlayer) {
+		return false;
+	}
 	if (leftPlayer->lifespan.expired() || rightPlayer->lifespan.expired()) {
 		activeState = AVAILABLE;
 		if (!leftPlayer->lifespan.expired()) {
@@ -94,6 +105,7 @@ void LobbyGameConnectionState::notifyGameServerOfPlayers() {
 void LobbyGameConnectionState::matchMade(std::shared_ptr<MatchSeeker> a_leftPlayer, std::shared_ptr<MatchSeeker> a_rightPlayer) {
 	leftPlayer = a_leftPlayer;
 	rightPlayer = a_rightPlayer;
+	queueType = a_rightPlayer->queue.id();
 
 	leftPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
 	rightPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
@@ -102,6 +114,24 @@ void LobbyGameConnectionState::matchMade(std::shared_ptr<MatchSeeker> a_leftPlay
 	}
 
 	notifyGameServerOfPlayers();
+}
+
+void LobbyGameConnectionState::recordResult(TeamSide a_winner) {
+	if (!leftPlayer || !rightPlayer) {
+		return;
+	}
+	auto leftPlayerData = leftPlayer->playerShared();
+	auto rightPlayerData = rightPlayer->playerShared();
+	if (!leftPlayerData || !rightPlayerData) {
+		return;
+	}
+	auto leftResult = (a_winner == TeamSide::LEFT) ? ServerPlayer::Rating::WIN : (a_winner == TeamSide::RIGHT) ? ServerPlayer::Rating::LOSS : ServerPlayer::Rating::DRAW;
+	leftPlayerData->queue(queueType).adjust(rightPlayerData->queue(queueType), leftResult);
+	ourServer.savePlayer(leftPlayerData);
+	ourServer.savePlayer(rightPlayerData);
+	std::cout << "Match result [" << queueType << "] winner: " << sideToString(a_winner) <<
+		" | " << leftPlayerData->client->handle << " (" << leftPlayerData->queue(queueType).rating << ")" <<
+		" vs " << rightPlayerData->client->handle << " (" << rightPlayerData->queue(queueType).rating << ")" << std::endl;
 }
 
 void LobbyGameConnectionState::notifyPlayersOfGameServer() {
@@ -119,6 +149,7 @@ void LobbyGameConnectionState::update(double /*a_dt*/) {
 MatchSeeker::MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, MatchQueue& a_queue) :
 	lifespan(a_connection),
 	state(static_cast<LobbyUserConnectionState*>(a_connection->state())),
+	ourPlayer(state->player()),
 	queue(a_queue) {
 }
 
@@ -132,7 +163,7 @@ MatchSeeker::~MatchSeeker() {
 }
 
 ServerPlayer* MatchSeeker::player() {
-	return state->player().get();
+	return ourPlayer.get();
 }
 
 bool operator<(MatchSeeker &a_lhs, MatchSeeker &a_rhs) {
@@ -148,20 +179,27 @@ void MatchQueue::update(double a_dt) {
 
 	auto pairs = getMatchPairs(a_dt);
 
-	removeMatchedPairsFromSeekers(pairs);
-
-	auto* gameServer = server->availableGameServer();
+	//only pairs actually handed to a game server leave the queue; the rest stay seekers
+	//(matching flag reset) so nobody is silently dropped when no server is available.
+	std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> assigned;
 	for (auto && match : pairs) {
+		auto* gameServer = server->availableGameServer();
 		if (!gameServer) {
-			break;
+			match.first->matching = false;
+			match.second->matching = false;
+			continue;
 		}
 		try {
 			gameServer->matchMade(match.first, match.second);
+			assigned.push_back(match);
 		} catch (...) {
+			match.first->matching = false;
+			match.second->matching = false;
 			std::cerr << "Failed to match!" << std::endl;
 		}
-		gameServer = server->availableGameServer(); //find the next available game server.
 	}
+
+	removeMatchedPairsFromSeekers(assigned);
 }
 
 void MatchQueue::removeMatchedPairsFromSeekers(const std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>>& pairs) {
@@ -210,6 +248,24 @@ LobbyServer::LobbyServer(Managers& a_managers) :
 	auto connectionString = (!databaseConfig.empty() && !databaseConfig[0].empty()) ? databaseConfig[0] : "host=localhost port=5432 dbname=bindstone user=bindstone";
 	db = std::make_shared<pqxx::connection>(connectionString);
 	MV::info("DB Connected");
+}
+
+void LobbyServer::savePlayer(const std::shared_ptr<ServerPlayer> &a_player) {
+	if (!a_player || !a_player->client || a_player->client->id < 0) {
+		return;
+	}
+	auto id = a_player->client->id;
+	auto serverState = MV::toJsonInline(*a_player, manager.services);
+	auto clientState = MV::toJsonInline(static_cast<const IntermediateDbPlayer&>(*a_player->client), manager.services);
+	dbPool.task([this, id, serverState, clientState] {
+		try {
+			pqxx::work transaction(*db);
+			transaction.exec("UPDATE players SET state = " + transaction.quote(clientState) + ", serverstate = " + transaction.quote(serverState) + " WHERE id = " + std::to_string(id) + ";");
+			transaction.commit();
+		} catch (std::exception &e) {
+			MV::error("Failed to save player [", id, "]: ", e.what());
+		}
+	});
 }
 
 void LobbyServer::update(double dt) {

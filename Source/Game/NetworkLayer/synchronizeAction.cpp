@@ -1,6 +1,10 @@
 #include "synchronizeAction.h"
 #include "Game/game.h"
 
+#include <jaiscript/core/registrar.hpp>
+
+static jai::registrar<SynchronizeAction, MV::Services> _regSynchronizeAction("SynchronizeAction");
+
 void SynchronizeAction::execute(Game& a_game) {
 	if (a_game.instance()) {
 		a_game.instance()->networkPool().synchronize(objects);

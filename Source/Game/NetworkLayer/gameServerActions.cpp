@@ -10,10 +10,26 @@
 #include "MV/Serialization/serialize.h"
 #include "Game/game.h"
 
+#include <jaiscript/core/registrar.hpp>
+
+// Polymorphic wire registrations: without these, toBinaryStringCast<NetworkAction> writes a
+// typeless base payload and the receiving side cannot reconstruct the action.
+static jai::registrar<GameServerAvailable, MV::Services> _regGameServerAvailable("GameServerAvailable");
+static jai::registrar<GameServerStateChange, MV::Services> _regGameServerStateChange("GameServerStateChange");
+static jai::registrar<MatchResult, MV::Services> _regMatchResult("MatchResult");
+static jai::registrar<AssignPlayersToGame, MV::Services> _regAssignPlayersToGame("AssignPlayersToGame");
+static jai::registrar<GetInitialGameState, MV::Services> _regGetInitialGameState("GetInitialGameState");
+static jai::registrar<SuppliedInitialGameState, MV::Services> _regSuppliedInitialGameState("SuppliedInitialGameState");
+static jai::registrar<RequestBuildingUpgrade, MV::Services> _regRequestBuildingUpgrade("RequestBuildingUpgrade");
+static jai::registrar<RequestFullGameState, MV::Services> _regRequestFullGameState("RequestFullGameState");
 
 #ifdef BINDSTONE_SERVER
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->setEndpoint(ourUrl, ourPort);
+}
+
+void MatchResult::execute(LobbyGameConnectionState* a_connection) {
+	a_connection->recordResult(winner);
 }
 void GameServerStateChange::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->state(ourState == AVAILABLE ? LobbyGameConnectionState::AVAILABLE : LobbyGameConnectionState::OCCUPIED);

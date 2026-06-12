@@ -288,7 +288,7 @@ int main(int, char *[]) {
 		auto tick = managers.timer.delta("tick");
 		server->update(tick);
 		statDisplay.update(tick);
-		std::this_thread::yield();
+		std::this_thread::sleep_for(std::chrono::milliseconds(1)); //don't busy-spin a core
 	}
 
 	return 0;

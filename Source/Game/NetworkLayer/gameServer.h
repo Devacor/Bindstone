@@ -119,10 +119,8 @@ public:
 	}
 
 	void userDisconnected(int64_t a_secret) {
-		if (left->secret == a_secret) {
-			
-		} else if (right->secret == a_secret) {
-
+		if (left && right && (left->secret == a_secret || right->secret == a_secret)) {
+			reportMatchResult(left->secret == a_secret ? TeamSide::RIGHT : TeamSide::LEFT); //forfeit: the remaining side wins
 		}
 		for (auto&& connection : ourUserServer->connections()) {
 			if (!connection->disconnected()) {
@@ -130,6 +128,18 @@ public:
 			}
 		}
 		makeUsAvailableToTheLobby();
+	}
+
+	//Single authoritative end-of-match report; safe to call repeatedly, first call wins.
+	//Forfeits route through here today; an in-game win condition should call this too.
+	void reportMatchResult(TeamSide a_winner) {
+		if (resultReported || !ourInstance) {
+			return;
+		}
+		resultReported = true;
+		if (ourLobbyClient) {
+			ourLobbyClient->send(makeNetworkString<MatchResult>(a_winner));
+		}
 	}
 
 	std::shared_ptr<InGamePlayer> leftPlayer() const {
@@ -193,6 +203,7 @@ private:
 
 	Managers &manager;
 	bool done;
+	bool resultReported = false;
 
 	std::optional<AssignedPlayer> left;
 	std::optional<AssignedPlayer> right;

@@ -33,6 +33,10 @@ struct MatchSeeker : public std::enable_shared_from_this<MatchSeeker> {
 
 	ServerPlayer* player();
 
+	const std::shared_ptr<ServerPlayer>& playerShared() const {
+		return ourPlayer;
+	}
+
 	double tolerance() {
 		if (time < 5.0) {
 			return .025;
@@ -56,6 +60,8 @@ struct MatchSeeker : public std::enable_shared_from_this<MatchSeeker> {
 	double time = 0.0;
 	bool matching = false;
 	LobbyUserConnectionState* state;
+	//captured at creation so the result can be recorded and saved even if the lobby connection drops mid-game
+	std::shared_ptr<ServerPlayer> ourPlayer;
 	MatchQueue& queue;
 	int64_t secret = 0;
 };
@@ -96,12 +102,11 @@ public:
 		seeking.reset();
 	}
 
-	void save() {
-		//commit player to db
-	}
+	void save();
 
 protected:
 	virtual void connectImplementation() override;
+	virtual void disconnectImplementation() override;
 
 private:
 	std::string activeState;
@@ -123,6 +128,8 @@ public:
 	virtual void message(const std::string &a_message);
 
 	void matchMade(std::shared_ptr<MatchSeeker> a_leftPlayer, std::shared_ptr<MatchSeeker> a_rightPlayer);
+
+	void recordResult(TeamSide a_winner);
 
 	LobbyServer& server() {
 		return ourServer;
@@ -235,7 +242,7 @@ public:
 						double currentBest; std::shared_ptr<MatchSeeker> opponent;
 						std::tie(opponent, currentBest) = opponentFromIndex(i, current);
 
-						if (opponent && (currentBest <= current->tolerance())) {
+						if (opponent && (currentBest <= current->tolerance()) && (currentBest <= opponent->tolerance())) {
 							if (auto opponentLifespan = opponent->lifespan.lock()) {
 								std::cout << "Matching [" << current->player()->client->handle << "] vs [" << opponent->player()->client->handle << "]" << std::endl;
 								current->matching = true;
@@ -265,6 +272,7 @@ public:
 			if (auto seekerCompare = seekers[j].lock()) {
 				if (auto seekerLifespan = seekerCompare->lifespan.lock()) {
 					if (!seekerCompare->matching) {
+						--remainingComparisons;
 						auto difference = current->player()->queue(ourId).skillDifference(seekerCompare->player()->queue(ourId));
 						if (difference < currentBest) {
 							currentBest = difference;
@@ -345,6 +353,9 @@ public:
 			return normalQueue;
 		}
 	}
+
+	//serializes on the calling thread, runs the UPDATE on the db pool
+	void savePlayer(const std::shared_ptr<ServerPlayer> &a_player);
 
 	LobbyGameConnectionState* availableGameServer() {
 		auto foundConnection = boolinq::from(ourGameServer->connections()).firstOrDefault([](const auto& connection) {

@@ -8,6 +8,13 @@
 #include "Game/player.h"
 #include "MV/Serialization/serialize.h"
 
+#include <jaiscript/core/registrar.hpp>
+
+static jai::registrar<CreatePlayer, MV::Services> _regCreatePlayer("CreatePlayer");
+static jai::registrar<LoginRequest, MV::Services> _regLoginRequest("LoginRequest");
+static jai::registrar<FindMatchRequest, MV::Services> _regFindMatchRequest("FindMatchRequest");
+static jai::registrar<ExpectedPlayersNoted, MV::Services> _regExpectedPlayersNoted("ExpectedPlayersNoted");
+
 
 #ifdef BINDSTONE_SERVER
 std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
@@ -181,6 +188,10 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 }
 
 void FindMatchRequest::execute(LobbyUserConnectionState* a_connection) {
+	if (!a_connection->authenticated()) {
+		a_connection->connection()->send(makeNetworkString<IllegalResponse>("Not logged in."));
+		return;
+	}
 	a_connection->state("finding");
 	a_connection->seekMatch(a_connection->server().queue(type));
 }

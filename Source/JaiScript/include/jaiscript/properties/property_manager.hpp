@@ -26,6 +26,10 @@ namespace jai {
 	namespace serialization {
 		class any_archive_writer;
 		class any_archive_reader;
+		// Defined in serialization/polymorphic.hpp, included at the bottom of this header
+		// (same pattern as registrar.hpp): implicit polymorphic registration for
+		// property_owner types.
+		template<typename T> void try_auto_register_implicit();
 	}
 
 	class property_manager {
@@ -219,7 +223,19 @@ namespace jai {
 		}
 
 	private:
+		// Serialization identity, implicitly: every property_owner type registers its
+		// class name with the polymorphic registry at program start (odr-used below, so
+		// the entry exists before main — load factories must be ready before the first
+		// construction). An explicit jai::registrar<T, Ctx>("Name") always takes
+		// precedence; use it for custom names, template types, or a binary that loads a
+		// type it never constructs (only construction odr-uses this member).
+		static inline const bool _jai_poly_registered = [] {
+			serialization::try_auto_register_implicit<Derived>();
+			return true;
+		}();
+
 		void register_inheritance() {
+			(void)_jai_poly_registered;
 			// Ensure inheritance is registered (runs once per type)
 			static const auto _inheritance_registered = []() {
 				if constexpr (sizeof...(Bases) > 0) {
@@ -349,3 +365,10 @@ namespace jai {
 	inline constexpr bool has_typed_property_owner_v = has_property_owner_v<T>;
 
 } // namespace jai
+
+// Implicit polymorphic registration rides in with the registry definition (same pattern
+// as registrar.hpp): forward-declared above, defined here. archive_dispatch.hpp supplies
+// the any_archive dispatch() bodies the registration factories instantiate (see the note
+// at the bottom of polymorphic.hpp).
+#include <jaiscript/serialization/polymorphic.hpp>
+#include <jaiscript/serialization/archive_dispatch.hpp>

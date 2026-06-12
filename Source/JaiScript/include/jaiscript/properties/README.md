@@ -175,6 +175,31 @@ jai::serialization::binary_archive_reader reader(buffer);
 // ... same as JSON
 ```
 
+## Polymorphic serialization — it just works
+
+Every `property_owner` type registers itself with `jai::serialization::polymorphic_registry`
+at program start, so `shared_ptr<Base>` round-trips get a `$type` tag and reconstruct the
+correct dynamic type with **zero extra code**. Rules:
+
+- The `$type` name is the bare class identifier (`"Player"` for `class Player`), parsed from
+  the compiler signature — never a mangled `typeid` name, identical on MSVC/GCC/Clang.
+- Pin a custom name in-class when the identifier might change or for template
+  instantiations (which have no stable derived spelling and are otherwise skipped):
+
+  ```cpp
+  static constexpr const char* jai_type_name = "MyStableName";
+  ```
+
+- An explicit `jai::registrar<T, Ctx>("Name")` (which also registers script bindings)
+  always takes precedence over the implicit name, regardless of static-init order. Both
+  feed the same registry — there is exactly one source of serialization identity.
+- Saving an *unregistered* polymorphic type through a base pointer throws
+  `serialization_error` instead of silently slicing.
+- Implicit registration is keyed to construction code: a binary that only ever *loads* a
+  type and never constructs it anywhere should keep an explicit `jai::registrar`.
+- Name collisions (two types deriving the same name) are reported on stderr and the later
+  implicit registration is skipped — disambiguate with `jai_type_name` or a registrar.
+
 ## Inheritance
 
 The `property_owner` template uses CRTP (Curiously Recurring Template Pattern) and supports inheritance tracking for JaiScript binding:

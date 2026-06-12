@@ -746,9 +746,15 @@ public:
 static jai::registrar<RenamedRegType, void> _renamedRegistration("CustomRegName");
 
 namespace {
-	// Anonymous-namespace types have compiler-dependent spellings AND no cross-TU
-	// identity; implicit naming must refuse them.
+	// Anonymous-namespace spellings differ per compiler; the canonical AN segment must
+	// make the derived name identical everywhere ("...::AN::AnonNamespaceProbe").
 	struct AnonNamespaceProbe { virtual ~AnonNamespaceProbe() = default; };
+
+	// And a property_owner in an anonymous namespace must round-trip implicitly.
+	class AnonImplicitDerived : public jai::property_owner<AnonImplicitDerived, ImplicitRegBase> {
+	public:
+		JAI_PROPERTY((int), anonValue, 5);
+	};
 }
 
 // In-class name pin: implicit registration must use jai_type_name when declared
@@ -790,8 +796,23 @@ public:
         test("static_type_name_extraction", [&]() {
             check_eq(std::string("ImplicitRegBase"), std::string(jai::detail::static_unqualified_type_name<ImplicitRegBase>()));
             check_eq(std::string("jai::foundry::tests::ImplicitRegBase"), std::string(jai::detail::static_type_name<ImplicitRegBase>()));
-            check(jai::detail::static_unqualified_type_name<std::vector<int>>().empty(), "template instantiations must be excluded from implicit naming");
-            check(jai::detail::static_unqualified_type_name<AnonNamespaceProbe>().empty(), "anonymous-namespace types must be excluded from implicit naming");
+            check_eq(std::string("ImplicitRegBase"), jai::detail::registration_type_name<ImplicitRegBase>());
+            check(jai::detail::registration_type_name<std::vector<int>>().empty(), "template instantiations must be excluded from implicit naming");
+            // The compiler-specific anonymous-namespace marker must canonicalize to AN.
+            check_eq(std::string("jai::foundry::tests::AN::AnonNamespaceProbe"), jai::detail::registration_type_name<AnonNamespaceProbe>());
+        });
+
+        test("anonymous_namespace_property_owner_round_trip", [&]() {
+            auto eng = engine::make();
+            std::shared_ptr<ImplicitRegBase> original = std::make_shared<AnonImplicitDerived>();
+
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            auto json = w.str();
+            check(json.find("AN::AnonImplicitDerived") != std::string::npos, "expected the canonical AN name: " + json);
+
+            auto loaded = roundtrip_json(*eng, original);
+            check(std::dynamic_pointer_cast<AnonImplicitDerived>(loaded) != nullptr, "dynamic type lost for anonymous-namespace type");
         });
 
         test("property_owner_implicit_type_tag_written", [&]() {

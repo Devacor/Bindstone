@@ -41,7 +41,7 @@ int main(int, char *[]) {
 			managers.pool.run();
 			auto tick = managers.timer.delta("tick");
 			server->update(tick);
-			std::this_thread::yield();
+			std::this_thread::sleep_for(std::chrono::milliseconds(1)); //don't busy-spin a core
 		}
 	} catch (std::exception & e) {
 		MV::error("Exception Toasted the Server: ", e.what());

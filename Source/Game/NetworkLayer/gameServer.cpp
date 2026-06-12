@@ -124,6 +124,7 @@ void GameServer::assign(const AssignedPlayer &a_left, const AssignedPlayer &a_ri
 	left = a_left;
 	right = a_right;
 	queueId = a_queueId;
+	resultReported = false;
 	ourInstance = ServerGameInstance::make(left->player, right->player, *this);
 }
 #endif

@@ -47,6 +47,27 @@ private:
 	State ourState = AVAILABLE;
 };
 
+//Game server -> lobby when a match concludes. Today the trigger is forfeit-by-disconnect
+//(GameServer::userDisconnected); an in-game win condition should call
+//GameServer::reportMatchResult when one exists. NEUTRAL = draw.
+class MatchResult : public NetworkAction {
+public:
+	MatchResult() {}
+	MatchResult(TeamSide a_winner) : winner(a_winner) {}
+
+#ifdef BINDSTONE_SERVER
+	virtual void execute(LobbyGameConnectionState* a_connection) override;
+#endif
+
+	template<class Archive>
+	void serialize(Archive& archive) {
+		archive(JAI_NVP(winner));
+		NetworkAction::serialize(archive);
+	}
+
+	TeamSide winner = TeamSide::NEUTRAL;
+};
+
 struct AssignedPlayer {
 	AssignedPlayer() {}
 	AssignedPlayer(const AssignedPlayer &a_rhs) = default;

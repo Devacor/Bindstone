@@ -3,6 +3,14 @@
 #include "Game/player.h"
 #include "MV/Serialization/serialize.h"
 
+#include <jaiscript/core/registrar.hpp>
+
+static jai::registrar<MessageAction, MV::Services> _regMessageAction("MessageAction");
+static jai::registrar<LoginResponse, MV::Services> _regLoginResponse("LoginResponse");
+static jai::registrar<IllegalResponse, MV::Services> _regIllegalResponse("IllegalResponse");
+static jai::registrar<ServerDetails, MV::Services> _regServerDetails("ServerDetails");
+static jai::registrar<MatchedResponse, MV::Services> _regMatchedResponse("MatchedResponse");
+
 
 void LoginResponse::execute(Game& a_game) {
 	std::cout << "Login: [" << message << "] Success: [" << (success ? "true" : "false") << "]" << std::endl;

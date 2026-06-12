@@ -17,6 +17,7 @@ namespace MV {
 	}
 	class PackedTextureDefinition;
 	class TexturePack : public std::enable_shared_from_this<TexturePack> {
+		friend jai::access;
 		friend class jai::serialization::access;
 	public:
 		struct ShapeDefinition {
@@ -26,14 +27,12 @@ namespace MV {
 			std::shared_ptr<TextureDefinition> texture;
 
 			template<class Archive>
-			void serialize(Archive & archive, std::uint32_t const a_version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					jai::serialization::make_nvp("id", id),
-					jai::serialization::make_nvp("bounds", bounds));
-				if (a_version > 0) {
-					archive(jai::serialization::make_nvp("slice", slice));
-				}
-				archive(jai::serialization::make_nvp("texture", texture));
+					jai::serialization::make_nvp("bounds", bounds),
+					jai::serialization::make_nvp("slice", slice),
+					jai::serialization::make_nvp("texture", texture));
 			}
 		};
 
@@ -120,15 +119,15 @@ namespace MV {
 
 		bool dirty;
 
+	public:
+		// Public so jai's serializable-trait detection (SFINAE, blind to friends) can see them.
 		template<class Archive>
-		void serialize(Archive & archive, std::uint32_t const version){
+		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			if(packedTexture.expired()){
 				packedTexture.reset();
 			}
-			if (version > 0) {
-				archive(jai::serialization::make_nvp("id", id));
-			}
 			archive(
+				jai::serialization::make_nvp("id", id),
 				jai::serialization::make_nvp("packedTexture", packedTexture),
 				jai::serialization::make_nvp("shapes", shapes),
 				jai::serialization::make_nvp("maximumExtent", maximumExtent),
@@ -137,10 +136,28 @@ namespace MV {
 				jai::serialization::make_nvp("consolidatedTexture", consolidatedTexture));
 		}
 
+		template<typename Archive>
+		static void load_and_construct(Archive& ar, jai::serialization::construct<TexturePack>& construct) {
+			auto* services = ar.template get_user_context<MV::Services>();
+			auto* renderer = services->template get<MV::Draw2D>();
+			std::string id;
+			ar.serialize("id", id);
+			construct(id, renderer);
+			ar.serialize("packedTexture", construct->packedTexture);
+			ar.serialize("shapes", construct->shapes);
+			ar.serialize("maximumExtent", construct->maximumExtent);
+			ar.serialize("contentExtent", construct->contentExtent);
+			ar.serialize("containers", construct->containers);
+			ar.serialize("consolidatedTexture", construct->consolidatedTexture);
+			construct->initializeAfterLoad();
+		}
+
+	private:
 		void initializeAfterLoad();
 	};
 
 	class PackedTextureDefinition : public DynamicTextureDefinition {
+		friend jai::access;
 		friend class jai::serialization::access;
 	public:
 		static std::shared_ptr<PackedTextureDefinition> make(const std::string &a_name, const std::shared_ptr<TexturePack> &a_texturePack, const Size<int> &a_size, const Color &a_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f}){
@@ -156,10 +173,26 @@ namespace MV {
 			texturePack(a_texturePack){
 		}
 
+	public:
+		// Public so jai's serializable-trait detection (SFINAE, blind to friends) can see them.
 		template<class Archive>
 		void serialize(Archive & archive, std::uint32_t const version){
 			archive(jai::serialization::make_nvp("texturePack", texturePack));
 			DynamicTextureDefinition::serialize(archive, version);
+		}
+
+		template<typename Archive>
+		static void load_and_construct(Archive& ar, jai::serialization::construct<PackedTextureDefinition>& construct) {
+			std::shared_ptr<TexturePack> texturePack;
+			ar.serialize("texturePack", texturePack);
+			Color backgroundColor;
+			ar.serialize("backgroundColor", backgroundColor);
+			construct("", texturePack, Size<int>(), backgroundColor);
+			ar.serialize("name", construct->textureName);
+			ar.serialize("size", construct->textureSize);
+			ar.serialize("contentSize", construct->desiredSize);
+			ar.serialize("scale", construct->logicalScale);
+			ar.serialize("handles", construct->handles);
 		}
 
 		void reloadImplementation() override {

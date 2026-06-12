@@ -414,7 +414,13 @@ namespace MV {
 		// JaiScript serialization implementations for Anchors (using requires clause)
 		template<typename Archive>
 		void save(Archive& ar, const Anchors& anchors) requires jai::serialization::jai_archive<Archive> {
-			// For JaiScript, serialize simplified version (no parentId lookup complexity)
+			// Anchor parents resolve by component id at postLoadInitialize (same contract as the
+			// old cereal format); a parent outside the saved subtree must carry an id to survive.
+			std::string parentId;
+			if (auto lockedParent = anchors.parentReference.lock()) {
+				parentId = lockedParent->id();
+			}
+			ar(jai::serialization::make_nvp("parentId", parentId));
 			ar(jai::serialization::make_nvp("anchors", anchors.parentAnchors));
 			ar(jai::serialization::make_nvp("offset", anchors.ourOffset));
 			ar(jai::serialization::make_nvp("pivot", anchors.pivotPercent));
@@ -423,6 +429,9 @@ namespace MV {
 
 		template<typename Archive>
 		void load(Archive& ar, Anchors& anchors) requires jai::serialization::jai_archive<Archive> {
+			if (ar.has_property("parentId")) { // older jai scenes predate anchor-parent persistence
+				ar(jai::serialization::make_nvp("parentId", anchors.parentIdLoaded));
+			}
 			ar(jai::serialization::make_nvp("anchors", anchors.parentAnchors));
 			ar(jai::serialization::make_nvp("offset", anchors.ourOffset));
 			ar(jai::serialization::make_nvp("pivot", anchors.pivotPercent));

@@ -244,6 +244,81 @@ static void RunSceneLoadBenchmark(bool a_headless) {
 	timeLoad("[JaiScript map.scene2]", [&] { return MV::Scene::Node::load("Scenes/map.scene2", managers.services, true); });
 }
 
+// Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
+// jai asset format end to end. Run: BindstoneClient.exe -verifyassets
+static void RunAssetVerification() {
+	Managers managers({ "", "" });
+	auto jaiEngine = jai::engine::make();
+	jai::stdlib::register_all(*jaiEngine);
+	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	static MV::TapDevice verifyMouse;
+	managers.services.connect(&verifyMouse);
+	managers.renderer.makeHeadless();
+	if (!managers.renderer.initialize(MV::Size<int>(1280, 720))) {
+		std::cout << "[verify] renderer init failed\n";
+		return;
+	}
+	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);
+	MV::FontDefinition::make(managers.textLibrary, "small", "Fonts/Verdana.ttf", 9);
+	MV::FontDefinition::make(managers.textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	MV::initializeSpineBindings();
+
+	auto fakeRoot = MV::Scene::Node::make(managers.renderer);
+	fakeRoot->attach<MV::Scene::Sprite>()->hide()->id("ScreenScaler");
+
+	const char* nodeFiles[] = {
+		"Scenes/map.scene",
+		"Assets/Interface/Login/view.scene",
+		"Assets/Interface/Main/view.scene",
+		"Assets/BattleEffects/Missile/Default/unit.prefab",
+		"Assets/Buildings/Life/Default/building.prefab",
+		"Assets/Buildings/Void/Default/building.prefab",
+		"Assets/Creatures/Air_T1/Default/unit.prefab",
+		"Assets/Creatures/Decay_T1/Default/unit.prefab",
+		"Assets/Creatures/Earth_Pebble/Default/unit.prefab",
+		"Assets/Creatures/Earth_T1/Default/unit.prefab",
+		"Assets/Creatures/Fire_T1/Default/unit.prefab",
+		"Assets/Creatures/Life_T1/Default/unit.prefab",
+		"Assets/Creatures/Lightning_T1/Default/unit.prefab",
+		"Assets/Creatures/VoidElemental/Default/unit.prefab",
+		"Assets/Creatures/Void_T1/Default/unit.prefab",
+		"Assets/Creatures/Water_DropletHeal/Default/unit.prefab",
+		"Assets/Creatures/Water_DropletHurt/Default/unit.prefab",
+		"Assets/Creatures/Water_T1/Default/unit.prefab",
+		"Assets/Prefabs/Button.prefab",
+		"Assets/Prefabs/Creatures/voidElemental/voidElemental.prefab",
+		"Assets/Prefabs/Life_T1.prefab",
+		"Assets/Prefabs/LoginName.prefab",
+		"Assets/Prefabs/missile.prefab",
+		"Assets/Prefabs/Missiles/missile.prefab",
+		"Assets/Prefabs/SimpleButton.prefab",
+	};
+	int passed = 0, failed = 0;
+	for (const char* path : nodeFiles) {
+		try {
+			auto root = MV::Scene::Node::load(path, managers.services, false);
+			fakeRoot->add(root);
+			root->postLoadStep();
+			std::cout << "[OK]   " << path << " (root=" << root->id() << ")" << std::endl;
+			root->removeFromParent();
+			++passed;
+		} catch (std::exception& e) {
+			std::cout << "[FAIL] " << path << ": " << e.what() << std::endl;
+			++failed;
+		}
+	}
+	try {
+		GameData catalogCheck(managers, false);
+		std::cout << "[OK]   Catalogs (creatures/buildings/battleEffects)" << std::endl;
+		++passed;
+	} catch (std::exception& e) {
+		std::cout << "[FAIL] Catalogs: " << e.what() << std::endl;
+		++failed;
+	}
+	std::cout << "\n[verify] " << passed << " passed, " << failed << " failed" << std::endl;
+}
+
 // CPU baseline for the particle hot loops (single-threaded, no GL): Particle::update (the per-frame
 // per-particle simulation, incl. the per-particle TransformMatrix) and the vertex-generation loop
 // from loadParticlesToPoints. Establishes a "before" number for perf work. Run: BindstoneClient.exe -emitterbench
@@ -365,6 +440,10 @@ int main(int argc, char *argv[]) {
 		}
 		if (strcmp(argv[i], "-loadbenchgl") == 0) {
 			RunSceneLoadBenchmark(false);
+			return 0;
+		}
+		if (strcmp(argv[i], "-verifyassets") == 0) {
+			RunAssetVerification();
 			return 0;
 		}
 		if (strcmp(argv[i], "-emitterbench") == 0) {

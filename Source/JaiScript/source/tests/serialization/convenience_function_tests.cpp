@@ -128,6 +128,14 @@ public:
 // Test Classes - Member serialize() function (unified save/load)
 // ============================================================================
 
+struct catalog_like_root_obj {
+	std::vector<int64_t> data;
+	template<typename Archive>
+	void serialize(Archive& ar) {
+		ar(jai::serialization::make_nvp("data", data));
+	}
+};
+
 class member_serialize_obj {
 public:
     double value = 0.0;
@@ -209,6 +217,22 @@ public:
     convenience_function_tests() : suite("Convenience Functions") {}
 
     void forge_tests() override {
+        test("root_object_member_serialize_read", [this]() {
+            // Reading a foreign root object {"data": [...]} into a member-serialize type:
+            // ar(obj) is inline by design, so the caller enters the document root explicitly.
+            auto eng = engine::make();
+            std::string text = "{\"data\": [1, 2, 3]}";
+            jai::serialization::json_archive_reader ar(text, eng.get());
+            catalog_like_root_obj loaded;
+            std::string rootType;
+            uint32_t rootVersion = 0;
+            check(ar.begin_object(rootType, rootVersion), "fresh reader enters document root");
+            loaded.serialize(ar);
+            ar.end_object();
+            check_eq(size_t(3), loaded.data.size(), "root object member serialize element count");
+            check_eq(int64_t(2), loaded.data[1], "root object member serialize element value");
+        });
+
         // ================================================================
         // RAW BASE64 TESTS (no serialization, just string encoding)
         // ================================================================

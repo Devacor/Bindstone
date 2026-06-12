@@ -74,7 +74,11 @@ public:
 		// Catalogs load before the shared engine is connected to Services; plain data needs no shared state
 		auto catalogEngine = jai::engine::make();
 		jai::serialization::json_archive_reader archive(contents, catalogEngine.get());
+		std::string rootType;
+		uint32_t rootVersion = 0;
+		archive.begin_object(rootType, rootVersion); // ar(obj) is inline; enter the document root ourselves
 		serialize(archive);
+		archive.end_object();
 	}
 
 	const DataType& data(const std::string &a_id) const {
@@ -87,10 +91,7 @@ public:
 		MV::require<MV::ResourceException>(false, "Failed to locate : ", a_id);
 		throw; //suppress no return warning.
 	}
-private:
-	Catalog< DataType>() {
-	}
-
+	// Public so jai's serializable-trait detection (SFINAE, blind to friends) can see it.
 	template<class Archive>
 	void serialize(Archive& archive) {
 		archive(jai::serialization::make_nvp("data", dataCollection));
@@ -98,6 +99,10 @@ private:
 			item.isServer = isServer;
 		}
 	}
+private:
+	Catalog< DataType>() {
+	}
+
 	bool isServer;
 	std::vector<DataType> dataCollection;
 };

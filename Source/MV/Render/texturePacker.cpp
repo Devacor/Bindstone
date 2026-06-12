@@ -4,6 +4,10 @@
 
 #include "sharedTextures.h"
 
+#include <jaiscript/core/registrar.hpp>
+static jai::registrar<MV::PackedTextureDefinition, MV::Services> _regPackedTexDef("PackedTextureDefinition");
+static jai::registrar<MV::TexturePack, MV::Services> _regTexturePack("TexturePack");
+
 namespace MV{
 
 	std::shared_ptr<MV::TexturePack> TexturePack::make(const std::string &a_id, MV::Draw2D* a_renderer, const Color &a_color, const Size<int> &a_maximumExtent) {

@@ -11,6 +11,7 @@
 #include "SDL_ttf.h"
 #include "MV/Render/points.h"
 #include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/construct.hpp>
 
 namespace MV {
 	namespace Scene{
@@ -293,6 +294,7 @@ namespace MV {
 
 	///////////////////////////////////
 	class FormattedText{
+		friend jai::access;
 		friend class jai::serialization::access;
 		friend FormattedLine;
 	public:
@@ -376,10 +378,17 @@ namespace MV {
 			string(a_rhs.string());
 			return *this;
 		}
-	private:
+	public:
+		// Public so jai's serializable-trait detection (SFINAE, blind to friends) can see them.
 		template<class Archive>
-		void serialize(Archive & archive, std::uint32_t const a_version) {
-			auto str = string();
+		void serialize(Archive & archive) { serialize(archive, 0); }
+
+		template<class Archive>
+		void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			std::string str;
+			if constexpr (jai::serialization::is_save<Archive>) {
+				str = string();
+			}
 			archive(
 				JAI_NVP(minimumTextLineHeight),
 				JAI_NVP(showAsPassword),
@@ -389,8 +398,38 @@ namespace MV {
 				JAI_NVP(textJustification),
 				jai::serialization::make_nvp("string", str)
 			);
+			if constexpr (!jai::serialization::is_save<Archive>) {
+				string(str);
+			}
 		}
 
+		template<typename Archive>
+		static void load_and_construct(Archive& ar, jai::serialization::construct<FormattedText>& construct) {
+			auto* services = ar.template get_user_context<MV::Services>();
+			auto& textLibrary = *services->template get<MV::TextLibrary>();
+
+			PointPrecision minimumTextLineHeight = 0.0f;
+			bool showAsPassword = false;
+			std::string defaultStateIdentifier;
+			PointPrecision textWidth = 0.0f;
+			TextWrapMethod textWrapping = TextWrapMethod::NONE;
+			TextJustification textJustification = TextJustification::LEFT;
+			std::string str;
+			ar.serialize("minimumTextLineHeight", minimumTextLineHeight);
+			ar.serialize("showAsPassword", showAsPassword);
+			ar.serialize("defaultStateIdentifier", defaultStateIdentifier);
+			ar.serialize("textWidth", textWidth);
+			ar.serialize("textWrapping", textWrapping);
+			ar.serialize("textJustification", textJustification);
+			ar.serialize("string", str);
+
+			construct(textLibrary, defaultStateIdentifier, textWidth, textWrapping, textJustification);
+			construct->minimumTextLineHeight = minimumTextLineHeight;
+			construct->showAsPassword = showAsPassword;
+			construct->append(str);
+		}
+
+	private:
 		mutable TextLibrary *library;
 		TextWrapMethod textWrapping;
 		std::vector<std::shared_ptr<FormattedLine>> lines;

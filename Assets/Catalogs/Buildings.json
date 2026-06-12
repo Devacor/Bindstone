@@ -1,311 +1,684 @@
+
 {
-    "data": [
+    "data": 
+    [
         {
-            "cereal_class_version": 0,
             "id": "life",
-            "skins": [
-                {"cereal_class_version": 0, "id": "tmp", "costs": [{"values":[0,0,325]}]}
+            "skins": 
+            [
+                {
+                    "id": "tmp",
+                    "costs": 
+                    [
+                        {
+                            "values": 
+                            [0,
+                                0,
+                                325
+                            ]
+                        }
+                    ]
+                }
             ],
-            "costs": [
-                {"values": [0,10000,0]},
-                {"values": [0,0,475]},
-                {"values": [0,6000,325]}
+            "costs": 
+            [
+                {
+                    "values": 
+                    [0,
+                        10000,
+                        0
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        0,
+                        475
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        6000,
+                        325
+                    ]
+                }
             ],
-            "game": {
-                "cereal_class_version": 0,
+            "game": 
+            {
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [ 
-                    {"ptr_wrapper": { "valid": 1, "data": {
-                        "id": "T1",
-                        "cost": 75,
-                        "income": 30,
-                        "upgrades": [
-                            {"ptr_wrapper": {"valid": 1, "data": {
-                                "id": "T2_0",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }},
-                            {"ptr_wrapper": {"valid": 1,"data": {
-                                "id": "T2_1",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }}
-                        ]
-                    }}} 
+                "upgrades": 
+                [
+                    {
+                        "$val": 
+                        {
+                            "id": "T1",
+                            "cost": 75,
+                            "income": 30,
+                            "upgrades": 
+                            [
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_0",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                },
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_1",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         },
         {
-            "cereal_class_version": 0,
             "id": "decay",
-            "skins": [
-                {"cereal_class_version": 0, "id": "tmp", "costs": [{"values":[0,0,325]}]}
+            "skins": 
+            [
+                {
+                    "id": "tmp",
+                    "costs": 
+                    [
+                        {
+                            "values": 
+                            [0,
+                                0,
+                                325
+                            ]
+                        }
+                    ]
+                }
             ],
-            "costs": [
-                {"values": [0,10000,0]},
-                {"values": [0,0,475]},
-                {"values": [0,6000,325]}
+            "costs": 
+            [
+                {
+                    "values": 
+                    [0,
+                        10000,
+                        0
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        0,
+                        475
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        6000,
+                        325
+                    ]
+                }
             ],
-            "game": {
+            "game": 
+            {
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [ 
-                    {"ptr_wrapper": { "valid": 1, "data": {
-                        "id": "T1",
-                        "cost": 75,
-                        "income": 30,
-                        "upgrades": [
-                            {"ptr_wrapper": {"valid": 1, "data": {
-                                "id": "T2_0",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }},
-                            {"ptr_wrapper": {"valid": 1,"data": {
-                                "id": "T2_1",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }}
-                        ]
-                    }}} 
+                "upgrades": 
+                [
+                    {
+                        "$val": 
+                        {
+                            "id": "T1",
+                            "cost": 75,
+                            "income": 30,
+                            "upgrades": 
+                            [
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_0",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                },
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_1",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         },
         {
-            "cereal_class_version": 0,
             "id": "void",
-            "skins": [
-                {"cereal_class_version": 0, "id": "tmp", "costs": [{"values":[0,0,325]}]}
+            "skins": 
+            [
+                {
+                    "id": "tmp",
+                    "costs": 
+                    [
+                        {
+                            "values": 
+                            [0,
+                                0,
+                                325
+                            ]
+                        }
+                    ]
+                }
             ],
-            "costs": [
-                {"values": [0,10000,0]},
-                {"values": [0,0,475]},
-                {"values": [0,6000,325]}
+            "costs": 
+            [
+                {
+                    "values": 
+                    [0,
+                        10000,
+                        0
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        0,
+                        475
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        6000,
+                        325
+                    ]
+                }
             ],
-            "game": {
+            "game": 
+            {
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [ 
-                    {"ptr_wrapper": { "valid": 1, "data": {
-                        "id": "T1",
-                        "cost": 75,
-                        "income": 30,
-                        "upgrades": [
-                            {"ptr_wrapper": {"valid": 1, "data": {
-                                "id": "T2_0",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }},
-                            {"ptr_wrapper": {"valid": 1,"data": {
-                                "id": "T2_1",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }}
-                        ]
-                    }}} 
+                "upgrades": 
+                [
+                    {
+                        "$val": 
+                        {
+                            "id": "T1",
+                            "cost": 75,
+                            "income": 30,
+                            "upgrades": 
+                            [
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_0",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                },
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_1",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         },
         {
-            "cereal_class_version": 0,
             "id": "earth",
-            "skins": [
-                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            "skins": 
+            [
+                {
+                    "id": "tmp",
+                    "costs": 
+                    [
+                        {
+                            "values": 
+                            [0,
+                                0,
+                                325
+                            ]
+                        }
+                    ]
+                }
             ],
-            "costs": [
-                {"values": [0,10000,0]},
-                {"values": [0,0,475]},
-                {"values": [0,6000,325]}
+            "costs": 
+            [
+                {
+                    "values": 
+                    [0,
+                        10000,
+                        0
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        0,
+                        475
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        6000,
+                        325
+                    ]
+                }
             ],
-            "game": {
+            "game": 
+            {
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [ 
-                    {"ptr_wrapper": { "valid": 1, "data": {
-                        "id": "T1",
-                        "cost": 75,
-                        "income": 30,
-                        "upgrades": [
-                            {"ptr_wrapper": {"valid": 1, "data": {
-                                "id": "T2_0",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }},
-                            {"ptr_wrapper": {"valid": 1,"data": {
-                                "id": "T2_1",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }}
-                        ]
-                    }}} 
+                "upgrades": 
+                [
+                    {
+                        "$val": 
+                        {
+                            "id": "T1",
+                            "cost": 75,
+                            "income": 30,
+                            "upgrades": 
+                            [
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_0",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                },
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_1",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         },
         {
-            "cereal_class_version": 0,
             "id": "fire",
-            "skins": [
-                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            "skins": 
+            [
+                {
+                    "id": "tmp",
+                    "costs": 
+                    [
+                        {
+                            "values": 
+                            [0,
+                                0,
+                                325
+                            ]
+                        }
+                    ]
+                }
             ],
-            "costs": [
-                {"values": [0,10000,0]},
-                {"values": [0,0,475]},
-                {"values": [0,6000,325]}
+            "costs": 
+            [
+                {
+                    "values": 
+                    [0,
+                        10000,
+                        0
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        0,
+                        475
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        6000,
+                        325
+                    ]
+                }
             ],
-            "game": {
-                "cereal_class_version": 0,
+            "game": 
+            {
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [ 
-                    {"ptr_wrapper": { "valid": 1, "data": {
-                        "id": "T1",
-                        "cost": 75,
-                        "income": 30,
-                        "upgrades": [
-                            {"ptr_wrapper": {"valid": 1, "data": {
-                                "id": "T2_0",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }},
-                            {"ptr_wrapper": {"valid": 1,"data": {
-                                "id": "T2_1",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }}
-                        ]
-                    }}} 
+                "upgrades": 
+                [
+                    {
+                        "$val": 
+                        {
+                            "id": "T1",
+                            "cost": 75,
+                            "income": 30,
+                            "upgrades": 
+                            [
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_0",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                },
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_1",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         },
         {
-            "cereal_class_version": 0,
             "id": "water",
-            "skins": [
-                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            "skins": 
+            [
+                {
+                    "id": "tmp",
+                    "costs": 
+                    [
+                        {
+                            "values": 
+                            [0,
+                                0,
+                                325
+                            ]
+                        }
+                    ]
+                }
             ],
-            "costs": [
-                {"values": [0,10000,0]},
-                {"values": [0,0,475]},
-                {"values": [0,6000,325]}
+            "costs": 
+            [
+                {
+                    "values": 
+                    [0,
+                        10000,
+                        0
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        0,
+                        475
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        6000,
+                        325
+                    ]
+                }
             ],
-            "game": {
-                "cereal_class_version": 0,
+            "game": 
+            {
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [ 
-                    {"ptr_wrapper": { "valid": 1, "data": {
-                        "id": "T1",
-                        "cost": 75,
-                        "income": 30,
-                        "upgrades": [
-                            {"ptr_wrapper": {"valid": 1, "data": {
-                                "id": "T2_0",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }},
-                            {"ptr_wrapper": {"valid": 1,"data": {
-                                "id": "T2_1",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }}
-                        ]
-                    }}} 
+                "upgrades": 
+                [
+                    {
+                        "$val": 
+                        {
+                            "id": "T1",
+                            "cost": 75,
+                            "income": 30,
+                            "upgrades": 
+                            [
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_0",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                },
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_1",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         },
         {
-            "cereal_class_version": 0,
             "id": "air",
-            "skins": [
-                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            "skins": 
+            [
+                {
+                    "id": "tmp",
+                    "costs": 
+                    [
+                        {
+                            "values": 
+                            [0,
+                                0,
+                                325
+                            ]
+                        }
+                    ]
+                }
             ],
-            "costs": [
-                {"values": [0,10000,0]},
-                {"values": [0,0,475]},
-                {"values": [0,6000,325]}
+            "costs": 
+            [
+                {
+                    "values": 
+                    [0,
+                        10000,
+                        0
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        0,
+                        475
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        6000,
+                        325
+                    ]
+                }
             ],
-            "game": {
-                "cereal_class_version": 0,
+            "game": 
+            {
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [ 
-                    {"ptr_wrapper": { "valid": 1, "data": {
-                        "id": "T1",
-                        "cost": 75,
-                        "income": 30,
-                        "upgrades": [
-                            {"ptr_wrapper": {"valid": 1, "data": {
-                                "id": "T2_0",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }},
-                            {"ptr_wrapper": {"valid": 1,"data": {
-                                "id": "T2_1",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }}
-                        ]
-                    }}} 
+                "upgrades": 
+                [
+                    {
+                        "$val": 
+                        {
+                            "id": "T1",
+                            "cost": 75,
+                            "income": 30,
+                            "upgrades": 
+                            [
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_0",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                },
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_1",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         },
         {
-            "cereal_class_version": 0,
             "id": "lightning",
-            "skins": [
-                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            "skins": 
+            [
+                {
+                    "id": "tmp",
+                    "costs": 
+                    [
+                        {
+                            "values": 
+                            [0,
+                                0,
+                                325
+                            ]
+                        }
+                    ]
+                }
             ],
-            "costs": [
-                {"values": [0,10000,0]},
-                {"values": [0,0,475]},
-                {"values": [0,6000,325]}
+            "costs": 
+            [
+                {
+                    "values": 
+                    [0,
+                        10000,
+                        0
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        0,
+                        475
+                    ]
+                },
+                {
+                    "values": 
+                    [0,
+                        6000,
+                        325
+                    ]
+                }
             ],
-            "game": {
-                "cereal_class_version": 0,
+            "game": 
+            {
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [ 
-                    {"ptr_wrapper": { "valid": 1, "data": {
-                        "id": "T1",
-                        "cost": 75,
-                        "income": 30,
-                        "upgrades": [
-                            {"ptr_wrapper": {"valid": 1, "data": {
-                                "id": "T2_0",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }},
-                            {"ptr_wrapper": {"valid": 1,"data": {
-                                "id": "T2_1",
-                                "cost": 250,
-                                "income": 60,
-                                "upgrades": []
-                            } }}
-                        ]
-                    }}} 
+                "upgrades": 
+                [
+                    {
+                        "$val": 
+                        {
+                            "id": "T1",
+                            "cost": 75,
+                            "income": 30,
+                            "upgrades": 
+                            [
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_0",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                },
+                                {
+                                    "$val": 
+                                    {
+                                        "id": "T2_1",
+                                        "cost": 250,
+                                        "income": 60,
+                                        "upgrades": 
+                                        [
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         }

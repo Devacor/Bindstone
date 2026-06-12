@@ -15,3 +15,6 @@
 *.PDF	 diff=astextplain
 *.rtf	 diff=astextplain
 *.RTF	 diff=astextplain
+
+# Server config files are parsed line-by-line at runtime; keep LF so no  lands in URLs
+Assets/ServerConfig/*.config text eol=lf

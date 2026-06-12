@@ -206,7 +206,7 @@ LobbyServer::LobbyServer(Managers& a_managers) :
 		})) {
 
 	MV::info("Initialize DB");
-	auto databaseConfig = MV::explode(MV::fileContents("ServerConfig/database.config"), [](char c) { return c == '\n'; });
+	auto databaseConfig = MV::fileLines("ServerConfig/database.config");
 	auto connectionString = (!databaseConfig.empty() && !databaseConfig[0].empty()) ? databaseConfig[0] : "host=localhost port=5432 dbname=bindstone user=bindstone";
 	db = std::make_shared<pqxx::connection>(connectionString);
 	MV::info("DB Connected");

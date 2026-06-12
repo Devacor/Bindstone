@@ -321,7 +321,7 @@ public:
 
 	// ServerConfig/smtp.config lines: host, port, user, password. Absent file = email disabled.
 	void email(const MV::Email::Addresses &a_addresses, const std::string &a_title, const std::string &a_message) {
-		auto smtpConfig = MV::explode(MV::fileContents("ServerConfig/smtp.config"), [](char c) { return c == '\n'; });
+		auto smtpConfig = MV::fileLines("ServerConfig/smtp.config");
 		if (smtpConfig.size() < 4) {
 			MV::warning("Email disabled (no ServerConfig/smtp.config), skipped: ", a_title);
 			return;

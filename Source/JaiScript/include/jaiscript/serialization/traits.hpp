@@ -33,8 +33,10 @@ namespace serialization {
 	template<typename T> class construct_unique;
 }
 
-// Friend class for serialization access. Defined here (not construct.hpp) so it is
-// complete before archive_impl.hpp's trait specializations name ::jai::access.
+// THE friend class for serialization access — the single class every trait probe and
+// dispatch routes through. Defined here (not construct.hpp) so it is complete before
+// archive_impl.hpp's trait specializations name it. Private serialize/save/load and
+// load_and_construct members need exactly one declaration: `friend jai::access;`
 class access {
 public:
 	template<typename T, typename... Args>
@@ -58,6 +60,18 @@ public:
 	static auto load_and_construct(Archive& ar, serialization::construct_unique<T>& c)
 		-> decltype(T::load_and_construct(ar, c)) {
 		return T::load_and_construct(ar, c);
+	}
+
+	// Explicit-T forms for callers with custom construct wrappers
+	template<typename T, typename Archive, typename Construct>
+	static auto load_and_construct(Archive& ar, Construct& c)
+		-> decltype(T::load_and_construct(ar, c)) {
+		return T::load_and_construct(ar, c);
+	}
+	template<typename T, typename Archive, typename Construct>
+	static auto load_and_construct(Archive& ar, Construct& c, std::uint32_t version)
+		-> decltype(T::load_and_construct(ar, c, version)) {
+		return T::load_and_construct(ar, c, version);
 	}
 
 	// Member save/load/serialize accessors — allows SFINAE detection of protected methods.

@@ -18,7 +18,6 @@ namespace MV {
 	class PackedTextureDefinition;
 	class TexturePack : public std::enable_shared_from_this<TexturePack> {
 		friend jai::access;
-		friend class jai::serialization::access;
 	public:
 		struct ShapeDefinition {
 			std::string id;
@@ -155,7 +154,6 @@ namespace MV {
 
 	class PackedTextureDefinition : public DynamicTextureDefinition {
 		friend jai::access;
-		friend class jai::serialization::access;
 	public:
 		static std::shared_ptr<PackedTextureDefinition> make(const std::string &a_name, const std::shared_ptr<TexturePack> &a_texturePack, const Size<int> &a_size, const Color &a_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f}){
 			return std::shared_ptr<PackedTextureDefinition>(new PackedTextureDefinition(a_name, a_texturePack, a_size, a_backgroundColor));

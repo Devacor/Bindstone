@@ -143,7 +143,6 @@ namespace MV {
 		                  public jai::property_owner<Component> {
 			friend Node;
 			friend jai::access;
-			friend class jai::serialization::access;
 
 		public:
 			virtual ~Component() {detachImplementation();}

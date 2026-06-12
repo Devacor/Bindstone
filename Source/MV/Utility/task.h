@@ -23,7 +23,7 @@ namespace MV {
 	class ActionBase {
 		friend Task;
 		friend MV::Script;
-		friend class jai::serialization::access;
+		friend jai::access;
 	public:
 		virtual std::string name() const { 
 			return "Base";
@@ -69,7 +69,7 @@ namespace MV {
 	};
 
 	class BasicAction : public ActionBase {
-		friend class jai::serialization::access;
+		friend jai::access;
 	public:
 		virtual std::string name() const override {
 			return "BasicAction";

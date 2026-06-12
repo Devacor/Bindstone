@@ -61,7 +61,7 @@ private:
 
 template <typename DataType>
 class Catalog {
-	friend class jai::serialization::access;
+	friend jai::access;
 	friend MV::Script;
 public:
 	Catalog<DataType>(const std::string &a_catalogType, bool a_isServer) :

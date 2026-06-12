@@ -343,7 +343,7 @@ public:
     // operator() for types with member save method
     // Prefers versioned save(Archive&, uint32_t), falls back to simple save(Archive&)
     // Context-aware: wraps in begin_object/end_object when called from array/root context
-    // Uses access:: to support protected methods that friend jai::serialization::access
+    // Uses access:: to support protected methods that friend jai::access
     template<typename T, std::enable_if_t<has_save_method<T>::value, int> = 0>
     void operator()(const T& obj) {
         bool wrap = needs_object_wrapper();
@@ -365,7 +365,7 @@ public:
     // operator() for types with serialize() method (but no save())
     // Prefers versioned serialize(Archive&, uint32_t), falls back to simple serialize(Archive&)
     // Context-aware: wraps in begin_object/end_object when called from array/root context
-    // Uses access:: to support protected methods that friend jai::serialization::access
+    // Uses access:: to support protected methods that friend jai::access
     template<typename T, std::enable_if_t<
         !has_save_method<T>::value &&
         has_serialize_method<T>::value, int> = 0>
@@ -722,7 +722,7 @@ private:
 
 public:
     // Helper: write custom type - context-aware, delegates to write_value
-    // Uses access:: to support protected methods that friend jai::serialization::access
+    // Uses access:: to support protected methods that friend jai::access
     // Made public for use by smart pointer serialization in property_serialization.hpp
     template<typename T>
     void write_custom(const T& value) {
@@ -1016,7 +1016,7 @@ public:
     // operator() for types with member load method
     // Prefers versioned load(Archive&, uint32_t), falls back to simple load(Archive&)
     // Note: Does NOT wrap - naming implies nesting. ar(obj) = inline, ar("name", obj) = nested.
-    // Uses access:: to support protected methods that friend jai::serialization::access
+    // Uses access:: to support protected methods that friend jai::access
     template<typename T, std::enable_if_t<has_load_method<T>::value, int> = 0>
     void operator()(T& obj) {
         if constexpr (has_versioned_load_method<T>::value) {
@@ -1029,7 +1029,7 @@ public:
     // operator() for types with serialize() method (but no load())
     // Prefers versioned serialize(Archive&, uint32_t), falls back to simple serialize(Archive&)
     // Note: Does NOT wrap - consistent with load() types. Wrapping via ar("name", obj).
-    // Uses access:: to support protected methods that friend jai::serialization::access
+    // Uses access:: to support protected methods that friend jai::access
     template<typename T, std::enable_if_t<
         !has_load_method<T>::value &&
         has_serialize_method<T>::value, int> = 0>
@@ -1419,7 +1419,7 @@ private:
 
 public:
     // Helper: read custom type - calls through self() for non-virtual dispatch
-    // Uses access:: to support protected methods that friend jai::serialization::access
+    // Uses access:: to support protected methods that friend jai::access
     // Made public for use by smart pointer serialization in property_serialization.hpp
     template<typename T>
     void read_custom(T& value) {

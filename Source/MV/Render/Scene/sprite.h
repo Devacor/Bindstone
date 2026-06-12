@@ -18,7 +18,6 @@ namespace MV {
 		class Sprite : public jai::property_owner<Sprite, Drawable> {
 			friend Node;
 			friend jai::access;
-			friend class jai::serialization::access;
 
 		public:
 			DrawableDerivedAccessors(Sprite)

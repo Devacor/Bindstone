@@ -26,7 +26,7 @@ namespace MV {
 		friend TemporaryCost;
 		friend Map;  // For sparse serialization access to travelCost/staticBlockedSemaphore
 		friend class jai::access;  // JaiScript load_and_construct support
-		friend class jai::serialization::access;  // JaiScript save/load support
+		friend jai::access;
 	public:
 		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
 		typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;
@@ -138,7 +138,7 @@ namespace MV {
 
 	class Map : public std::enable_shared_from_this<Map> {
 		friend class jai::access;  // JaiScript load_and_construct support
-		friend class jai::serialization::access;  // JaiScript save/load support
+		friend jai::access;
 	public:
 		// JaiScript load_and_construct - must be public for trait detection
 		template<typename Archive>
@@ -465,7 +465,7 @@ namespace MV {
 	};
 
 	class NavigationAgent : public std::enable_shared_from_this<NavigationAgent> {
-		friend class jai::serialization::access;
+		friend jai::access;
 	public:
 		typedef void CallbackSignature(std::shared_ptr<NavigationAgent>);
 		typedef jai::signal<CallbackSignature>::shared_receiver_type SharedReceiverType;

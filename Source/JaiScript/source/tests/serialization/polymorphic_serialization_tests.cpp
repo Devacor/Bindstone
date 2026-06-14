@@ -765,6 +765,17 @@ public:
     JAI_PROPERTY((int), pinned, 3);
 };
 
+// Auto-named registrar: no name string passed — the script name and serialization $type
+// are both derived from the C++ type. Not a property_owner, so the only registration is
+// the registrar's, making the derived name unambiguous.
+struct AutoNamedRegType {
+    virtual ~AutoNamedRegType() = default;
+    int value = 0;
+    template<class Archive>
+    void serialize(Archive& ar) { ar(jai::serialization::make_nvp("value", value)); }
+};
+static jai::registrar<AutoNamedRegType, void> _autoNamedRegistration;  // <-- no name
+
 // Polymorphic, serializable, but never registered: saving through a base pointer
 // must throw instead of silently slicing.
 class UnregPolyBase {
@@ -846,6 +857,17 @@ public:
             auto binaryDerived = std::dynamic_pointer_cast<ImplicitRegDerived>(fromBinary);
             check(binaryDerived != nullptr, "dynamic type lost through binary round-trip");
             check_eq(std::string("round"), binaryDerived->derivedTag.get());
+        });
+
+        test("registrar_auto_name_no_string_feeds_both_registries", [&]() {
+            // Script-name registry got the bare class name, with no string ever passed.
+            auto scriptName = jai::type_name_registry::instance().get_name<AutoNamedRegType>();
+            check(scriptName.has_value(), "auto-named type missing from type_name_registry");
+            check_eq(std::string("AutoNamedRegType"), std::string(*scriptName));
+            // Serialization registry got the same name, from the same derivation.
+            auto* entry = jai::serialization::polymorphic_registry::instance().find(std::type_index(typeid(AutoNamedRegType)));
+            check(entry != nullptr, "auto-named type missing from polymorphic_registry");
+            check_eq(std::string("AutoNamedRegType"), entry->name);
         });
 
         test("explicit_registrar_overrides_implicit_name", [&]() {

@@ -328,6 +328,14 @@ public:
         }
     }
 
+    // Hot reload: clear the instance-method overload sets + resolution cache so a reload
+    // rebuilds them fresh (re-adding each method via add_script_method) instead of appending
+    // to the previous definition's overloads.
+    void clear_instance_method_overloads() {
+        method_overloads_.clear();
+        overload_resolution_cache_.clear();
+    }
+
     // Hot reload: drop statics absent from the new definition so they're no longer accessible.
     void retain_static_fields(const std::set<uint64_t>& keep) {
         for (auto it = static_fields_.begin(); it != static_fields_.end();) {

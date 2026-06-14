@@ -182,10 +182,11 @@ at program start, so `shared_ptr<Base>` round-trips get a `$type` tag and recons
 correct dynamic type with **zero extra code**. Rules:
 
 - The `$type` name is the bare class identifier (`"Player"` for `class Player`), parsed from
-  the compiler signature — never a mangled `typeid` name, identical on MSVC/GCC/Clang.
-  Anonymous-namespace types keep their qualified path with a canonical `AN` segment
-  (`"foo::AN::Baz"`); they are per-TU distinct types, so two TUs deriving the same name
-  trip the collision warning.
+  the compiler signature — never a mangled `typeid` name, identical on MSVC/GCC/Clang. All
+  namespace qualification is stripped, matching the bare names explicit registrars use, so a
+  type can move between implicit and explicit registration without its `$type` changing.
+  Anonymous-namespace types strip to their bare name too; they are per-TU distinct types, so
+  two TUs deriving the same name trip the collision warning (pin one with `jai_type_name`).
 - Pin a custom name in-class when the identifier might change or for template
   instantiations (which have no stable derived spelling and are otherwise skipped):
 
@@ -193,9 +194,11 @@ correct dynamic type with **zero extra code**. Rules:
   static constexpr const char* jai_type_name = "MyStableName";
   ```
 
-- An explicit `jai::registrar<T, Ctx>("Name")` (which also registers script bindings)
-  always takes precedence over the implicit name, regardless of static-init order. Both
-  feed the same registry — there is exactly one source of serialization identity.
+- To name a type explicitly **without modifying it**, register externally at file scope —
+  either `jai::registrar<T, Ctx>("Name")` (also adds script bindings) or
+  `jai::serialization::polymorphic_registry::try_auto_register<T>("Name")` (serialization
+  only). Both take precedence over the implicit name regardless of static-init order. Every
+  path feeds the same registry — there is exactly one source of serialization identity.
 - Saving an *unregistered* polymorphic type through a base pointer throws
   `serialization_error` instead of silently slicing.
 - Implicit registration is keyed to construction code: a binary that only ever *loads* a

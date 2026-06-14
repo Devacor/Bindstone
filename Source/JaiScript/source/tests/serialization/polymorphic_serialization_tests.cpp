@@ -746,8 +746,8 @@ public:
 static jai::registrar<RenamedRegType, void> _renamedRegistration("CustomRegName");
 
 namespace {
-	// Anonymous-namespace spellings differ per compiler; the canonical AN segment must
-	// make the derived name identical everywhere ("...::AN::AnonNamespaceProbe").
+	// Anonymous-namespace spellings differ per compiler, but stripping to the bare last
+	// segment yields the same clean identifier everywhere ("AnonNamespaceProbe").
 	struct AnonNamespaceProbe { virtual ~AnonNamespaceProbe() = default; };
 
 	// And a property_owner in an anonymous namespace must round-trip implicitly.
@@ -796,10 +796,10 @@ public:
         test("static_type_name_extraction", [&]() {
             check_eq(std::string("ImplicitRegBase"), std::string(jai::detail::static_unqualified_type_name<ImplicitRegBase>()));
             check_eq(std::string("jai::foundry::tests::ImplicitRegBase"), std::string(jai::detail::static_type_name<ImplicitRegBase>()));
-            check_eq(std::string("ImplicitRegBase"), jai::detail::registration_type_name<ImplicitRegBase>());
-            check(jai::detail::registration_type_name<std::vector<int>>().empty(), "template instantiations must be excluded from implicit naming");
-            // The compiler-specific anonymous-namespace marker must canonicalize to AN.
-            check_eq(std::string("jai::foundry::tests::AN::AnonNamespaceProbe"), jai::detail::registration_type_name<AnonNamespaceProbe>());
+            check(jai::detail::static_unqualified_type_name<std::vector<int>>().empty(), "template instantiations must be excluded from implicit naming");
+            // Anonymous-namespace types strip to their bare identifier (the compiler-specific
+            // marker is in a discarded middle segment) — no namespace qualification kept.
+            check_eq(std::string("AnonNamespaceProbe"), std::string(jai::detail::static_unqualified_type_name<AnonNamespaceProbe>()));
         });
 
         test("anonymous_namespace_property_owner_round_trip", [&]() {
@@ -809,7 +809,8 @@ public:
             jai::serialization::json_archive_writer w(0, eng.get());
             w(original);
             auto json = w.str();
-            check(json.find("AN::AnonImplicitDerived") != std::string::npos, "expected the canonical AN name: " + json);
+            check(json.find("\"AnonImplicitDerived\"") != std::string::npos, "expected the bare implicit name: " + json);
+            check(json.find("AN::") == std::string::npos, "no namespace qualification should leak into the type name: " + json);
 
             auto loaded = roundtrip_json(*eng, original);
             check(std::dynamic_pointer_cast<AnonImplicitDerived>(loaded) != nullptr, "dynamic type lost for anonymous-namespace type");

@@ -28,8 +28,9 @@ namespace jai {
 		class any_archive_reader;
 		// Defined in serialization/polymorphic.hpp, included at the bottom of this header
 		// (same pattern as registrar.hpp): implicit polymorphic registration for
-		// property_owner types.
+		// property_owner types, and the base-pointer adjuster registration for MI.
 		template<typename T> void try_auto_register_implicit();
+		template<typename Derived, typename Base> void register_polymorphic_base_relation();
 	}
 
 	class property_manager {
@@ -231,6 +232,13 @@ namespace jai {
 		// type it never constructs (only construction odr-uses this member).
 		static inline const bool _jai_poly_registered = [] {
 			serialization::try_auto_register_implicit<Derived>();
+			// Record Derived->Base pointer adjusters so a shared_ptr<Base> whose dynamic
+			// type is Derived reconstructs the correct Base subobject under multiple
+			// inheritance (each base is also a property_owner and records its own bases,
+			// so adjust_to_base composes them transitively).
+			if constexpr (sizeof...(Bases) > 0) {
+				(serialization::register_polymorphic_base_relation<Derived, Bases>(), ...);
+			}
 			return true;
 		}();
 

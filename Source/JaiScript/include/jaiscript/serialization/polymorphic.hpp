@@ -14,6 +14,8 @@
 #include <typeindex>
 #include <unordered_map>
 #include <type_traits>
+#include <vector>
+#include <set>
 
 // construct.hpp includes archive_impl.hpp (which includes this header), so only the
 // declaration can appear here; the probe and factory bodies need no more until they
@@ -91,6 +93,61 @@ public:
     const type_entry* find(const std::string& name) const {
         auto it = by_name_.find(name);
         return it != by_name_.end() ? it->second : nullptr;
+    }
+
+    // ---- Multiple-inheritance base-pointer adjustment --------------------------------
+    // A shared_ptr<Base> whose dynamic type is Derived must, on load, point at the Base
+    // *subobject* — which under multiple inheritance is at a non-zero offset within
+    // Derived. The save/load/back-ref paths route pointers through void (which erases the
+    // offset), so we record per-(Derived->Base) adjusters and reapply them. property_owner
+    // registers these automatically for its declared bases; register manually for
+    // non-property_owner MI hierarchies. Single inheritance is offset zero, so the absence
+    // of a recorded relation is a safe identity (the common case allocates nothing).
+    template<typename Derived, typename Base>
+    static void register_base_relation() {
+        static_assert(std::is_base_of_v<Base, Derived>, "register_base_relation<Derived, Base>: Base must be a base class of Derived");
+        if constexpr (!std::is_same_v<Derived, Base>) {
+            instance().add_base_edge(
+                std::type_index(typeid(Derived)),
+                std::type_index(typeid(Base)),
+                +[](void* p) -> void* {
+                    return static_cast<void*>(static_cast<Base*>(static_cast<Derived*>(p)));
+                });
+        }
+    }
+
+    void add_base_edge(std::type_index derived, std::type_index base, void* (*adjust)(void*)) {
+        auto& edges = base_edges_[derived];
+        for (const auto& e : edges) { if (e.base == base) { return; } }
+        edges.push_back(base_edge{ base, adjust });
+    }
+
+    // Adjust a void* pointing at a `from`-typed (complete) object to point at its `to` base
+    // subobject. Identity when from==to or no relation is recorded (offset-zero / single
+    // inheritance). Direct relations are a single map lookup; deeper hierarchies compose
+    // adjusters via a short DFS over the recorded edges.
+    void* adjust_to_base(std::type_index from, std::type_index to, void* p) const {
+        if (p == nullptr || from == to) { return p; }
+        auto it = base_edges_.find(from);
+        if (it == base_edges_.end()) { return p; }
+        for (const auto& e : it->second) { if (e.base == to) { return e.adjust(p); } }
+        std::set<std::type_index> visited{ from };
+        std::vector<std::pair<std::type_index, void*>> stack;
+        for (const auto& e : it->second) {
+            if (visited.insert(e.base).second) { stack.push_back({ e.base, e.adjust(p) }); }
+        }
+        while (!stack.empty()) {
+            auto [cur, curp] = stack.back();
+            stack.pop_back();
+            auto cit = base_edges_.find(cur);
+            if (cit == base_edges_.end()) { continue; }
+            for (const auto& e : cit->second) {
+                void* next = e.adjust(curp);
+                if (e.base == to) { return next; }
+                if (visited.insert(e.base).second) { stack.push_back({ e.base, next }); }
+            }
+        }
+        return p;
     }
 
     // Auto-register a polymorphic type for serialization.
@@ -252,8 +309,16 @@ private:
         }
     }
 
+    struct base_edge {
+        std::type_index base;
+        void* (*adjust)(void*); // Derived* -> Base* (stateless, so a plain function pointer)
+    };
+
     std::unordered_map<std::type_index, type_entry> by_rtti_;
     std::unordered_map<std::string, const type_entry*> by_name_;
+    // Direct Derived->Base adjusters; adjust_to_base() composes them transitively. Populated
+    // only at static-init (single-threaded), read-only thereafter, so loads need no lock.
+    std::unordered_map<std::type_index, std::vector<base_edge>> base_edges_;
 };
 
 // Free-function entry points named ahead of this header by jai::registrar and
@@ -267,6 +332,11 @@ void try_auto_register(const std::string& name) {
 template<typename T>
 void try_auto_register_implicit() {
     polymorphic_registry::try_auto_register_implicit<T>();
+}
+
+template<typename Derived, typename Base>
+void register_polymorphic_base_relation() {
+    polymorphic_registry::register_base_relation<Derived, Base>();
 }
 
 } // namespace serialization

@@ -709,7 +709,10 @@ private:
                     self()->begin_object();
                     push_context(SerializationContext::ObjectBody);
                     any_archive_writer wrapper(*self());
-                    entry->save_fn(wrapper, value.get());
+                    // value.get() is a Base*; save_fn casts the void back to the concrete
+                    // (Derived) type, so hand it the complete object — dynamic_cast<void*>
+                    // recovers the most-derived address (correct under multiple inheritance).
+                    entry->save_fn(wrapper, dynamic_cast<const void*>(value.get()));
                     pop_context();
                     self()->end_object();
                     pop_context();
@@ -769,8 +772,14 @@ protected:
     // Shared pointer tracking for deserialization (script_value based)
     std::unordered_map<uint32_t, script_value> id_to_shared_ptr_;
 
-    // C++ shared_ptr tracking for property serialization (type-erased)
-    std::unordered_map<uint32_t, std::shared_ptr<void>> cpp_shared_ptrs_;
+    // C++ shared_ptr tracking for property serialization (type-erased). The stored pointer
+    // is the COMPLETE object (most-derived) and `type` its dynamic type, so a back-reference
+    // taken through any base view adjusts to the right subobject under multiple inheritance.
+    struct deserialized_entry {
+        std::shared_ptr<void> object;
+        std::type_index type = std::type_index(typeid(void));
+    };
+    std::unordered_map<uint32_t, deserialized_entry> cpp_shared_ptrs_;
 
     // User context storage (for dependency injection during deserialization)
     std::map<std::type_index, void*> user_contexts_;
@@ -843,38 +852,44 @@ public:
     // ============================================================================
     template<typename T>
     void register_deserialized_shared(uint32_t id, const std::shared_ptr<T>& ptr) {
-        if (id != 0 && ptr) {
-            cpp_shared_ptrs_[id] = std::static_pointer_cast<void>(ptr);
+        if (id == 0 || !ptr) { return; }
+        if constexpr (std::is_polymorphic_v<T>) {
+            // Store the complete object + its dynamic type so back-refs through any base
+            // view adjust correctly (the aliasing shared_ptr keeps the original owner).
+            void* complete = dynamic_cast<void*>(ptr.get());
+            cpp_shared_ptrs_[id] = deserialized_entry{ std::shared_ptr<void>(ptr, complete), std::type_index(typeid(*ptr)) };
+        } else {
+            cpp_shared_ptrs_[id] = deserialized_entry{ std::static_pointer_cast<void>(ptr), std::type_index(typeid(T)) };
         }
     }
 
     template<typename T>
     std::shared_ptr<T> get_deserialized_shared(uint32_t id) const {
-        if (id == 0) return nullptr;
-        auto it = cpp_shared_ptrs_.find(id);
-        if (it != cpp_shared_ptrs_.end()) {
-            return std::static_pointer_cast<T>(it->second);
-        }
-        return nullptr;
+        auto adjusted = get_deserialized_shared_adjusted(id, std::type_index(typeid(T)));
+        return std::static_pointer_cast<T>(adjusted);
     }
 
     bool has_deserialized_shared(uint32_t id) const {
         return id != 0 && cpp_shared_ptrs_.find(id) != cpp_shared_ptrs_.end();
     }
 
-    // Non-templated versions for type-erased any_archive_reader
-    std::shared_ptr<void> get_deserialized_shared_void(uint32_t id) const {
+    // Type-erased back-ref retrieval: returns the stored object as a void shared_ptr whose
+    // pointer is already adjusted from the complete object to the `target` base subobject,
+    // so the caller's static_pointer_cast<target> is a plain reinterpret of a correct
+    // address. Used by both the templated get above and any_archive_reader.
+    std::shared_ptr<void> get_deserialized_shared_adjusted(uint32_t id, std::type_index target) const {
         if (id == 0) return nullptr;
         auto it = cpp_shared_ptrs_.find(id);
-        if (it != cpp_shared_ptrs_.end()) {
-            return it->second;
-        }
-        return nullptr;
+        if (it == cpp_shared_ptrs_.end()) return nullptr;
+        void* adjusted = polymorphic_registry::instance().adjust_to_base(it->second.type, target, it->second.object.get());
+        return std::shared_ptr<void>(it->second.object, adjusted);
     }
 
-    void register_deserialized_shared_void(uint32_t id, std::shared_ptr<void> ptr) {
-        if (id != 0 && ptr) {
-            cpp_shared_ptrs_[id] = std::move(ptr);
+    // Type-erased registration: `complete` is the most-derived pointer, `type` its dynamic
+    // type (computed by the caller, which still has the static type).
+    void register_deserialized_shared_typed(uint32_t id, std::shared_ptr<void> complete, std::type_index type) {
+        if (id != 0 && complete) {
+            cpp_shared_ptrs_[id] = deserialized_entry{ std::move(complete), type };
         }
     }
 
@@ -1389,7 +1404,10 @@ private:
                     // Pass id so load_fn registers the object eagerly (before its
                     // properties load), enabling subtree back-references to resolve.
                     auto void_ptr = entry->load_fn(wrapper, id);
-                    result = std::static_pointer_cast<elem_type>(void_ptr);
+                    // void_ptr points at the complete (Derived) object; adjust to the Base
+                    // subobject for the caller's shared_ptr<elem_type> (offset != 0 under MI).
+                    void* adjusted = polymorphic_registry::instance().adjust_to_base(entry->type, std::type_index(typeid(elem_type)), void_ptr.get());
+                    result = std::shared_ptr<elem_type>(void_ptr, static_cast<elem_type*>(adjusted));
                     self()->end_object();
                     self()->register_deserialized_shared(id, result);
                     return result;

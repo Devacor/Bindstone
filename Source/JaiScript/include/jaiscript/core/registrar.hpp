@@ -10,6 +10,9 @@
 #include <string_view>
 #include <optional>
 #include <algorithm>
+#include <type_traits>
+
+#include <jaiscript/detail/static_type_name.hpp>
 
 // C++20 features detection
 #if defined(__cpp_concepts) && __cpp_concepts >= 201907L
@@ -168,9 +171,28 @@ private:
 // C++17 Usage (runtime name):
 //   static jai::registrar<Player, MV::Services> _player("Player", [](auto& builder, const Services& ctx) { ... });
 //
+// Auto-named (the script name and serialization $type are derived from the C++ type, so
+// you don't repeat the class name as a string — works for non-template classes):
+//   static jai::registrar<Player, MV::Services> _player;                                  // name = "Player"
+//   static jai::registrar<Player, MV::Services> _player([](auto& builder, const Services& ctx) { ... });
+// Template instantiations have no portable derived name and must pass one explicitly
+// (e.g. Point<int> -> "Pointi"); omitting it is a compile error directing you here.
+//
 // At engine initialization:
 //   jai::bind_registrar(engine);                     // No context
 //   jai::bind_registrar<Services>(engine, services); // With context
+
+// Shared by the auto-named registrar constructors: the bare C++ type name (also used as
+// the serialization $type, so the two stay in lockstep), or a compile error pointing at
+// the explicit-name constructor when T has no portable name.
+template<typename T>
+inline std::string registrar_auto_name() {
+    constexpr auto derived = ::jai::detail::static_unqualified_type_name<T>();
+    static_assert(!derived.empty(),
+        "jai::registrar<T, Context>: T has no portable auto-name (template instantiation, "
+        "lambda, or local type). Pass an explicit name: jai::registrar<T, Context>(\"Name\").");
+    return std::string(derived);
+}
 
 // ============================================================================
 // C++17-compatible registrar (runtime name)
@@ -179,11 +201,8 @@ private:
 // Primary template - with context
 template<typename T, typename Context>
 class registrar {
-public:
-    // Default: auto_bind + build
-    explicit registrar(const char* name) {
-        std::string name_str(name);
-        type_name_registry::instance().register_type<T>(name);
+    static void register_simple(std::string name_str) {
+        type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
@@ -195,11 +214,9 @@ public:
         );
     }
 
-    // With configuration lambda: (dynamic_binder<T>&, const Context&) -> void
     template<typename F>
-    registrar(const char* name, F&& configure) {
-        std::string name_str(name);
-        type_name_registry::instance().register_type<T>(name);
+    static void register_configured(std::string name_str, F&& configure) {
+        type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
@@ -211,16 +228,29 @@ public:
             }
         );
     }
+
+public:
+    // Explicit name: auto_bind + build
+    explicit registrar(const char* name) { register_simple(std::string(name)); }
+
+    // Auto-named (bare C++ type name, shared with the serialization $type): auto_bind + build
+    registrar() { register_simple(registrar_auto_name<T>()); }
+
+    // Explicit name + configuration lambda: (dynamic_binder<T>&, const Context&) -> void
+    template<typename F>
+    registrar(const char* name, F&& configure) { register_configured(std::string(name), std::forward<F>(configure)); }
+
+    // Auto-named + configuration lambda. enable_if keeps a string literal from binding
+    // here instead of the explicit-name constructor above.
+    template<typename F, std::enable_if_t<std::is_invocable_v<F&, dynamic_binder<T>&, const Context&>, int> = 0>
+    explicit registrar(F&& configure) { register_configured(registrar_auto_name<T>(), std::forward<F>(configure)); }
 };
 
 // Specialization for no context
 template<typename T>
 class registrar<T, void> {
-public:
-    // Default: auto_bind + build
-    explicit registrar(const char* name) {
-        std::string name_str(name);
-        type_name_registry::instance().register_type<T>(name);
+    static void register_simple(std::string name_str) {
+        type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
@@ -232,11 +262,9 @@ public:
         );
     }
 
-    // With configuration lambda: (dynamic_binder<T>&) -> void
     template<typename F>
-    registrar(const char* name, F&& configure) {
-        std::string name_str(name);
-        type_name_registry::instance().register_type<T>(name);
+    static void register_configured(std::string name_str, F&& configure) {
+        type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
@@ -248,6 +276,22 @@ public:
             }
         );
     }
+
+public:
+    // Explicit name: auto_bind + build
+    explicit registrar(const char* name) { register_simple(std::string(name)); }
+
+    // Auto-named (bare C++ type name, shared with the serialization $type): auto_bind + build
+    registrar() { register_simple(registrar_auto_name<T>()); }
+
+    // Explicit name + configuration lambda: (dynamic_binder<T>&) -> void
+    template<typename F>
+    registrar(const char* name, F&& configure) { register_configured(std::string(name), std::forward<F>(configure)); }
+
+    // Auto-named + configuration lambda. enable_if keeps a string literal from binding
+    // here instead of the explicit-name constructor above.
+    template<typename F, std::enable_if_t<std::is_invocable_v<F&, dynamic_binder<T>&>, int> = 0>
+    explicit registrar(F&& configure) { register_configured(registrar_auto_name<T>(), std::forward<F>(configure)); }
 };
 
 #if JAI_HAS_NTTP_STRING && JAI_HAS_CONCEPTS

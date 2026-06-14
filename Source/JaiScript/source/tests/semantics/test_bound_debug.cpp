@@ -43,6 +43,26 @@ public:
                 check_eq(std::string(e.what()), std::string(""));  // Force failure
             }
         });
+
+        // Move/move-assign must carry engine_ref_; otherwise the moved-to array builds its next
+        // element with a wild (uninitialized) engine pointer. Observable in reference mode by
+        // the engine the pushed element ends up carrying.
+        test("move_preserves_engine_ref", [this]() {
+            auto eng = engine::make();
+            script_value holder = script_value::make_array(nullptr, eng.get());
+            auto& backing = const_cast<script_array&>(holder.as_array());
+
+            bound_array<script_int> ref(backing, eng.get());   // reference mode, engine_ref_ = eng
+            bound_array<script_int> moved = std::move(ref);     // move ctor must carry engine_ref_
+            moved.push_back((script_int)7);                     // element is built via engine_ref_
+            check_eq((size_t)1, backing.size());
+            check(backing[0].get_engine() == eng.get(), "moved bound_array lost its engine_ref_");
+
+            bound_array<script_int> assigned(backing, eng.get());
+            assigned = std::move(moved);                        // move assignment too
+            assigned.push_back((script_int)9);
+            check(backing.back().get_engine() == eng.get(), "move-assigned bound_array lost its engine_ref_");
+        });
     }
 };
 

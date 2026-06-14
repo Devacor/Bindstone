@@ -9536,6 +9536,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     std::unordered_map<uint64_t, script_value> new_field_defaults;
     std::unordered_map<uint64_t, script_value> new_methods;
     std::unordered_map<uint64_t, script_value> new_static_methods;
+    std::set<uint64_t> new_static_field_ids; // statics declared in this (re)definition, for reload purge
     
     // Reserve capacity based on member count for efficiency
     if (!decl->members.empty()) {
@@ -9706,8 +9707,15 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
             // Check if field is static
             if (var_decl->is_static) {
+                if (field_id != 0) {
+                    new_static_field_ids.insert(field_id);
+                }
+                // A reload preserves a static's runtime value (statics are state, not code);
+                // only a static that is NEW in this definition runs its initializer.
+                bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id);
+
                 // Static fields must be evaluated immediately (they're shared across all instances)
-                if (initializer_ast) {
+                if (initializer_ast && !preserve_existing) {
                     JAISCRIPT_TRY(dispatch_expr(initializer_ast.get()));
                     default_val = pop_value();
 
@@ -9718,7 +9726,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 }
 
                 // Add static field directly to the class
-                if (field_id != 0) {
+                if (field_id != 0 && !preserve_existing) {
                     class_def->add_static_field(field_id, default_val);
                 }
             } else {
@@ -10490,6 +10498,18 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // Call redefine_class with the new field defaults and methods
         // Call redefine_class to migrate existing instances
         class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_);
+
+        // Statics dropped from the new definition must no longer be accessible.
+        class_def->retain_static_fields(new_static_field_ids);
+
+        // A hot_reload_migrate hook that errored left the interpreter unwinding. That error
+        // belongs to the migration, not to the class declaration — clear it so the reload is
+        // atomic and doesn't propagate a per-instance hook failure as the statement's result.
+        if (is_unwinding_) {
+            is_unwinding_ = false;
+            current_exception_.reset();
+            active_exception_value_.reset();
+        }
 
         // Invalidate cached field pointers - they may point to stale storage after migration
         environment_->clear_all_parent_caches();

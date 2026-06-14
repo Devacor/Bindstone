@@ -59,7 +59,7 @@ public:
     void migrate_fields(const std::set<uint64_t>& old_field_ids,
                        const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
         std::unordered_map<uint64_t, script_value> new_fields;
-        new_fields.reserve(new_field_defaults.size());
+        new_fields.reserve(new_field_defaults.size() + 1);
 
         for (const auto& [id, default_value] : new_field_defaults) {
             auto it = fields_.find(id);
@@ -67,6 +67,18 @@ public:
                 new_fields.emplace(id, std::move(it->second));
             } else {
                 new_fields.emplace(id, default_value.clone());
+            }
+        }
+
+        // The C++ base object lives in a runtime-only field (_cpp_object) that never appears
+        // in the declared field defaults. Carry it across so a field-changing reload of a
+        // script class extending a C++ class doesn't drop (and destruct) the C++ object and
+        // leave inherited C++ methods uncallable.
+        uint64_t cpp_id = get_cpp_object_field_id();
+        if (cpp_id != 0 && new_fields.find(cpp_id) == new_fields.end()) {
+            auto it = fields_.find(cpp_id);
+            if (it != fields_.end()) {
+                new_fields.emplace(cpp_id, std::move(it->second));
             }
         }
 
@@ -313,6 +325,18 @@ public:
             static_field_values_.insert_or_assign(id, value_with_engine);
         } else {
             static_field_values_.insert_or_assign(id, initial_value);
+        }
+    }
+
+    // Hot reload: drop statics absent from the new definition so they're no longer accessible.
+    void retain_static_fields(const std::set<uint64_t>& keep) {
+        for (auto it = static_fields_.begin(); it != static_fields_.end();) {
+            if (keep.find(*it) == keep.end()) {
+                static_field_values_.erase(*it);
+                it = static_fields_.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
 
@@ -944,58 +968,69 @@ public:
             }
         }
 
-        size_t write_idx = 0;
-        for (size_t read_idx = 0; read_idx < instances_.size(); ++read_idx) {
-            if (auto instance = instances_[read_idx].lock()) {
-                if (fields_changed) {
-                    for (const auto& [name, default_value] : new_field_defaults) {
-                        if (!instance->has_field(name)) {
-                            instance->set_field(name, default_value.clone());
-                        }
+        // Migrate against a SNAPSHOT of the current instances. A hot_reload_migrate hook can
+        // construct new same-class instances, which register into instances_ mid-migration;
+        // iterating the live vector would migrate those too (re-invoking the hook) and loop
+        // unboundedly. Snapshotted instances built against the new definition need no
+        // migration, so skipping them is also correct.
+        std::vector<std::weak_ptr<class_instance>> to_migrate = instances_;
+        for (auto& weak_instance : to_migrate) {
+            auto instance = weak_instance.lock();
+            if (!instance) {
+                continue;
+            }
+            if (fields_changed) {
+                for (const auto& [name, default_value] : new_field_defaults) {
+                    if (!instance->has_field(name)) {
+                        instance->set_field(name, default_value.clone());
                     }
+                }
 
-                    if (migrate_method_it != new_methods.end() && !migrate_method_it->second.is_null()) {
+                if (migrate_method_it != new_methods.end() && !migrate_method_it->second.is_null()) {
+                    // Per-instance isolation: one instance's migrate hook erroring (throwing,
+                    // or returning an error) must not abort the reload for the others.
+                    try {
                         auto instance_value = script_value::make_object(name_, instance, engine_ref);
-
                         const script_function& migrate_func = migrate_method_it->second.as_function();
                         std::vector<script_value> args = {instance_value};
                         auto result = migrate_func(args);
-                        if (!result) {
-                            (void)result;
-                        }
+                        (void)result;
+                    } catch (...) {
+                        // A migrate hook that throws (script throw, runtime error, anything)
+                        // must not abort the reload for the other instances. Catch-all because
+                        // a script throw is not necessarily a std::exception.
                     }
-
-                    instance->migrate_fields(old_fields, new_field_defaults);
                 }
 
-                try {
-                    instance->set_class_definition(shared_from_this());
-                } catch (const std::exception& e) {
-                    (void)e;
-                }
+                instance->migrate_fields(old_fields, new_field_defaults);
+            }
 
-                if (write_idx != read_idx) {
-                    instances_[write_idx] = std::move(instances_[read_idx]);
-                }
-                ++write_idx;
+            try {
+                instance->set_class_definition(shared_from_this());
+            } catch (const std::exception& e) {
+                (void)e;
             }
         }
-        instances_.resize(write_idx);
+        // Drop dead weak refs; keep live ones plus any registered during migration.
+        instances_.erase(
+            std::remove_if(instances_.begin(), instances_.end(),
+                [](const std::weak_ptr<class_instance>& w) { return w.expired(); }),
+            instances_.end());
 
         method_metadata_.clear();
 
-        write_idx = 0;
-        for (size_t read_idx = 0; read_idx < derived_classes_.size(); ++read_idx) {
-            if (auto derived = derived_classes_[read_idx].lock()) {
+        // Propagate to derived classes (their inherited fields changed), snapshotting for the
+        // same reason as above, then drop any dead derived refs.
+        std::vector<std::weak_ptr<class_definition>> derived_snapshot = derived_classes_;
+        for (auto& weak_derived : derived_snapshot) {
+            if (auto derived = weak_derived.lock()) {
                 derived->update_instances_from_base();
-
-                if (write_idx != read_idx) {
-                    derived_classes_[write_idx] = std::move(derived_classes_[read_idx]);
-                }
-                ++write_idx;
             }
         }
-        derived_classes_.resize(write_idx);
+        derived_classes_.erase(
+            std::remove_if(derived_classes_.begin(), derived_classes_.end(),
+                [](const std::weak_ptr<class_definition>& w) { return w.expired(); }),
+            derived_classes_.end());
 
         current_fingerprint_ = new_fingerprint;
     }

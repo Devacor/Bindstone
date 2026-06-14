@@ -370,7 +370,7 @@ public:
 		JAI_SIGNAL_LOCK();
 		if (recv) {
 			recv->owner_signal_.reset();
-			if (!in_call_) {
+			if (in_call_depth_ == 0) {
 				remove_observer(recv);
 			} else {
 				disconnect_queue_.push_back(recv);
@@ -397,7 +397,7 @@ public:
 			}
 		}
 		owned_connections_.clear();
-		if (!in_call_) {
+		if (in_call_depth_ == 0) {
 			observers_.clear();
 		} else {
 			// Queue all for removal
@@ -505,7 +505,7 @@ private:
 	void disconnect_unlocked(shared_receiver_type recv) {
 		if (recv) {
 			recv->owner_signal_.reset();
-			if (!in_call_) {
+			if (in_call_depth_ == 0) {
 				remove_observer(recv);
 			} else {
 				disconnect_queue_.push_back(recv);
@@ -523,6 +523,41 @@ private:
 		return observers_.size();
 	}
 
+	// Deferred post-emit cleanup, run once the outermost emit unwinds: apply queued
+	// disconnects, remove fired one-shots, cull dead observers. Invoked from emit_scope's
+	// destructor so it still runs if a slot throws.
+	void drain_after_emit() {
+		for (auto& recv : disconnect_queue_) {
+			remove_observer(recv);
+		}
+		disconnect_queue_.clear();
+
+		// Remove one-shots only if any fired (skips the scan in the common case).
+		if (has_oneshots_pending_) {
+			for (size_t i = observers_.size(); i > 0; --i) {
+				auto locked = observers_[i - 1].lock();
+				if (locked && locked->is_oneshot()) {
+					locked->owner_signal_.reset();
+					remove_observer(locked);
+				}
+			}
+			has_oneshots_pending_ = false;
+		}
+
+		cull_dead_observers_unlocked();
+	}
+
+	// RAII depth guard for emit (see in_call_depth_): increments on entry, and on exit — normal
+	// or via exception — decrements and drains at depth 0. Constructed AFTER JAI_SIGNAL_LOCK so
+	// it destructs first, draining while the lock is still held.
+	struct emit_scope {
+		signal_emitter* self;
+		explicit emit_scope(signal_emitter* s) : self(s) { ++self->in_call_depth_; }
+		~emit_scope() { if (--self->in_call_depth_ == 0) self->drain_after_emit(); }
+		emit_scope(const emit_scope&) = delete;
+		emit_scope& operator=(const emit_scope&) = delete;
+	};
+
 	// Emit implementation with optional short-circuit
 	template<bool ShortCircuit, typename... Args>
 	bool emit_impl(Args&&... args) {
@@ -536,9 +571,9 @@ private:
 			return true;
 		}
 
-		in_call_ = true;
+		emit_scope guard(this);  // drains queue / one-shots / dead observers on the outermost
+		                         // unwind, even if a slot throws
 		bool result = true;
-		bool has_oneshots = false;
 
 		for (size_t i = 0; i < observers_.size(); ++i) {
 			auto locked = observers_[i].lock();
@@ -550,7 +585,7 @@ private:
 				// later receiver an empty shell (null shared_ptr, empty string, ...).
 				if (!locked->predicate(args...)) {
 					result = false;
-					if (locked->is_oneshot()) has_oneshots = true;
+					if (locked->is_oneshot()) has_oneshots_pending_ = true;
 					break;
 				}
 			} else {
@@ -558,31 +593,9 @@ private:
 			}
 
 			if (locked->is_oneshot()) {
-				has_oneshots = true;
+				has_oneshots_pending_ = true;
 			}
 		}
-
-		in_call_ = false;
-
-		// Process disconnect queue
-		for (auto& recv : disconnect_queue_) {
-			remove_observer(recv);
-		}
-		disconnect_queue_.clear();
-
-		// Remove one-shots only if any were found (avoids heap allocation when none exist)
-		if (has_oneshots) {
-			for (size_t i = observers_.size(); i > 0; --i) {
-				auto locked = observers_[i - 1].lock();
-				if (locked && locked->is_oneshot()) {
-					locked->owner_signal_.reset();
-					remove_observer(locked);
-				}
-			}
-		}
-
-		// Cull dead observers
-		cull_dead_observers_unlocked();
 
 		return result;
 	}
@@ -600,9 +613,9 @@ private:
 			return true;
 		}
 
-		in_call_ = true;
+		emit_scope guard(this);  // drains queue / one-shots / dead observers on the outermost
+		                         // unwind, even if a slot throws
 		bool result = true;
-		bool has_oneshots = false;
 
 		for (size_t i = 0; i < observers_.size(); ++i) {
 			auto locked = observers_[i].lock();
@@ -611,7 +624,7 @@ private:
 			if constexpr (ShortCircuit) {
 				if (!locked->predicate()) {
 					result = false;
-					if (locked->is_oneshot()) has_oneshots = true;
+					if (locked->is_oneshot()) has_oneshots_pending_ = true;
 					break;
 				}
 			} else {
@@ -619,31 +632,9 @@ private:
 			}
 
 			if (locked->is_oneshot()) {
-				has_oneshots = true;
+				has_oneshots_pending_ = true;
 			}
 		}
-
-		in_call_ = false;
-
-		// Process disconnect queue
-		for (auto& recv : disconnect_queue_) {
-			remove_observer(recv);
-		}
-		disconnect_queue_.clear();
-
-		// Remove one-shots only if any were found (avoids heap allocation when none exist)
-		if (has_oneshots) {
-			for (size_t i = observers_.size(); i > 0; --i) {
-				auto locked = observers_[i - 1].lock();
-				if (locked && locked->is_oneshot()) {
-					locked->owner_signal_.reset();
-					remove_observer(locked);
-				}
-			}
-		}
-
-		// Cull dead observers
-		cull_dead_observers_unlocked();
 
 		return result;
 	}
@@ -666,7 +657,13 @@ private:
 	// Prevent shared_from_this issues - we use this for connected() tracking
 	std::shared_ptr<char> prevent_shared_ownership_;
 
-	bool in_call_ = false;
+	// Emit can run reentrantly (a slot may emit the same signal), so track call DEPTH, not a
+	// bool: the deferred post-emit cleanup runs only when the OUTERMOST emit unwinds. An RAII
+	// guard (emit_scope) owns the decrement, so a throwing slot can't leave the depth stuck —
+	// which would otherwise wedge the emitter (disconnects queue forever, dead receivers keep
+	// firing). has_oneshots_pending_ accumulates across the reentrant call stack.
+	int in_call_depth_ = 0;
+	bool has_oneshots_pending_ = false;
 	int is_blocked_ = 0;
 	std::function<T> blocked_callback_;
 	std::vector<shared_receiver_type> disconnect_queue_;

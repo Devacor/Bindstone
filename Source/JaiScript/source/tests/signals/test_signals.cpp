@@ -3,6 +3,7 @@
 #include <jaiscript/signals/signal_impl.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <vector>
+#include <stdexcept>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -58,6 +59,37 @@ public:
 
             sig.emit(10, 20);
             check_eq(sum, 30, "Signal emitted to receiver");
+        });
+
+        // A throwing slot must not permanently wedge the emitter: the RAII depth guard restores
+        // depth (so later disconnects take effect immediately) and drains even when emit throws.
+        test("emit_not_wedged_after_slot_throws", [this]() {
+            signal_emitter<void()> sig;
+
+            int fired = 0;
+            auto bad = sig.connect([]() { throw std::runtime_error("boom"); });
+            auto good = sig.connect([&fired]() { fired++; });  // hold the receiver alive
+
+            try { sig.emit(); } catch (...) {}  // slot throws; emitter must stay usable
+
+            sig.disconnect(bad);  // must take effect now, not be stuck in the deferred queue
+
+            fired = 0;
+            sig.emit();  // would re-throw (bad still connected) if the emitter were wedged
+            check_eq(1, fired, "remaining receiver fires after a prior slot threw");
+        });
+
+        // A slot that re-emits the SAME signal (reentrancy) must not corrupt iteration via a
+        // bool in_call_; the depth counter defers cleanup to the outermost emit only.
+        test("reentrant_emit_is_safe", [this]() {
+            signal_emitter<void(int)> sig;
+            int total = 0;
+            auto recv = sig.connect([&](int x) {
+                total += x;
+                if (x > 0) sig.emit(x - 1);  // recurse down to 0
+            });
+            sig.emit(3);
+            check_eq(3 + 2 + 1 + 0, total, "reentrant emits all fire without corruption");
         });
 
         test("signal_emitter_multiple_receivers", [this]() {

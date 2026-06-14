@@ -452,6 +452,75 @@ namespace stdlib {
     };
     */
 
+    // Reconstruct a class instance from a {"_type_": Name, ...} map WITHOUT eval'ing
+    // attacker-controlled keys (the from_json/from_binary/from_base64 key-injection fix, B5).
+    // Both the type name and every property name are treated as DATA, not code:
+    //   * the type is resolved through the registry first — a malicious _type_ like
+    //     "touch(); Dummy" matches no class, so we return null and the caller falls back to the
+    //     raw map; the attacker string is never parsed or executed. A resolved name is a bare
+    //     class identifier, so default-constructing it is injection-safe and seeds the full
+    //     field set (incl. inherited and C++-base members) exactly as the language's `Name()`.
+    //   * each property name is symbolized and assigned only if it names a declared member, via
+    //     the same setter/field dispatch the interpreter uses — never built into a script string.
+    // This also drops the old per-property parse+execute (an O(n) reparse) for a direct write.
+    // Returns null if `type_name` is unregistered or construction fails (caller returns the map).
+    inline script_value reconstruct_typed_object(
+            engine* eng,
+            const std::map<script_value, script_value>& map,
+            const std::string& type_name,
+            const std::function<script_value(const script_value&)>& transform) {
+        if (!eng->get_class_definition(type_name)) return script_value(std::monostate{}, eng);
+
+        try {
+            script_value instance = eng->execute(type_name + "()");
+            auto inst = instance.as<std::shared_ptr<class_instance>>();
+            if (!inst) return script_value(std::monostate{}, eng);
+
+            for (const auto& [key, value] : map) {
+                if (!key.is_string()) continue;
+                const std::string prop_name = key.as_string();
+                if (prop_name == "_type_" || prop_name == "_version_") continue;
+
+                // A property NAME is data, never code: resolve it to a member symbol and assign
+                // only if it names a declared member. A malicious key ("x=1; touch(); y") has no
+                // setter and is not a field, so it is silently skipped. This mirrors the
+                // interpreter's own `obj.member = value` resolution (the symbolizer's
+                // "_set_<member>" setter convention), so a C++-bound property — pure or inherited
+                // — routes through its setter (coercion lives in the binding) and a script field
+                // is written directly.
+                uint64_t member_id = eng->symbolize(prop_name);
+                uint64_t setter_id = eng->symbolize("_set_" + prop_name);
+                script_value setter = inst->get_method(setter_id, false);
+                script_value v = transform ? transform(value) : value.clone();
+                if (!setter.is_null()) {
+                    (void)setter.as_function()({ instance, v });
+                } else if (inst->has_field(member_id)) {
+                    inst->set_field(member_id, v);
+                }
+            }
+
+            // post_load(self, version) migration hook, if the class declares one.
+            if (auto* def = inst->get_class_definition()) {
+                if (auto class_eng = def->get_engine()) {
+                    uint64_t post_load_id = class_eng->symbolize("post_load");
+                    script_value post_load = def->get_method(post_load_id, false);
+                    if (post_load.type() == script_value_type::jai_function_type) {
+                        script_int version = 1;
+                        auto version_it = map.find(script_value("_version_", eng));
+                        if (version_it != map.end() && version_it->second.is_int()) {
+                            version = version_it->second.as<script_int>();
+                        }
+                        std::vector<script_value> args = { instance, script_value(version, eng) };
+                        (void)post_load.as_function()(args);
+                    }
+                }
+            }
+            return instance;
+        } catch (...) {
+            return script_value(std::monostate{}, eng);  // reconstruction failed -> raw map
+        }
+    }
+
     // Register JSON and binary serialization functions with an engine
     inline void register_json_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
@@ -486,117 +555,14 @@ namespace stdlib {
                 if (val.is_map()) {
                     const auto& map = val.as_map();
 
-                    // Check if this map has a _type_ field
+                    // Reconstruct a registered class from a {"_type_": Name, ...} map without
+                    // eval'ing attacker-controlled keys (see reconstruct_typed_object).
                     auto typeIt = map.find(script_value("_type_", eng));
                     if (typeIt != map.end() && typeIt->second.is_string()) {
-                        std::string type_name = typeIt->second.as_string();
-
-                        // Try to reconstruct the bound object
-                        try {
-                            script_value instance(std::monostate{}, eng);
-
-                            // Try to get the class definition to check for custom serialization constructor
-                            bool has_custom_constructor = false;
-                            try {
-                                // Create a temporary instance to get the class definition
-                                script_value temp_instance = eng->execute(type_name + "()");
-                                auto temp_class_instance = temp_instance.as<std::shared_ptr<class_instance>>();
-                                if (temp_class_instance) {
-                                    auto class_def = temp_class_instance->get_class_definition();
-                                    if (class_def) {
-                                        auto class_eng = class_def->get_engine();
-                                        if (class_eng) {
-                                            uint64_t serialize_construct_id = class_eng->symbolize("_serialize_construct");
-                                            script_value custom_constructor = class_def->get_method(serialize_construct_id);
-                                            if (custom_constructor.type() == script_value_type::jai_function_type) {
-                                                // Use custom serialization constructor
-                                                std::vector<script_value> args = { val };
-                                                auto result = custom_constructor.as_function()(args);
-                                                if (result) {
-                                                    instance = std::move(result.value());
-                                                    has_custom_constructor = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (...) {
-                                // Default constructor failed, continue with fallback
-                            }
-
-                            if (!has_custom_constructor) {
-                                // Fallback: Create default instance and set properties
-                                instance = eng->execute(type_name + "()");
-
-                                // Set all properties (except metadata fields like _type_ and _version_)
-                                for (const auto& [key, value] : map) {
-                                    if (key.is_string()) {
-                                        std::string propName = key.as_string();
-                                        // Skip metadata fields
-                                        if (propName == "_type_" || propName == "_version_") continue;
-
-                                        // Process nested values recursively
-                                        script_value propValue = processValue(value);
-
-                                        // Set the property using unique temporary variables
-                                        static std::atomic<uint64_t> json_counter{0};
-                                        auto id = json_counter.fetch_add(1, std::memory_order_relaxed);
-                                        std::string tempVar = "_jt_" + std::to_string(id);
-                                        std::string objVar = "_jo_" + std::to_string(id);
-                                        eng->add_global(tempVar, propValue);
-                                        eng->add_global(objVar, instance);
-
-                                        try {
-                                            eng->execute(objVar + "." + propName + " = " + tempVar);
-                                            instance = eng->get_variable(objVar);
-                                        } catch (...) {
-                                            // Skip properties that can't be set (e.g., read-only or non-existent)
-                                        }
-
-                                        // Clean up - always runs, even after exception above
-                                        eng->add_global(tempVar, script_value(std::monostate{}, eng));
-                                        eng->add_global(objVar, script_value(std::monostate{}, eng));
-                                    }
-                                }
-                            }
-
-                            // Call post_load hook if it exists (for both custom and fallback paths)
-                            // Pass both the object and the version number for migration logic
-                            try {
-                                auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
-                                if (class_instance_ptr) {
-                                    auto class_def = class_instance_ptr->get_class_definition();
-                                    if (class_def) {
-                                        auto class_eng = class_def->get_engine();
-                                        if (!class_eng) return instance;
-                                        uint64_t post_load_id = class_eng->symbolize("post_load");
-                                        script_value post_load = class_def->get_method(post_load_id, false);  // Don't throw if not found
-                                        if (post_load.type() == script_value_type::jai_function_type) {
-                                            // Extract version from map (default to 1 if not present)
-                                            script_int version = 1;
-                                            auto versionIt = map.find(script_value("_version_", eng));
-                                            if (versionIt != map.end() && versionIt->second.is_int()) {
-                                                version = versionIt->second.as<script_int>();
-                                            }
-
-                                            std::vector<script_value> args = {
-                                                instance,
-                                                script_value(version, eng)
-                                            };
-                                            (void)post_load.as_function()(args);
-                                        }
-                                    }
-                                }
-                            } catch (...) {
-                                // Hook failed - rethrow to show error
-                                throw;
-                            }
-
-                            return instance;
-
-                        } catch (...) {
-                            // If object reconstruction fails, fall through to return as map
-                        }
+                        script_value obj = reconstruct_typed_object(
+                            eng, map, typeIt->second.as_string(), processValue);
+                        if (!obj.is_null()) return obj;
+                        // unknown/unregistered type -> fall through to generic map processing
                     }
 
                     // Process map values recursively
@@ -662,75 +628,14 @@ namespace stdlib {
 
             script_value result = reader.read_value();
 
-            // For objects with _type_ field, try to reconstruct like JSON
+            // For objects with a _type_ field, reconstruct through the registry (no eval).
             if (result.is_map()) {
                 const auto& map = result.as_map();
                 auto type_it = map.find(script_value("_type_", eng));
                 if (type_it != map.end() && type_it->second.is_string()) {
-                    std::string type_name = type_it->second.as_string();
-
-                    try {
-                        script_value instance = eng->execute(type_name + "()");
-
-                        // Set properties
-                        for (const auto& [key, value] : map) {
-                            if (key.is_string() && key.as_string() != "_type_" && key.as_string() != "_version_") {
-                                std::string prop_name = key.as_string();
-                                static std::atomic<uint64_t> binary_counter{0};
-                                auto bid = binary_counter.fetch_add(1, std::memory_order_relaxed);
-                                std::string temp_var = "_bt_" + std::to_string(bid);
-                                std::string obj_var = "_bo_" + std::to_string(bid);
-                                eng->add_global(temp_var, value);
-                                eng->add_global(obj_var, instance);
-
-                                try {
-                                    eng->execute(obj_var + "." + prop_name + " = " + temp_var);
-                                    instance = eng->get_variable(obj_var);
-                                } catch (...) {
-                                    // Skip properties that can't be set
-                                }
-
-                                // Clean up - always runs
-                                eng->add_global(temp_var, script_value(std::monostate{}, eng));
-                                eng->add_global(obj_var, script_value(std::monostate{}, eng));
-                            }
-                        }
-
-                        // Call post_load hook if it exists
-                        try {
-                            auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
-                            if (class_instance_ptr) {
-                                auto class_def = class_instance_ptr->get_class_definition();
-                                if (class_def) {
-                                    auto class_eng = class_def->get_engine();
-                                    if (class_eng) {
-                                        uint64_t post_load_id = class_eng->symbolize("post_load");
-                                        script_value post_load = class_def->get_method(post_load_id, false);
-                                        if (post_load.type() == script_value_type::jai_function_type) {
-                                            // Extract version from map (default to 1 if not present)
-                                            script_int version = 1;
-                                            auto version_it = map.find(script_value("_version_", eng));
-                                            if (version_it != map.end() && version_it->second.is_int()) {
-                                                version = version_it->second.as<script_int>();
-                                            }
-
-                                            std::vector<script_value> args = {
-                                                instance,
-                                                script_value(version, eng)
-                                            };
-                                            (void)post_load.as_function()(args);
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (...) {
-                            // Hook failed, but continue
-                        }
-
-                        return instance;
-                    } catch (...) {
-                        // If object reconstruction fails, fall through to return as map
-                    }
+                    script_value obj = reconstruct_typed_object(
+                        eng, map, type_it->second.as_string(), nullptr);
+                    if (!obj.is_null()) return obj;
                 }
             }
 
@@ -762,73 +667,14 @@ namespace stdlib {
             serialization::binary_archive_reader reader(data, eng);
             script_value result = reader.read_value();
 
-            // Handle object reconstruction like from_binary
+            // For objects with a _type_ field, reconstruct through the registry (no eval).
             if (result.is_map()) {
                 const auto& map = result.as_map();
                 auto type_it = map.find(script_value("_type_", eng));
                 if (type_it != map.end() && type_it->second.is_string()) {
-                    std::string type_name = type_it->second.as_string();
-
-                    try {
-                        script_value instance = eng->execute(type_name + "()");
-
-                        for (const auto& [key, value] : map) {
-                            if (key.is_string() && key.as_string() != "_type_" && key.as_string() != "_version_") {
-                                std::string prop_name = key.as_string();
-                                static std::atomic<uint64_t> base64_counter{0};
-                                auto b64id = base64_counter.fetch_add(1, std::memory_order_relaxed);
-                                std::string temp_var = "_b6t_" + std::to_string(b64id);
-                                std::string obj_var = "_b6o_" + std::to_string(b64id);
-                                eng->add_global(temp_var, value);
-                                eng->add_global(obj_var, instance);
-
-                                try {
-                                    eng->execute(obj_var + "." + prop_name + " = " + temp_var);
-                                    instance = eng->get_variable(obj_var);
-                                } catch (...) {
-                                    // Skip properties that can't be set
-                                }
-
-                                // Clean up - always runs
-                                eng->add_global(temp_var, script_value(std::monostate{}, eng));
-                                eng->add_global(obj_var, script_value(std::monostate{}, eng));
-                            }
-                        }
-
-                        // Call post_load hook if it exists
-                        try {
-                            auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
-                            if (class_instance_ptr) {
-                                auto class_def = class_instance_ptr->get_class_definition();
-                                if (class_def) {
-                                    auto class_eng = class_def->get_engine();
-                                    if (class_eng) {
-                                        uint64_t post_load_id = class_eng->symbolize("post_load");
-                                        script_value post_load = class_def->get_method(post_load_id, false);
-                                        if (post_load.type() == script_value_type::jai_function_type) {
-                                            script_int version = 1;
-                                            auto version_it = map.find(script_value("_version_", eng));
-                                            if (version_it != map.end() && version_it->second.is_int()) {
-                                                version = version_it->second.as<script_int>();
-                                            }
-
-                                            std::vector<script_value> args = {
-                                                instance,
-                                                script_value(version, eng)
-                                            };
-                                            (void)post_load.as_function()(args);
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (...) {
-                            // Hook failed, but continue
-                        }
-
-                        return instance;
-                    } catch (...) {
-                        // If object reconstruction fails, fall through to return as map
-                    }
+                    script_value obj = reconstruct_typed_object(
+                        eng, map, type_it->second.as_string(), nullptr);
+                    if (!obj.is_null()) return obj;
                 }
             }
 

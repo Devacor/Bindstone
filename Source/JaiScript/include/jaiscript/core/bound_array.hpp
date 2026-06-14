@@ -31,8 +31,8 @@ class bound_array {
 private:
     // Either owns the data (for by-value) or references it (for by-reference)
     mutable std::shared_ptr<script_value> owned_value_;
-    script_array* arr_;  // script_array is std::vector<script_value>
-    engine* engine_ref_;  // Engine reference for creating script_values
+    script_array* arr_ = nullptr;  // script_array is std::vector<script_value>
+    engine* engine_ref_ = nullptr;  // Engine reference for creating script_values
 
     // Helper to get engine reference
     engine* get_engine() const {
@@ -202,7 +202,7 @@ public:
      * @brief Move constructor
      */
     bound_array(bound_array&& other) noexcept
-        : owned_value_(std::move(other.owned_value_)), arr_(other.arr_) {
+        : owned_value_(std::move(other.owned_value_)), arr_(other.arr_), engine_ref_(other.engine_ref_) {
         if (owned_value_) {
             arr_ = &owned_value_->as_array();
         }
@@ -214,6 +214,7 @@ public:
      */
     bound_array& operator=(const bound_array& other) {
         if (this != &other) {
+            engine_ref_ = other.engine_ref_;
             if (other.owned_value_) {
                 owned_value_ = std::make_shared<script_value>(other.owned_value_->clone());
                 arr_ = &owned_value_->as_array();
@@ -230,6 +231,7 @@ public:
      */
     bound_array& operator=(bound_array&& other) noexcept {
         if (this != &other) {
+            engine_ref_ = other.engine_ref_;
             owned_value_ = std::move(other.owned_value_);
             arr_ = other.arr_;
             if (owned_value_) {

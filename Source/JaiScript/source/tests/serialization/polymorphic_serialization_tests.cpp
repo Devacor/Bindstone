@@ -765,6 +765,44 @@ public:
     JAI_PROPERTY((int), pinned, 3);
 };
 
+// Multiple inheritance: the SECOND base sits at a non-zero offset within the derived
+// object, so reconstructing a shared_ptr<PORightBase> from a dynamic POMultiDerived needs
+// pointer adjustment. property_owner registers the Derived->Base casters automatically.
+class POLeftBase : public jai::property_owner<POLeftBase> {
+public:
+    JAI_PROPERTY((int), leftVal, 0);
+};
+class PORightBase : public jai::property_owner<PORightBase> {
+public:
+    JAI_PROPERTY((int), rightVal, 0);
+};
+class POMultiDerived : public jai::property_owner<POMultiDerived, POLeftBase, PORightBase> {
+public:
+    JAI_PROPERTY((int), derivedVal, 0);
+};
+
+// Non-property_owner MI hierarchy registered through the manual escape hatches: an explicit
+// registrar for identity + a manual base relation for the offset.
+struct MIRawLeft {
+    virtual ~MIRawLeft() = default;
+    int l = 0;
+    template<class Ar> void serialize(Ar& ar) { ar(jai::serialization::make_nvp("l", l)); }
+};
+struct MIRawRight {
+    virtual ~MIRawRight() = default;
+    int r = 0;
+    template<class Ar> void serialize(Ar& ar) { ar(jai::serialization::make_nvp("r", r)); }
+};
+struct MIRawDerived : MIRawLeft, MIRawRight {
+    int d = 0;
+    template<class Ar> void serialize(Ar& ar) { ar(jai::serialization::make_nvp("d", d)); MIRawLeft::serialize(ar); MIRawRight::serialize(ar); }
+};
+static jai::registrar<MIRawDerived, void> _miRawReg("MIRawDerived");
+static const bool _miRawRelation = [] {
+    jai::serialization::register_polymorphic_base_relation<MIRawDerived, MIRawRight>();
+    return true;
+}();
+
 // Auto-named registrar: no name string passed — the script name and serialization $type
 // are both derived from the C++ type. Not a property_owner, so the only registration is
 // the registrar's, making the derived name unambiguous.
@@ -857,6 +895,44 @@ public:
             auto binaryDerived = std::dynamic_pointer_cast<ImplicitRegDerived>(fromBinary);
             check(binaryDerived != nullptr, "dynamic type lost through binary round-trip");
             check_eq(std::string("round"), binaryDerived->derivedTag.get());
+        });
+
+        test("property_owner_auto_registers_base_casters", [&]() {
+            // property_owner<Derived, Left, Right> registers Derived->base adjusters at
+            // static init. Verify the second base's adjuster directly (its subobject is at
+            // a non-zero offset) — the registry produces the same pointer a real
+            // static_cast<PORightBase*> would.
+            auto obj = std::make_shared<POMultiDerived>();
+            void* derivedAddr = obj.get();
+            void* expectedRight = static_cast<PORightBase*>(obj.get());
+            check(expectedRight != derivedAddr, "test premise: PORightBase subobject must be at a non-zero offset");
+
+            void* adjusted = jai::serialization::polymorphic_registry::instance().adjust_to_base(
+                std::type_index(typeid(POMultiDerived)), std::type_index(typeid(PORightBase)), derivedAddr);
+            check(adjusted == expectedRight, "auto-registered caster must adjust a POMultiDerived* to its PORightBase subobject");
+
+            // First base is at offset zero; adjuster (if any) must be identity.
+            void* expectedLeft = static_cast<POLeftBase*>(obj.get());
+            void* adjustedLeft = jai::serialization::polymorphic_registry::instance().adjust_to_base(
+                std::type_index(typeid(POMultiDerived)), std::type_index(typeid(POLeftBase)), derivedAddr);
+            check(adjustedLeft == expectedLeft, "first-base adjustment must match static_cast");
+        });
+
+        test("multiple_inheritance_manual_base_relation", [&]() {
+            auto eng = engine::make();
+            auto obj = std::make_shared<MIRawDerived>();
+            obj->l = 5; obj->r = 6; obj->d = 7;
+            std::shared_ptr<MIRawRight> asRight = obj;
+            check(static_cast<const void*>(asRight.get()) != static_cast<const void*>(obj.get()),
+                "test premise: MIRawRight subobject must be at a non-zero offset");
+
+            auto loaded = roundtrip_json(*eng, asRight);
+            check(loaded != nullptr, "manual MI round-trip returned null");
+            check_eq(6, loaded->r);                    // adjusted base data correct
+            auto full = std::dynamic_pointer_cast<MIRawDerived>(loaded);
+            check(full != nullptr, "manual MI dynamic type lost");
+            check_eq(5, full->l);
+            check_eq(7, full->d);
         });
 
         test("registrar_auto_name_no_string_feeds_both_registries", [&]() {

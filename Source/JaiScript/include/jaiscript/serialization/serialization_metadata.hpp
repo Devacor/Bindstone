@@ -8,6 +8,8 @@
 #include <memory>
 #include <cstdint>
 #include <typeindex>
+#include <typeinfo>
+#include <type_traits>
 
 // Forward declarations to avoid circular dependencies
 namespace jai {
@@ -179,10 +181,12 @@ class any_archive_reader {
     void* (*get_engine_)(void*);  // Returns engine*
     void* (*get_user_context_)(void*, std::type_index);  // Returns user context by type_index
     void (*clear_property_value_)(void*);
-    // Shared pointer ID tracking for type-erased smart pointer deserialization
+    // Shared pointer ID tracking for type-erased smart pointer deserialization. The void
+    // pointers carry a type_index so multiple-inheritance base-offset adjustment can happen
+    // on the concrete side (this header can't see polymorphic_registry).
     bool (*has_deserialized_shared_)(void*, uint32_t);
-    std::shared_ptr<void> (*get_deserialized_shared_void_)(void*, uint32_t);
-    void (*register_deserialized_shared_void_)(void*, uint32_t, std::shared_ptr<void>);
+    std::shared_ptr<void> (*get_deserialized_shared_adjusted_)(void*, uint32_t, std::type_index);
+    void (*register_deserialized_shared_typed_)(void*, uint32_t, std::shared_ptr<void>, std::type_index);
 
 public:
     template<typename Archive>
@@ -219,12 +223,12 @@ public:
         })
         , clear_property_value_([](void* p) { static_cast<Archive*>(p)->clear_property_value(); })
         , has_deserialized_shared_([](void* p, uint32_t id) { return static_cast<Archive*>(p)->has_deserialized_shared(id); })
-        , get_deserialized_shared_void_([](void* p, uint32_t id) -> std::shared_ptr<void> {
-            // Get as shared_ptr<void> - the concrete archive stores shared_ptr<void> internally
-            return static_cast<Archive*>(p)->get_deserialized_shared_void(id);
+        , get_deserialized_shared_adjusted_([](void* p, uint32_t id, std::type_index target) -> std::shared_ptr<void> {
+            // Concrete side adjusts the complete pointer to the target base subobject.
+            return static_cast<Archive*>(p)->get_deserialized_shared_adjusted(id, target);
         })
-        , register_deserialized_shared_void_([](void* p, uint32_t id, std::shared_ptr<void> ptr) {
-            static_cast<Archive*>(p)->register_deserialized_shared_void(id, std::move(ptr));
+        , register_deserialized_shared_typed_([](void* p, uint32_t id, std::shared_ptr<void> complete, std::type_index type) {
+            static_cast<Archive*>(p)->register_deserialized_shared_typed(id, std::move(complete), type);
         })
     {}
 
@@ -266,17 +270,26 @@ public:
     // Shared pointer tracking for type-erased deserialization
     bool has_deserialized_shared(uint32_t id) { return has_deserialized_shared_(ptr_, id); }
 
-    // Get a previously deserialized shared_ptr by ID, cast to the target type
+    // Get a previously deserialized shared_ptr by ID, cast to the target type. The void is
+    // already adjusted to T's subobject, so the static_pointer_cast reinterprets a correct
+    // address (multiple-inheritance safe).
     template<typename T>
     std::shared_ptr<T> get_deserialized_shared(uint32_t id) {
-        auto void_ptr = get_deserialized_shared_void_(ptr_, id);
+        auto void_ptr = get_deserialized_shared_adjusted_(ptr_, id, std::type_index(typeid(T)));
         return std::static_pointer_cast<T>(void_ptr);
     }
 
-    // Register a newly deserialized shared_ptr (stores as shared_ptr<void>)
+    // Register a newly deserialized shared_ptr, storing the complete object + its dynamic
+    // type so later back-refs through any base view adjust correctly.
     template<typename T>
     void register_deserialized_shared(uint32_t id, std::shared_ptr<T> ptr) {
-        register_deserialized_shared_void_(ptr_, id, std::static_pointer_cast<void>(ptr));
+        if (!ptr) { return; }
+        if constexpr (std::is_polymorphic_v<T>) {
+            void* complete = dynamic_cast<void*>(ptr.get());
+            register_deserialized_shared_typed_(ptr_, id, std::shared_ptr<void>(ptr, complete), std::type_index(typeid(*ptr)));
+        } else {
+            register_deserialized_shared_typed_(ptr_, id, std::static_pointer_cast<void>(ptr), std::type_index(typeid(T)));
+        }
     }
 
     // Archive type recovery for full-fidelity deserialization

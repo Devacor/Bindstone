@@ -3,7 +3,6 @@
 #ifndef JAISCRIPT_DETAIL_STATIC_TYPE_NAME_HPP
 #define JAISCRIPT_DETAIL_STATIC_TYPE_NAME_HPP
 
-#include <string>
 #include <string_view>
 
 // Compile-time C++ type names via the compiler's signature macro (the nameof/ctti
@@ -58,95 +57,29 @@ constexpr std::string_view static_type_name() {
 	return extract_type_name(raw_type_signature<T>());
 }
 
-// True only for names spelled identically by every supported compiler: plain
-// (possibly namespace-qualified) identifiers. Template instantiations ('<'),
-// local classes, and lambdas contain characters outside this set.
-constexpr bool is_portable_type_name(std::string_view name) {
-	if (name.empty()) { return false; }
-	for (char c : name) {
-		const bool identifierChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == ':';
-		if (!identifierChar) { return false; }
-	}
-	return true;
-}
-
-// Namespaces stripped ("Node"). Empty whenever the spelling is not provably
-// identical across compilers — those types must supply a name explicitly
-// (jai_type_name member or jai::registrar).
+// The implicit registration name: the bare class identifier, all qualification
+// stripped ("MV::Scene::Node" -> "Node"). Anonymous-namespace types fall out as their
+// bare name too — the compiler-specific marker (`anonymous namespace', {anonymous}, ...)
+// sits in a discarded middle segment, so taking everything after the last "::" yields a
+// clean identifier without special-casing. Kept bare for consistency with explicit
+// jai::registrar names (also bare), so a type can move between implicit and explicit
+// registration without its serialized $type changing.
+//
+// Empty when there is no stable bare identifier: templates (their argument spelling
+// varies by compiler), lambdas, and any spelling whose final segment isn't a plain
+// identifier. Those must be named explicitly — a jai_type_name member, or externally via
+// jai::registrar / polymorphic_registry::try_auto_register without touching the type.
 template<typename T>
 constexpr std::string_view static_unqualified_type_name() {
 	auto name = static_type_name<T>();
-	if (!is_portable_type_name(name)) { return {}; }
+	if (name.empty()) { return {}; }
+	if (name.find('<') != std::string_view::npos) { return {}; } //template instantiation
 	if (auto pos = name.rfind("::"); pos != std::string_view::npos) { name.remove_prefix(pos + 2); }
+	for (char c : name) {
+		const bool identifierChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+		if (!identifierChar) { return {}; } //lambda / local / anything with a non-identifier final segment
+	}
 	return name;
-}
-
-// Anonymous-namespace segments are the one compiler-variant spelling worth
-// canonicalizing rather than rejecting: each compiler marks them differently, but the
-// surrounding identifiers are portable. They normalize to the stable token "AN"
-// (foo::{anonymous}::Baz -> "foo::AN::Baz"). Note such types are per-TU distinct; two
-// TUs deriving the same canonical name trip the registry's collision warning.
-inline constexpr std::string_view anonymous_namespace_markers[] = {
-	"`anonymous namespace'",  //MSVC
-	"`anonymous-namespace'",  //MSVC (alternate spelling)
-	"(anonymous namespace)",  //Clang, newer GCC
-	"{anonymous}",            //GCC
-	"(anonymous)",            //GCC (alternate spelling)
-};
-
-constexpr std::string_view matched_anonymous_marker(std::string_view name, size_t pos) {
-	for (auto marker : anonymous_namespace_markers) {
-		if (name.substr(pos, marker.size()) == marker) { return marker; }
-	}
-	return {};
-}
-
-// Identifier chars and '::' with anonymous-namespace markers allowed as whole segments.
-constexpr bool is_canonicalizable_type_name(std::string_view name) {
-	if (name.empty()) { return false; }
-	size_t i = 0;
-	while (i < name.size()) {
-		if (auto marker = matched_anonymous_marker(name, i); !marker.empty()) {
-			i += marker.size();
-			continue;
-		}
-		const char c = name[i];
-		const bool identifierChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == ':';
-		if (!identifierChar) { return false; }
-		++i;
-	}
-	return true;
-}
-
-// The implicit registration name: plain types give the bare identifier ("Baz"),
-// anonymous-namespace types keep their qualified path with canonical AN segments
-// ("foo::AN::Baz" — the qualification is what disambiguates them from a public Baz).
-// Empty for spellings that cannot be made portable (templates, locals, lambdas).
-inline std::string canonical_registration_name(std::string_view name) {
-	if (!is_canonicalizable_type_name(name)) { return {}; }
-	std::string result;
-	result.reserve(name.size());
-	bool hasAnonymousSegment = false;
-	size_t i = 0;
-	while (i < name.size()) {
-		if (auto marker = matched_anonymous_marker(name, i); !marker.empty()) {
-			result += "AN";
-			hasAnonymousSegment = true;
-			i += marker.size();
-			continue;
-		}
-		result += name[i];
-		++i;
-	}
-	if (!hasAnonymousSegment) {
-		if (auto pos = result.rfind("::"); pos != std::string::npos) { result.erase(0, pos + 2); }
-	}
-	return result;
-}
-
-template<typename T>
-std::string registration_type_name() {
-	return canonical_registration_name(static_type_name<T>());
 }
 
 // Compile-time self-test: locks the signature parse against compiler/format drift

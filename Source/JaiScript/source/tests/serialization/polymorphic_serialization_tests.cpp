@@ -878,6 +878,29 @@ public:
             check(json.find("ImplicitRegDerived") != std::string::npos, "expected the implicit class name: " + json);
         });
 
+        // A tampered $type naming a registered but UNRELATED type must be rejected on load,
+        // not silently reinterpreted as the requested base (type confusion, B5).
+        test("polymorphic_load_rejects_unrelated_type", [&]() {
+            auto eng = engine::make();
+            std::shared_ptr<ImplicitRegBase> original = std::make_shared<ImplicitRegDerived>();
+            (void)std::make_shared<POLeftBase>();  // odr-use so POLeftBase is registered
+
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            std::string json = w.str();
+
+            // Relabel the concrete type as POLeftBase — registered, but not a subtype of
+            // ImplicitRegBase — simulating a malicious save/network payload.
+            const std::string concrete = "ImplicitRegDerived";
+            auto pos = json.find(concrete);
+            check(pos != std::string::npos, "expected the concrete $type in: " + json);
+            json.replace(pos, concrete.size(), "POLeftBase");
+
+            jai::serialization::json_archive_reader r(json, eng.get());
+            std::shared_ptr<ImplicitRegBase> out;
+            check_throws([&]() { r(out); }, "unrelated $type must be rejected, not mis-cast");
+        });
+
         test("property_owner_implicit_round_trip", [&]() {
             auto eng = engine::make();
             auto derived = std::make_shared<ImplicitRegDerived>();

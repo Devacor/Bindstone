@@ -5,6 +5,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/serialization/binary_archive.hpp>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -78,6 +79,23 @@ public:
             )");
             check_eq((script_int)11, eng->execute("q.x").as_int());
             check_eq((script_int)22, eng->execute("q.y").as_int());
+        });
+
+        // A length prefix bounded only by uint32 lets a ~5-byte blob claim 4 billion elements;
+        // the reader must reject it against the remaining buffer, not reserve/loop into a
+        // multi-GB allocation on the live scene-load path. B5.
+        test("binary_oversized_array_length_rejected", [&]() {
+            auto eng = engine::make();
+            std::vector<uint8_t> blob = { 0x03, 0xFF, 0xFF, 0xFF, 0xFF }; // array marker + 4B count
+            jai::serialization::binary_archive_reader r(blob.data(), blob.size(), eng.get());
+            check_throws([&]() { (void)r.begin_array(); }, "oversized array length must be rejected");
+        });
+
+        test("binary_oversized_map_length_rejected", [&]() {
+            auto eng = engine::make();
+            std::vector<uint8_t> blob = { 0x05, 0xFF, 0xFF, 0xFF, 0xFF }; // map marker + 4B count
+            jai::serialization::binary_archive_reader r(blob.data(), blob.size(), eng.get());
+            check_throws([&]() { (void)r.begin_map(); }, "oversized map length must be rejected");
         });
     }
 };

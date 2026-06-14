@@ -150,6 +150,37 @@ public:
         return p;
     }
 
+    // Whether a complete object of dynamic type `from` may be safely viewed as `to` — i.e.
+    // `to` is `from` itself, the universal type-erased `void`, or a base reachable through the
+    // recorded Derived->Base edges. The polymorphic load and back-reference paths gate their
+    // void->base casts on this, so a tampered `$type` naming an unrelated (but registered) type
+    // is rejected with an error instead of being reinterpreted as the requested base — the
+    // serialization type-confusion fix (B5). property_owner records every declared base
+    // (including offset-zero single inheritance), so its hierarchies validate exactly; a type
+    // with no recorded relation is assignable only to itself.
+    bool is_assignable(std::type_index from, std::type_index to) const {
+        if (from == to || to == std::type_index(typeid(void))) { return true; }
+        auto it = base_edges_.find(from);
+        if (it == base_edges_.end()) { return false; }
+        std::set<std::type_index> visited{ from };
+        std::vector<std::type_index> stack;
+        for (const auto& e : it->second) {
+            if (e.base == to) { return true; }
+            if (visited.insert(e.base).second) { stack.push_back(e.base); }
+        }
+        while (!stack.empty()) {
+            auto cur = stack.back();
+            stack.pop_back();
+            auto cit = base_edges_.find(cur);
+            if (cit == base_edges_.end()) { continue; }
+            for (const auto& e : cit->second) {
+                if (e.base == to) { return true; }
+                if (visited.insert(e.base).second) { stack.push_back(e.base); }
+            }
+        }
+        return false;
+    }
+
     // Auto-register a polymorphic type for serialization.
     // Detects save/load methods and load_and_construct via SFINAE.
     // Called from jai::registrar during static initialization.

@@ -881,6 +881,12 @@ public:
         if (id == 0) return nullptr;
         auto it = cpp_shared_ptrs_.find(id);
         if (it == cpp_shared_ptrs_.end()) return nullptr;
+        // A back-reference may request a different base view than the original load; reject it
+        // unless the stored dynamic type is actually assignable to that base, so a tampered id
+        // can't reinterpret an unrelated object through `target` (type confusion). B5.
+        if (!polymorphic_registry::instance().is_assignable(it->second.type, target)) {
+            throw serialization_error("Back-referenced object is not a subtype of the requested type");
+        }
         void* adjusted = polymorphic_registry::instance().adjust_to_base(it->second.type, target, it->second.object.get());
         return std::shared_ptr<void>(it->second.object, adjusted);
     }
@@ -1396,6 +1402,13 @@ private:
             if (!poly_type.empty()) {
                 auto* entry = polymorphic_registry::instance().find(poly_type);
                 if (entry && entry->load_fn) {
+                    // Reject a tampered $type that names a registered type unrelated to the
+                    // requested base BEFORE constructing it — otherwise the void->elem_type cast
+                    // below would reinterpret an unrelated object as elem_type (type confusion
+                    // reachable from untrusted payloads). B5.
+                    if (!polymorphic_registry::instance().is_assignable(entry->type, std::type_index(typeid(elem_type)))) {
+                        throw serialization_error("Polymorphic type '" + poly_type + "' is not a subtype of the requested base type");
+                    }
                     if (!self()->seek_property("$val")) {
                         throw serialization_error("Expected '$val' for polymorphic shared_ptr");
                     }

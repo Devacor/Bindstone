@@ -663,7 +663,14 @@ public:
         if (marker != 0x03) {
             throw runtime_error("Expected array marker, got " + std::to_string(marker));
         }
-        return read_little_endian<uint32_t>();
+        uint32_t size = read_little_endian<uint32_t>();
+        // A length prefix can't exceed the bytes left (each element costs >=1 byte); reject an
+        // oversized count instead of reserving/looping into a multi-GB allocation from a tiny
+        // malicious blob (mirrors read_binary). B5.
+        if (size > remaining_bytes()) {
+            throw serialization_error("Array size exceeds remaining data");
+        }
+        return size;
     }
 
     void end_array() {
@@ -689,6 +696,10 @@ public:
         }
 
         uint32_t size = read_little_endian<uint32_t>();
+        // See begin_array: a map of `size` entries needs at least `size` more bytes.
+        if (size > remaining_bytes()) {
+            throw serialization_error("Map size exceeds remaining data");
+        }
         return size;
     }
 

@@ -97,6 +97,18 @@ public:
             check_eq(eng->execute("root.extra").as<int>(), 1);
         });
 
+        // A bound method cached before a reload must not keep running the old code.
+        test("bound_method_not_stale_after_reload", [&]() {
+            auto eng = engine::make();
+            eng->execute(R"(
+                class Greeter { int value() { return 1; } }
+                auto g = Greeter();
+            )");
+            check_eq(eng->execute("g.value()").as<int>(), 1); // populate any bound-method cache
+            eng->execute("class Greeter { int value() { return 2; } }"); // reload, new body
+            check_eq(eng->execute("g.value()").as<int>(), 2); // bug: stale cache returns 1
+        });
+
         // Constructor overloads (arity-dispatched) must survive a reload. (Script *methods*
         // don't overload by arity — that's default-parameter territory — so the review's
         // "overload collapse" only applies to constructors here.)

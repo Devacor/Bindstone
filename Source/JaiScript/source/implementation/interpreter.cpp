@@ -9530,6 +9530,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     } else if (is_redefinition) {
         // Clear old ASTs for hot reload
         class_def->clear_asts();
+        // Rebuild method overload sets from scratch so they don't accumulate across reloads.
+        class_def->clear_instance_method_overloads();
     }
     
     // Collect new field defaults and methods (using uint64_t IDs for performance)
@@ -9845,41 +9847,12 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
                         new_static_methods[method_id] = script_value::make_function(static_method_func, engine_);
                     } else {
-                        // Instance method - has 'this' parameter
-                        auto method_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()),
-                                           method_ast,
-                                           class_def,
-                                           definition_env,
-                                           class_name = decl->name](const std::vector<script_value>& args) -> checked_result<script_value> {
-                            auto self = weak_self.lock();
-                            if (!self) {
-                                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Interpreter was destroyed before method call");
-                            }
-
-                            // First argument should be 'this' object
-                            if (args.empty()) {
-                                return checked_result<script_value>(make_error_code(runtime_error_code::this_outside_method), "Method called without 'this' object");
-                            }
-
-                            // Extract 'this' from first argument
-                            script_value this_obj = args[0];
-
-                            // Create remaining arguments (excluding 'this')
-                            std::vector<script_value> method_args(args.begin() + 1, args.end());
-
-                            // Create a method environment that provides implicit 'this' field access
-                            // Use definition_env (namespace/global) as parent
-                            scoped_method_environment method_env(
-                                self.get(),
-                                definition_env,
-                                this_obj
-                            );
-
-                            // Call the interpreter method directly
-                            return self->execute_method_ast(method_ast, method_env.get(), method_args);
-                        };
-
-                        new_methods[method_id] = script_value::make_function(method_func, engine_);
+                        // Instance method: rebuild the overload set + resolving dispatcher with
+                        // the SAME machinery a fresh class uses (add_script_method appends to
+                        // method_overloads_ and installs the type/arity dispatcher), so reloaded
+                        // methods overload correctly instead of collapsing to the last-declared.
+                        class_def->add_script_method(method_name, method_ast, this, definition_env);
+                        new_methods[method_id] = class_def->get_method(method_id, false);
                     }
                 } else {
                     // For new classes, add method normally

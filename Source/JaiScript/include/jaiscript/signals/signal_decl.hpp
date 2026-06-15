@@ -544,7 +544,12 @@ private:
 			has_oneshots_pending_ = false;
 		}
 
-		cull_dead_observers_unlocked();
+		// Only scan/erase when this emit actually saw a dead observer (or short-circuited) —
+		// turns the common steady-state drain (live observers, no queue, no one-shots) into O(1).
+		if (has_dead_observers_) {
+			cull_dead_observers_unlocked();
+			has_dead_observers_ = false;
+		}
 	}
 
 	// RAII depth guard for emit (see in_call_depth_): increments on entry, and on exit — normal
@@ -577,7 +582,7 @@ private:
 
 		for (size_t i = 0; i < observers_.size(); ++i) {
 			auto locked = observers_[i].lock();
-			if (!locked) continue;
+			if (!locked) { has_dead_observers_ = true; continue; }
 
 			if constexpr (ShortCircuit) {
 				// Pass as LVALUES: forwarding rvalue args inside the loop would let the
@@ -586,6 +591,7 @@ private:
 				if (!locked->predicate(args...)) {
 					result = false;
 					if (locked->is_oneshot()) has_oneshots_pending_ = true;
+					has_dead_observers_ = true;  // unscanned tail may hold dead observers
 					break;
 				}
 			} else {
@@ -619,12 +625,13 @@ private:
 
 		for (size_t i = 0; i < observers_.size(); ++i) {
 			auto locked = observers_[i].lock();
-			if (!locked) continue;
+			if (!locked) { has_dead_observers_ = true; continue; }
 
 			if constexpr (ShortCircuit) {
 				if (!locked->predicate()) {
 					result = false;
 					if (locked->is_oneshot()) has_oneshots_pending_ = true;
+					has_dead_observers_ = true;  // unscanned tail may hold dead observers
 					break;
 				}
 			} else {
@@ -664,6 +671,10 @@ private:
 	// firing). has_oneshots_pending_ accumulates across the reentrant call stack.
 	int in_call_depth_ = 0;
 	bool has_oneshots_pending_ = false;
+	// Set when an emit pass sees an expired observer (or stops early on short-circuit, leaving an
+	// unscanned tail) — gates the post-emit cull so a steady-state emit over live observers skips
+	// the O(n) scan entirely. Accumulates across reentrant emits like has_oneshots_pending_.
+	bool has_dead_observers_ = false;
 	int is_blocked_ = 0;
 	std::function<T> blocked_callback_;
 	std::vector<shared_receiver_type> disconnect_queue_;

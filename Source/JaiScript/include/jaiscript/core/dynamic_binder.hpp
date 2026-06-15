@@ -18,7 +18,6 @@
 #include <jaiscript/properties/property_schema.hpp>
 #include <jaiscript/properties/observable_property.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
-#include <jaiscript/core/property_type_converter.hpp>
 #include <string>
 #include <memory>
 #include <functional>
@@ -703,44 +702,6 @@ public:
         return *this;
     }
 
-    // Add custom serialization constructor for non-default constructible types
-    template<typename constructor_func>
-    dynamic_binder& serialize_construct(constructor_func&& constructor) {
-        // Store the custom constructor in the class definition
-        class_def_->add_method("_serialize_construct", [constructor = std::forward<constructor_func>(constructor), class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (args.size() != 1) {
-                throw runtime_error("Serialization constructor expects exactly one argument (the serialized data)");
-            }
-            
-            // Call the custom constructor with the serialized data
-            T instance = constructor(args[0]);
-            
-            // Create a class_instance to hold it
-            auto class_instance = class_def->create_instance();
-            class_instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name,
-                class_def->get_type_id(), std::make_shared<T>(std::move(instance)), engine_ptr));
-
-            if (auto eng = engine_ptr) {
-                return script_value::make_object(class_name, class_instance, eng);
-            }
-            throw runtime_error("Engine no longer exists");
-        });
-        
-        // Also register serialization metadata
-        auto& metadata = serialization_metadata_;
-        metadata.custom_construct = [constructor = std::forward<constructor_func>(constructor)](serialization::any_archive_reader& ar, uint32_t version) -> script_value {
-            // Convert archive data to script_value for the constructor
-            // This is a simplified implementation - real version would need proper conversion
-            script_value data = script_value(); // TODO: Convert archive to script_value
-            T instance = constructor(data, version);
-
-            // TODO: Wrap in class_instance and return as script_value
-            return script_value();
-        };
-        
-        return *this;
-    }
-    
     // Set class version
     dynamic_binder& version(uint32_t v) {
         serialization_metadata_.current_version = v;
@@ -1060,15 +1021,6 @@ public:
         return *this;
     }
     
-    // Add explicit type conversion support - general purpose
-    template<typename From, typename To>
-    dynamic_binder& add_type_conversion(std::function<To(const From&)> converter) {
-        // Register the conversion with the engine
-        // This would need to be implemented in the engine's type system
-        // Usage: .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Button>>([](const auto& item) { return item.self(); })
-        return *this;
-    }
-
 private:
 
 public:
@@ -1291,8 +1243,8 @@ private:
                 !try_bind_property_typed<uint16_t>(prop_name, value_type, is_observable) &&
                 !try_bind_property_typed<int8_t>(prop_name, value_type, is_observable) &&
                 !try_bind_property_typed<uint8_t>(prop_name, value_type, is_observable)) {
-                // Try the global type converter registry for custom types
-                try_bind_property_from_registry(prop_name, value_type);
+                // No primitive matched: non-primitive property types are bound manually.
+                // (The chain above is evaluated for its binding side effects.)
             }
         }
     }
@@ -1472,21 +1424,6 @@ private:
                 return script_value(std::monostate{}, eng);
             })
             .build();
-    }
-
-    // Try to bind a property using the global type converter registry
-    // This handles custom types like MV::Point<int, int> that have been registered
-    // via property_type_converter_registrar
-    //
-    // TODO: Implement fully once property_manager has type-erased value access
-    // For now, complex property types need to be bound manually
-    void try_bind_property_from_registry(const std::string& /*prop_name*/, std::type_index value_type) {
-        // Check if converter exists (for future use)
-        if (!property_type_converter_registry::instance().has_converter(value_type)) {
-            return;  // No converter registered - skip silently
-        }
-        // Complex type binding not yet implemented
-        // Custom types need to be bound manually for now
     }
 
     // Helper to convert C++ value to script_value

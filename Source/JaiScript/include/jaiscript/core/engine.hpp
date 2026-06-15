@@ -97,14 +97,7 @@ namespace jai {
         
         script_value execute_file(const std::string& scriptPath);
         script_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
-        
-        // Deprecated - use execute methods instead
-        [[deprecated("Use execute() instead")]]
-        script_value eval(const std::string& scriptContent);
-        
-        [[deprecated("Use execute_file() instead")]]
-        script_value fileEval(const std::string& scriptPath);
-        
+
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
         
@@ -467,22 +460,9 @@ namespace jai {
         // Get the global environment (for internal use)
         std::shared_ptr<environment> get_global_environment() const;
         
-        // state management (hooks for external serialization)
-        struct state {
-            std::map<std::string, script_value> globals;  // Use ordered map for deterministic serialization
-            // More state to be added
-        };
-        
-        state get_state() const;
-        void set_state(const state& state);
-        
-        // Hot-reload support
-        bool can_hot_reload(const std::string& scriptPath) const;
-        
         // Performance optimization
         void set_has_custom_numeric_operators(bool value);
-        bool hot_reload(const std::string& scriptPath);
-        
+
         // Get registered type name from typeid
         std::string get_registered_type_name(const std::string& typeIdName) const;
         
@@ -628,11 +608,6 @@ namespace jai {
         // Parameter storage for function calls (replaces thread_local)
         detail::parameter_storage* get_current_parameter_storage() const;
         void set_current_parameter_storage(detail::parameter_storage* storage);
-
-        // Escaped value registry - tracks script_values that have left the interpreter
-        // When engine dies, we null out their engine_ pointers to prevent dangling access
-        void register_escaped(script_value* val);
-        void unregister_escaped(script_value* val);
 
     private:
         struct implementation;

@@ -387,10 +387,6 @@ struct engine::implementation {
     };
     std::unordered_map<std::string, import_record> import_cache;
 
-    // Escaped values registry - tracks script_values that have left the interpreter
-    // When engine dies, we null out their engine_ pointers to prevent dangling access
-    std::unordered_set<script_value*> escaped_values_;
-
     implementation();
     ~implementation();
     
@@ -413,25 +409,13 @@ engine::implementation::implementation()
       class_definition_type_id_(string_symbolizer_.intern("class_definition")) {
     global_environment_ = std::make_shared<environment>(&string_symbolizer_);
 
-    const char* backend_env = std::getenv("JAISCRIPT_BACKEND");
-    if (backend_env) {
-        std::string backend_str(backend_env);
-        if (backend_str == "jvm" || backend_str == "vm") {
-            current_backend_type = backend_type::jvm;
-            backend = jvm::create_vm_backend(&string_symbolizer_, global_environment_);
-        } else if (backend_str == "auto") {
-            current_backend_type = backend_type::auto_select;
-            backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
-        } else {
-            current_backend_type = backend_type::interpreter;
-            backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
-        }
-    } else {
-        current_backend_type = backend_type::interpreter;
-        backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
-    }
-    
-    
+    // The tree-walk interpreter is the only backend (the bytecode VM is unfinished/LEGACY).
+    // A previous JAISCRIPT_BACKEND env read could silently route a shipped engine to the
+    // throwing VM stub, so it was removed.
+    current_backend_type = backend_type::interpreter;
+    backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
+
+
     // Set up class lookup callback
     backend->set_class_lookup_callback([this](const std::string& name) -> std::shared_ptr<class_definition> {
         auto it = classes.find(name);
@@ -540,26 +524,7 @@ engine::engine() : impl(std::make_unique<implementation>()) {
     // Built-in functions that create script_value will be added in initialize_engine_reference()
 }
 
-engine::~engine() {
-    // Null out engine pointers in all escaped values before destroying impl
-    // This prevents dangling pointer access after engine death
-    for (script_value* val : impl->escaped_values_) {
-        val->clear_engine();
-    }
-    // impl destructor runs after this, cleaning up everything else
-}
-
-void engine::register_escaped(script_value* val) {
-    if (val && impl) {
-        impl->escaped_values_.insert(val);
-    }
-}
-
-void engine::unregister_escaped(script_value* val) {
-    if (val && impl) {
-        impl->escaped_values_.erase(val);
-    }
-}
+engine::~engine() = default;  // pimpl: defined here where `implementation` is complete
 
 engine::engine(engine&&) noexcept = default;
 engine& engine::operator=(engine&&) noexcept = default;
@@ -1337,59 +1302,6 @@ bool engine::is_type_name(const std::string& name) const {
 
 std::shared_ptr<environment> engine::get_global_environment() const {
     return impl->global_environment_;
-}
-
-engine::state engine::get_state() const {
-    // Build ordered map of serializable globals for deterministic serialization
-    std::map<std::string, script_value> orderedGlobals;
-    
-    // Get all variables from the global environment
-    auto allVars = impl->global_environment_->get_all_variables();
-    
-    // Filter out non-serializable ones
-    for (const auto& [name, value] : allVars) {
-        if (impl->nonSerializableGlobals.find(name) == impl->nonSerializableGlobals.end()) {
-            orderedGlobals[std::string{name}] = value;
-        }
-    }
-    
-    return state{orderedGlobals};
-}
-
-void engine::set_state(const state& state) {
-    // Get all current variables
-    auto currentVars = impl->global_environment_->get_all_variables();
-    
-    // Create a new environment with only non-serializable globals
-    auto newEnv = std::make_shared<environment>(&impl->string_symbolizer_);
-    
-    // Copy over non-serializable globals
-    for (const auto& [name, value] : currentVars) {
-        if (impl->nonSerializableGlobals.find(name) != impl->nonSerializableGlobals.end()) {
-            newEnv->define(std::string{name}, value);
-        }
-    }
-    
-    // Add the new state globals  
-    for (const auto& [name, value] : state.globals) {
-        newEnv->define(name, value);
-    }
-    
-    // Replace the global environment
-    impl->global_environment_ = newEnv;
-    
-    // Update the backend to use the new environment
-    impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
-}
-
-bool engine::can_hot_reload(const std::string& scriptPath) const {
-    // TODO: Implement file timestamp checking
-    return false;
-}
-
-bool engine::hot_reload(const std::string& scriptPath) {
-    // TODO: Implement hot reload with state preservation
-    return false;
 }
 
 void engine::register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName) {

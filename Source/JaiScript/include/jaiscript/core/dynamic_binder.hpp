@@ -474,7 +474,7 @@ public:
                 return dynamic_binder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, eng);
             };
 
-            engine_.add_overloaded_function(class_name_, sizeof...(Args), [class_def = class_def_, class_name = class_name_, engine_ptr, helper](const std::vector<script_value>& args) -> script_value {
+            engine_.add_overloaded_function_with_full_types(class_name_, sizeof...(Args), [class_def = class_def_, class_name = class_name_, engine_ptr, helper](const std::vector<script_value>& args) -> script_value {
                 try {
                     // Extract arguments using index-based unpacking via helper
                     auto cpp_obj = helper(args, engine_ptr);
@@ -490,7 +490,8 @@ public:
                 } catch (const std::exception&) {
                     throw;
                 }
-            });
+            },
+            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
         }
 
         return *this;

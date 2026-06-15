@@ -42,6 +42,13 @@ static int compute_param_match_cost(
         const script_value& arg = args[first_arg + i];
         script_value_type argType = arg.type();
 
+        // A wildcard (script_value) parameter accepts any argument at a small fixed cost — low
+        // enough to stay viable, high enough that a concrete-typed overload still wins.
+        if (paramInfo.base_type == script_value_type::jai_null_type) {
+            totalCost += 5;
+            continue;
+        }
+
         // Handle object/shared_ptr types with inheritance checking
         if ((paramInfo.base_type == script_value_type::jai_object_type ||
              paramInfo.base_type == script_value_type::jai_shared_ptr_type) &&
@@ -1066,17 +1073,20 @@ void engine::add_overloaded_functionWithTypes(const std::string& name, size_t ar
     bool hasExistingFunction = existing_result && existing_result.value().is_function();
 
     if (hasExistingFunction) {
-        // Move existing function to overloaded set first
-        // Check if we have arity info for the existing function
-        auto arityIt = impl->functionArities.find(name);
-        size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
+        // Only migrate the existing global the first time (see add_overloaded_function_with_full_types):
+        // once a set exists the global is the dispatcher, and migrating it self-recurses.
+        auto overloadIt = impl->overloadedFunctions.find(name);
+        if (overloadIt == impl->overloadedFunctions.end()) {
+            auto arityIt = impl->functionArities.find(name);
+            size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
 
-        impl->getOrCreateOverloadSet(name).add_overload(existingArity, std::move(existing_result.value()));
-        if (arityIt != impl->functionArities.end()) {
-            impl->functionArities.erase(arityIt);
+            impl->getOrCreateOverloadSet(name).add_overload(existingArity, std::move(existing_result.value()));
+            if (arityIt != impl->functionArities.end()) {
+                impl->functionArities.erase(arityIt);
+            }
         }
     }
-    
+
     // Now add the new overload with type information
     impl->getOrCreateOverloadSet(name).add_overload(argCount, script_value::make_function(func, this), paramTypes);
     impl->updateOverloadedFunction(name, this);
@@ -1088,13 +1098,19 @@ void engine::add_overloaded_function_with_full_types(const std::string& name, si
     bool hasExistingFunction = existing_result && existing_result.value().is_function();
 
     if (hasExistingFunction) {
-        // Move existing function to overloaded set first
-        auto arityIt = impl->functionArities.find(name);
-        size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
+        // Only migrate the existing global into the overload set the FIRST time (when no set
+        // exists yet). Once a set exists, the global IS the dispatcher; moving it into the set
+        // (where the empty-signature dedup overwrites the real overload) makes a call dispatch to
+        // itself -> infinite recursion. Mirrors the guard in add_overloaded_function.
+        auto overloadIt = impl->overloadedFunctions.find(name);
+        if (overloadIt == impl->overloadedFunctions.end()) {
+            auto arityIt = impl->functionArities.find(name);
+            size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
 
-        impl->getOrCreateOverloadSet(name).add_overload_with_types(existingArity, std::move(existing_result.value()), {});
-        if (arityIt != impl->functionArities.end()) {
-            impl->functionArities.erase(arityIt);
+            impl->getOrCreateOverloadSet(name).add_overload_with_types(existingArity, std::move(existing_result.value()), {});
+            if (arityIt != impl->functionArities.end()) {
+                impl->functionArities.erase(arityIt);
+            }
         }
     }
 

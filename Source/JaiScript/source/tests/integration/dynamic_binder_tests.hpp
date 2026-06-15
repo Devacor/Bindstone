@@ -389,6 +389,42 @@ public:
             check_near(128.0/255.0, eng->execute("d.g").as<double>(), 1e-3); // int set() chosen: 128/255
         });
 
+        // Same-arity CONSTRUCTORS (the other half of the MV::Color clobber: Color(float...) vs
+        // Color(int...)) must also resolve by argument type. This also guards the registration-path
+        // recursion bug: routing the 2nd ctor through the typed entry point used to migrate the
+        // dispatcher into the overload set, so a 0-arg call self-recursed into a stack overflow.
+        test("same_arity_constructor_resolves_by_type", [this]() {
+            auto eng = engine::make();
+
+            class Rgb {
+            public:
+                float r = 0, g = 0, b = 0;
+                Rgb() {}
+                Rgb(float R, float G, float B) { r=R; g=G; b=B; }
+                Rgb(int R, int G, int B) { r=R/255.0f; g=G/255.0f; b=B/255.0f; }
+            };
+
+            dynamic_binder<Rgb>(*eng, "Rgb")
+                .constructor<>()
+                .constructor<float, float, float>()
+                .constructor<int, int, int>()
+                .property("r", &Rgb::r)
+                .property("g", &Rgb::g)
+                .build();
+
+            // The 0-arg ctor must still work after typed overloads are registered (no recursion).
+            eng->execute("auto z = Rgb();");
+            check_near(0.0, eng->execute("z.r").as<double>(), 1e-5);
+
+            eng->execute("auto a = Rgb(1.0, 0.5, 0.25);");   // float ctor (raw)
+            check_near(1.0, eng->execute("a.r").as<double>(), 1e-5);
+            check_near(0.5, eng->execute("a.g").as<double>(), 1e-5);
+
+            eng->execute("auto b = Rgb(255, 128, 64);");     // int ctor (/255)
+            check_near(1.0, eng->execute("b.r").as<double>(), 1e-5);
+            check_near(128.0/255.0, eng->execute("b.g").as<double>(), 1e-3);
+        });
+
         test("equality_operator", [this]() {
             auto eng = engine::make();
 

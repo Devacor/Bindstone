@@ -398,7 +398,7 @@ public:
             self()->begin_object();
             push_context(SerializationContext::ObjectBody);  // Prevent nested wrapping
         }
-        obj.property_mgr.save(*self());
+        obj.save_owned_properties(*self());  // walks the inheritance chain (not just the derived mgr)
         if (wrap) {
             pop_context();
             self()->end_object();
@@ -1073,7 +1073,7 @@ public:
         !has_serialize_method<T>::value &&
         has_property_mgr<T>::value, int> = 0>
     void operator()(T& obj) {
-        obj.property_mgr.load(*self());
+        obj.load_owned_properties(*self());  // walks the inheritance chain (not just the derived mgr)
     }
 
     // operator() for primitives (arithmetic, enum, string)
@@ -1491,7 +1491,7 @@ public:
             std::string type_name;
             uint32_t version;
             self()->begin_object(type_name, version);
-            value.property_mgr.load(*self());
+            value.load_owned_properties(*self());  // walks the inheritance chain
             self()->end_object();
         }
         else {

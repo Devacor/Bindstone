@@ -286,9 +286,61 @@ namespace jai {
 		// Load with hook (templated on concrete Archive type)
 		template<typename Archive>
 		void load_with_hook(Archive& ar) {
-			property_mgr.load(ar);
+			load_owned_properties(ar);
 			serialization::any_archive_reader type_erased(ar);
 			post_load(type_erased);
+		}
+
+		// --- Inheritance-aware property serialization -----------------------------------------
+		// property_owner<Derived, Bases...> holds ONE property_mgr per inheritance level, and the
+		// derived level name-hides the bases'. These walk the whole chain (each base is itself a
+		// property_owner, so it recurses — mirrors bind_to_engine/post_load) so a derived object's
+		// INHERITED properties are serialized too; without them only the most-derived level survives.
+
+		// Visit every level's properties (bases first, then own) — the single save walk.
+		template<typename Fn>
+		void visit_owned_properties(Fn&& fn) const {
+			if constexpr (sizeof...(Bases) > 0) {
+				(try_visit_base<Bases>(fn), ...);
+			}
+			for (const auto& [name, prop] : property_mgr.all()) {
+				fn(name, prop);
+			}
+		}
+
+		// Save: one type-erased wrap, then write every level's savable properties into the current
+		// (already-open, flat) object.
+		template<typename Archive>
+		void save_owned_properties(Archive& ar) const {
+			serialization::any_archive_writer type_erased(ar);
+			visit_owned_properties([&type_erased](const std::string&, property_base* prop) {
+				if (prop->allow_save()) {
+					prop->serialize(type_erased);
+				}
+			});
+		}
+
+		// Load (concrete archive): each level seeks its own properties by name from the same flat
+		// object — property_manager::load is re-entrant by design (see its comment), so call it per level.
+		template<typename Archive>
+		void load_owned_properties(Archive& ar) {
+			if constexpr (sizeof...(Bases) > 0) {
+				(try_load_base<Bases>(ar), ...);
+			}
+			property_mgr.load(ar);
+		}
+
+		// Find a property by name anywhere in the chain (the type-erased load reads names
+		// sequentially and must resolve base-level properties too).
+		property_base* find_owned_property(const std::string& name) {
+			if (auto* p = property_mgr.get(name)) {
+				return p;
+			}
+			property_base* found = nullptr;
+			if constexpr (sizeof...(Bases) > 0) {
+				((found = found ? found : try_find_base<Bases>(name)), ...);
+			}
+			return found;
 		}
 
 	protected:
@@ -335,6 +387,32 @@ namespace jai {
 		}
 		template<typename Base>
 		void try_post_load_base(...) {}
+
+		// Recurse the inheritance-aware property walks into each base (no-op if a base isn't a
+		// property_owner). Mirror the try_bind_base/try_post_load_base SFINAE shape.
+		template<typename Base, typename Fn>
+		auto try_visit_base(Fn&& fn) const
+			-> decltype(static_cast<const Base*>(this)->visit_owned_properties(fn), void()) {
+			static_cast<const Base*>(this)->visit_owned_properties(fn);
+		}
+		template<typename Base>
+		void try_visit_base(...) const {}
+
+		template<typename Base, typename Archive>
+		auto try_load_base(Archive& ar)
+			-> decltype(static_cast<Base*>(this)->load_owned_properties(ar), void()) {
+			static_cast<Base*>(this)->load_owned_properties(ar);
+		}
+		template<typename Base>
+		void try_load_base(...) {}
+
+		template<typename Base>
+		auto try_find_base(const std::string& name)
+			-> decltype(static_cast<Base*>(this)->find_owned_property(name)) {
+			return static_cast<Base*>(this)->find_owned_property(name);
+		}
+		template<typename Base>
+		property_base* try_find_base(...) { return nullptr; }
 	};
 
 	// ============================================================================

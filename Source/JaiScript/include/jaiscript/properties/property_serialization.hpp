@@ -422,14 +422,14 @@ namespace property_serialization {
 			// For now, just mark as expired/valid
 			ar.write_bool(!value.expired());
 		}
-		// Priority 10: property_owner types - serialize via their property_mgr
+		// Priority 10: property_owner types - serialize every inheritance level's property_mgr
 		else if constexpr (is_property_owner_v<T>) {
 			ar.begin_object("", 0);  // Type name not needed in type-erased context
-			for (const auto& [name, prop] : value.property_mgr.all()) {
+			value.visit_owned_properties([&ar](const std::string&, property_base* prop) {
 				if (prop->allow_save()) {
 					prop->serialize(ar);  // Calls virtual serialize(any_archive_writer&)
 				}
-			}
+			});
 			ar.end_object();
 		}
 		// Fallback: throw for unsupported types - fail explicitly instead of silently
@@ -575,7 +575,7 @@ namespace property_serialization {
 			// Read properties - the archive will iterate through them
 			std::string property_name;
 			while (ar.read_property_name(property_name)) {
-				auto* prop = value.property_mgr.get(property_name);
+				auto* prop = value.find_owned_property(property_name);  // search the whole chain
 				if (prop) {
 					prop->serialize(ar);  // Calls virtual serialize(any_archive_reader&)
 				}

@@ -227,9 +227,13 @@ template<typename T>
 std::string to_json(engine& eng, const T& value, int indent = 2) {
     serialization::json_archive_writer ar(indent, &eng);
     ar.begin_object("", 1);
-    if constexpr (detail::can_use_direct_archive_v<T>) {
-        // Types with property_mgr/save/serialize: serialize content directly
-        // For shared_ptr/unique_ptr, this uses [id, {...}] format with dedup tracking
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
+        // (polymorphic) type and aliasing survive — derefing into serialize_object_content would
+        // dispatch on the static pointee type and slice off the derived data + $type. B6.
+        ar.serialize("value0", value);
+    } else if constexpr (detail::can_use_direct_archive_v<T>) {
+        // Types with property_mgr/save/serialize: serialize content directly into the root object.
         ar.serialize_object_content(value);
     } else {
         // Basic types: serialize with "value0" key
@@ -246,10 +250,11 @@ std::string to_json(engine& eng, const T& value, Context& ctx, int indent = 2) {
     serialization::json_archive_writer ar(indent, &eng);
     (void)ctx;
     ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T> && detail::can_use_direct_archive_v<T>) {
-        if (value) {
-            ar.serialize_object_content(*value);
-        }
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
+        // (polymorphic) type and aliasing survive instead of being sliced to the static pointee
+        // type by serialize_object_content(*value). B6.
+        ar.serialize("value0", value);
     } else if constexpr (detail::can_use_direct_archive_v<T>) {
         ar.serialize_object_content(value);  // Don't double-wrap
     } else {
@@ -268,18 +273,11 @@ T from_json(engine& eng, const std::string& json) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        // shared_ptr<U> where U has property_mgr/load and is default-constructible
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_shared<E>();
-        ar(*result);  // Read as E, not shared_ptr<E>
-    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        // unique_ptr<U> where U has property_mgr/load and is default-constructible
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_unique<E>();
-        ar(*result);  // Read as E, not unique_ptr<E>
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
+        // polymorphic factory, restoring the derived object instead of forcing the static pointee
+        // type via make_shared<E>()/make_unique<E>(). B6.
+        ar.serialize("value0", result);
     } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
@@ -300,18 +298,11 @@ T from_json(engine& eng, const std::string& json, Context& ctx) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        // shared_ptr<U> where U has property_mgr/load and is default-constructible
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_shared<E>();
-        ar(*result);  // Read as E, not shared_ptr<E>
-    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        // unique_ptr<U> where U has property_mgr/load and is default-constructible
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_unique<E>();
-        ar(*result);
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
+        // polymorphic factory, restoring the derived object instead of forcing the static pointee
+        // type via make_shared<E>()/make_unique<E>(). B6.
+        ar.serialize("value0", result);
     } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
@@ -331,10 +322,11 @@ template<typename T>
 std::vector<uint8_t> to_binary(engine& eng, const T& value) {
     serialization::binary_archive_writer ar(&eng);
     ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T> && detail::can_use_direct_archive_v<T>) {
-        if (value) {
-            ar.serialize_object_content(*value);
-        }
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
+        // (polymorphic) type and aliasing survive instead of being sliced to the static pointee
+        // type by serialize_object_content(*value). B6.
+        ar.serialize("value0", value);
     } else if constexpr (detail::can_use_direct_archive_v<T>) {
         ar.serialize_object_content(value);  // Don't double-wrap
     } else {
@@ -350,10 +342,11 @@ template<typename T>
 std::string to_binary_string(engine& eng, const T& value) {
     serialization::binary_archive_writer ar(&eng);
     ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T> && detail::can_use_direct_archive_v<T>) {
-        if (value) {
-            ar.serialize_object_content(*value);
-        }
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
+        // (polymorphic) type and aliasing survive instead of being sliced to the static pointee
+        // type by serialize_object_content(*value). B6.
+        ar.serialize("value0", value);
     } else if constexpr (detail::can_use_direct_archive_v<T>) {
         ar.serialize_object_content(value);  // Don't double-wrap
     } else {
@@ -370,10 +363,11 @@ std::string to_binary_string(engine& eng, const T& value, Context& ctx) {
     serialization::binary_archive_writer ar(&eng);
     (void)ctx;
     ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T> && detail::can_use_direct_archive_v<T>) {
-        if (value) {
-            ar.serialize_object_content(*value);
-        }
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
+        // (polymorphic) type and aliasing survive instead of being sliced to the static pointee
+        // type by serialize_object_content(*value). B6.
+        ar.serialize("value0", value);
     } else if constexpr (detail::can_use_direct_archive_v<T>) {
         ar.serialize_object_content(value);  // Don't double-wrap
     } else {
@@ -393,16 +387,11 @@ T from_binary(engine& eng, const std::vector<uint8_t>& data) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_shared<E>();
-        ar(*result);
-    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_unique<E>();
-        ar(*result);
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
+        // polymorphic factory, restoring the derived object instead of forcing the static pointee
+        // type via make_shared<E>()/make_unique<E>(). B6.
+        ar.serialize("value0", result);
     } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
@@ -421,16 +410,11 @@ T from_binary(engine& eng, const std::vector<uint8_t>& data, Context& ctx) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_shared<E>();
-        ar(*result);
-    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_unique<E>();
-        ar(*result);
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
+        // polymorphic factory, restoring the derived object instead of forcing the static pointee
+        // type via make_shared<E>()/make_unique<E>(). B6.
+        ar.serialize("value0", result);
     } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
@@ -452,16 +436,11 @@ T from_binary_string(engine& eng, const std::string& data) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_shared<E>();
-        ar(*result);
-    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_unique<E>();
-        ar(*result);
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
+        // polymorphic factory, restoring the derived object instead of forcing the static pointee
+        // type via make_shared<E>()/make_unique<E>(). B6.
+        ar.serialize("value0", result);
     } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
@@ -484,16 +463,11 @@ T from_binary_string(engine& eng, const std::string& data, Context& ctx) {
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::is_shared_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                   && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_shared<E>();
-        ar(*result);
-    } else if constexpr (detail::is_unique_ptr_v<T> && detail::can_use_direct_archive_read_v<T>
-                          && std::is_default_constructible_v<detail::owning_ptr_element_t<T>>) {
-        using E = detail::owning_ptr_element_t<T>;
-        result = std::make_unique<E>();
-        ar(*result);
+    if constexpr (detail::is_owning_ptr_v<T>) {
+        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
+        // polymorphic factory, restoring the derived object instead of forcing the static pointee
+        // type via make_shared<E>()/make_unique<E>(). B6.
+        ar.serialize("value0", result);
     } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {

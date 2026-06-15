@@ -25,6 +25,73 @@ namespace jvm {
     }
 }
 
+// Cost of matching args[first_arg .. first_arg+paramTypes.size()) against paramTypes, using the
+// same ranking as free-function overload resolution: exact 0 > int<->float small > convertible >
+// object/inheritance, with a non-match returning -1. Single source of truth shared by
+// OverloadSet::findBestMatch (free functions / constructors, first_arg = 0) and
+// engine::select_cpp_overload (same-arity C++ method dispatch, first_arg = 1 to skip 'this').
+static int compute_param_match_cost(
+        const std::vector<script_value>& args,
+        size_t first_arg,
+        const std::vector<param_type_info>& paramTypes,
+        const conversions::conversion_registry* convReg,
+        const std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type) {
+    int totalCost = 0;
+    for (size_t i = 0; i < paramTypes.size(); ++i) {
+        const auto& paramInfo = paramTypes[i];
+        const script_value& arg = args[first_arg + i];
+        script_value_type argType = arg.type();
+
+        // Handle object/shared_ptr types with inheritance checking
+        if ((paramInfo.base_type == script_value_type::jai_object_type ||
+             paramInfo.base_type == script_value_type::jai_shared_ptr_type) &&
+            (argType == script_value_type::jai_object_type ||
+             argType == script_value_type::jai_shared_ptr_type)) {
+
+            if (classes_by_type && paramInfo.cpp_type != std::type_index(typeid(void))) {
+                auto paramClassIt = classes_by_type->find(paramInfo.cpp_type);
+                if (paramClassIt != classes_by_type->end()) {
+                    std::string expectedClassName = paramClassIt->second->get_name();
+                    auto instance = const_cast<script_value&>(arg).get_class_instance();
+                    if (instance) {
+                        auto argClassDef = instance->get_class_definition();
+                        if (argClassDef) {
+                            if (argClassDef->get_name() == expectedClassName) {
+                                // Exact match; shared_ptr<T> -> T counts as a small conversion.
+                                if (argType == script_value_type::jai_shared_ptr_type &&
+                                    paramInfo.base_type == script_value_type::jai_object_type) {
+                                    totalCost += 1;
+                                }
+                            } else if (argClassDef->is_subtype_of(expectedClassName)) {
+                                totalCost += 1;  // derived type
+                            } else {
+                                return -1;       // incompatible class types
+                            }
+                        } else if (instance->get_class_name() != expectedClassName) {
+                            return -1;
+                        }
+                    } else {
+                        return -1;               // no instance - not a valid object
+                    }
+                } else {
+                    totalCost += 100;            // expected class not found - accept with high cost
+                }
+            } else {
+                totalCost += 50;                 // no C++ type info - typed overloads preferred
+            }
+        } else {
+            // Non-object types (or mixed) - primitive + custom conversions via the registry.
+            int cost = convReg ? convReg->get_builtin_conversion_cost(argType, paramInfo.base_type)
+                               : (argType == paramInfo.base_type ? 0 : 1000);
+            if (cost >= 1000) {
+                return -1;
+            }
+            totalCost += cost;
+        }
+    }
+    return totalCost;
+}
+
 struct engine::implementation {
     // Unified conversion registry (replaces both type_conversions and custom_conversions)
     std::shared_ptr<conversions::conversion_registry> conversions;
@@ -185,78 +252,11 @@ struct engine::implementation {
                     continue;
                 }
 
-                // Calculate conversion cost for typed overload
-                int totalCost = 0;
-                bool viable = true;
-                for (size_t i = 0; i < argCount && viable; ++i) {
-                    const auto& paramInfo = overload.paramTypes[i];
-                    script_value_type argType = args[i].type();
-
-                    // Handle object/shared_ptr types with inheritance checking
-                    if ((paramInfo.base_type == script_value_type::jai_object_type ||
-                         paramInfo.base_type == script_value_type::jai_shared_ptr_type) &&
-                        (argType == script_value_type::jai_object_type ||
-                         argType == script_value_type::jai_shared_ptr_type)) {
-
-                        // If we have class lookup and C++ type info, do inheritance check
-                        if (classes_by_type && paramInfo.cpp_type != typeid(void)) {
-                            auto paramClassIt = classes_by_type->find(paramInfo.cpp_type);
-                            if (paramClassIt != classes_by_type->end()) {
-                                // Get expected class name
-                                std::string expectedClassName = paramClassIt->second->get_name();
-
-                                // Get argument's class info
-                                auto instance = const_cast<script_value&>(args[i]).get_class_instance();
-                                if (instance) {
-                                    auto argClassDef = instance->get_class_definition();
-                                    if (argClassDef) {
-                                        if (argClassDef->get_name() == expectedClassName) {
-                                            // Exact match
-                                            // shared_ptr<T> -> T counts as small conversion
-                                            if (argType == script_value_type::jai_shared_ptr_type &&
-                                                paramInfo.base_type == script_value_type::jai_object_type) {
-                                                totalCost += 1;
-                                            }
-                                            // else exact match, cost 0
-                                        } else if (argClassDef->is_subtype_of(expectedClassName)) {
-                                            // Derived type - small conversion cost
-                                            totalCost += 1;
-                                        } else {
-                                            // Incompatible class types
-                                            viable = false;
-                                        }
-                                    } else {
-                                        // Can't get class def, check by name
-                                        if (instance->get_class_name() != expectedClassName) {
-                                            viable = false;
-                                        }
-                                    }
-                                } else {
-                                    // No instance - not a valid object
-                                    viable = false;
-                                }
-                            } else {
-                                // Expected class not found - accept any object with high cost
-                                totalCost += 100;
-                            }
-                        } else {
-                            // No C++ type info - legacy path, accept with penalty so typed overloads are preferred
-                            totalCost += 50;
-                        }
-                    } else {
-                        // Non-object types or mixed object/primitive - use conversion registry
-                        // This handles both primitive conversions (int->float) and custom conversions (MyType->int)
-                        int cost = conversions ? conversions->get_builtin_conversion_cost(argType, paramInfo.base_type)
-                                              : (argType == paramInfo.base_type ? 0 : 1000);
-                        if (cost >= 1000) {
-                            viable = false;
-                        } else {
-                            totalCost += cost;
-                        }
-                    }
-                }
-
-                if (viable) {
+                // Calculate conversion cost for typed overload (shared scorer; first_arg = 0 for
+                // free functions / constructors, where args[0] is already the first parameter).
+                int totalCost = compute_param_match_cost(args, 0, overload.paramTypes,
+                                                         conversions.get(), classes_by_type);
+                if (totalCost >= 0) {
                     viableCandidates.push_back({&overload, totalCost});
                 }
             }
@@ -525,6 +525,26 @@ engine::engine() : impl(std::make_unique<implementation>()) {
 }
 
 engine::~engine() = default;  // pimpl: defined here where `implementation` is complete
+
+int engine::select_cpp_overload(const std::vector<script_value>& args,
+                                const std::vector<std::vector<param_type_info>>& candidateParamTypes) const {
+    // args[0] is 'this'; rank each candidate's C++ parameter signature against args[1..] using the
+    // same scorer as free-function overloads. Empty signatures are untyped (legacy) entries that
+    // stay viable at a high cost so a typed overload always wins. Returns the best index, or -1.
+    int bestIdx = -1;
+    int bestCost = std::numeric_limits<int>::max();
+    for (size_t c = 0; c < candidateParamTypes.size(); ++c) {
+        const auto& sig = candidateParamTypes[c];
+        int cost = sig.empty()
+            ? 1000
+            : compute_param_match_cost(args, 1, sig, impl->conversions.get(), &impl->classesByType);
+        if (cost >= 0 && cost < bestCost) {
+            bestCost = cost;
+            bestIdx = static_cast<int>(c);
+        }
+    }
+    return bestIdx;
+}
 
 engine::engine(engine&&) noexcept = default;
 engine& engine::operator=(engine&&) noexcept = default;

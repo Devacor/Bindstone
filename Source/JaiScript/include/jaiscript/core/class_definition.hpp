@@ -222,6 +222,15 @@ public:
     }
 
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
+        add_method(name, std::move(func), arity, {});
+    }
+
+    // Typed overload: param_types is the C++ parameter signature (one entry per script argument,
+    // excluding 'this'). Same-arity overloads with DISTINCT signatures coexist and are resolved by
+    // argument type at call time; an identical signature re-binds. Empty param_types is a legacy
+    // untyped binding (single overload per arity, as before).
+    void add_method(const std::string& name, script_function func, size_t arity,
+                    std::vector<param_type_info> param_types) {
         auto eng = engine_;
         if (!eng) return;
 
@@ -232,7 +241,14 @@ public:
         uint64_t name_id = eng->symbolize(name);
 
         if (arity != SIZE_MAX) {
-            cpp_method_overloads_[name_id][arity] = func;
+            auto& bucket = cpp_method_overloads_[name_id][arity];
+            auto existing = std::find_if(bucket.begin(), bucket.end(),
+                [&](const cpp_overload_entry& e) { return e.param_types == param_types; });
+            if (existing != bucket.end()) {
+                existing->func = func;  // re-bind same signature
+            } else {
+                bucket.push_back(cpp_overload_entry{ std::move(param_types), func });
+            }
             method_arities_[name_id].push_back(arity);
 
             class_definition* class_def_ptr = this;
@@ -248,13 +264,31 @@ public:
 
                     auto& overloads_for_name = class_def_ptr->cpp_method_overloads_[name_id];
                     auto it = overloads_for_name.find(script_arg_count);
-                    if (it != overloads_for_name.end()) {
-                        return it->second(args);
+                    if (it == overloads_for_name.end() || it->second.empty()) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                                                            "Method argument count mismatch: no overload accepts this number of arguments",
+                                                            name_id);
                     }
 
-                    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                                                        "Method argument count mismatch: no overload accepts this number of arguments",
-                                                        name_id);
+                    auto& entries = it->second;
+                    // Fast path: a single binding at this arity needs no type ranking.
+                    if (entries.size() == 1) {
+                        return entries.front().func(args);
+                    }
+
+                    // Same-arity overloads: rank by C++ parameter types and dispatch to the best.
+                    std::vector<std::vector<param_type_info>> sigs;
+                    sigs.reserve(entries.size());
+                    for (const auto& e : entries) {
+                        sigs.push_back(e.param_types);
+                    }
+                    int best = args[0].get_engine()->select_cpp_overload(args, sigs);
+                    if (best < 0) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                                                            "No method overload matches the argument types",
+                                                            name_id);
+                    }
+                    return entries[static_cast<size_t>(best)].func(args);
                 },
                 engine_
             ));
@@ -1083,7 +1117,13 @@ private:
     engine* engine_ = nullptr;
     std::unordered_map<uint64_t, script_value> methods_;
     std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;
-    std::unordered_map<uint64_t, std::unordered_map<size_t, script_function>> cpp_method_overloads_;
+    // One bound C++ method overload: its parameter-type signature (empty = untyped/legacy) and the
+    // type-erased call. Multiple entries per (name, arity) are same-arity overloads resolved by type.
+    struct cpp_overload_entry {
+        std::vector<param_type_info> param_types;
+        script_function func;
+    };
+    std::unordered_map<uint64_t, std::unordered_map<size_t, std::vector<cpp_overload_entry>>> cpp_method_overloads_;
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> method_overloads_;
 
     struct overload_cache_key {

@@ -609,6 +609,12 @@ namespace jai {
         detail::parameter_storage* get_current_parameter_storage() const;
         void set_current_parameter_storage(detail::parameter_storage* storage);
 
+        // Rank same-arity C++ method overload candidates (each a parameter-type signature) against
+        // a call's actual arguments (args[0] = 'this'); returns the best candidate index, or -1.
+        // Shares the free-function overload scorer so resolution stays consistent.
+        int select_cpp_overload(const std::vector<script_value>& args,
+                                const std::vector<std::vector<param_type_info>>& candidateParamTypes) const;
+
     private:
         struct implementation;
         std::unique_ptr<implementation> impl;
@@ -695,7 +701,9 @@ namespace jai {
             return {map_cpp_type_to_param_info<std::tuple_element_t<Is, ArgsTuple>>()...};
         }
 
-        // Map C++ types to param_type_info (with type_index for object types)
+    public:
+        // Map C++ types to param_type_info (with type_index for object types). Public so the
+        // binding layer (dynamic_binder) can build per-overload C++ parameter signatures.
         template<typename T>
         static param_type_info map_cpp_type_to_param_info() {
             using decay_t = std::decay_t<T>;

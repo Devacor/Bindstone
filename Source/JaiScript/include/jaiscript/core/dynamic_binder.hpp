@@ -492,10 +492,21 @@ public:
                 }
             });
         }
-        
+
         return *this;
     }
     
+    // Build a C++ parameter signature from `Count` tuple elements starting at `Offset` (the offset
+    // skips the leading self parameter of a lambda method). Used to register typed overloads.
+    template<typename Tuple, size_t Offset, size_t... Is>
+    static std::vector<param_type_info> param_sig_from_tuple_impl(std::index_sequence<Is...>) {
+        return { engine::map_cpp_type_to_param_info<std::decay_t<std::tuple_element_t<Offset + Is, Tuple>>>()... };
+    }
+    template<typename Tuple, size_t Offset, size_t Count>
+    static std::vector<param_type_info> param_sig_from_tuple() {
+        return param_sig_from_tuple_impl<Tuple, Offset>(std::make_index_sequence<Count>{});
+    }
+
     // Add method binding - member function pointer version
     template<typename R, typename... Args>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...)) {
@@ -521,9 +532,11 @@ public:
             throw runtime_error("Engine no longer exists");
         };
 
-        // Add method to the class definition (for object.method() calls)
-        // Methods are stored per-class and accessed through the object instance
-        class_def_->add_method(name, method_func, sizeof...(Args));
+        // Add method to the class definition (for object.method() calls), carrying the C++
+        // parameter signature so same-arity overloads (e.g. set(float...) vs set(int...)) resolve
+        // by argument type instead of the last registration silently winning.
+        class_def_->add_method(name, method_func, sizeof...(Args),
+            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
 
         return *this;
     }
@@ -553,9 +566,10 @@ public:
             throw runtime_error("Engine no longer exists");
         };
 
-        // Add method to the class definition (for object.method() calls)
-        // Methods are stored per-class and accessed through the object instance
-        class_def_->add_method(name, method_func, sizeof...(Args));
+        // Add method to the class definition with its C++ parameter signature (see non-const
+        // overload) so same-arity const overloads resolve by argument type.
+        class_def_->add_method(name, method_func, sizeof...(Args),
+            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
 
         return *this;
     }
@@ -618,11 +632,13 @@ public:
             }
         };
 
-        // Add method to the class definition (for object.method() calls)
-        // Methods are stored per-class and accessed through the object instance
-        // Arity from script perspective: if has_self_param, arity is traits::arity - 1, else traits::arity
+        // Add method to the class definition (for object.method() calls), with the C++ parameter
+        // signature (skipping the leading self parameter) so same-arity lambda overloads resolve by
+        // argument type. Arity from script perspective excludes self.
         constexpr size_t script_arity = has_self_param ? traits::arity - 1 : traits::arity;
-        class_def_->add_method(name, method_func, script_arity);
+        constexpr size_t self_offset = has_self_param ? 1 : 0;
+        class_def_->add_method(name, method_func, script_arity,
+            param_sig_from_tuple<args_tuple, self_offset, script_arity>());
 
         return *this;
     }

@@ -357,6 +357,38 @@ public:
             check_eq(eng->execute("calc.add(5, 3, 2)").as<int>(), 10);
         });
 
+        // Same NAME, same ARITY, different parameter TYPES must resolve by argument type. Mirrors
+        // MV::Color: set(float...) stores channels raw; set(int...) divides by 255. Before the fix
+        // the two collapsed to the last registration (int), so a float set() truncated to near-black.
+        test("same_arity_overload_resolves_by_type", [this]() {
+            auto eng = engine::make();
+
+            class ColorLike {
+            public:
+                float r = 0, g = 0, b = 0, a = 0;
+                ColorLike& set(float R, float G, float B, float A) { r=R; g=G; b=B; a=A; return *this; }
+                ColorLike& set(int R, int G, int B, int A) { r=R/255.0f; g=G/255.0f; b=B/255.0f; a=A/255.0f; return *this; }
+            };
+
+            dynamic_binder<ColorLike>(*eng, "ColorLike")
+                .constructor<>()
+                .property("r", &ColorLike::r)
+                .property("g", &ColorLike::g)
+                .method("set", static_cast<ColorLike&(ColorLike::*)(float, float, float, float)>(&ColorLike::set))
+                .method("set", static_cast<ColorLike&(ColorLike::*)(int, int, int, int)>(&ColorLike::set))
+                .build();
+
+            // Float arguments -> the float overload (raw); near-black ~0.004 if it were sliced to int.
+            eng->execute("auto c = ColorLike(); c.set(1.0, 0.5, 0.25, 1.0);");
+            check_near(1.0, eng->execute("c.r").as<double>(), 1e-5);   // float set() chosen: r preserved
+            check_near(0.5, eng->execute("c.g").as<double>(), 1e-5);   // float set() chosen: g preserved
+
+            // Integer arguments -> the int overload (divided by 255).
+            eng->execute("auto d = ColorLike(); d.set(255, 128, 64, 255);");
+            check_near(1.0, eng->execute("d.r").as<double>(), 1e-5);        // int set() chosen: 255/255
+            check_near(128.0/255.0, eng->execute("d.g").as<double>(), 1e-3); // int set() chosen: 128/255
+        });
+
         test("equality_operator", [this]() {
             auto eng = engine::make();
 

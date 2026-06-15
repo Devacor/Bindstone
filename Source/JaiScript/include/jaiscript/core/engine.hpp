@@ -708,7 +708,13 @@ namespace jai {
         static param_type_info map_cpp_type_to_param_info() {
             using decay_t = std::decay_t<T>;
 
-            if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> ||
+            if constexpr (std::is_same_v<decay_t, script_value>) {
+                // Wildcard: a script_value parameter accepts ANY argument type (a generic binding,
+                // e.g. pair(script_value, script_value)). jai_null_type is the sentinel — no real
+                // C++ binding parameter is genuinely null-typed — and the overload scorer gives it a
+                // small fixed cost so a concrete-typed overload still ranks ahead.
+                return param_type_info(script_value_type::jai_null_type);
+            } else if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> ||
                           std::is_same_v<decay_t, script_int>) {
                 return param_type_info(script_value_type::jai_int_type);
             } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> ||

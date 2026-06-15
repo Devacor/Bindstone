@@ -73,6 +73,19 @@ struct sp_ptr_holder : public property_owner<sp_ptr_holder> {
     JAI_PROPERTY((int), extra, 0);
 };
 
+// Polymorphic property_owner hierarchy (auto-registers, records the Derived->Base edge) used to
+// prove the convenience to_*/from_* functions route an owning ROOT through the archive's $type
+// path instead of slicing it to the static pointee type (B6).
+class conv_poly_base : public property_owner<conv_poly_base> {
+public:
+    JAI_PROPERTY((int), baseVal, 1);
+};
+
+class conv_poly_derived : public property_owner<conv_poly_derived, conv_poly_base> {
+public:
+    JAI_PROPERTY((std::string), derivedTag, "");
+};
+
 // ============================================================================
 // Test Classes - property_owner Auto-registration
 // ============================================================================
@@ -1006,6 +1019,77 @@ public:
             check(loaded.data.get() != nullptr, "data not null");
             check_eq(loaded.data.get()->value, 555, "data.value preserved");
             check_eq(loaded.extra.get(), 10, "extra preserved");
+        });
+
+        // ================================================================
+        // OWNING-ROOT POLYMORPHISM (B6 slicing fix)
+        // ================================================================
+        // to_*/from_*(shared_ptr<Base>) used to deref into static-type dispatch, dropping the
+        // derived data + $type. They now route the pointer through the archive's smart-ptr path
+        // so the dynamic type and the derived object's own data survive a convenience round-trip.
+        // NOTE: the derived's OWN field (derivedTag) is what proves no slicing. We deliberately do
+        // not assert the INHERITED base field here: property_owner<Derived,Base> implicit
+        // serialization writes only the most-derived property_mgr (base property managers are
+        // name-hidden and not walked), so inherited properties are dropped on BOTH the explicit
+        // archive path and these convenience wrappers — a separate, pre-existing gap, not B6.
+
+        test("convenience_owning_ptr_polymorphic_json", [this]() {
+            auto eng = engine::make();
+
+            auto derived = std::make_shared<conv_poly_derived>();
+            derived->derivedTag = "kept";
+            std::shared_ptr<conv_poly_base> original = derived;
+
+            std::string json = to_json(*eng, original);
+            check(json.find("$type") != std::string::npos, "polymorphic owning root must emit a $type discriminator");
+            check(json.find("conv_poly_derived") != std::string::npos, "derived type name present in JSON");
+
+            auto loaded = from_json<std::shared_ptr<conv_poly_base>>(*eng, json);
+            check(loaded != nullptr, "loaded not null");
+            auto loadedDerived = std::dynamic_pointer_cast<conv_poly_derived>(loaded);
+            check(loadedDerived != nullptr, "convenience from_json sliced the derived type (B6)");
+            check_eq(loadedDerived->derivedTag.get(), std::string("kept"), "derived field preserved (not sliced)");
+        });
+
+        test("convenience_owning_ptr_polymorphic_binary", [this]() {
+            auto eng = engine::make();
+
+            auto derived = std::make_shared<conv_poly_derived>();
+            derived->derivedTag = "binary";
+            std::shared_ptr<conv_poly_base> original = derived;
+
+            std::string blob = to_binary_string(*eng, original);
+            auto loaded = from_binary_string<std::shared_ptr<conv_poly_base>>(*eng, blob);
+            auto loadedDerived = std::dynamic_pointer_cast<conv_poly_derived>(loaded);
+            check(loadedDerived != nullptr, "binary convenience round-trip sliced the derived type (B6)");
+            check_eq(loadedDerived->derivedTag.get(), std::string("binary"), "derived field preserved (binary)");
+        });
+
+        test("convenience_owning_ptr_polymorphic_base64", [this]() {
+            auto eng = engine::make();
+
+            auto derived = std::make_shared<conv_poly_derived>();
+            derived->derivedTag = "b64";
+            std::shared_ptr<conv_poly_base> original = derived;
+
+            std::string encoded = to_base64(*eng, original);
+            auto loaded = from_base64<std::shared_ptr<conv_poly_base>>(*eng, encoded);
+            auto loadedDerived = std::dynamic_pointer_cast<conv_poly_derived>(loaded);
+            check(loadedDerived != nullptr, "base64 convenience round-trip sliced the derived type (B6)");
+            check_eq(loadedDerived->derivedTag.get(), std::string("b64"), "derived field preserved (base64)");
+        });
+
+        // A non-polymorphic owning root (no $type) must still round-trip through convenience —
+        // this is the path that previously hit the broken serialize_object_content(shared_ptr).
+        test("convenience_owning_ptr_nonpolymorphic_json", [this]() {
+            auto eng = engine::make();
+            auto ptr = std::make_shared<sp_simple_data>();
+            ptr->value = 321;
+
+            std::string json = to_json(*eng, ptr);
+            auto loaded = from_json<std::shared_ptr<sp_simple_data>>(*eng, json);
+            check(loaded != nullptr, "non-polymorphic owning root round-trips");
+            check_eq(loaded->value, 321, "value preserved through convenience round-trip");
         });
 
         // ================================================================

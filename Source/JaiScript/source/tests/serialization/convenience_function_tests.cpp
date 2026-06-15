@@ -1025,18 +1025,16 @@ public:
         // OWNING-ROOT POLYMORPHISM (B6 slicing fix)
         // ================================================================
         // to_*/from_*(shared_ptr<Base>) used to deref into static-type dispatch, dropping the
-        // derived data + $type. They now route the pointer through the archive's smart-ptr path
-        // so the dynamic type and the derived object's own data survive a convenience round-trip.
-        // NOTE: the derived's OWN field (derivedTag) is what proves no slicing. We deliberately do
-        // not assert the INHERITED base field here: property_owner<Derived,Base> implicit
-        // serialization writes only the most-derived property_mgr (base property managers are
-        // name-hidden and not walked), so inherited properties are dropped on BOTH the explicit
-        // archive path and these convenience wrappers — a separate, pre-existing gap, not B6.
+        // derived data + $type. They now route the pointer through the archive's smart-ptr path so
+        // the dynamic type, the derived's own data (derivedTag), AND inherited base data (baseVal)
+        // all survive. (The inherited-field preservation was the separate property_owner chain bug,
+        // fixed in the Inheritance Serialization work — these assert it end-to-end through convenience.)
 
         test("convenience_owning_ptr_polymorphic_json", [this]() {
             auto eng = engine::make();
 
             auto derived = std::make_shared<conv_poly_derived>();
+            derived->baseVal = 7;          // inherited from conv_poly_base
             derived->derivedTag = "kept";
             std::shared_ptr<conv_poly_base> original = derived;
 
@@ -1049,12 +1047,14 @@ public:
             auto loadedDerived = std::dynamic_pointer_cast<conv_poly_derived>(loaded);
             check(loadedDerived != nullptr, "convenience from_json sliced the derived type (B6)");
             check_eq(loadedDerived->derivedTag.get(), std::string("kept"), "derived field preserved (not sliced)");
+            check_eq(loadedDerived->baseVal.get(), 7, "inherited field preserved");
         });
 
         test("convenience_owning_ptr_polymorphic_binary", [this]() {
             auto eng = engine::make();
 
             auto derived = std::make_shared<conv_poly_derived>();
+            derived->baseVal = 11;
             derived->derivedTag = "binary";
             std::shared_ptr<conv_poly_base> original = derived;
 
@@ -1063,12 +1063,14 @@ public:
             auto loadedDerived = std::dynamic_pointer_cast<conv_poly_derived>(loaded);
             check(loadedDerived != nullptr, "binary convenience round-trip sliced the derived type (B6)");
             check_eq(loadedDerived->derivedTag.get(), std::string("binary"), "derived field preserved (binary)");
+            check_eq(loadedDerived->baseVal.get(), 11, "inherited field preserved (binary)");
         });
 
         test("convenience_owning_ptr_polymorphic_base64", [this]() {
             auto eng = engine::make();
 
             auto derived = std::make_shared<conv_poly_derived>();
+            derived->baseVal = 13;
             derived->derivedTag = "b64";
             std::shared_ptr<conv_poly_base> original = derived;
 
@@ -1077,6 +1079,7 @@ public:
             auto loadedDerived = std::dynamic_pointer_cast<conv_poly_derived>(loaded);
             check(loadedDerived != nullptr, "base64 convenience round-trip sliced the derived type (B6)");
             check_eq(loadedDerived->derivedTag.get(), std::string("b64"), "derived field preserved (base64)");
+            check_eq(loadedDerived->baseVal.get(), 13, "inherited field preserved (base64)");
         });
 
         // A non-polymorphic owning root (no $type) must still round-trip through convenience —

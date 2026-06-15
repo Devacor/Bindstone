@@ -310,13 +310,17 @@ namespace jai {
         }
         
         void setHasCustomNumericOps(bool value);
-        
+
+        // The single overloaded-function registration algorithm shared by every public entry point
+        // (add_function*, add_overloaded_function*, add_variadic_function). createSetOnFirst is the
+        // only policy difference between the entry points.
+        void register_overload_impl(const std::string& name, size_t arity, script_function func,
+                                    const std::vector<param_type_info>& paramTypes, bool createSetOnFirst);
+
     public:
         // Overloaded function registration
         void add_overloaded_function(const std::string& name, size_t argCount, script_function func);
-        void add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<script_value_type>& paramTypes);
         void add_overloaded_function_with_full_types(const std::string& name, size_t argCount, script_function func, const std::vector<param_type_info>& paramTypes);
-        void add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<script_value_type>& paramTypes);
         void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& paramTypes);
         
         // Class registration

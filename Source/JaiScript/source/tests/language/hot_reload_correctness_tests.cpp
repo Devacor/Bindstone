@@ -4,11 +4,25 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 
 using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+// C++ base for the script-extends-C++ reload test. Tracks live instances so the test can prove
+// the _cpp_object survives a field-changing reload — neither dropped (which would run the
+// destructor) nor silently reconstructed.
+struct ReloadCppBase {
+    int payload = 0;
+    static int live_instances;
+    ReloadCppBase() { ++live_instances; }
+    ReloadCppBase(int v) : payload(v) { ++live_instances; }
+    ~ReloadCppBase() { --live_instances; }
+    int payload_value() const { return payload; }
+};
+int ReloadCppBase::live_instances = 0;
 
 class hot_reload_correctness_tests : public suite {
 public:
@@ -152,6 +166,44 @@ public:
             eng->execute(def); // reload, identical
             check_eq(eng->execute("Pt(7).x").as<int>(), 7);     // bug would collapse to 2-arg ctor
             check_eq(eng->execute("Pt(1, 2).y").as<int>(), 2);
+        });
+
+        // A script class extending a C++ (dynamic_binder) base holds the live C++ object in a
+        // runtime _cpp_object field that never appears in the declared field defaults. A
+        // field-changing reload must carry it across, so the inherited C++ method stays callable
+        // and the C++ object is neither destructed nor rebuilt.
+        test("cpp_object_survives_field_changing_reload", [&]() {
+            auto eng = engine::make();
+            const int base_live = ReloadCppBase::live_instances;
+
+            dynamic_binder<ReloadCppBase>(*eng, "ReloadCppBase")
+                .constructor<int>()
+                .method("payload_value", &ReloadCppBase::payload_value)
+                .build();
+
+            eng->execute(R"(
+                class Wrapper : ReloadCppBase {
+                    int extra = 0;
+                    Wrapper(int v) : super(v) {}
+                }
+                auto w = Wrapper(7);
+                w.extra = 3;
+            )");
+            check_eq(eng->execute("w.payload_value()").as<int>(), 7);   // inherited C++ method works
+            check_eq(ReloadCppBase::live_instances - base_live, 1);     // exactly one C++ base alive
+
+            eng->execute(R"(
+                class Wrapper : ReloadCppBase {
+                    int extra = 0;
+                    int added = 9;
+                    Wrapper(int v) : super(v) {}
+                }
+            )"); // field-changing reload (gains `added`)
+
+            check_eq(eng->execute("w.payload_value()").as<int>(), 7);   // _cpp_object preserved
+            check_eq(eng->execute("w.added").as<int>(), 9);             // new field present
+            check_eq(eng->execute("w.extra").as<int>(), 3);             // existing data kept
+            check_eq(ReloadCppBase::live_instances - base_live, 1);     // not destructed, not rebuilt
         });
     }
 };

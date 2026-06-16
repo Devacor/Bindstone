@@ -4,10 +4,9 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "Game/state.h"
 
-// JaiScript binding for Interface
 static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
 	[](jai::dynamic_binder<MV::Interface>& builder, const MV::Services&) {
-	builder.auto_bind();  // Calls Interface::on_bind for private member bindings
+	builder.auto_bind();
 
 	builder.method("show", &MV::Interface::show);
 	builder.method("hide", &MV::Interface::hide);
@@ -18,10 +17,9 @@ static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
 	builder.method("removeFocus", &MV::Interface::removeFocus);
 });
 
-// JaiScript binding for InterfaceManager
 static jai::registrar<MV::InterfaceManager, MV::Services> _hookInterfaceManager("InterfaceManager",
 	[](jai::dynamic_binder<MV::InterfaceManager>& builder, const MV::Services&) {
-	builder.auto_bind();  // Calls InterfaceManager::jai_auto_bind for private member bindings
+	builder.auto_bind();
 
 	// Note: make() and page() return Interface& which is non-copyable (has reference member)
 	// value_converter fallback tries to copy, which fails. These need proper registration or
@@ -88,8 +86,6 @@ namespace MV {
 			manager.root()->add(node);
 			node->active(false);
 
-			// TODO: Port script to JaiScript
-			// manager.script().eval_file("Interface/" + pageId + "/initialize.jai");
 			if (scriptInitialize) {
 				scriptInitialize(*this);
 			}
@@ -104,9 +100,6 @@ namespace MV {
 	}
 
 	InterfaceManager& InterfaceManager::initialize() {
-		// TODO: Port script to JaiScript and use jaiEngine_.eval_file()
-		// jaiEngine_.set_local("self", jai::script_value::from_ptr(this, &jaiEngine_));
-		// jaiEngine_.eval_file(node->id());
 		if (scriptInitialize) {
 			scriptInitialize(*this);
 		}
@@ -128,7 +121,6 @@ namespace MV {
 		}
 	}
 
-	// jai_auto_bind implementations - called by dynamic_binder::auto_bind() to register private members
 	void Interface::jai_auto_bind(jai::dynamic_binder<Interface>& builder) {
 		// Note: manager() not bound - InterfaceManager contains non-copyable members (unique_ptr vector)
 		// and value_converter would try to copy it if not registered. Access via scripts not needed.

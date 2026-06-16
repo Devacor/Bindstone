@@ -19,7 +19,6 @@
 
 #include "glm/mat4x4.hpp"
 
-// --- Manual JSON parse benchmark (run with -bench): real engine DOM vs flat parser ---
 #include <jaiscript/serialization/json_archive.hpp>
 #include "../../JaiScript/bench/fast_json.hpp"
 #include "MV/Render/Scene/emitter.h"
@@ -345,7 +344,6 @@ static void RunEmitterBenchmark() {
 
 		volatile double sink = 0.0;
 
-		// 1) Particle::update over `frames` frames.
 		auto u0 = std::chrono::steady_clock::now();
 		for (int f = 0; f < frames; ++f) {
 			for (auto& p : particles) { p.update(1.0 / 60.0); }
@@ -354,7 +352,6 @@ static void RunEmitterBenchmark() {
 		sink += particles[0].position.x;
 		double updNs = std::chrono::duration<double, std::nano>(u1 - u0).count() / (double(n) * frames);
 
-		// 2) Vertex generation (the loadParticlesToPoints inner loop) once over all particles.
 		std::vector<DrawPoint> pts; pts.reserve(n * 4);
 		std::vector<GLuint> idx; idx.reserve(n * 6);
 		TexturePoint tp[4] = { {0.0f,0.0f}, {0.0f,1.0f}, {1.0f,1.0f}, {1.0f,0.0f} };

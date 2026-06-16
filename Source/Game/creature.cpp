@@ -7,10 +7,6 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/signals/signal_binding.hpp>
 
-// ============================================================================
-// JaiScript bindings (ported from the ChaiScript-era gameHooks)
-// ============================================================================
-
 static jai::registrar<CreatureData, MV::Services> _hookCreatureData("CreatureData",
 	[](jai::dynamic_binder<CreatureData>& builder, const MV::Services&) {
 	builder.property("id", &CreatureData::id);

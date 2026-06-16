@@ -198,7 +198,6 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
     method_overloads_[name_id].push_back(ast);
 
     // Invalidate overload resolution cache for this method name (new overload may change resolution)
-    // Erase all entries with this name_id from the cache
     for (auto it = overload_resolution_cache_.begin(); it != overload_resolution_cache_.end(); ) {
         if (it->first.name_id == name_id) {
             it = overload_resolution_cache_.erase(it);
@@ -237,7 +236,6 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
                 typename class_definition::overload_cache_key cache_key{name_id, method_args.size()};
                 auto cache_it = class_def->overload_resolution_cache_.find(cache_key);
                 if (cache_it != class_def->overload_resolution_cache_.end()) {
-                    // Cache hit - use the previously resolved overload
                     std::shared_ptr<function_decl> ast = cache_it->second;
 
                     auto method_env = interp->get_pooled_method_environment(
@@ -377,7 +375,6 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "No matching overload found", name_id);
             }
 
-            // Cache the resolved overload for future calls with same (name_id, arity)
             // Only cache when there are multiple overloads AND exactly one matches this arity
             // (if multiple overloads share the same arity, resolution depends on argument types)
             if (overloads.size() > 1) {

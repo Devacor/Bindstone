@@ -1,9 +1,5 @@
 #pragma once
-// Test helpers that round-trip a value through each archive format. They let the
-// existing JSON serialization tests double as binary-archive tests: a test builds
-// its graph once and runs the same assertions for both `roundtrip_json` and
-// `roundtrip_binary`. Mirrors the engine's Node::saveJai/saveBinary (ar(value)
-// directly, no begin_object wrapper).
+// Mirrors the engine's Node::saveJai/saveBinary (ar(value) directly, no begin_object wrapper).
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/serialization/json_archive.hpp>

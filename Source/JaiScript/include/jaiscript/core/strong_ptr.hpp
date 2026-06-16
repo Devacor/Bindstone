@@ -10,7 +10,6 @@
 
 namespace jai {
 
-// Forward declarations
 template<typename T> class strong_ptr;
 template<typename T> class weaker_ptr;
 
@@ -98,16 +97,12 @@ public:
 
     // ===== Constructors =====
 
-    /// Default constructor - creates empty strong_ptr
     constexpr strong_ptr() noexcept = default;
-
-    /// Nullptr constructor
     constexpr strong_ptr(std::nullptr_t) noexcept {}
 
     /// Deleted: use make_strong<T>() instead (enforces combined allocation)
     strong_ptr(T*) = delete;
 
-    /// Copy constructor
     strong_ptr(const strong_ptr& other) noexcept
         : ptr_(other.ptr_), cb_(other.cb_) {
         if (cb_) {
@@ -115,14 +110,12 @@ public:
         }
     }
 
-    /// Move constructor
     strong_ptr(strong_ptr&& other) noexcept
         : ptr_(other.ptr_), cb_(other.cb_) {
         other.ptr_ = nullptr;
         other.cb_ = nullptr;
     }
 
-    /// Converting copy constructor (for derived types)
     template<typename U>
     requires std::is_convertible_v<U*, T*>
     strong_ptr(const strong_ptr<U>& other) noexcept
@@ -132,7 +125,6 @@ public:
         }
     }
 
-    /// Converting move constructor (for derived types)
     template<typename U>
     requires std::is_convertible_v<U*, T*>
     strong_ptr(strong_ptr<U>&& other) noexcept
@@ -231,10 +223,8 @@ private:
     T* ptr_ = nullptr;
     detail::control_block_base* cb_ = nullptr;
 
-    // Private constructor for make_strong
     strong_ptr(T* ptr, detail::control_block_base* cb) noexcept : ptr_(ptr), cb_(cb) {}
 
-    // Friend declarations
     template<typename U> friend class strong_ptr;
     template<typename U> friend class weaker_ptr;
     template<typename U, typename... Args> friend strong_ptr<U> make_strong(Args&&...);
@@ -272,7 +262,6 @@ public:
         other.cb_ = nullptr;
     }
 
-    /// Construct from strong_ptr
     weaker_ptr(const strong_ptr<T>& other) noexcept
         : ptr_(other.ptr_), cb_(other.cb_) {
         if (cb_) {
@@ -369,10 +358,7 @@ private:
  */
 template<typename T, typename... Args>
 [[nodiscard]] strong_ptr<T> make_strong(Args&&... args) {
-    // Single allocation for control block + object storage
     auto* cb = new detail::control_block<T>();
-
-    // Construct object in-place using placement new
     T* ptr = new (cb->storage) T(std::forward<Args>(args)...);
 
     return strong_ptr<T>(ptr, cb);

@@ -114,7 +114,6 @@ int main(int argc, char** argv) {
     std::printf("File: %s\n", path);
     std::printf("Size: %zu bytes (%.2f MiB), iterations: %d\n\n", buf.size(), mb, iters);
 
-    // ---- correctness / structural parity ----
     Checksum fjCs, rjCs;
     bool fjOk = false, rjOk = false;
     {
@@ -150,7 +149,6 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    // ---- timing (parse + DOM build, fresh DOM each iter) ----
     volatile uint64_t sink = 0;
 
     Timing rjT = timeIt(iters, [&] {

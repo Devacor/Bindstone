@@ -57,8 +57,6 @@ class engine;
         // Non-copyable types should be handled via shared_ptr<T> specialization or T& references.
         template<typename T>
         struct value_converter {
-            // from() only exists for copy-constructible types (uses requires clause)
-            // For non-copyable types, use shared_ptr<T> or T& reference conversions
             static T from(const script_value& v, engine* eng)
                 requires std::is_copy_constructible_v<T> || is_specialization_v<T, std::vector> || is_specialization_v<T, std::map>
             {
@@ -71,11 +69,10 @@ class engine;
                     using value_type = typename T::mapped_type;
                     return conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
                 } else if constexpr (std::is_class_v<T> && !std::is_same_v<T, std::string>) {
-                    // For custom copyable classes, try to extract directly from shared_ptr
                     if (v.is_object()) {
                         try {
                             auto ptr = v.as<std::shared_ptr<T>>();
-                            return *ptr;  // Copy here - only for copyable types
+                            return *ptr;
                         } catch (const std::exception&) {
                             return v.as<T>();
                         }
@@ -108,7 +105,6 @@ class engine;
                     }
                     return convert_custom_type_with_registry<T>(t, eng);
                 } else if constexpr (std::is_enum_v<T>) {
-                    // For enums, convert to underlying integer type
                     if (!eng) {
                         throw runtime_error("Engine reference required for script_value creation");
                     }
@@ -121,7 +117,6 @@ class engine;
                     }
                     return script_value(t, eng);
                 } else {
-                    // Unknown type - provide clear error
                     static_assert(std::is_integral_v<T> || std::is_floating_point_v<T> ||
                                   std::is_same_v<T, bool> || std::is_same_v<T, std::string> ||
                                   std::is_class_v<T> || std::is_enum_v<T>,
@@ -298,8 +293,7 @@ class engine;
             }
             
             static script_value to(T& t, engine* eng) {
-                // For class types, use helper that checks registration (implementation in engine_impl.hpp)
-                // This avoids copying non-copyable types and preserves reference semantics
+                // avoids copying non-copyable types and preserves reference semantics
                 if constexpr (std::is_class_v<T> &&
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
@@ -380,13 +374,9 @@ class engine;
                     if (!eng) {
                         throw runtime_error("Engine reference required for custom type conversion");
                     }
-                    // Only call convert_custom_type_with_registry for copyable types
-                    // Non-copyable types should be passed by reference or shared_ptr
                     if constexpr (std::is_copy_constructible_v<T>) {
                         return convert_custom_type_with_registry<T>(t, eng);
                     } else {
-                        // For non-copyable types passed by const ref, we cannot create a script value
-                        // The caller should use T& or shared_ptr<T> instead
                         throw runtime_error("Cannot convert non-copyable type by const reference. "
                                            "Use T& or shared_ptr<T> instead.");
                     }

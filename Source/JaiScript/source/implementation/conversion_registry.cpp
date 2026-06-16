@@ -14,10 +14,8 @@
 namespace jai {
 namespace conversions {
 
-// Built-in type conversion implementations
-void conversion_registry::register_builtin_conversion(script_value_type from, script_value_type to, int cost, 
+void conversion_registry::register_builtin_conversion(script_value_type from, script_value_type to, int cost,
                                std::function<script_value(const script_value&)> converter) {
-    // Remove existing conversion if any
     auto it = std::find_if(builtin_conversions_.begin(), builtin_conversions_.end(),
         [from, to](const BuiltinConversion& c) { 
             return c.from == from && c.to == to; 
@@ -84,7 +82,6 @@ bool conversion_registry::try_custom_conversion(const script_value& v, const std
     return false;
 }
 
-// conversion_manager implementation
 void conversion_manager::add_builtin_conversion(script_value_type from, script_value_type to, int cost,
                            std::function<script_value(const script_value&)> converter) {
     if (registry_) {
@@ -92,7 +89,6 @@ void conversion_manager::add_builtin_conversion(script_value_type from, script_v
     }
 }
 
-// Register standard vector conversions with smart int handling
 void register_standard_vector_conversions(std::shared_ptr<conversion_registry> registry) {
     if (!registry) return;
     
@@ -106,8 +102,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             for (const auto& item : script_array) {
                 if (item.is_int()) {
                     auto int64_val = item.as<int64_t>();
-                    // Bounds check for down-conversion
-                    if (int64_val < std::numeric_limits<int>::min() || 
+                    if (int64_val < std::numeric_limits<int>::min() ||
                         int64_val > std::numeric_limits<int>::max()) {
                         throw std::runtime_error("Integer value out of range for int: " + std::to_string(int64_val));
                     }
@@ -153,7 +148,6 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
                 if (item.is_float()) {
                     result.push_back(item.as<float>());
                 } else if (item.is_int()) {
-                    // Allow int->float conversion
                     result.push_back(static_cast<float>(item.as<int64_t>()));
                 } else {
                     throw std::runtime_error("Array element is not a number");
@@ -182,7 +176,6 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
                 if (item.is_float()) {
                     result.push_back(item.as<double>());
                 } else if (item.is_int()) {
-                    // Allow int->double conversion
                     result.push_back(static_cast<double>(item.as<int64_t>()));
                 } else {
                     throw std::runtime_error("Array element is not a number");
@@ -225,7 +218,6 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
                 if (item.is_bool()) {
                     result.push_back(item.as<bool>());
                 } else if (item.is_int()) {
-                    // Allow int->bool conversion (0 = false, non-zero = true)
                     result.push_back(item.as<int64_t>() != 0);
                 } else {
                     throw std::runtime_error("Array element is not a boolean or integer");
@@ -244,7 +236,6 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
     );
 }
 
-// Register standard map conversions with smart int handling
 void register_standard_map_conversions(std::shared_ptr<conversion_registry> registry) {
     if (!registry) return;
     
@@ -264,12 +255,11 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 }
                 
                 auto int64_val = value.as<int64_t>();
-                // Bounds check for down-conversion
-                if (int64_val < std::numeric_limits<int>::min() || 
+                if (int64_val < std::numeric_limits<int>::min() ||
                     int64_val > std::numeric_limits<int>::max()) {
                     throw std::runtime_error("Integer value out of range for int: " + std::to_string(int64_val));
                 }
-                
+
                 result[key.as<std::string>()] = static_cast<int>(int64_val);
             }
             
@@ -468,8 +458,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 }
                 
                 auto int64_key = key.as<int64_t>();
-                // Bounds check for down-conversion
-                if (int64_key < std::numeric_limits<int>::min() || 
+                if (int64_key < std::numeric_limits<int>::min() ||
                     int64_key > std::numeric_limits<int>::max()) {
                     throw std::runtime_error("Integer key out of range for int: " + std::to_string(int64_key));
                 }
@@ -517,11 +506,9 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
     );
 }
 
-// Register bound_array conversions for zero-copy access
 void register_bound_array_conversions(std::shared_ptr<conversion_registry> registry) {
     if (!registry) return;
-    
-    // Register conversions for common bound_array types
+
     // Note: These don't actually convert, they just verify the type
     // The actual zero-copy wrapping happens in the value_converter specializations
     
@@ -578,12 +565,9 @@ void register_bound_array_conversions(std::shared_ptr<conversion_registry> regis
     );
 }
 
-// Register bound_map conversions for zero-copy access
 void register_bound_map_conversions(std::shared_ptr<conversion_registry> registry) {
     if (!registry) return;
-    
-    // Register conversions for common bound_map types
-    
+
     // bound_map<std::string, int>
     registry->register_conversion<bound_map<std::string, int>>(
         [](const script_value& v) -> bound_map<std::string, int> {
@@ -624,7 +608,6 @@ void register_bound_map_conversions(std::shared_ptr<conversion_registry> registr
     );
 }
 
-// Register all standard conversions
 void register_all_standard_conversions(std::shared_ptr<conversion_registry> registry) {
     register_standard_vector_conversions(registry);
     register_standard_map_conversions(registry);
@@ -632,7 +615,6 @@ void register_all_standard_conversions(std::shared_ptr<conversion_registry> regi
     register_bound_map_conversions(registry);
 }
 
-// C++ type converter methods
 void conversion_registry::register_cpp_type_converter(type_id tid, 
                                                      std::function<script_value(const void*)> converter) {
     cpp_type_converters_[tid] = converter;
@@ -653,7 +635,6 @@ script_value conversion_registry::convert_cpp_type_from_void(type_id tid, const 
 
 } // namespace conversions
 
-// Explicit template instantiations for commonly used types
 template void conversions::conversion_manager::add_custom_conversion<int>(
     std::function<int(const script_value&)>, 
     std::function<script_value(const int&)>
@@ -668,13 +649,11 @@ template void conversions::conversion_manager::add_vector_conversion<int>();
 template void conversions::conversion_manager::add_vector_conversion<double>();
 template void conversions::conversion_manager::add_vector_conversion<std::string>();
 
-// Explicit instantiations for bound_array conversions
 template void conversions::conversion_manager::add_bound_array_conversion<int>();
 template void conversions::conversion_manager::add_bound_array_conversion<double>();
 template void conversions::conversion_manager::add_bound_array_conversion<std::string>();
 template void conversions::conversion_manager::add_bound_array_conversion<bool>();
 
-// Explicit instantiations for bound_map conversions
 template void conversions::conversion_manager::add_bound_map_conversion<std::string, int>();
 template void conversions::conversion_manager::add_bound_map_conversion<std::string, double>();
 template void conversions::conversion_manager::add_bound_map_conversion<std::string, std::string>();

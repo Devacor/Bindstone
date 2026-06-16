@@ -299,7 +299,6 @@ public:
             check_eq(result.as<std::string>(), std::string("hello world"));
         });
 
-        // === Enum Tests ===
         test("enum_basic", [this]() {
             auto eng = engine::make();
             jai::stdlib::register_all(eng);
@@ -338,7 +337,6 @@ public:
             check_eq(result.as<int64_t>(), int64_t(8));
         });
 
-        // === Null-safe Member Access Tests ===
         test("null_safe_on_null", [this]() {
             auto eng = engine::make();
             jai::stdlib::register_all(eng);
@@ -370,7 +368,6 @@ public:
             check_eq(result.as<bool>(), true);
         });
 
-        // === Destructuring Tests ===
         test("destructuring_basic", [this]() {
             auto eng = engine::make();
             jai::stdlib::register_all(eng);

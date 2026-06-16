@@ -9,7 +9,6 @@ using namespace jai::foundry;
 namespace jai::foundry::tests {
 namespace object_deep_copy_ns {
 
-// Test class for deep copy verification
 class test_object {
 public:
     int value;
@@ -22,14 +21,12 @@ public:
     test_object(const test_object& other) = default;
     test_object& operator=(const test_object& other) = default;
     
-    // Methods to test
     int get_value() const { return value; }
     void set_value(int v) { value = v; }
     std::string get_name() const { return name; }
     void set_name(const std::string& n) { name = n; }
 };
 
-// Test class with inheritance
 class derived_object : public test_object {
 public:
     double extra;
@@ -49,7 +46,6 @@ public:
         test("basic object deep copy", [this]() {
             auto eng = engine::make();
             
-            // Register test_object class
             dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
@@ -59,8 +55,7 @@ public:
                 .property("value", &test_object::value)
                 .property("name", &test_object::name)
                 .build();
-            
-            // Test object creation and copying
+
             eng->execute(R"(
                 var obj1 = test_object(42, "original");
                 var obj2 = obj1;  // This should deep copy
@@ -85,7 +80,6 @@ public:
         test("object deep copy with inheritance", [this]() {
             auto eng = engine::make();
             
-            // Register base and derived classes
             dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
@@ -101,7 +95,6 @@ public:
                 .method("set_extra", &derived_object::set_extra)
                 .build();
             
-            // Test derived object creation and copying
             eng->execute(R"(
                 var obj1 = derived_object(42, "original", 3.14);
                 var obj2 = obj1;  // This should deep copy
@@ -133,7 +126,6 @@ public:
         test("object deep copy in containers", [this]() {
             auto eng = engine::make();
             
-            // Register test_object class
             dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
@@ -141,8 +133,7 @@ public:
                 .method("get_name", &test_object::get_name)
                 .method("set_name", &test_object::set_name)
                 .build();
-            
-            // Test objects in arrays and maps
+
             eng->execute(R"(
                 var obj = test_object(42, "original");
                 

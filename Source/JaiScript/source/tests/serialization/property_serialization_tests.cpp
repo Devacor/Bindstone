@@ -107,7 +107,6 @@ public:
     resource_manager* manager = nullptr;
 
     // Constructor that takes both context and archive
-    // Uses any_archive_reader for type-erased polymorphic interface
     archive_aware_object(resource_manager* mgr, serialization::any_archive_reader& ar)
         : manager(mgr) {
         // Can do complex initialization based on archive metadata
@@ -534,7 +533,6 @@ public:
             // The "description" field keeps its default value since archive doesn't have it
             check_eq(v3.description.get(), std::string("default_description"));
 
-            // Note: To handle renamed fields, use post_load hook (to be implemented)
         });
 
         test("version_deleted_field", [&]() {
@@ -1083,8 +1081,6 @@ public:
             check_eq(loaded.area, 0);
         });
 
-        // ===== dynamic_binder POST-DESERIALIZE TESTS =====
-
         test("dynamic_binder_post_load_with_version", [&]() {
             // Test that dynamic_binder registered classes can use post_load hook with version
             auto eng = engine::make();
@@ -1382,7 +1378,6 @@ public:
             json_reader.begin_object(type_name, version);
 
             // Construct with both context and archive
-            // Wrap json_reader in type-erased any_archive_reader for polymorphic interface
             serialization::any_archive_reader any_reader(json_reader);
             archive_aware_object loaded(&new_mgr, any_reader);
             loaded.property_mgr.load(json_reader);

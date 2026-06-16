@@ -88,10 +88,8 @@ public:
         test("script_cpp_interop", [this]() {
             auto js_engine = engine::make();
             
-            // Register sqrt function directly  
             js_engine->add_function("sqrt", [](double x) { return std::sqrt(x); });
-            
-            // Register a C++ class
+
             struct Vector2D {
                 double x, y;
                 Vector2D(double x = 0, double y = 0) : x(x), y(y) {}
@@ -133,7 +131,6 @@ public:
         test("script_inherits_from_cpp", [this]() {
             auto js_engine = engine::make();
             
-            // Register a C++ base class
             class Creature {
             public:
                 std::string name;
@@ -188,7 +185,6 @@ public:
             auto js_engine = engine::make();
             stdlib::register_all(*js_engine);
             
-            // Add a counter to track destructor calls
             int destructor_count = 0;
 
             // Use getter/setter functions instead of direct variable binding
@@ -236,7 +232,6 @@ public:
             auto arr = result.as_array();
             check_eq(arr.size(), 3);
 
-            // Debug output
             std::cout << "Destructor counts: [" << arr[0].as_int() << ", " << arr[1].as_int() << ", " << arr[2].as_int() << "]" << std::endl;
             std::cout << "Expected: [2, 3, 4]" << std::endl;
 
@@ -319,7 +314,6 @@ public:
             auto js_engine = engine::make();
             stdlib::register_all(*js_engine);
 
-            // Track destruction order via string appending
             std::string order_log;
             js_engine->add_function("log_event", [&order_log](const std::string& event) {
                 if (!order_log.empty()) order_log += ",";
@@ -457,8 +451,6 @@ public:
             check_eq(arr[3].as_int(), 2); // 2 objects in map
             check_eq(arr[4].as_int(), 0); // All destroyed after scope
         });
-
-        // ===== MULTIPLE INHERITANCE TESTS =====
 
         test("multiple_inheritance_basic_fields", [this]() {
             auto js_engine = engine::make();
@@ -774,6 +766,5 @@ public:
 
 } // namespace jai::foundry::tests
 
-// Auto-register with the test framework
 using script_class_tests = jai::foundry::tests::script_class_tests;
 FOUNDRY_REGISTER(script_class_tests)

@@ -41,7 +41,6 @@ inline instance_variables build_script_locals(
 
 template<typename T>
 typename signal_emitter<T>::shared_receiver_type signal_emitter<T>::connect(const std::string& id, const script_value& fn_callback) {
-	// Same argument-conversion machinery as std::function bindings (engine_impl.hpp)
 	return connect(id, convert_script_function<T>(fn_callback));
 }
 

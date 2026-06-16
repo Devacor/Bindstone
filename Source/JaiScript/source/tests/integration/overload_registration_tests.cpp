@@ -21,8 +21,6 @@ public:
 
     void forge_tests() override {
 
-        // Free-function same-arity overloads resolve by argument type (the OverloadSet resolver
-        // predates the 2e method/ctor work; this pins that the free-function path was always right).
         test("free_fn_same_arity_resolves_by_type", [this]() {
             auto eng = engine::make();
             eng->add_function("pick", [](int a, int b) -> std::string { (void)a; (void)b; return "ints"; });
@@ -48,7 +46,7 @@ public:
             check_eq(std::string("i"), a->execute("h(1)").as<std::string>());
             check_eq(std::string("s"), a->execute("h(\"x\")").as<std::string>());
 
-            auto b = engine::make();  // reverse registration order, same expectations
+            auto b = engine::make();
             b->add_function("h", [](const std::string& x) -> std::string { (void)x; return "s"; });
             b->add_function("h", [](int x) -> std::string { (void)x; return "i"; });
             check_eq(std::string("i"), b->execute("h(1)").as<std::string>());
@@ -63,7 +61,7 @@ public:
             eng->add_function("m", [](const std::string& x, const std::string& y) -> std::string { return x + y; });
             check_eq((int64_t)3, eng->execute("m(1, 2)").as_int());
             check_eq(std::string("ab"), eng->execute("m(\"a\", \"b\")").as<std::string>());
-            check_eq((int64_t)5, eng->execute("m(2, 3)").as_int());  // still works after the string call
+            check_eq((int64_t)5, eng->execute("m(2, 3)").as_int());
         });
 
         // A typed function and then a variadic of the same name: the fixed-arity overload wins at
@@ -75,12 +73,11 @@ public:
             eng->add_variadic_function("v", [e](const std::vector<script_value>& args) -> script_value {
                 return script_value(std::string("var:") + std::to_string(args.size()), e);
             });
-            check_eq(std::string("two"), eng->execute("v(1, 2)").as<std::string>());        // fixed-arity wins
-            check_eq(std::string("var:1"), eng->execute("v(9)").as<std::string>());          // variadic catches arity 1
-            check_eq(std::string("var:3"), eng->execute("v(1, 2, 3)").as<std::string>());    // and arity 3
+            check_eq(std::string("two"), eng->execute("v(1, 2)").as<std::string>());
+            check_eq(std::string("var:1"), eng->execute("v(9)").as<std::string>());
+            check_eq(std::string("var:3"), eng->execute("v(1, 2, 3)").as<std::string>());
         });
 
-        // Reverse: variadic first, then a typed fixed-arity overload of the same name.
         test("variadic_then_typed_same_name", [this]() {
             auto eng = engine::make();
             engine* e = eng.get();
@@ -99,8 +96,8 @@ public:
             auto eng = engine::make();
             class C { public: int v = 7; C() {} C(int a, int b) { v = a + b; } };
             dynamic_binder<C>(*eng, "C").constructor<>().constructor<int, int>().property("v", &C::v).build();
-            check_eq((int64_t)7, eng->execute("auto z = C(); z.v").as_int());     // 0-arg, no recursion
-            check_eq((int64_t)5, eng->execute("auto t = C(2, 3); t.v").as_int()); // typed ctor still resolves
+            check_eq((int64_t)7, eng->execute("auto z = C(); z.v").as_int());
+            check_eq((int64_t)5, eng->execute("auto t = C(2, 3); t.v").as_int());
         });
     }
 };

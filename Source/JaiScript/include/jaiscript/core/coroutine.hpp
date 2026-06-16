@@ -7,7 +7,6 @@
 
 namespace jai {
 
-// Forward declarations
 class engine;
 class interpreter;
 class environment;
@@ -29,7 +28,6 @@ public:
 
     coroutine_handle(engine* eng);
 
-    // Script-facing API
     checked_result<script_value> resume(engine* eng);
     bool done() const { return status_ == status::completed || status_ == status::failed; }
     status get_status() const { return status_; }
@@ -50,12 +48,10 @@ public:
     void pop_continuation();
     bool has_continuations() const { return !continuations_.empty(); }
 
-    // Function info
     std::shared_ptr<function_decl> get_function() const { return function_; }
     const std::vector<script_value>& get_args() const { return initial_args_; }
     std::shared_ptr<environment> get_closure_env() const { return closure_env_; }
 
-    // Status management
     void set_status(status s) { status_ = s; }
 
     // Saved interpreter state (captured on yield, restored on resume)
@@ -69,12 +65,10 @@ private:
     status status_ = status::created;
     script_value yield_value_;
 
-    // The coroutine function
     std::shared_ptr<function_decl> function_;
     std::vector<script_value> initial_args_;
     std::shared_ptr<environment> closure_env_;
 
-    // Continuation stack (breadcrumb trail for fast-forward on resume)
     std::vector<continuation_point> continuations_;
 };
 

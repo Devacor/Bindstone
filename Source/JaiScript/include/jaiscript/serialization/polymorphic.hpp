@@ -181,9 +181,6 @@ public:
         return false;
     }
 
-    // Auto-register a polymorphic type for serialization.
-    // Detects save/load methods and load_and_construct via SFINAE.
-    // Called from jai::registrar during static initialization.
     template<typename T>
     static void try_auto_register(const std::string& name) {
         if constexpr (std::is_polymorphic_v<T>) {
@@ -269,7 +266,6 @@ private:
         instance().register_entry(std::type_index(typeid(T)), std::move(entry), true);
     }
 
-    // --- Save function generation ---
     // Uses archive operator() via dispatch — handles save methods, property_mgr,
     // and access-controlled methods without requiring friendship
 
@@ -283,10 +279,6 @@ private:
         };
     }
 
-    // --- Load function generation ---
-    // Priority: load_and_construct > default construct + member_load
-
-    // Detection: T::load_and_construct(Archive&, construct<T>&) — JaiScript style
     struct detection_archive {
         static constexpr bool is_jai_archive = true;
         static constexpr bool is_text_format = false;

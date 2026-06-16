@@ -1,6 +1,4 @@
 // Regression tests for the Phase 3 hot-reload correctness bugs (June release review).
-// Written tests-first: each asserts the CORRECT post-reload behavior, so it fails against
-// the current machinery and passes once the bug is fixed.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>

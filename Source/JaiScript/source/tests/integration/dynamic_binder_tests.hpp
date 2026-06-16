@@ -380,13 +380,13 @@ public:
 
             // Float arguments -> the float overload (raw); near-black ~0.004 if it were sliced to int.
             eng->execute("auto c = ColorLike(); c.set(1.0, 0.5, 0.25, 1.0);");
-            check_near(1.0, eng->execute("c.r").as<double>(), 1e-5);   // float set() chosen: r preserved
-            check_near(0.5, eng->execute("c.g").as<double>(), 1e-5);   // float set() chosen: g preserved
+            check_near(1.0, eng->execute("c.r").as<double>(), 1e-5);
+            check_near(0.5, eng->execute("c.g").as<double>(), 1e-5);
 
             // Integer arguments -> the int overload (divided by 255).
             eng->execute("auto d = ColorLike(); d.set(255, 128, 64, 255);");
-            check_near(1.0, eng->execute("d.r").as<double>(), 1e-5);        // int set() chosen: 255/255
-            check_near(128.0/255.0, eng->execute("d.g").as<double>(), 1e-3); // int set() chosen: 128/255
+            check_near(1.0, eng->execute("d.r").as<double>(), 1e-5);
+            check_near(128.0/255.0, eng->execute("d.g").as<double>(), 1e-3);
         });
 
         // Same-arity CONSTRUCTORS (the other half of the MV::Color clobber: Color(float...) vs
@@ -416,11 +416,11 @@ public:
             eng->execute("auto z = Rgb();");
             check_near(0.0, eng->execute("z.r").as<double>(), 1e-5);
 
-            eng->execute("auto a = Rgb(1.0, 0.5, 0.25);");   // float ctor (raw)
+            eng->execute("auto a = Rgb(1.0, 0.5, 0.25);");
             check_near(1.0, eng->execute("a.r").as<double>(), 1e-5);
             check_near(0.5, eng->execute("a.g").as<double>(), 1e-5);
 
-            eng->execute("auto b = Rgb(255, 128, 64);");     // int ctor (/255)
+            eng->execute("auto b = Rgb(255, 128, 64);");
             check_near(1.0, eng->execute("b.r").as<double>(), 1e-5);
             check_near(128.0/255.0, eng->execute("b.g").as<double>(), 1e-3);
         });

@@ -45,29 +45,23 @@ public:
     script_container_tests() : suite("script_container_tests") {}
     
     void pre_test() override {
-        // Reset static counters before each test
         TestWidget::reset_counts();
     }
     
     void forge_tests() override {
-        // ========== SCRIPT ARRAY TESTS ==========
-        
         test("bound_array_reference_semantics", [this]() {
             auto eng = engine::make();
-            
-            // Create a script array
+
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
             arr.push_back(eng->make_value(10));
             arr.push_back(eng->make_value(20));
             arr.push_back(eng->make_value(30));
-            
-            // Create reference wrapper (no copy)
+
             bound_array<int> arr_ref(arr_val.as_array(), eng.get());
             check_eq(arr_ref.size(), 3u);
             check(!arr_ref.is_owned());
-            
-            // Modifications affect original
+
             arr_ref.push_back(40);
             check_eq(arr_val.as_array().size(), 4u);
             check_eq(arr_ref.size(), 4u);
@@ -75,19 +69,16 @@ public:
         
         test("bound_array_value_semantics", [this]() {
             auto eng = engine::make();
-            
-            // Create a script array
+
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
             arr.push_back(eng->make_value(10));
             arr.push_back(eng->make_value(20));
-            
-            // Create by value (deep copy)
+
             bound_array<int> arr_copy(arr_val);
             check_eq(arr_copy.size(), 2u);
             check(arr_copy.is_owned());
-            
-            // Modifications don't affect original
+
             arr_copy.push_back(30);
             check_eq(arr_val.as_array().size(), 2u);
             check_eq(arr_copy.size(), 3u);
@@ -99,10 +90,9 @@ public:
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
             arr.push_back(eng->make_value(100));
-            
-            // Reference wrapper
+
             bound_array<int> arr_ref(arr_val.as_array(), eng.get());
-            
+
             // Copy from reference creates owned copy
             bound_array<int> arr_copy(arr_ref);
             check(arr_copy.is_owned());
@@ -122,7 +112,7 @@ public:
             arr.push_back(eng->make_value(3));
             
             bound_array<int> arr_ref(arr_val.as_array(), eng.get());
-            
+
             // By value - should copy
             auto by_value = [](bound_array<int> arr) {
                 arr.push_back(999);
@@ -165,12 +155,10 @@ public:
             arr.push_back(eng->make_value(20));
             
             bound_array<int> barr(arr_val.as_array(), eng.get());
-            
-            // Read access
+
             check_eq(barr[0], 10);
             check_eq(barr[1], 20);
-            
-            // Write access
+
             barr[0] = 100;
             check_eq(barr[0], 100);
             check_eq(arr_val.as_array()[0].as<int>(), 100);  // Original modified
@@ -186,15 +174,13 @@ public:
             arr.push_back(eng->make_value(3));
             
             bound_array<int> barr(arr_val.as_array(), eng.get());
-            
-            // Range-based for
+
             int sum = 0;
             for (int val : barr) {
                 sum += val;
             }
             check_eq(sum, 6);
-            
-            // Iterator access
+
             auto it = barr.begin();
             check_eq(*it, 1);
             ++it;
@@ -204,7 +190,6 @@ public:
         test("bound_array_custom_objects", [this]() {
             auto eng = engine::make();
             
-            // Register TestWidget
             dynamic_binder<TestWidget>(*eng, "TestWidget")
                 .constructor<std::string, int>()
                 .property("name", &TestWidget::name)
@@ -221,10 +206,9 @@ public:
             check_eq(TestWidget::instance_count, 2);
             check_eq(TestWidget::copy_count, 0);
             
-            // Reference wrapper - no copies
             bound_array<TestWidget> widgets_ref(arr_val.as_array(), eng.get());
             check_eq(TestWidget::copy_count, 0);
-            
+
             // By value parameter - should trigger copies
             auto process = [](bound_array<TestWidget> widgets) {
                 return widgets.size();
@@ -235,22 +219,18 @@ public:
             check_eq(TestWidget::copy_count, 2);  // Deep copy of elements
         });
         
-        // ========== SCRIPT MAP TESTS ==========
-        
         test("bound_map_reference_semantics", [this]() {
             auto eng = engine::make();
-            
+
             script_value map_val = eng->make_map();
             auto& map = map_val.as_map();
             map.insert_or_assign(eng->make_value("one"), eng->make_value(1));
             map.insert_or_assign(eng->make_value("two"), eng->make_value(2));
-            
-            // Reference wrapper
+
             bound_map<std::string, int> map_ref(map_val.as_map(), eng.get());
             check_eq(map_ref.size(), 2u);
             check(!map_ref.is_owned());
-            
-            // Modifications affect original
+
             map_ref.insert("three", 3);
             check_eq(map_val.as_map().size(), 3u);
             check_eq(map_ref.size(), 3u);
@@ -263,13 +243,11 @@ public:
             auto& jmap = map_val.as_map();
             jmap.insert_or_assign(eng->make_value("alpha"), eng->make_value(10));
             jmap.insert_or_assign(eng->make_value("beta"), eng->make_value(20));
-            
-            // By value (deep copy)
+
             bound_map<std::string, int> map_copy(map_val);
             check_eq(map_copy.size(), 2u);
             check(map_copy.is_owned());
-            
-            // Modifications don't affect original
+
             map_copy.insert("gamma", 30);
             check_eq(map_val.as_map().size(), 2u);
             check_eq(map_copy.size(), 3u);
@@ -284,18 +262,15 @@ public:
             jmap.insert_or_assign(eng->make_value("y"), eng->make_value(200));
             
             bound_map<std::string, int> map(map_val.as_map(), eng.get());
-            
-            // Read access
+
             check_eq(map.at("x"), 100);
             check_eq(map.at("y"), 200);
             check(map.contains("x"));
             check(!map.contains("z"));
-            
-            // Write access
+
             map["x"] = 1000;
             check_eq(map.at("x"), 1000);
-            
-            // Insert via operator[]
+
             map["z"] = 300;
             check_eq(map.size(), 3u);
             check_eq(map.at("z"), 300);
@@ -311,8 +286,7 @@ public:
             jmap.insert_or_assign(eng->make_value("c"), eng->make_value(3));
             
             bound_map<std::string, int> map(map_val.as_map(), eng.get());
-            
-            // Range-based for
+
             int sum = 0;
             for (const auto& [key, value] : map) {
                 sum += value;
@@ -320,7 +294,6 @@ public:
             check_eq(sum, 6);
         });
         
-        // ========== BINDING REJECTION TESTS ==========
         // Commented out for now as they test compile-time failures
         
         /*
@@ -368,23 +341,19 @@ public:
         });
         */
         
-        // ========== PERFORMANCE TEST ==========
-        
         test("bound_array_zero_copy_performance", [this]() {
             auto eng = engine::make();
-            
-            // Create large array
+
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
             for (int i = 0; i < 10000; ++i) {
                 arr.push_back(eng->make_value(i));
             }
-            
-            // Reference wrapper should be instant
+
             auto start = std::chrono::high_resolution_clock::now();
             bound_array<int> arr_ref(arr_val.as_array(), eng.get());
             auto ref_time = std::chrono::high_resolution_clock::now() - start;
-            
+
             // Iteration should be fast (no copying)
             start = std::chrono::high_resolution_clock::now();
             int sum = 0;
@@ -392,16 +361,15 @@ public:
                 sum += val;
             }
             auto iter_time = std::chrono::high_resolution_clock::now() - start;
-            
+
             // Value copy should take time
             start = std::chrono::high_resolution_clock::now();
             bound_array<int> arr_copy(arr_val);
             auto copy_time = std::chrono::high_resolution_clock::now() - start;
-            
+
             // Reference creation should be much faster than copying
             check(ref_time < copy_time / 10);
-            
-            // Verify sum is correct
+
             check_eq(sum, (10000 * 9999) / 2);
         });
     }

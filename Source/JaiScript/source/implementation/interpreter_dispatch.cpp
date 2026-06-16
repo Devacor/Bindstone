@@ -6,7 +6,6 @@
 namespace jai {
 
 namespace {
-    // Shared error result for an overflowing integer operation.
     inline checked_result<script_value> overflow_error(const char* msg) {
         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
     }
@@ -42,13 +41,11 @@ void interpreter::init_dispatch_table() {
 // Uses script_value::TYPEID_* constants for fast type checking
 // Returns checked_result for zero-allocation error handling
 checked_result<script_value> interpreter::handle_add(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-        // Common fast path: neither operand is an object, no unwrapping needed
         if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
             const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
             script_int r;
@@ -67,7 +64,6 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -105,7 +101,6 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
 }
 
 checked_result<script_value> interpreter::handle_subtract(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
@@ -126,7 +121,6 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for - operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -157,7 +151,6 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
 }
 
 checked_result<script_value> interpreter::handle_multiply(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
@@ -178,7 +171,6 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for * operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -209,7 +201,6 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
 }
 
 checked_result<script_value> interpreter::handle_divide(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
@@ -236,7 +227,6 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for / operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -273,7 +263,6 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
 }
 
 checked_result<script_value> interpreter::handle_modulo(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
@@ -298,7 +287,6 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for % operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -333,7 +321,6 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
 }
 
 checked_result<script_value> interpreter::handle_less(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
@@ -354,7 +341,6 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -386,7 +372,6 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
 }
 
 checked_result<script_value> interpreter::handle_less_equal(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
@@ -407,7 +392,6 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -439,7 +423,6 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
 }
 
 checked_result<script_value> interpreter::handle_greater(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
@@ -460,7 +443,6 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 
@@ -492,7 +474,6 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
 }
 
 checked_result<script_value> interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
-    // Fast path: check raw storage indices first to skip unwrapping for non-object types
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
 
@@ -513,7 +494,6 @@ checked_result<script_value> interpreter::handle_greater_equal(const script_valu
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
     }
 
-    // Slow path: unwrap transparent wrappers for object types
     script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
     script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
 

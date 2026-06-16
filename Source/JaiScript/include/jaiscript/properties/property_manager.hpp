@@ -14,7 +14,6 @@ namespace jai {
 	// Forward declarations
 	class engine;
 
-	// Helper to get the first type from a parameter pack
 	namespace detail {
 		template<typename First, typename...>
 		struct first_type { using type = First; };
@@ -46,7 +45,6 @@ namespace jai {
 		const std::map<std::string, property_base*>& all() const { return m_properties; }
 
 		// Track a script-created receiver - keeps it alive for the lifetime of the property_manager
-		// This is used by dynamic_binder to manage observable property callbacks from scripts
 		template<typename T>
 		std::shared_ptr<receiver<T>> track_receiver(std::shared_ptr<receiver<T>> recv) {
 			return script_receivers_.track(std::move(recv));
@@ -82,8 +80,6 @@ namespace jai {
 		template<typename T>
 		inline T* get_value(const std::string& key) const;
 
-		// Templated serialization methods
-		// Archive type is known at compile time (CRTP pattern)
 		// Internally wraps in any_archive_writer/reader for polymorphic property dispatch
 		template<typename Archive>
 		void save(Archive& ar) const;
@@ -99,18 +95,11 @@ namespace jai {
 		receiver_owner script_receivers_;  // Holds receivers created by script callbacks
 	};
 
-	// Note: property_owner is now a CRTP template class defined later in this file.
-	// See "Property Owner (CRTP with optional inheritance tracking)" section.
-
-	// ===== IMPLEMENTATION =====
-
-	// property_base constructor implementation (depends on property_manager)
 	inline property_base::property_base(property_manager& property_register, std::string name)
 		: property_base(std::move(name)) {
 		property_register.add(this);
 	}
 
-	// property_manager implementation
 	inline void property_manager::add(property_base* prop) {
 		m_properties[prop->name()] = prop;
 	}
@@ -180,43 +169,33 @@ namespace jai {
 	template<typename Derived, typename... Bases>
 	class property_owner : public Bases... {
 	public:
-		// Expose the derived type and base types for macros and dynamic_binder
 		using _jai_owner_type = Derived;
 		using _jai_base_types = std::tuple<Bases...>;
 		static constexpr size_t _jai_base_count = sizeof...(Bases);
 
-		// Per-instance property manager (for runtime property access)
 		property_manager property_mgr;
 
 		property_manager& reflection() { return property_mgr; }
 		const property_manager& reflection() const { return property_mgr; }
 
-		// Static access to type-level schema
 		static const type_property_schema& schema() {
 			return type_registry::instance().for_type<Derived>();
 		}
 
-		// Get all property names including inherited (from type registry)
 		static std::vector<std::string> all_property_names() {
 			return type_registry::instance().all_property_names<Derived>();
 		}
 
-		// Default constructor
 		property_owner() {
 			register_inheritance();
 		}
 
-		// Forwarding constructor for single base - forwards all arguments to that base
-		// This allows derived classes to initialize their base properly:
-		//   Sprite(args) : property_owner(args) { }
 		template<typename... Args>
 		explicit property_owner(Args&&... args) requires (sizeof...(Bases) == 1)
 			: detail::first_type_t<Bases...>(std::forward<Args>(args)...) {
 			register_inheritance();
 		}
 
-		// Forwarding constructor for multiple bases - forwards one arg per base
-		// Requires number of args to match number of bases
 		template<typename... Args>
 		explicit property_owner(Args&&... args) requires (sizeof...(Bases) > 1 && sizeof...(Bases) == sizeof...(Args))
 			: Bases(std::forward<Args>(args))... {
@@ -244,7 +223,6 @@ namespace jai {
 
 		void register_inheritance() {
 			(void)_jai_poly_registered;
-			// Ensure inheritance is registered (runs once per type)
 			static const auto _inheritance_registered = []() {
 				if constexpr (sizeof...(Bases) > 0) {
 					auto& schema = type_registry::instance().for_type<Derived>();
@@ -264,9 +242,7 @@ namespace jai {
 
 		virtual ~property_owner() = default;
 
-		// Engine binding support
 		void bind_to_engine(std::weak_ptr<engine> eng) {
-			// Bind bases if they have bind_to_engine
 			if constexpr (sizeof...(Bases) > 0) {
 				(try_bind_base<Bases>(eng), ...);
 			}
@@ -277,13 +253,11 @@ namespace jai {
 		// Override in derived classes to resolve cross-references, update caches, etc.
 		// Uses type-erased archive for polymorphic dispatch
 		virtual void post_load(serialization::any_archive_reader& ar) {
-			// Default: call base class hooks
 			if constexpr (sizeof...(Bases) > 0) {
 				(try_post_load_base<Bases>(ar), ...);
 			}
 		}
 
-		// Load with hook (templated on concrete Archive type)
 		template<typename Archive>
 		void load_with_hook(Archive& ar) {
 			load_owned_properties(ar);
@@ -344,20 +318,16 @@ namespace jai {
 		}
 
 	protected:
-		// Receiver owner for automatic signal cleanup
 		receiver_owner receivers_;
 
-		// Track a receiver - ties its lifetime to this object
 		template<typename T>
 		std::shared_ptr<receiver<T>> track(std::shared_ptr<receiver<T>> recv) {
 			return receivers_.track(std::move(recv));
 		}
 
-		// Access to receiver_owner for advanced use cases
 		receiver_owner& receivers() { return receivers_; }
 		const receiver_owner& receivers() const { return receivers_; }
 
-		// Copy operations are protected
 		property_owner(const property_owner& rhs) {
 			*this = rhs;
 		}
@@ -371,7 +341,6 @@ namespace jai {
 		}
 
 	private:
-		// SFINAE helpers to call base class methods if they exist
 		template<typename Base>
 		auto try_bind_base(std::weak_ptr<engine> eng)
 			-> decltype(static_cast<Base*>(this)->bind_to_engine(eng), void()) {
@@ -388,8 +357,6 @@ namespace jai {
 		template<typename Base>
 		void try_post_load_base(...) {}
 
-		// Recurse the inheritance-aware property walks into each base (no-op if a base isn't a
-		// property_owner). Mirror the try_bind_base/try_post_load_base SFINAE shape.
 		template<typename Base, typename Fn>
 		auto try_visit_base(Fn&& fn) const
 			-> decltype(static_cast<const Base*>(this)->visit_owned_properties(fn), void()) {
@@ -415,11 +382,6 @@ namespace jai {
 		property_base* try_find_base(...) { return nullptr; }
 	};
 
-	// ============================================================================
-	// Type traits for property_owner
-	// ============================================================================
-
-	// Check if T has _jai_owner_type (uses property_owner CRTP)
 	template<typename T, typename = void>
 	struct has_property_owner : std::false_type {};
 
@@ -429,7 +391,6 @@ namespace jai {
 	template<typename T>
 	inline constexpr bool has_property_owner_v = has_property_owner<T>::value;
 
-	// Get base types from a property_owner
 	template<typename T, typename = void>
 	struct get_base_types {
 		using type = std::tuple<>;

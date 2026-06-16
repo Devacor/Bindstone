@@ -29,7 +29,6 @@ namespace jai {
 namespace dynamic_binder_detail {
 
     // Type-erased context extractor implementation
-    // Uses any_archive_reader for type-erased callback storage
     using context_extractor_t = std::function<void*(serialization::any_archive_reader&, const std::string&)>;
 
     // Helper to create context extractor for a specific type

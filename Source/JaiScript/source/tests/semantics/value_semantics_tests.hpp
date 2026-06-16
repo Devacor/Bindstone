@@ -56,9 +56,8 @@ public:
     value_semantics_tests() : suite("Value Semantics") {}
     
     void pre_test() override {
-        // Reset TrackedObject counters before each test
         TrackedObject::reset();
-        TrackedObject::verbose = false;  // Ensure verbose is off by default
+        TrackedObject::verbose = false;
     }
     
     void forge_tests() override {
@@ -130,7 +129,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            // Register a function that takes by value
             eng->add_function("take_by_value", [](TrackedObject obj) -> int {
                 return obj.get();
             });
@@ -146,7 +144,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            // Register a function that takes by reference
             eng->add_function("take_by_ref", [](TrackedObject& obj) -> int {
                 return obj.get();
             });
@@ -189,7 +186,6 @@ public:
             
             eng->execute("map[\"key\"] = obj;");
             
-            // Verify the value is in the map
             auto result = eng->execute("map[\"key\"].value");
             
             TrackedObject::verbose = false;
@@ -318,7 +314,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            // Function that modifies by reference
             eng->add_function("modify_by_ref", [](TrackedObject& obj, int val) {
                 obj.modify(val);
             });
@@ -335,7 +330,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            // Create a C++ class that contains a TrackedObject
             class ObjectContainer {
             public:
                 std::shared_ptr<TrackedObject> obj;
@@ -384,5 +378,4 @@ private:
 
 } // namespace jai::foundry::tests
 
-// Auto-register with the test framework
 FOUNDRY_REGISTER(jai::foundry::tests::value_semantics_tests)

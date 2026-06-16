@@ -204,7 +204,7 @@ private:
         const uint32_t start = static_cast<uint32_t>(doc_->chars.size());
         for (;;) {
             const char* hit = scan_string_special(p_, end_);
-            doc_->chars.append(p_, static_cast<size_t>(hit - p_));   // bulk-copy the clean run
+            doc_->chars.append(p_, static_cast<size_t>(hit - p_));
             p_ = hit;
             if (p_ >= end_) return false;                            // unterminated
             if (*p_ == '"') {
@@ -213,7 +213,6 @@ private:
                 len = static_cast<uint32_t>(doc_->chars.size() - start);
                 return true;
             }
-            // backslash escape
             ++p_;
             if (p_ >= end_) return false;
             char e = *p_++;

@@ -34,8 +34,8 @@ public:
 		// ---- #20 typed-null: `int x;` must not crash or mis-compare ----
 		test("typed_null_equality_no_crash", [this]() {
 			auto e = engine::make();
-			check(e->execute("int a; int b; a == b;").as_bool());  // both null -> equal
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());    // engine stays usable
+			check(e->execute("int a; int b; a == b;").as_bool());
+			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 		test("typed_null_equality_symmetric", [this]() {
 			auto e = engine::make();
@@ -103,7 +103,7 @@ public:
 				try { f(); } catch (ex) { caught = 1; }
 				ran * 10 + caught;
 			)");
-			check_eq((int64_t)1, r.as_int());  // caught, but `ran = 1` never executed
+			check_eq((int64_t)1, r.as_int());
 		});
 
 		// ---- #13 switch case scopes: destructors run at case exit, pool is released ----
@@ -122,7 +122,7 @@ public:
 				}
 				log;
 			)");
-			check_eq(std::string("bx"), r.as_string());  // dtor fired when the case scope closed
+			check_eq(std::string("bx"), r.as_string());
 		});
 		test("switch_in_loop_does_not_leak", [this]() {
 			auto e = engine::make();
@@ -160,7 +160,7 @@ public:
 			auto e = engine::make();
 			if (!e->throw_on_overflow()) { return; }
 			check_throws([&]() { e->execute("var y = -9223372036854775807 - 1; y /= -1;"); });
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());  // host survived
+			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 		test("compound_add_overflow_identifier_rhs", [this]() {
 			auto e = engine::make();
@@ -180,7 +180,7 @@ public:
 			int sum = 0;
 			auto r1 = sig.connect([&](std::shared_ptr<int> v) { sum += v ? *v : -1000; });
 			auto r2 = sig.connect([&](std::shared_ptr<int> v) { sum += v ? *v : -1000; });
-			emitter(std::make_shared<int>(21));  // temporary: both receivers must see it
+			emitter(std::make_shared<int>(21));
 			check_eq(42, sum);
 		});
 		test("signal_emit_rvalue_string_reaches_all_receivers", [this]() {
@@ -199,8 +199,8 @@ public:
 			std::string src;
 			for (int i = 0; i < 5000; ++i) { src += "if (true) "; }
 			src += "1;";
-			check_throws([&]() { e->execute(src); });            // guard fires, no stack overflow
-			check_eq((int64_t)3, e->execute("1 + 2").as_int());  // engine stays usable
+			check_throws([&]() { e->execute(src); });
+			check_eq((int64_t)3, e->execute("1 + 2").as_int());
 		});
 		test("deep_block_nesting_no_crash", [this]() {
 			auto e = engine::make();
@@ -253,9 +253,9 @@ public:
 					self.setVar("count", self.getVar("count") + v * 100);
 				});
 			)");
-			check(static_cast<bool>(thing.hook));               // script lambda landed in the std::function
-			thing.hook(3);                                      // C++ invokes the script hook
-			thing.pingEmitter(2);                               // C++ emit reaches the script receiver
+			check(static_cast<bool>(thing.hook));
+			thing.hook(3);
+			thing.pingEmitter(2);
 			check_eq((int64_t)203, e->execute("self.getVar(\"count\");").as_int());
 		});
 

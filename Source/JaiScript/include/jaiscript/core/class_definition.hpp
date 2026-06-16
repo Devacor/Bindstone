@@ -9,12 +9,10 @@
 
 namespace jai {
 
-// Forward declarations for script class support
 class function_decl;
 class interpreter;
 class environment;
 
-// Common types for class system
 enum class access_level {
     public_access,
     private_access,
@@ -279,12 +277,10 @@ public:
                     }
 
                     auto& entries = it->second;
-                    // Fast path: a single binding at this arity needs no type ranking.
                     if (entries.size() == 1) {
                         return entries.front().func(args);
                     }
 
-                    // Same-arity overloads: rank by C++ parameter types and dispatch to the best.
                     std::vector<std::vector<param_type_info>> sigs;
                     sigs.reserve(entries.size());
                     for (const auto& e : entries) {

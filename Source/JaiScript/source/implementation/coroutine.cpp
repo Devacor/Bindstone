@@ -54,7 +54,6 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
             "Coroutine is already running");
     }
 
-    // Get the interpreter
     interpreter_backend* backend = dynamic_cast<interpreter_backend*>(
         eng->get_execution_backend());
     if (!backend) {
@@ -71,7 +70,6 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
         interp->arm_execution_deadline();
     }
 
-    // Save caller's coroutine state (for nested coroutines)
     coroutine_handle* prev_coroutine = interp->active_coroutine_;
     bool prev_yield_request = interp->hasYieldRequest_;
     interp->active_coroutine_ = this;
@@ -86,15 +84,9 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
     std::optional<checked_result<script_value>> error_result;
 
     if (prev_status == status::created) {
-        // ================================================================
-        // FIRST EXECUTION - call the function normally via call_function
-        // ================================================================
-        // call_function will:
-        // - Set up call frame with parameters
-        // - Execute the function body
-        // - On yield: save environment/call_stack into this coroutine (via active_coroutine_)
-        //   and return the yield value WITHOUT running cleanup
-        // - On normal return: cleanup normally and return the result
+        // On yield, call_function saves environment/call_stack into this coroutine
+        // (via active_coroutine_) and returns the yield value WITHOUT running cleanup;
+        // on normal return it cleans up and returns the result.
         interpreter::script_defined_function scriptFunc(
             function_->name,
             function_->parameters,
@@ -119,17 +111,11 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
         }
 
     } else {
-        // ================================================================
-        // RESUME - restore saved state and continue from continuations
-        // ================================================================
-
-        // Save caller's interpreter state
         auto caller_env = interp->environment_;
         auto caller_call_stack = std::move(interp->call_stack_);
         auto caller_return_value = std::move(interp->returnValue_);
         bool caller_has_return = interp->hasReturnValue_;
 
-        // Restore coroutine's saved state
         interp->environment_ = saved_environment_;
         interp->call_stack_ = std::move(saved_call_stack_);
         interp->returnValue_ = std::move(saved_return_value_);
@@ -144,11 +130,9 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
             start_index = body_cont->index;
             pop_continuation();
         }
-        // Track if we hit an error during execution
         bool had_error = false;
         size_t last_body_idx = start_index;
 
-        // Execute from the saved position in the function body
         for (size_t i = start_index; i < function_->body->declarations.size(); ++i) {
             last_body_idx = i;
             // For the first statement (start_index), the inner continuations
@@ -171,17 +155,13 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
             }
         }
 
-        // Check outcome
         if (!had_error) {
             if (interp->hasYieldRequest_) {
-                // Yielded again - save state
                 // Record where to resume in the function body.
                 // If inner constructs pushed continuations, re-enter this statement.
                 // If no inner continuations, the yield was a direct child, skip it.
                 size_t resume_idx = has_continuations() ? last_body_idx : last_body_idx + 1;
                 push_continuation(function_->body.get(), resume_idx);
-                // The visit_* methods have pushed new continuations
-                // and left the environment chain intact
                 saved_environment_ = interp->environment_;
                 saved_call_stack_ = std::move(interp->call_stack_);
                 saved_return_value_ = std::move(interp->returnValue_);
@@ -192,25 +172,21 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
                 if (interp->returnValue_) {
                     yield_value_ = std::move(interp->returnValue_.value());
                 }
-                // Clear saved state since coroutine is done
                 saved_environment_.reset();
                 saved_call_stack_.clear();
             } else {
                 status_ = status::completed;
-                // Clear saved state since coroutine is done
                 saved_environment_.reset();
                 saved_call_stack_.clear();
             }
         }
 
-        // Restore caller state
         interp->environment_ = caller_env;
         interp->call_stack_ = std::move(caller_call_stack);
         interp->returnValue_ = std::move(caller_return_value);
         interp->hasReturnValue_ = caller_has_return;
     }
 
-    // Restore caller's coroutine state
     interp->active_coroutine_ = prev_coroutine;
     interp->hasYieldRequest_ = prev_yield_request;
 

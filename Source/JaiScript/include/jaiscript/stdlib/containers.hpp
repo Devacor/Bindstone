@@ -10,7 +10,7 @@ namespace stdlib {
     struct script_pair {
         script_value first;
         script_value second;
-        
+
         // Engine-aware constructor - will be used as default by dynamic_binder
         explicit script_pair(engine* eng)
             : first(std::monostate{}, eng),

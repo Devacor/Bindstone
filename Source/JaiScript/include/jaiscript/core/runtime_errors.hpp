@@ -8,7 +8,6 @@
 
 namespace jai {
 
-    // Error codes for JaiScript runtime errors
     // Using std::error_code pattern for zero-overhead error handling in hot paths
     enum class runtime_error_code {
         success = 0,  // Must be 0 for default-constructed error_code
@@ -84,7 +83,6 @@ namespace jai {
         execution_budget_exceeded = 125,
     };
 
-    // Error category for JaiScript runtime
     class runtime_error_category_impl : public std::error_category {
     public:
         const char* name() const noexcept override {
@@ -94,15 +92,12 @@ namespace jai {
         std::string message(int ev) const override;
     };
 
-    // Global error category instance
     const std::error_category& runtime_error_category() noexcept;
 
-    // Convenience function to make error codes
     inline std::error_code make_error_code(runtime_error_code e) noexcept {
         return {static_cast<int>(e), runtime_error_category()};
     }
 
-    // Exception type that carries error code + context
     class runtime_exception : public std::system_error {
     public:
         runtime_exception(std::error_code ec, const std::string& context)

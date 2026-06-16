@@ -3,7 +3,6 @@
 
 namespace jai {
 
-// Constructor implementations
 script_value::script_value(script_int i, engine* eng) : type_info_(nullptr), engine_(eng), storage_(i) {
     if (eng) {
         type_info_ = eng->get_type_info_int();
@@ -51,7 +50,6 @@ script_value script_value::make_reference(script_value* target, const std::share
     if (!target) {
         throw runtime_error("Cannot create reference to null");
     }
-    // Get engine reference from the target value
     auto eng = target->get_engine();
     if (!eng) {
         throw runtime_error("Cannot create reference: target has no valid engine reference");
@@ -65,7 +63,6 @@ script_value script_value::make_reference(script_value* target, const std::share
     return v;
 }
 
-// Engine-aware factory method implementations
 script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create array with null engine pointer");
@@ -95,14 +92,10 @@ script_value script_value::make_object(const std::string& type_name, std::shared
         throw runtime_error("Cannot create object with null engine pointer");
     }
 
-    // Intern the type name for fast comparison
     uint64_t type_id = eng->get_symbolizer()->intern(type_name);
-
-    // Call the optimized version with type_id
     return make_object(type_name, type_id, data, eng);
 }
 
-// Optimized version with cached type_id
 script_value script_value::make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class) {
     if (!eng) {
         throw runtime_error("Cannot create object with null engine pointer");
@@ -128,7 +121,6 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
     return v;
 }
 
-// Factory method for raw C++ objects - requires type_id to avoid re-interning
 script_value script_value::make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create cpp_object with null engine pointer");
@@ -187,7 +179,6 @@ checked_result<script_value> script_value::make_weak_ptr(const script_value& val
     // Regular objects have value semantics and get cloned when passed as parameters,
     // so creating a weak_ptr from them doesn't work correctly
     if (value.type() == script_value_type::jai_shared_ptr_type) {
-        // Get the strong_ptr<object_holder> from the value
         auto holder = value.get_object_holder();
         if (!holder) {
             return checked_result<script_value>(
@@ -195,13 +186,9 @@ checked_result<script_value> script_value::make_weak_ptr(const script_value& val
                 "Failed to get object_holder from script_value");
         }
 
-        // Create a weak_ptr from the strong_ptr
         jai::weaker_ptr<object_holder> weak = holder;
-
-        // Store the weak_ptr directly in the variant
         v.storage_ = weak;
     } else if (value.type() == script_value_type::jai_object_type) {
-        // This is a regular object with value semantics
         return checked_result<script_value>(
             make_error_code(runtime_error_code::type_mismatch),
             "Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<T>(...); auto weak = weak_ptr<T>(obj);");
@@ -271,21 +258,17 @@ script_value script_value::make_function(const script_function& func, engine* en
     return v;
 }
 
-// Copy constructor (shallow copy for reference semantics)
 script_value::script_value(const script_value& other)
     : type_info_(other.type_info_),
       engine_(other.engine_),
       storage_(other.storage_),
       cpp_bound_ptr_(other.cpp_bound_ptr_),
       cpp_bound_type_size_(other.cpp_bound_type_size_) {
-    // Simple shallow copy - shares storage with the original, including engine pointer
     // cpp_bound_ptr_ is also copied so copies of bound values remain bound
     // NOTE: Raw engine* is much faster to copy than weak_ptr (no atomic ops)
 }
 
-// Copy assignment operator (shallow copy for C++ internals)
-// NOTE: This is intentionally a shallow copy for performance in C++ code.
-// The interpreter handles cloning based on JaiScript value/reference semantics.
+// NOTE: Intentionally shallow; the interpreter handles cloning based on JaiScript value/reference semantics.
 script_value& script_value::operator=(const script_value& other) {
     if (this != &other) {
         type_info_ = other.type_info_;
@@ -297,23 +280,19 @@ script_value& script_value::operator=(const script_value& other) {
     return *this;
 }
 
-// Explicit deep copy method
 script_value script_value::clone() const {
     if (!engine_) {
         throw runtime_error("Cannot clone script_value: missing engine pointer");
     }
 
-    // Check if this is a shared_ptr type - perform deep copy using registered copy constructor
     // shared_ptr<T> is a TYPE MARKER that indicates reference semantics for normal operations,
     // but clone() should perform a deep copy to create an independent instance
     if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
-        // Get the object_holder from storage
         auto obj_holder = std::get<strong_ptr<object_holder>>(storage_);
         if (!obj_holder) {
             throw runtime_error("Cannot clone shared_ptr: null object_holder");
         }
 
-        // Check if this is a class_instance (script class) that supports deep copy
         if (obj_holder->is_class_instance_wrapper) {
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
             auto new_instance = instance->deep_copy();
@@ -330,7 +309,6 @@ script_value script_value::clone() const {
             return result;
         }
 
-        // For C++ objects wrapped in shared_ptr, use the registered copy function
         auto class_def = engine_->get_class_definition(obj_holder->type_id);
         if (class_def && class_def->has_copy_function()) {
             auto new_cpp_obj = class_def->copy_object(obj_holder->data.get());
@@ -348,7 +326,6 @@ script_value script_value::clone() const {
             }
         }
 
-        // No copy function registered - type is non-copyable
         throw runtime_error(
             "Cannot clone shared_ptr<" + obj_holder->type_name + ">: type is non-copyable. "
             "Register a copy constructor with dynamic_binder<" + obj_holder->type_name + ">::copy_constructor() "
@@ -359,11 +336,9 @@ script_value script_value::clone() const {
     result.type_info_ = type_info_;
     result.cpp_bound_ptr_ = cpp_bound_ptr_;  // Preserve C++ binding
 
-    // Handle deep copying for different types
     // Use current_type() to check what's actually stored, not the declared type
     switch (current_type()) {
         case script_value_type::jai_array_type: {
-            // Deep copy the array - each element is also cloned
             auto& other_array = *std::get<strong_ptr<std::vector<script_value>>>(storage_);
             auto new_array = make_strong<std::vector<script_value>>();
             new_array->reserve(other_array.size());
@@ -374,7 +349,6 @@ script_value script_value::clone() const {
             break;
         }
         case script_value_type::jai_map_type: {
-            // Deep copy the map - keys and values are cloned
             auto& other_map = *std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
             auto new_map = make_strong<std::map<script_value, script_value>>();
             for (const auto& [key, value] : other_map) {
@@ -388,15 +362,10 @@ script_value script_value::clone() const {
             // Only shared_ptr<T> has reference semantics (handled by early return above)
             auto obj_holder = std::get<strong_ptr<object_holder>>(storage_);
 
-            // Check if this is a class_instance that supports deep copy
             if (obj_holder->is_class_instance_wrapper) {
-                // This is a class_instance, safe to static_cast
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-                // Use class_instance's deep_copy method
                 auto new_instance = instance->deep_copy();
 
-                // Create new object_holder
                 auto new_holder = make_strong<object_holder>();
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
@@ -404,8 +373,6 @@ script_value script_value::clone() const {
                 new_holder->is_class_instance_wrapper = true;
                 result.storage_ = new_holder;
             } else {
-                // FIX #2: Raw C++ objects need explicit copy support
-                // Try to get copy function from class definition
                 bool copied = false;
                 if (engine_) {
                     auto class_def = engine_->get_class_definition(obj_holder->type_id);
@@ -424,7 +391,6 @@ script_value script_value::clone() const {
                 }
 
                 if (!copied) {
-                    // No copy function registered - throw error instead of silent aliasing
                     throw runtime_error(
                         "Cannot deep copy C++ object of type '" + obj_holder->type_name +
                         "'. Register a copy constructor with dynamic_binder<T>::copy_constructor() "
@@ -501,22 +467,16 @@ script_value script_value::try_unwrap_transparent_wrapper() const {
         return *this;
     }
 
-    // Look up the class definition
     auto class_def = engine_->get_class_definition(holder->type_id);
     if (!class_def || !class_def->is_transparent_wrapper()) {
-        return *this;  // Not a transparent wrapper
+        return *this;
     }
 
-    // Unwrap the value
     script_value mutable_self = *this;
     script_value unwrapped = class_def->unwrap(mutable_self);
-
-    // If unwrap succeeded (returned non-null), return the unwrapped value
     if (!unwrapped.is_null()) {
         return unwrapped;
     }
-
-    // Unwrap failed, return self
     return *this;
 }
 
@@ -526,7 +486,6 @@ std::string script_value::to_string() const {
         return deref().to_string();
     }
 
-    // Use current_type() to switch on what's actually stored
     switch (current_type()) {
         case script_value_type::jai_null_type:
             return "null";
@@ -633,12 +592,8 @@ void script_value::assign_through(const script_value& value) {
         if (refHolder->sourceEnv.expired()) {
             throw runtime_error("Reference target environment has been destroyed");
         }
-        // Assign to the referenced value
         *refHolder->target = value;
     } else if (cpp_bound_ptr_ != nullptr) {
-        // For C++ bound values, assign directly to the C++ variable
-        // TODO: Store type metadata with cpp_bound values for proper casting
-        // For now, we handle common C++ types (int, float, etc.)
         switch (type()) {
             case script_value_type::jai_int_type: {
                 auto v = value.as<script_int>();
@@ -680,7 +635,6 @@ void script_value::assign_through(const script_value& value) {
                 throw runtime_error("assign_through not yet implemented for this cpp_bound type");
         }
     } else {
-        // Not a reference, direct assignment
         *this = value;
     }
 }
@@ -704,14 +658,11 @@ void script_value::assign_through(script_value&& value) {
         if (refHolder->sourceEnv.expired()) {
             throw runtime_error("Reference target environment has been destroyed");
         }
-        // Move assign to the referenced value
         *refHolder->target = std::move(value);
     } else if (cpp_bound_ptr_ != nullptr) {
-        // For C++ bound values, we can't really move into the C++ variable
-        // Just do a regular assignment
+        // can't move into a C++ variable — fall back to copy
         assign_through(value);
     } else {
-        // Not a reference, direct move assignment
         *this = std::move(value);
     }
 }
@@ -743,12 +694,9 @@ bool script_value::operator==(const script_value& other) const {
 }
 
 std::strong_ordering script_value::operator<=>(const script_value& other) const {
-    // First compare types
     if (auto cmp = type() <=> other.type(); cmp != 0) {
         return cmp;
     }
-
-    // Then compare values for same types
     switch (type()) {
         case script_value_type::jai_null_type:
             return std::strong_ordering::equal; // All nulls are equal

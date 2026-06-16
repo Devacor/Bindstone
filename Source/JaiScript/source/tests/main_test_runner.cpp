@@ -213,7 +213,6 @@ int main(int argc, char** argv) {
 
     std::cout << "\n-----------------------------------------\n";
     if (total_tests == 0 && filter.suite_pattern != "*") {
-        // A filter was given but matched no suite name and no test name - list available suites.
         std::cout << "No tests matched filter: \"" << filter.suite_pattern
                   << (filter.has_dot ? ("." + filter.test_pattern) : std::string()) << "\"\n\n";
         std::cout << "Available suites:\n";

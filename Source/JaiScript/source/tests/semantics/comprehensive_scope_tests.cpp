@@ -14,7 +14,6 @@ namespace jai::foundry::tests {
 // Global log to track construction/destruction order
 static std::vector<std::string> operation_log;
 
-// C++ class bound via dynamic_binder
 class CppBoundObject {
 public:
     static int instance_count;  // Total created (for unique IDs)

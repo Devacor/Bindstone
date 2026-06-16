@@ -4,16 +4,12 @@
 #include "value.hpp"
 
 namespace jai {
-    // Forward declaration
     class engine;
-    
-    // Helper function for engine conversion registry access
+
     // Must be defined after engine.hpp is included
     std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng);
 
 namespace conversions {
-
-// Implementation of template functions that require full script_value definition
 
 template<typename T>
 std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng) {
@@ -29,8 +25,7 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
         if constexpr (std::is_same_v<T, script_value>) {
             result.push_back(elem);
         } else {
-            // For custom types, try conversion registry first, then fallback to as<T>()
-            // This allows proper custom type conversion while avoiding infinite recursion
+            // try conversion registry first to avoid infinite recursion via as<T>()
             if (eng) {
                 auto registry = get_engine_conversion_registry(eng);
                 if (registry && registry->template has_conversion<T>()) {
@@ -42,23 +37,19 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
                     }
                 }
             }
-            // Fallback to direct conversion
             result.push_back(elem.as<T>());
         }
     }
     return result;
 }
 
-// This template function should not be used directly - use the engine-aware version instead
-// Keeping it only for backward compatibility
 template<typename T>
 [[deprecated("Use engine-aware version convert_vector_to_script_array(vec, engine) instead")]]
 script_value convert_vector_to_script_array(const std::vector<T>& vec) {
     throw std::runtime_error("Non-engine-aware vector conversion is no longer supported. Use convert_vector_to_script_array(vec, engine) instead.");
 }
 
-// Engine-aware version that uses the conversion registry for custom types
-// Implementation moved to engine_impl.hpp to avoid circular dependencies
+// Implementation in engine_impl.hpp to avoid circular dependencies
 template<typename T>
 script_value convert_vector_to_script_array(const std::vector<T>& vec, engine* eng);
 
@@ -103,13 +94,9 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
     return result;
 }
 
-// Engine-aware version that uses the conversion registry for custom types
-// Implementation moved to engine_impl.hpp to avoid circular dependencies
+// Implementation in engine_impl.hpp to avoid circular dependencies
 template<typename K, typename V>
 script_value convert_stdmap_to_script_map(const std::map<K, V>& stdmap, engine* eng);
-
-// Implementation of conversion_manager methods moved to engine_impl.hpp
-// to avoid circular dependencies
 
 } // namespace conversions
 } // namespace jai

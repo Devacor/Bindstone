@@ -9,12 +9,6 @@
 
 namespace jai {
 
-// ============================================================================
-// type_name_helper<T> - Clean Type Names for Script Binding
-// ============================================================================
-// Provides human-readable type names for template parameters.
-// Specialize for custom types to get clean names in the script layer.
-
 template<typename T>
 struct type_name_helper {
     static std::string name() {
@@ -64,21 +58,13 @@ template<> struct type_name_helper<std::string> {
     static std::string name() { return "string"; }
 };
 
-// ============================================================================
-// static_type_registry - Global Type Registration Tracking
-// ============================================================================
-// Tracks which types have been registered to avoid duplicate registrations.
-// This is used by auto_bind_template to ensure thread-safe, one-time registration.
-
 class static_type_registry {
 public:
-    // Check if a type is already registered (by type_index)
     template<typename T>
     static bool is_registered() {
         return get_registration_flag<T>();
     }
 
-    // Mark a type as registered
     template<typename T>
     static void mark_registered() {
         get_registration_flag<T>() = true;
@@ -93,35 +79,19 @@ private:
     }
 };
 
-// ============================================================================
-// template_binder_traits - Forward declaration for auto_bind_template
-// ============================================================================
 // Specialized by JAI_TEMPLATE_BINDER to provide type_name() and make_binder()
-
-// Single type parameter
 template<template<typename> class Template, typename T>
 struct template_binder_traits;
 
-// Two type parameters
 template<template<typename, typename> class Template, typename T1, typename T2>
 struct template_binder_traits_2;
 
-// Three type parameters
 template<template<typename, typename, typename> class Template, typename T1, typename T2, typename T3>
 struct template_binder_traits_3;
 
-// ============================================================================
-// has_template_binder<T> - Auto-Detection for Template Binder Traits
-// ============================================================================
-// Detects if a type T is a template instantiation (e.g., Point<int>) that has
-// template_binder_traits defined via JAI_TEMPLATE_BINDER.
-// This enables automatic serialization/binding without explicit JAI_BIND_TEMPLATE.
-
-// Primary template - not a template instantiation or no traits available
 template<typename T, typename = void>
 struct has_template_binder : std::false_type {};
 
-// Specialization for single-parameter template instantiations
 template<template<typename> class Template, typename Arg>
 struct has_template_binder<Template<Arg>,
     std::void_t<decltype(template_binder_traits<Template, Arg>::type_name())>
@@ -130,7 +100,6 @@ struct has_template_binder<Template<Arg>,
 template<typename T>
 inline constexpr bool has_template_binder_v = has_template_binder<T>::value;
 
-// Two-parameter version
 template<typename T, typename = void>
 struct has_template_binder_2 : std::false_type {};
 
@@ -142,22 +111,13 @@ struct has_template_binder_2<Template<Arg1, Arg2>,
 template<typename T>
 inline constexpr bool has_template_binder_2_v = has_template_binder_2<T>::value;
 
-// Combined check - true if either 1-param or 2-param traits exist
 template<typename T>
 inline constexpr bool has_any_template_binder_v =
     has_template_binder_v<T> || has_template_binder_2_v<T>;
 
-// ============================================================================
-// template_binder_accessor<T> - Access Traits from Instantiated Type
-// ============================================================================
-// Given Point<int>, provides access to template_binder_traits<Point, int>.
-// Used by serialization and binding to work with template types dynamically.
-
-// Primary template - undefined (SFINAE will prevent use for non-template types)
 template<typename T, typename = void>
 struct template_binder_accessor;
 
-// Single type parameter accessor
 template<template<typename> class Template, typename Arg>
 struct template_binder_accessor<Template<Arg>,
     std::enable_if_t<has_template_binder_v<Template<Arg>>>
@@ -184,7 +144,6 @@ struct template_binder_accessor<Template<Arg>,
     }
 };
 
-// Two type parameter accessor
 template<template<typename, typename> class Template, typename Arg1, typename Arg2>
 struct template_binder_accessor<Template<Arg1, Arg2>,
     std::enable_if_t<has_template_binder_2_v<Template<Arg1, Arg2>>>
@@ -211,23 +170,17 @@ struct template_binder_accessor<Template<Arg1, Arg2>,
     }
 };
 
-// ============================================================================
-// integer_variant_binder - Auto-bind int32/int64 variants together
-// ============================================================================
 // When binding a template with an integer type parameter, automatically
 // binds both 32-bit and 64-bit variants so users get:
 //   - Point<int>    (64-bit, JaiScript's native int)
 //   - Point<int32>  (32-bit, explicit)
 //
 // This is called from engine::bind_static_type() after binding the primary type.
-
-// Forward declaration (implemented after engine is available)
 template<typename T>
 struct integer_variant_binder {
     static void bind(engine&) {} // Default: no-op for non-templates
 };
 
-// Specialization for single-param template instantiations
 template<template<typename> class Template, typename Arg>
 struct integer_variant_binder<Template<Arg>> {
     static void bind(engine& eng) {
@@ -270,9 +223,6 @@ struct integer_variant_binder<Template<Arg>> {
     }
 };
 
-// ============================================================================
-// auto_bind_template - CRTP Helper for Automatic Registration
-// ============================================================================
 // Inherit from this to automatically register template instantiations.
 // Registration happens when the type is first ODR-used (before main()).
 //
@@ -283,8 +233,6 @@ struct integer_variant_binder<Template<Arg>> {
 //       JAI_PROPERTY((T), x, T{});
 //       JAI_PROPERTY((T), y, T{});
 //   };
-
-// Single type parameter version
 template<template<typename> class Template, typename T>
 struct auto_bind_template {
     // The constructor odr-uses _registrar: a static data member of a class template
@@ -293,13 +241,10 @@ struct auto_bind_template {
     auto_bind_template() { (void)&_registrar; }
 
 private:
-    // Static initialization triggers registration once per instantiation
     struct registrar {
         registrar() {
             if (!static_type_registry::is_registered<Template<T>>()) {
                 static_type_registry::mark_registered<Template<T>>();
-                // Registration happens via jai_static_type<Template<T>>
-                // which is created by JAI_BIND_TEMPLATE or auto-triggered here
             }
         }
     };
@@ -307,7 +252,6 @@ private:
     static inline registrar _registrar{};
 };
 
-// Two type parameters version
 template<template<typename, typename> class Template, typename T1, typename T2>
 struct auto_bind_template_2 {
     auto_bind_template_2() { (void)&_registrar; }
@@ -323,12 +267,6 @@ private:
     static inline registrar _registrar{};
 };
 
-// ============================================================================
-// JAI_TEMPLATE_BINDER - Define Template Binding Once
-// ============================================================================
-// Creates a template struct that knows how to bind any instantiation.
-// Use JAI_BIND_TEMPLATE to instantiate for specific type parameters.
-//
 // Simple version (3 params) - TemplateClass used as binder name:
 //   JAI_TEMPLATE_BINDER(Point, "Point",
 //       .property("x", &Point<T>::x)
@@ -340,7 +278,6 @@ private:
 //       .property("x", &MyNamespace::Point<T>::x)
 //   );
 
-// Implementation macro - takes all 4 params explicitly
 #define JAI_TEMPLATE_BINDER_IMPL(BinderName, TemplateClass, BaseName, ...) \
     template<typename T> \
     struct jai_template_binder_##BinderName { \
@@ -357,7 +294,6 @@ private:
         } \
     }; \
     \
-    /* Specialize template_binder_traits for auto_bind_template support */ \
     template<typename T> \
     struct jai::template_binder_traits<TemplateClass, T> { \
         static std::string type_name() { \
@@ -368,17 +304,14 @@ private:
         } \
     }
 
-// Simple version: JAI_TEMPLATE_BINDER(TemplateClass, BaseName, ...)
 // Uses TemplateClass as the binder name (must be simple identifier, no namespaces)
 #define JAI_TEMPLATE_BINDER(TemplateClass, BaseName, ...) \
     JAI_TEMPLATE_BINDER_IMPL(TemplateClass, TemplateClass, BaseName, __VA_ARGS__)
 
-// Named version: JAI_TEMPLATE_BINDER_NAMED(BinderName, TemplateClass, BaseName, ...)
 // For namespaced types where TemplateClass contains ::
 #define JAI_TEMPLATE_BINDER_NAMED(BinderName, TemplateClass, BaseName, ...) \
     JAI_TEMPLATE_BINDER_IMPL(BinderName, TemplateClass, BaseName, __VA_ARGS__)
 
-// Two type parameters - implementation
 #define JAI_TEMPLATE_BINDER_2_IMPL(BinderName, TemplateClass, BaseName, ...) \
     template<typename T1, typename T2> \
     struct jai_template_binder_##BinderName { \
@@ -406,20 +339,12 @@ private:
         } \
     }
 
-// Two type parameters - simple version
 #define JAI_TEMPLATE_BINDER_2(TemplateClass, BaseName, ...) \
     JAI_TEMPLATE_BINDER_2_IMPL(TemplateClass, TemplateClass, BaseName, __VA_ARGS__)
 
-// Two type parameters - named version
 #define JAI_TEMPLATE_BINDER_2_NAMED(BinderName, TemplateClass, BaseName, ...) \
     JAI_TEMPLATE_BINDER_2_IMPL(BinderName, TemplateClass, BaseName, __VA_ARGS__)
 
-// ============================================================================
-// JAI_BIND_TEMPLATE - Instantiate Template Binding for Specific Types
-// ============================================================================
-// Creates a jai_static_type specialization for the specific instantiation.
-// This enables the type to be used with bind_static_type<T>().
-//
 // Simple version (2 params) - TemplateClass matches binder name:
 //   JAI_BIND_TEMPLATE(Point, int);      // Creates Point<int> binding
 //   JAI_BIND_TEMPLATE(Point, float);    // Creates Point<float> binding
@@ -427,7 +352,6 @@ private:
 // Named version (3 params) - for namespaced types:
 //   JAI_BIND_TEMPLATE_NAMED(MyPoint, NS::Point, int);   // Creates NS::Point<int> binding
 
-// Implementation macro - takes all 3 params explicitly
 #define JAI_BIND_TEMPLATE_IMPL(BinderName, TemplateClass, TypeParam) \
     template<> struct jai::jai_static_type<TemplateClass<TypeParam>> { \
         static constexpr bool registered = true; \
@@ -450,24 +374,20 @@ private:
             binder.bind_to(eng, name.c_str()); \
         } \
     private: \
-        /* Registration marker - uses address for unique identifier */ \
         static inline const bool _registered = []() { \
             jai::static_type_registry::mark_registered<TemplateClass<TypeParam>>(); \
             return true; \
         }(); \
     }
 
-// Simple version: JAI_BIND_TEMPLATE(TemplateClass, TypeParam)
 // Uses TemplateClass as the binder name (must match JAI_TEMPLATE_BINDER)
 #define JAI_BIND_TEMPLATE(TemplateClass, TypeParam) \
     JAI_BIND_TEMPLATE_IMPL(TemplateClass, TemplateClass, TypeParam)
 
-// Named version: JAI_BIND_TEMPLATE_NAMED(BinderName, TemplateClass, TypeParam)
 // For namespaced types where TemplateClass contains ::
 #define JAI_BIND_TEMPLATE_NAMED(BinderName, TemplateClass, TypeParam) \
     JAI_BIND_TEMPLATE_IMPL(BinderName, TemplateClass, TypeParam)
 
-// Two type parameters - implementation
 #define JAI_BIND_TEMPLATE_2_IMPL(BinderName, TemplateClass, T1, T2) \
     template<> struct jai::jai_static_type<TemplateClass<T1, T2>> { \
         static constexpr bool registered = true; \
@@ -490,28 +410,17 @@ private:
             binder.bind_to(eng, name.c_str()); \
         } \
     private: \
-        /* Registration marker - uses address for unique identifier */ \
         static inline const bool _registered = []() { \
             jai::static_type_registry::mark_registered<TemplateClass<T1, T2>>(); \
             return true; \
         }(); \
     }
 
-// Two type parameters - simple version
 #define JAI_BIND_TEMPLATE_2(TemplateClass, T1, T2) \
     JAI_BIND_TEMPLATE_2_IMPL(TemplateClass, TemplateClass, T1, T2)
 
-// Two type parameters - named version
 #define JAI_BIND_TEMPLATE_2_NAMED(BinderName, TemplateClass, T1, T2) \
     JAI_BIND_TEMPLATE_2_IMPL(BinderName, TemplateClass, T1, T2)
-
-// ============================================================================
-// JAI_BIND_TEMPLATE_VARIANTS - Batch Registration Helper
-// ============================================================================
-// Register multiple type variants at once.
-//
-// Usage:
-//   JAI_BIND_TEMPLATE_VARIANTS_3(Point, int, float, double);
 
 // Note: Full variadic macro support would require more complex preprocessor magic.
 // For now, provide explicit overloads for common cases.
@@ -541,7 +450,6 @@ private:
     JAI_BIND_TEMPLATE(T, P4); \
     JAI_BIND_TEMPLATE(T, P5)
 
-// Named variants for namespaced types
 #define JAI_BIND_TEMPLATE_VARIANTS_NAMED_1(B, T, P1) \
     JAI_BIND_TEMPLATE_NAMED(B, T, P1)
 

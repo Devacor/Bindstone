@@ -36,7 +36,6 @@
 // are defined in class_definition.hpp (extracted for faster compilation)
 #include "class_definition.hpp"
 
-// Forward declarations for script class support
 namespace jai {
     class function_decl;
     class ConstructorDecl;
@@ -44,54 +43,34 @@ namespace jai {
     class FieldDecl;
     class block_stmt;
     class expression;
-    struct parameter;  // Defined in ast.hpp
+    struct parameter;
     using expression_ptr = std::shared_ptr<expression>;
 
-    struct script_defined_function;  // Defined in interpreter.hpp
+    struct script_defined_function;
 }
 
 namespace jai {
 
-// Forward declarations
 template<typename T> class signal_emitter;
 template<typename T> class signal;
 template<typename T> class observable_property;
 
-// ============================================================================
-// observable_property_ref<T> - Script-side reference to an observable property
-// ============================================================================
-//
-// This wrapper class is used to expose observable_property<T> to scripts.
-// It provides:
-//   - get() - returns the current value
-//   - on_change(callback) - connects a callback for value changes
-//   - Transparent wrapper behavior - forwards operations to the underlying value
-//
-// Usage in scripts:
-//   player.score           // Returns observable_property_ref<int>
-//   player.score + 5       // Transparent wrapper forwards + to int (returns 5)
-//   player.score.on_change([&](auto old, auto new) { ... })  // Connects callback
-//
 template<typename T>
 class observable_property_ref {
 public:
     observable_property_ref(observable_property<T>* prop, property_manager* mgr)
         : prop_(prop), mgr_(mgr) {}
 
-    // Get the current value
     T get() const { return prop_ ? prop_->get() : T{}; }
 
-    // Get pointer to the observable_property (for on_change registration)
     observable_property<T>* property() const { return prop_; }
 
-    // Get the property_manager (for receiver tracking)
     property_manager* manager() const { return mgr_; }
 
 private:
     observable_property<T>* prop_;
     property_manager* mgr_;
 };
-// class_instance and class_definition are defined in class_definition.hpp (included above)
 
 // Helper function to extract base template name from full type name
 // Examples: "Point<int>" -> "Point", "MyMap<std::string, int>" -> "MyMap", "Button" -> "Button"
@@ -191,7 +170,6 @@ namespace dynamic_binder_validation {
     template<typename... Args>
     struct is_std_container<std::unordered_set<Args...>> : std::true_type {};
 
-    // Helper to detect if a type is a signal type (jai::signal_emitter, jai::signal)
     // Signal types are internal callback mechanisms and don't need registration validation
     template<typename T>
     struct is_signal_type : std::false_type {};
@@ -249,8 +227,6 @@ namespace dynamic_binder_validation {
     using get_validation_type_t = typename get_validation_type<T>::type;
 
     // Helper to determine if a type needs registration validation
-    // Returns true for types that should be registered with dynamic_binder
-    // Returns false for primitives, std::string, STL containers, signal types, and script_value
     // IMPORTANT: Smart pointers are unwrapped - we validate the inner type
     template<typename T>
     constexpr bool needs_registration_check() {
@@ -267,34 +243,17 @@ namespace dynamic_binder_validation {
 
 }
 
-// ============================================================================
-// detail namespace - Implementation helpers (already inside namespace jai)
-// ============================================================================
-
 namespace detail {
-    // ============================================================================
-    // extract_cpp_object_ptr<T> - Extract C++ object from class_instance or cpp_bound
-    // ============================================================================
-    //
-    // This helper extracts a raw T* pointer from a script_value that represents
-    // a C++ object. Handles two cases:
-    //   1. class_instance wrapper: extracts via get_field(cpp_object_field_id)
-    //   2. cpp_bound value: extracts directly from cpp_bound_ptr_
-    //
-    // Used by dynamic_binder method handlers to support method chaining where
-    // methods return T& (creating cpp_bound values) that are then used as 'this'
-    // for subsequent method calls.
-    //
+    // extracts raw T* from a script_value — handles class_instance wrapper and cpp_bound
+    // (cpp_bound arises when a method returns T&; the next call uses it as 'this')
     template<typename T>
     T* extract_cpp_object_ptr(const script_value& val) {
-        // Case 1: Non-owning cpp_bound reference (from T& return)
         if (val.is_cpp_bound()) {
             T* ptr = val.get_cpp_bound_as<T>();
             if (ptr) return ptr;
             // If cpp_bound but wrong type, fall through to try class_instance path
         }
 
-        // Case 2: class_instance wrapper (normal constructed object)
         auto instance = val.as<std::shared_ptr<class_instance>>();
         auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
 
@@ -360,11 +319,9 @@ concept has_base_types = requires {
     typename T::_jai_base_types;
 };
 
-// Forward declaration for jai_auto_bind detection
 template<typename U> class dynamic_binder;
 
-// Detect if T has static jai_auto_bind(dynamic_binder<T>&) method
-// This allows classes to register their own private members during auto_bind()
+// allows classes to register their own private members during auto_bind()
 template<typename T>
 concept has_jai_auto_bind = requires(dynamic_binder<T>& builder) {
     { T::jai_auto_bind(builder) } -> std::same_as<void>;
@@ -522,8 +479,6 @@ public:
                                  " arguments, got " + std::to_string(args.size() - 1));
             }
 
-            // Extract the C++ object from the first argument (this)
-            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
             // Call the method with unpacked arguments
@@ -556,8 +511,6 @@ public:
                                  " arguments, got " + std::to_string(args.size() - 1));
             }
 
-            // Extract the C++ object from the first argument (this)
-            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
             // Call the method with unpacked arguments
@@ -608,8 +561,6 @@ public:
                                      " arguments, got " + std::to_string(args.size() - 1));
                 }
 
-                // Extract the C++ object from the first argument (this)
-                // Handles both class_instance wrappers and cpp_bound values (for method chaining)
                 T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
                 // Call the lambda with the C++ object as first argument and remaining args
@@ -748,7 +699,6 @@ private:
                 // Extract the validation type (unwraps smart pointers)
                 using validation_type_t = typename dynamic_binder_validation::get_validation_type<P>::type;
 
-                // Check if this type has been registered with dynamic_binder
                 // We use std::type_index to identify types, just like the rest of the codebase
                 auto prop_type_index = std::type_index(typeid(validation_type_t));
                 auto registered_class = engine_.get_class_definition_by_type(prop_type_index);
@@ -782,15 +732,12 @@ private:
                 throw runtime_error("Property getter called without 'this' object");
             }
 
-            // Extract the C++ object from the first argument (this)
-            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
             if (auto eng = engine_ptr) {
                 // Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
                 if constexpr (is_specialization_v<P, std::vector>) {
                     using element_type = typename P::value_type;
-                    // Create bound_cpp_vector wrapper that references the C++ vector directly
                     auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
                         cpp_obj->*member, eng);
                     return eng->make_object(wrapper);
@@ -809,8 +756,6 @@ private:
                     throw runtime_error("Property setter requires 'this' and value");
                 }
 
-                // Extract the C++ object from the first argument (this)
-                // Handles both class_instance wrappers and cpp_bound values (for method chaining)
                 T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
                 // Special case: if P is script_value, don't convert
@@ -893,8 +838,6 @@ public:
                 throw runtime_error("Property getter called without 'this' object");
             }
 
-            // Extract the C++ object from the first argument (this)
-            // Handles both class_instance wrappers and cpp_bound values (for method chaining)
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
             // Check if getter is a member function pointer
@@ -927,8 +870,6 @@ public:
                     throw runtime_error("Property setter requires 'this' and value");
                 }
 
-                // Extract the C++ object from the first argument (this)
-                // Handles both class_instance wrappers and cpp_bound values (for method chaining)
                 T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
@@ -944,8 +885,6 @@ public:
                     throw runtime_error("Property setter requires 'this' and value");
                 }
 
-                // Extract the C++ object from the first argument (this)
-                // Handles both class_instance wrappers and cpp_bound values (for method chaining)
                 T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0]);
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
@@ -1056,12 +995,9 @@ public:
 
         // Dispatch to appropriate helper based on signature
         if constexpr (arg_count == 1) {
-            // Check if single arg is serialization::any_archive_reader& or context pointer
             using arg0_type = std::tuple_element_t<0, typename factory_traits::argument_types>;
 
-            // Check if the decayed type (without reference/pointer) is any_archive_reader
             if constexpr (std::is_same_v<std::decay_t<arg0_type>, serialization::any_archive_reader>) {
-                // Archive-only factory: [](serialization::any_archive_reader& archive) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
                     dynamic_binder_detail::make_archive_only_factory<T>(
                         std::forward<FactoryFunc>(factory), class_name_, &engine_);
@@ -1078,7 +1014,6 @@ public:
             }
         } else if constexpr (arg_count == 2) {
             if constexpr (!std::is_void_v<ContextType>) {
-                // Context + archive factory: [](ContextType* ctx, serialization::any_archive_reader& archive) -> std::shared_ptr<T>
                 serialization_metadata_.custom_construct =
                     dynamic_binder_detail::make_context_archive_factory<T, ContextType>(
                         std::forward<FactoryFunc>(factory), class_name_, &engine_);
@@ -1095,8 +1030,6 @@ public:
     }
 
     // Register post-deserialization hook for migration and data transformation
-    // This is a convenience method that registers a "post_load" method
-    // that will be automatically called after properties are loaded from archives
     //
     // The hook receives the version number that was serialized, which can be used
     // for migration logic. You can use either signature:
@@ -1116,7 +1049,6 @@ public:
     //   })
     template<typename Callable>
     dynamic_binder& post_load_hook(Callable&& callable) {
-        // Register as a regular method named "post_load"
         return method("post_load", std::forward<Callable>(callable));
     }
 

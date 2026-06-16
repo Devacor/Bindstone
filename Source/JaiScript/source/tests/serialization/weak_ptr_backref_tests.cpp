@@ -49,7 +49,6 @@ private:
     JAI_PROPERTY((std::vector<std::string>), labels);
 };
 
-// Base component: polymorphic, owns a weak_ptr back to its Node.
 class ReproComponent : public jai::property_owner<ReproComponent>,
                        public std::enable_shared_from_this<ReproComponent> {
     friend jai::access;
@@ -91,7 +90,6 @@ private:
     JAI_PROPERTY((std::weak_ptr<ReproNode>), owner);
 };
 
-// Derived component: polymorphic, $type-tagged in output. Chains to base.
 class ReproDerived : public jai::property_owner<ReproDerived, ReproComponent> {
     friend jai::access;
 public:
@@ -121,7 +119,6 @@ private:
     JAI_PROPERTY((int), derivedData, 0);
 };
 
-// Node: property_owner with a vector of components and load_and_construct.
 class ReproNode : public jai::property_owner<ReproNode>,
                   public std::enable_shared_from_this<ReproNode> {
     friend jai::access;
@@ -147,12 +144,6 @@ private:
     JAI_PROPERTY((std::vector<std::shared_ptr<ReproComponent>>), components);
 };
 
-// ============================================================================
-// Recursive tree of POLYMORPHIC nodes: each node holds shared_ptr children and
-// a weak_ptr back to its parent. The element/static type is the base, dynamic
-// type is the derived -> every node is $type-tagged and loaded via the
-// polymorphic registry load_fn path.
-// ============================================================================
 class ReproTreeBase : public jai::property_owner<ReproTreeBase>,
                       public std::enable_shared_from_this<ReproTreeBase> {
     friend jai::access;
@@ -228,13 +219,10 @@ public:
         test("weak_ptr_backref_through_polymorphic_component", [&]() {
             auto eng = engine::make();
 
-            // Register the derived component so it gets a $type discriminator.
             serialization::polymorphic_registry::try_auto_register<ReproDerived>("ReproDerived");
             serialization::polymorphic_registry::try_auto_register<ReproComponent>("ReproComponent");
 
-            // Same graph + assertions, run for each archive format (JSON and binary).
             auto run = [&](const std::string& fmt, auto&& roundtrip) {
-                // Build: node owns a derived component; component points back at node.
                 auto node = std::make_shared<ReproNode>(0);
                 node->setNodeId("root");
                 auto comp = std::make_shared<ReproDerived>(0);
@@ -259,7 +247,6 @@ public:
                 if (!loadedComp) { return; }
                 check_eq(loadedComp->getId(), std::string("comp_1"));
 
-                // The large nested blob must have round-tripped fully.
                 check(loadedComp->getBlob() != nullptr, fmt + ": blob loaded");
                 if (loadedComp->getBlob()) { check_eq(loadedComp->getBlob()->numberCount(), size_t(500)); }
 
@@ -278,8 +265,6 @@ public:
             serialization::polymorphic_registry::try_auto_register<ReproTreeNode>("ReproTreeNode");
 
             auto run = [&](const std::string& fmt, auto&& roundtrip) {
-                // Build a 3-level tree of polymorphic nodes; children point back at
-                // their parents via weak_ptr.
                 auto root = std::make_shared<ReproTreeNode>(0);
                 root->setValue(1); root->setTag("root");
 
@@ -304,8 +289,6 @@ public:
                 check_eq(loaded->parentLock().get(), (ReproTreeBase*)nullptr);  // root has no parent
                 check_eq(loaded->getChildren().size(), size_t(2));
 
-                // Every child's weak_ptr parent must resolve to its actual parent
-                // node in the loaded tree. This is the polymorphic-path back-ref case.
                 verifyTree(loaded, nullptr);
             };
 

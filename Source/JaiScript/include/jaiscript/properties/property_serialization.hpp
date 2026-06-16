@@ -120,38 +120,22 @@ namespace property_serialization {
 	// ============================================================================
 	// Serialization support detection (CRTP-compatible)
 	// ============================================================================
-	// After CRTP migration, we no longer detect save/load methods that take
-	// the deleted archive_writer/archive_reader base classes.
-	//
-	// Supported serialization patterns:
-	//   1. JAI_STATIC_BINDER(T, ...) - compile-time property serialization
-	//   2. property_owner<T> - runtime property serialization via property_mgr
-	//   3. is_direct_serializable_v<T> - primitives, strings, enums
-	//
-	// For smart pointers: Element types must use one of the above patterns.
-	// Custom save/load methods should be templated on Archive type (Cereal-style).
-	// ============================================================================
 
 	// --- load_and_construct detection ---
 	// Detects: T has a static load_and_construct(Archive&, construct<T>&) member
 	// This pattern is used for types without default constructors
 	namespace detail {
-		// Dummy archive for trait detection
-		// Must have enough stub methods for load_and_construct decltype to work
+		// Dummy archive for trait detection (stubs let load_and_construct decltype succeed)
 		struct detection_archive {
 			static constexpr bool is_text_format = false;
 			static constexpr bool is_jai_archive = true;
 
-			// Stub methods to allow trait detection of load_and_construct
-			// These allow the decltype expression to succeed, even though
-			// they aren't actually called
 			template<typename T>
 			T* get_user_context() const { return nullptr; }
 
 			template<typename T>
 			void serialize(const char*, T&) {}
 
-			// Basic read/write stubs
 			int32_t read_int32() { return 0; }
 			std::string read_string() { return {}; }
 			void begin_object(std::string&, uint32_t&) {}
@@ -225,8 +209,6 @@ namespace property_serialization {
 	template<typename Archive, typename T> inline void write_weak_ptr(Archive& ar, const std::weak_ptr<T>& ptr);
 	template<typename Archive, typename T> inline void read_weak_ptr(Archive& ar, std::weak_ptr<T>& ptr);
 
-	// Check if a type is a primitive that we can directly serialize
-	// (moved here so dispatch functions can use it)
 	template<typename T>
 	constexpr bool is_direct_serializable_v =
 		std::is_arithmetic_v<T> ||
@@ -238,11 +220,7 @@ namespace property_serialization {
 	// ============================================================================
 	// Type-erased dispatch for property serialization
 	// ============================================================================
-	// These work with any_archive_writer/reader for the new property system.
-	// Properties are "binding glue" - they provide (name, value) to the archive.
-	// The dispatch handles type-specific serialization using the type-erased interface.
 
-	// Helper to serialize primitives via type-erased archive
 	template<typename T>
 	inline void write_primitive_erased(serialization::any_archive_writer& ar, const T& value) {
 		if constexpr (std::is_same_v<T, int8_t>) {
@@ -285,7 +263,6 @@ namespace property_serialization {
 		}
 	}
 
-	// Helper to deserialize primitives via type-erased archive
 	template<typename T>
 	inline void read_primitive_erased(serialization::any_archive_reader& ar, T& value) {
 		if constexpr (std::is_same_v<T, int8_t>) {
@@ -330,15 +307,11 @@ namespace property_serialization {
 		}
 	}
 
-	// Type-erased save dispatch
-	// Handles all serializable types via the any_archive_writer interface
 	template<typename T>
 	void dispatch_save_erased(serialization::any_archive_writer& ar, const T& value) {
-		// Priority 1: Direct primitives
 		if constexpr (is_direct_serializable_v<T>) {
 			write_primitive_erased(ar, value);
 		}
-		// Priority 2: Vectors - write as array
 		else if constexpr (is_std_vector_v<T>) {
 			using elem_type = vector_element_t<T>;
 			ar.begin_array(value.size());
@@ -347,7 +320,6 @@ namespace property_serialization {
 			}
 			ar.end_array();
 		}
-		// Priority 3: Maps - write as map
 		else if constexpr (is_std_map_v<T>) {
 			using key_type = map_key_t<T>;
 			using val_type = map_value_t<T>;
@@ -364,7 +336,6 @@ namespace property_serialization {
 			}
 			ar.end_map();
 		}
-		// Priority 4: Unordered maps
 		else if constexpr (is_std_unordered_map_v<T>) {
 			using key_type = unordered_map_key_t<T>;
 			using val_type = unordered_map_value_t<T>;
@@ -381,7 +352,6 @@ namespace property_serialization {
 			}
 			ar.end_map();
 		}
-		// Priority 5: Arrays
 		else if constexpr (is_std_array_v<T>) {
 			constexpr size_t N = array_size_v<T>;
 			ar.begin_array(N);
@@ -390,62 +360,47 @@ namespace property_serialization {
 			}
 			ar.end_array();
 		}
-		// Priority 6: Pairs
 		else if constexpr (is_std_pair_v<T>) {
 			ar.begin_array(2);
 			dispatch_save_erased(ar, value.first);
 			dispatch_save_erased(ar, value.second);
 			ar.end_array();
 		}
-		// Priority 7: shared_ptr - uses ID-based deduplication
 		else if constexpr (is_std_shared_ptr_v<T>) {
 			auto [id, is_new] = ar.get_or_assign_shared_id(value.get());
-
-			// Write ID first
 			ar.write_uint32(id);
-
-			// If new and non-null, serialize the element
 			if (is_new && value) {
 				dispatch_save_erased(ar, *value);
 			}
 		}
-		// Priority 8: unique_ptr
 		else if constexpr (is_std_unique_ptr_v<T>) {
 			ar.write_bool(value != nullptr);
 			if (value) {
 				dispatch_save_erased(ar, *value);
 			}
 		}
-		// Priority 9: weak_ptr - just writes whether it's valid (actual tracking done elsewhere)
 		else if constexpr (is_std_weak_ptr_v<T>) {
-			// weak_ptr serialization is tricky in type-erased context
-			// For now, just mark as expired/valid
 			ar.write_bool(!value.expired());
 		}
-		// Priority 10: property_owner types - serialize every inheritance level's property_mgr
 		else if constexpr (is_property_owner_v<T>) {
 			ar.begin_object("", 0);  // Type name not needed in type-erased context
 			value.visit_owned_properties([&ar](const std::string&, property_base* prop) {
 				if (prop->allow_save()) {
-					prop->serialize(ar);  // Calls virtual serialize(any_archive_writer&)
+					prop->serialize(ar);
 				}
 			});
 			ar.end_object();
 		}
-		// Fallback: throw for unsupported types - fail explicitly instead of silently
 		else {
 			throw std::runtime_error("Type is not serializable via type-erased archive (use JAI_STATIC_BINDER, property_owner, or mark property as transient)");
 		}
 	}
 
-	// Type-erased load dispatch
 	template<typename T>
 	void dispatch_load_erased(serialization::any_archive_reader& ar, T& value) {
-		// Priority 1: Direct primitives
 		if constexpr (is_direct_serializable_v<T>) {
 			read_primitive_erased(ar, value);
 		}
-		// Priority 2: Vectors
 		else if constexpr (is_std_vector_v<T>) {
 			using elem_type = vector_element_t<T>;
 			size_t size = ar.begin_array();
@@ -458,7 +413,6 @@ namespace property_serialization {
 			}
 			ar.end_array();
 		}
-		// Priority 3: Maps
 		else if constexpr (is_std_map_v<T>) {
 			using key_type = map_key_t<T>;
 			using val_type = map_value_t<T>;
@@ -481,7 +435,6 @@ namespace property_serialization {
 			}
 			ar.end_map();
 		}
-		// Priority 4: Unordered maps
 		else if constexpr (is_std_unordered_map_v<T>) {
 			using key_type = unordered_map_key_t<T>;
 			using val_type = unordered_map_value_t<T>;
@@ -505,7 +458,6 @@ namespace property_serialization {
 			}
 			ar.end_map();
 		}
-		// Priority 5: Arrays
 		else if constexpr (is_std_array_v<T>) {
 			constexpr size_t N = array_size_v<T>;
 			size_t size = ar.begin_array();
@@ -514,14 +466,12 @@ namespace property_serialization {
 			}
 			ar.end_array();
 		}
-		// Priority 6: Pairs
 		else if constexpr (is_std_pair_v<T>) {
 			size_t size = ar.begin_array();
 			if (size >= 1) dispatch_load_erased(ar, value.first);
 			if (size >= 2) dispatch_load_erased(ar, value.second);
 			ar.end_array();
 		}
-		// Priority 7: shared_ptr - uses ID-based deduplication
 		else if constexpr (is_std_shared_ptr_v<T>) {
 			using elem_type = shared_ptr_element_t<T>;
 			uint32_t id = ar.read_uint32();
@@ -531,13 +481,11 @@ namespace property_serialization {
 				return;
 			}
 
-			// Check if already deserialized
 			if (ar.has_deserialized_shared(id)) {
 				value = ar.get_deserialized_shared<elem_type>(id);
 				return;
 			}
 
-			// New - construct and deserialize
 			if constexpr (std::is_default_constructible_v<elem_type>) {
 				value = std::make_shared<elem_type>();
 				dispatch_load_erased(ar, *value);
@@ -546,7 +494,6 @@ namespace property_serialization {
 				throw std::runtime_error("Cannot deserialize shared_ptr<T>: element type is not default constructible");
 			}
 		}
-		// Priority 8: unique_ptr
 		else if constexpr (is_std_unique_ptr_v<T>) {
 			using elem_type = unique_ptr_element_t<T>;
 			bool has_value = ar.read_bool();
@@ -561,29 +508,23 @@ namespace property_serialization {
 				value.reset();
 			}
 		}
-		// Priority 9: weak_ptr - just reads validity (actual resolution done elsewhere)
 		else if constexpr (is_std_weak_ptr_v<T>) {
-			// Read and discard the validity flag - weak_ptr resolution is complex in type-erased context
 			ar.read_bool();
 			value.reset();
 		}
-		// Priority 10: property_owner types - deserialize via their property_mgr
 		else if constexpr (is_property_owner_v<T>) {
 			std::string type_name;
 			uint32_t version;
 			ar.begin_object(type_name, version);
-			// Read properties - the archive will iterate through them
 			std::string property_name;
 			while (ar.read_property_name(property_name)) {
-				auto* prop = value.find_owned_property(property_name);  // search the whole chain
+				auto* prop = value.find_owned_property(property_name);
 				if (prop) {
-					prop->serialize(ar);  // Calls virtual serialize(any_archive_reader&)
+					prop->serialize(ar);
 				}
-				// Unknown properties are skipped
 			}
 			ar.end_object();
 		}
-		// Fallback: throw for unsupported types - fail explicitly instead of silently
 		else {
 			throw std::runtime_error("Type is not deserializable via type-erased archive (use JAI_STATIC_BINDER, property_owner, or mark property as transient)");
 		}
@@ -592,8 +533,6 @@ namespace property_serialization {
 	// ============================================================================
 	// Templated primitive write/read helpers (for CRTP archives)
 	// ============================================================================
-	// These take any Archive type and call the appropriate write/read method.
-	// Used by smart pointer serialization which is templated on Archive.
 
 	template<typename Archive, typename T>
 	inline void write_primitive_templated(Archive& ar, const T& value) {
@@ -688,16 +627,12 @@ namespace property_serialization {
 	// weak_ptr: Saves the ID of the shared_ptr it references (for reconstruction)
 	// unique_ptr: Always serializes the object (no sharing possible)
 
-	// Helper: check if a type can be serialized via CRTP archives
-	// Supported: primitives, JAI_STATIC_BINDER types, property_owner types
 	template<typename T>
 	inline constexpr bool is_element_serializable_v =
 		is_direct_serializable_v<T> ||
 		has_static_type_v<T> ||
 		is_property_owner_v<T>;
 
-	// Helper: check if a type can be deserialized via CRTP archives
-	// Supported: primitives, JAI_STATIC_BINDER types, property_owner types
 	template<typename T>
 	inline constexpr bool is_element_deserializable_v =
 		is_direct_serializable_v<T> ||
@@ -705,20 +640,15 @@ namespace property_serialization {
 		is_property_owner_v<T>;
 
 	// Write shared_ptr with ID-based de-duplication
-	// Binary format: [id:uint32][object data if new and non-null] - compact, no overhead
-	// JSON format: {"_type_": "ptr", "$id": id, "$val": object} - verbose for readability
-	//
-	// Uses ar(*ptr) uniformly - the archive handles type detection via write_custom()
-	// which checks for custom save()/serialize() methods before falling back to property_mgr.
+	// Binary format: [id:uint32][object data if new and non-null] - compact
+	// JSON format: {"_type_": "ptr", "$id": id, "$val": object} - verbose
 	template<typename Archive, typename T>
 	inline void write_shared_ptr(Archive& ar, const std::shared_ptr<T>& ptr) {
 		constexpr bool text_format = std::remove_reference_t<Archive>::is_text_format;
 
-		// Get or assign ID for this pointer
 		auto [id, is_new] = ar.get_or_assign_shared_id(ptr.get());
 
 		if constexpr (text_format) {
-			// JSON: verbose object format for readability
 			ar.begin_object("ptr", 0);
 			ar(serialization::make_nvp("$id", id));
 
@@ -745,7 +675,6 @@ namespace property_serialization {
 			}
 			ar.end_object();
 		} else {
-			// Binary: compact format - just ID and optional object
 			ar.write_uint32(id);
 
 			if (is_new && ptr) {
@@ -757,15 +686,11 @@ namespace property_serialization {
 	// Read shared_ptr with ID-based de-duplication
 	// Binary format: [id:uint32][object data if new and non-null] - compact
 	// JSON format: {"_type_": "ptr", "$id": id, "$val": object} - verbose
-	//
-	// Uses ar(*ptr) uniformly for default-constructible types.
-	// For non-default-constructible types, uses load_and_construct.
 	template<typename Archive, typename T>
 	inline void read_shared_ptr(Archive& ar, std::shared_ptr<T>& ptr) {
 		constexpr bool text_format = std::remove_reference_t<Archive>::is_text_format;
 
 		if constexpr (text_format) {
-			// JSON: verbose object format
 			std::string type_name;
 			uint32_t version;
 			ar.begin_object(type_name, version);
@@ -863,7 +788,6 @@ namespace property_serialization {
 	}
 
 	// Write unique_ptr - format: {"$val": {...}} or null (matches archive.hpp)
-	// Binary: compact bool + object format
 	template<typename Archive, typename T>
 	inline void write_unique_ptr(Archive& ar, const std::unique_ptr<T>& ptr) {
 		constexpr bool text_format = std::remove_reference_t<Archive>::is_text_format;
@@ -887,7 +811,6 @@ namespace property_serialization {
 	}
 
 	// Read unique_ptr - format: {"$val": {...}} or null (matches archive.hpp)
-	// Binary: compact bool + object format
 	template<typename Archive, typename T>
 	inline void read_unique_ptr(Archive& ar, std::unique_ptr<T>& ptr) {
 		constexpr bool text_format = std::remove_reference_t<Archive>::is_text_format;
@@ -928,7 +851,6 @@ namespace property_serialization {
 	}
 
 	// weak_ptr: Saves the ID of the shared_ptr it references
-	// Binary format: [id:uint32] - just the ID, very compact
 	// JSON format: {"$ref": id} or null - matches archive.hpp format
 	// NOTE: The shared_ptr must be serialized BEFORE the weak_ptr for this to work.
 	//       If the shared_ptr hasn't been seen yet, the ID will be 0 (not found).
@@ -990,17 +912,8 @@ namespace property_serialization {
 } // namespace property_serialization
 } // namespace jai
 
-// ============================================================================
-// Property serialization implementations using type-erased archives
-// ============================================================================
-// The virtual serialize() overloads use any_archive_writer/reader for polymorphic
-// dispatch through property_base*. The concrete archive type is wrapped at the
-// call site (property_manager) to enable compile-time dispatch in user types.
-
 namespace jai {
 
-	// Compile-time check: is this type serializable?
-	// Supported: primitives, containers, smart pointers, JAI_STATIC_BINDER, property_owner
 	template<typename T>
 	inline constexpr bool is_type_serializable_v =
 		property_serialization::is_direct_serializable_v<T> ||
@@ -1013,55 +926,36 @@ namespace jai {
 		has_static_type_v<T> ||
 		property_serialization::is_property_owner_v<T>;
 
-	// property<T>::serialize(any_archive_writer&) - save via dispatch pattern
-	// Uses dispatch() to recover concrete archive type for full-fidelity serialization
-	// This enables shared_ptr, load_and_construct, and custom save methods to work properly
 	template<typename T>
 	inline void property<T>::serialize(serialization::any_archive_writer& ar) const {
-		// Skip if marked as transient (compile-time decision)
 		if (m_serialize_mode == serialize_mode::transient) {
 			return;
 		}
 
-		// Skip if dynamically disabled (runtime decision)
 		if (!m_allow_serialization) {
 			return;
 		}
 
-		// Use concrete archive's serialize(name, value) which properly manages context:
-		// - Writes property name
-		// - Pushes PropertyValue context
-		// - Calls write_value() which wraps types with serialize methods in begin_object/end_object
-		// - Pops context after writing
 		ar.dispatch([this](auto& concrete_ar) {
 			concrete_ar.serialize(name().c_str(), m_value);
 		});
 	}
 
-	// property<T>::serialize(any_archive_reader&) - load via dispatch pattern
-	// Uses dispatch() to recover concrete archive type for full-fidelity deserialization
 	template<typename T>
 	inline void property<T>::serialize(serialization::any_archive_reader& ar) {
-		// Note: property_manager has already positioned to this property (read the name).
-		// We're now at the VALUE, which for complex types is wrapped in {}.
-		// Use read_custom() which properly handles:
-		// - Types with serialize() methods: calls begin_object/end_object
-		// - STL containers and primitives: delegates to operator()
+		// property_manager has already positioned to this property (read the name);
+		// we're now at the VALUE
 		ar.dispatch([&](auto& concrete_ar) {
 			concrete_ar.read_custom(m_value);
 		});
 	}
 
-	// deleted_property<T>::serialize(any_archive_writer&) - no-op
 	template<typename T>
 	inline void deleted_property<T>::serialize(serialization::any_archive_writer& ar) const {
-		// No-op: deleted properties don't save
 	}
 
-	// deleted_property<T>::serialize(any_archive_reader&) - skip value
 	template<typename T>
 	inline void deleted_property<T>::serialize(serialization::any_archive_reader& ar) {
-		// Skip the deleted property by reading and discarding
 		if constexpr (std::is_default_constructible_v<T>) {
 			T dummy{};
 			property_serialization::dispatch_load_erased(ar, dummy);
@@ -1078,16 +972,11 @@ namespace jai {
 	// ============================================================================
 	// property_manager templated serialization
 	// ============================================================================
-	// Archive is the concrete CRTP type. We wrap it in any_archive_writer/reader
-	// for polymorphic dispatch through property_base* while maintaining compile-time
-	// optimization in the concrete archive.
 
 	template<typename Archive>
 	void property_manager::save(Archive& ar) const {
-		// Create type-erased wrapper for polymorphic dispatch
 		serialization::any_archive_writer type_erased(ar);
 
-		// Collect and write properties that should be saved
 		for (const auto& [name, prop] : m_properties) {
 			if (prop->allow_save()) {
 				prop->serialize(type_erased);
@@ -1097,14 +986,11 @@ namespace jai {
 
 	template<typename Archive>
 	void property_manager::load(Archive& ar) {
-		// Create type-erased wrapper for polymorphic dispatch
 		serialization::any_archive_reader type_erased(ar);
 
-		// Read properties based on archive format (compile-time branch)
 		if constexpr (Archive::needs_property_keys) {
-			// Binary format: iterate through pre-read property names. COPY, not reference:
-			// loading a nested property pushes onto the reader's object stack (a vector),
-			// and reallocation would invalidate a reference into the current top.
+			// Binary: COPY, not reference — loading a nested property pushes onto the
+			// reader's object stack (a vector); reallocation would invalidate a reference.
 			const std::vector<std::string> prop_names = ar.get_object_property_names();
 			for (size_t i = 0; i < prop_names.size(); ++i) {
 				const std::string& prop_name = prop_names[i];
@@ -1113,14 +999,12 @@ namespace jai {
 					if (it != m_properties.end()) {
 						it->second->serialize(type_erased);
 					}
-					// Unknown properties are skipped by end_object
 				}
 			}
 		} else {
-			// JSON format: seek each known property by name (map lookup).
-			// This avoids consuming the sequential iterator, which is critical
-			// when multiple property_mgrs at different inheritance levels
-			// (Sprite → Drawable → Component) read from the same flat object.
+			// JSON: seek each known property by name — critical when multiple property_mgrs
+			// at different inheritance levels (Sprite → Drawable → Component) read the same
+			// flat object; consuming the sequential iterator would lose position.
 			for (const auto& [name, prop] : m_properties) {
 				if (type_erased.seek_property(name)) {
 					prop->serialize(type_erased);
@@ -1131,9 +1015,3 @@ namespace jai {
 	}
 
 } // namespace jai
-
-// ============================================================================
-// Smart pointer serialization is handled internally by the archive's operator()
-// No ADL free functions needed - this avoids collisions with Cereal.
-// See write_shared_ptr/read_shared_ptr and write_weak_ptr/read_weak_ptr above.
-// ============================================================================

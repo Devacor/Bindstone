@@ -262,31 +262,24 @@ namespace jai {
         std::shared_ptr<environment> env_;
     };
 
-    /// @brief Call frame for stack-based function execution
-    /// Parameters are stored in a simple vector for O(n) lookup where n is small.
     /// This avoids hash map overhead for the most frequently accessed variables.
     /// Defined at namespace scope so coroutine_handle can reference it without circular includes.
     struct call_frame {
-        /// Environment for closure/global variable access
         std::shared_ptr<environment> closure_env;
 
-        /// Method 'this' object pointer (for method calls)
         /// We store a pointer to avoid script_value default construction issues
         std::unique_ptr<script_value> this_object_ptr;
         bool is_method = false;
 
-        /// Static method class definition (for static method calls)
         std::shared_ptr<class_definition> static_class_def;
         bool is_static_method = false;
 
-        /// Slot-based local storage: params and locals indexed by slot number
         /// O(1) access by slot index - much faster than hash map or linear search
         std::vector<script_value> locals;
 
         /// Invalid slot constant - SIZE_MAX naturally fails bounds check
         static constexpr size_t INVALID_SLOT = SIZE_MAX;
 
-        /// Get local by slot index (O(1) access)
         script_value* get_local(size_t slot) noexcept {
             if (slot < locals.size()) {
                 return &locals[slot];
@@ -301,13 +294,10 @@ namespace jai {
             return nullptr;
         }
 
-        /// Set local by slot index - slots are set sequentially (params first, then locals)
         void set_local(size_t slot, script_value value) {
             if (slot == locals.size()) {
-                // Sequential append - most common case
                 locals.push_back(std::move(value));
             } else if (slot < locals.size()) {
-                // Reassignment to existing slot
                 locals[slot] = std::move(value);
             } else {
                 // slot > size: a lower-numbered slot belongs to a declaration in a
@@ -324,7 +314,6 @@ namespace jai {
             }
         }
 
-        /// Reserve capacity for locals (called when entering function)
         void reserve_locals(size_t count) {
             if (count > 0) {
                 locals.reserve(count);
@@ -335,7 +324,6 @@ namespace jai {
         /// identify slots that belong to this frame vs. an inner lambda's scope).
         size_t local_count() const noexcept { return locals.size(); }
 
-        /// Set 'this' object for method calls
         void set_this(script_value this_obj) {
             this_object_ptr = std::make_unique<script_value>(std::move(this_obj));
             is_method = true;
@@ -417,7 +405,6 @@ namespace jai {
             cached_zero_float_ = script_value(0.0, engine_);
             cached_one_float_ = script_value(1.0, engine_);
 
-            // Cache type_info pointers for fast value construction
             if (cached_zero_int_.has_value()) cached_type_info_int_ = cached_zero_int_->get_type_info();
             if (cached_zero_float_.has_value()) cached_type_info_float_ = cached_zero_float_->get_type_info();
             if (cached_true_.has_value()) cached_type_info_bool_ = cached_true_->get_type_info();

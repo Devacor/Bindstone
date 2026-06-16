@@ -230,13 +230,10 @@ class registrar {
     }
 
 public:
-    // Explicit name: auto_bind + build
     explicit registrar(const char* name) { register_simple(std::string(name)); }
 
-    // Auto-named (bare C++ type name, shared with the serialization $type): auto_bind + build
     registrar() { register_simple(registrar_auto_name<T>()); }
 
-    // Explicit name + configuration lambda: (dynamic_binder<T>&, const Context&) -> void
     template<typename F>
     registrar(const char* name, F&& configure) { register_configured(std::string(name), std::forward<F>(configure)); }
 
@@ -278,13 +275,10 @@ class registrar<T, void> {
     }
 
 public:
-    // Explicit name: auto_bind + build
     explicit registrar(const char* name) { register_simple(std::string(name)); }
 
-    // Auto-named (bare C++ type name, shared with the serialization $type): auto_bind + build
     registrar() { register_simple(registrar_auto_name<T>()); }
 
-    // Explicit name + configuration lambda: (dynamic_binder<T>&) -> void
     template<typename F>
     registrar(const char* name, F&& configure) { register_configured(std::string(name), std::forward<F>(configure)); }
 
@@ -320,7 +314,6 @@ public:
         );
     }
 
-    // With configuration lambda: (dynamic_binder<T>&, const Context&) -> void
     template<typename F>
         requires std::invocable<F, dynamic_binder<T>&, const Context&>
     explicit nttp_registrar(F&& configure) {
@@ -356,7 +349,6 @@ public:
         );
     }
 
-    // With configuration lambda: (dynamic_binder<T>&) -> void
     template<typename F>
         requires std::invocable<F, dynamic_binder<T>&>
     explicit nttp_registrar(F&& configure) {
@@ -391,7 +383,6 @@ inline void bind_registrar(engine& eng) {
 
 } // namespace jai
 
-// Include dynamic_binder.hpp to make registrar lambdas work
 #include <jaiscript/core/dynamic_binder.hpp>
 // Include polymorphic registry for auto-registration of polymorphic types, plus the
 // any_archive dispatch() definitions its save/load factories instantiate (see the note

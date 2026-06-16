@@ -73,7 +73,6 @@ public:
                 }
                 sum
             )");
-            // 0 + 1 + 2 + 3 + 4 + (-1) = 9
             check_eq(result.template as<script_int>(), static_cast<script_int>(9));
         });
 
@@ -96,7 +95,6 @@ public:
                 auto r3 = c.resume();
                 r0 * 1000 + r1 * 100 + r2 * 10 + r3
             )");
-            // 0*1000 + 1*100 + 2*10 + 99 = 219
             check_eq(result.template as<script_int>(), static_cast<script_int>(219));
         });
 
@@ -118,7 +116,6 @@ public:
                 auto r2 = c2.resume();
                 r1 + r2
             )");
-            // 1 + (-1) = 0
             check_eq(result.template as<script_int>(), static_cast<script_int>(0));
         });
 
@@ -171,7 +168,6 @@ public:
                 auto r6 = b.resume();
                 r1 + r2 + r3 + r4 + r5 + r6
             )");
-            // 1 + 10 + 2 + 20 + 3 + 30 = 66
             check_eq(result.template as<script_int>(), static_cast<script_int>(66));
         });
 
@@ -193,7 +189,6 @@ public:
                 auto r3 = c.resume();
                 r1 * 100 + r2 * 10 + r3
             )");
-            // 2*100 + 6*10 + 18 = 278
             check_eq(result.template as<script_int>(), static_cast<script_int>(278));
         });
 
@@ -236,7 +231,6 @@ public:
                 }
                 sum
             )");
-            // 0+1+2+10+11+12+(-1) = 35
             check_eq(result.template as<script_int>(), static_cast<script_int>(35));
         });
 
@@ -304,7 +298,6 @@ public:
                     if (count == 7) { break; }
                 }
             )");
-            // fibonacci: 0, 1, 1, 2, 3, 5, 8 → sum = 20
             check_eq(eng->get_variable("sum").as<int64_t>(), int64_t(20));
             check_eq(eng->get_variable("count").as<int64_t>(), int64_t(7));
         });
@@ -323,7 +316,6 @@ public:
                     total = total + x;
                 }
             )");
-            // 0 + 1 + 2 + 3 + 4 = 10
             check_eq(eng->get_variable("total").as<int64_t>(), int64_t(10));
         });
 

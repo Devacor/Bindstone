@@ -1,9 +1,7 @@
 // Single compilation unit for JaiScript
-// This file includes all implementation files
 
 #include "../include/jaiscript/jaiscript.hpp"
 
-// Include all implementation files
 #include "implementation/types.cpp"
 #include "implementation/type_info.cpp"
 #include "implementation/value.cpp"

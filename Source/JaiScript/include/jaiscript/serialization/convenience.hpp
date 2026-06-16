@@ -6,9 +6,6 @@
 
 namespace jai {
 
-// ============================================================================
-// Base64 encoding/decoding (RFC 4648)
-// ============================================================================
 namespace detail {
 
 inline constexpr char base64_chars[] =
@@ -36,7 +33,6 @@ inline std::string base64_encode(const std::string& input) {
     size_t len = input.size();
     size_t i = 0;
 
-    // Process 3 bytes at a time -> 4 base64 chars
     while (i + 2 < len) {
         result += base64_chars[(bytes[i] >> 2) & 0x3F];
         result += base64_chars[((bytes[i] & 0x03) << 4) | ((bytes[i+1] >> 4) & 0x0F)];
@@ -45,17 +41,14 @@ inline std::string base64_encode(const std::string& input) {
         i += 3;
     }
 
-    // Handle remaining bytes
     if (i < len) {
         result += base64_chars[(bytes[i] >> 2) & 0x3F];
 
         if (i + 1 < len) {
-            // 2 bytes remaining
             result += base64_chars[((bytes[i] & 0x03) << 4) | ((bytes[i+1] >> 4) & 0x0F)];
             result += base64_chars[(bytes[i+1] & 0x0F) << 2];
             result += '=';
         } else {
-            // 1 byte remaining
             result += base64_chars[(bytes[i] & 0x03) << 4];
             result += "==";
         }
@@ -68,7 +61,6 @@ inline std::string base64_decode(const std::string& input) {
     std::string result;
     if (input.empty()) return result;
 
-    // Count valid base64 characters (excluding padding)
     size_t valid_chars = 0;
     for (char c : input) {
         unsigned char uc = static_cast<unsigned char>(c);
@@ -96,7 +88,6 @@ inline std::string base64_decode(const std::string& input) {
         buffer[buffer_idx++] = val;
 
         if (buffer_idx == 4) {
-            // Decode 4 base64 chars -> 3 bytes
             result += static_cast<char>((buffer[0] << 2) | (buffer[1] >> 4));
             result += static_cast<char>((buffer[1] << 4) | (buffer[2] >> 2));
             result += static_cast<char>((buffer[2] << 6) | buffer[3]);
@@ -104,7 +95,6 @@ inline std::string base64_decode(const std::string& input) {
         }
     }
 
-    // Handle remaining chars (with padding)
     if (buffer_idx >= 2) {
         result += static_cast<char>((buffer[0] << 2) | (buffer[1] >> 4));
     }
@@ -117,18 +107,7 @@ inline std::string base64_decode(const std::string& input) {
 
 } // namespace detail
 
-// ============================================================================
-// Convenience functions for serialization
-// ============================================================================
-// These provide a simple one-liner API for common serialization tasks.
-// Engine is always required (JaiScript types are engine-bound).
-// User context is optional for dependency injection during deserialization.
-
 namespace detail {
-
-// ============================================================================
-// Smart pointer element type extraction
-// ============================================================================
 template<typename T> struct shared_ptr_element { using type = T; };
 template<typename T> struct shared_ptr_element<std::shared_ptr<T>> { using type = T; };
 template<typename T> using shared_ptr_element_t = typename shared_ptr_element<T>::type;
@@ -149,7 +128,6 @@ template<typename T> inline constexpr bool is_unique_ptr_v = is_unique_ptr<T>::v
 template<typename T>
 inline constexpr bool is_owning_ptr_v = is_shared_ptr_v<T> || is_unique_ptr_v<T>;
 
-// Get element type from either shared_ptr or unique_ptr
 template<typename T>
 using owning_ptr_element_t = std::conditional_t<
     is_shared_ptr_v<T>,
@@ -157,11 +135,6 @@ using owning_ptr_element_t = std::conditional_t<
     std::conditional_t<is_unique_ptr_v<T>, unique_ptr_element_t<T>, T>
 >;
 
-// ============================================================================
-// Type trait detection (unwraps shared_ptr to check pointee)
-// ============================================================================
-
-// Concept to detect property_owner types (has property_mgr member)
 template<typename T, typename = void>
 struct has_property_mgr : std::false_type {};
 
@@ -182,18 +155,12 @@ struct has_load_method : std::false_type {};
 template<typename T>
 struct has_load_method<T, std::void_t<decltype(std::declval<T>().load(std::declval<serialization::json_archive_reader&>()))>> : std::true_type {};
 
-// Concept to detect types with templated serialize() method
 template<typename T, typename = void>
 struct has_serialize_method : std::false_type {};
 
 template<typename T>
 struct has_serialize_method<T, std::void_t<decltype(std::declval<T>().serialize(std::declval<serialization::json_archive_writer&>()))>> : std::true_type {};
 
-// ============================================================================
-// Smart pointer aware traits - unwrap owning pointers to check pointee type
-// ============================================================================
-
-// For save: check if T (or T's pointee for shared_ptr/unique_ptr) can be serialized directly
 template<typename T>
 constexpr bool can_use_direct_archive_v = []() {
     if constexpr (is_owning_ptr_v<T>) {
@@ -204,7 +171,6 @@ constexpr bool can_use_direct_archive_v = []() {
     }
 }();
 
-// For load: check if T (or T's pointee for shared_ptr/unique_ptr) can be deserialized directly
 template<typename T>
 constexpr bool can_use_direct_archive_read_v = []() {
     if constexpr (is_owning_ptr_v<T>) {
@@ -217,11 +183,6 @@ constexpr bool can_use_direct_archive_read_v = []() {
 
 } // namespace detail
 
-// ============================================================================
-// JSON Serialization
-// ============================================================================
-
-// Serialize to JSON string
 // Always wraps in begin_object/end_object for consistent format (like binary)
 template<typename T>
 std::string to_json(engine& eng, const T& value, int indent = 2) {
@@ -233,17 +194,14 @@ std::string to_json(engine& eng, const T& value, int indent = 2) {
         // dispatch on the static pointee type and slice off the derived data + $type. B6.
         ar.serialize("value0", value);
     } else if constexpr (detail::can_use_direct_archive_v<T>) {
-        // Types with property_mgr/save/serialize: serialize content directly into the root object.
         ar.serialize_object_content(value);
     } else {
-        // Basic types: serialize with "value0" key
         ar.serialize("value0", value);
     }
     ar.end_object();
     return ar.str();
 }
 
-// Serialize to JSON with user context
 // Always wraps in begin_object/end_object for consistent format (like binary)
 template<typename T, typename Context>
 std::string to_json(engine& eng, const T& value, Context& ctx, int indent = 2) {
@@ -264,7 +222,6 @@ std::string to_json(engine& eng, const T& value, Context& ctx, int indent = 2) {
     return ar.str();
 }
 
-// Deserialize from JSON string
 // Always expects begin_object/end_object wrapper for consistent format (like binary)
 template<typename T>
 T from_json(engine& eng, const std::string& json) {
@@ -281,14 +238,12 @@ T from_json(engine& eng, const std::string& json) {
     } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
-        // Basic types: deserialize with "value0" key
         ar.serialize("value0", result);
     }
     ar.end_object();
     return std::move(result);
 }
 
-// Deserialize from JSON with user context (for dependency injection)
 // Always expects begin_object/end_object wrapper for consistent format (like binary)
 template<typename T, typename Context>
 T from_json(engine& eng, const std::string& json, Context& ctx) {
@@ -312,11 +267,6 @@ T from_json(engine& eng, const std::string& json, Context& ctx) {
     return std::move(result);
 }
 
-// ============================================================================
-// Binary Serialization
-// ============================================================================
-
-// Serialize to binary (returns vector)
 // Always wraps in begin_object/end_object for consistent format with property sizes
 template<typename T>
 std::vector<uint8_t> to_binary(engine& eng, const T& value) {
@@ -336,7 +286,6 @@ std::vector<uint8_t> to_binary(engine& eng, const T& value) {
     return ar.data();
 }
 
-// Serialize to binary string (for storage/transmission as string)
 // Always wraps in begin_object/end_object for consistent format with property sizes
 template<typename T>
 std::string to_binary_string(engine& eng, const T& value) {
@@ -357,7 +306,6 @@ std::string to_binary_string(engine& eng, const T& value) {
     return std::string(data.begin(), data.end());
 }
 
-// Serialize to binary with user context
 template<typename T, typename Context>
 std::string to_binary_string(engine& eng, const T& value, Context& ctx) {
     serialization::binary_archive_writer ar(&eng);
@@ -378,7 +326,6 @@ std::string to_binary_string(engine& eng, const T& value, Context& ctx) {
     return std::string(data.begin(), data.end());
 }
 
-// Deserialize from binary vector
 // Always expects begin_object/end_object wrapper for consistent format
 template<typename T>
 T from_binary(engine& eng, const std::vector<uint8_t>& data) {
@@ -401,7 +348,6 @@ T from_binary(engine& eng, const std::vector<uint8_t>& data) {
     return result;
 }
 
-// Deserialize from binary vector with user context
 template<typename T, typename Context>
 T from_binary(engine& eng, const std::vector<uint8_t>& data, Context& ctx) {
     serialization::binary_archive_reader ar(data, &eng);
@@ -424,7 +370,6 @@ T from_binary(engine& eng, const std::vector<uint8_t>& data, Context& ctx) {
     return result;
 }
 
-// Deserialize from binary string
 template<typename T>
 T from_binary_string(engine& eng, const std::string& data) {
     serialization::binary_archive_reader ar(
@@ -450,7 +395,6 @@ T from_binary_string(engine& eng, const std::string& data) {
     return result;
 }
 
-// Deserialize from binary string with user context
 template<typename T, typename Context>
 T from_binary_string(engine& eng, const std::string& data, Context& ctx) {
     serialization::binary_archive_reader ar(
@@ -477,37 +421,25 @@ T from_binary_string(engine& eng, const std::string& data, Context& ctx) {
     return result;
 }
 
-// ============================================================================
-// Base64 Serialization (binary serialization + base64 encoding)
-// ============================================================================
-
-// Serialize to base64 string
 template<typename T>
 std::string to_base64(engine& eng, const T& value) {
     return detail::base64_encode(to_binary_string(eng, value));
 }
 
-// Serialize to base64 with user context
 template<typename T, typename Context>
 std::string to_base64(engine& eng, const T& value, Context& ctx) {
     return detail::base64_encode(to_binary_string(eng, value, ctx));
 }
 
-// Deserialize from base64 string
 template<typename T>
 T from_base64(engine& eng, const std::string& base64) {
     return from_binary_string<T>(eng, detail::base64_decode(base64));
 }
 
-// Deserialize from base64 with user context
 template<typename T, typename Context>
 T from_base64(engine& eng, const std::string& base64, Context& ctx) {
     return from_binary_string<T>(eng, detail::base64_decode(base64), ctx);
 }
-
-// ============================================================================
-// Raw base64 encoding (for strings, not serialization)
-// ============================================================================
 
 inline std::string base64_encode(const std::string& input) {
     return detail::base64_encode(input);

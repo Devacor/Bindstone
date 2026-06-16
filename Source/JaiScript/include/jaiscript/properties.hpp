@@ -7,8 +7,7 @@
 #include <jaiscript/properties/property.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
-// property_serialization.hpp removed from convenience header for faster compilation.
-// Include it explicitly in .cpp files that serialize properties.
+// Include property_serialization.hpp explicitly in .cpp files that serialize properties.
 
 // For custom types (like MV::Point<float>, BoxAABB, etc.), provide
 // save() and load() free functions in the same namespace as your type (ADL):

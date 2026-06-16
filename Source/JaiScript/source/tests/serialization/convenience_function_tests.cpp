@@ -19,10 +19,7 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
-// ============================================================================
-// Smart Pointer Test Types (must be at namespace scope for JAI_PROPERTY)
-// ============================================================================
-
+// These smart-pointer test types must be at namespace scope for JAI_PROPERTY.
 struct sp_inner_data {
     int x = 0;
     std::string label;
@@ -86,11 +83,6 @@ public:
     JAI_PROPERTY((std::string), derivedTag, "");
 };
 
-// ============================================================================
-// Test Classes - property_owner Auto-registration
-// ============================================================================
-
-// Simple property_owner test class
 class conv_player : public property_owner<conv_player> {
 public:
     JAI_PROPERTY((int), health, 100);
@@ -100,7 +92,6 @@ public:
     conv_player() = default;
 };
 
-// property_owner with containers
 class conv_inventory : public property_owner<conv_inventory> {
 public:
     JAI_PROPERTY((std::vector<std::string>), items);
@@ -109,18 +100,12 @@ public:
     conv_inventory() = default;
 };
 
-// ============================================================================
-// Test Classes - Explicit save/load (uses ar.serialize API)
-// ============================================================================
-
 class explicit_save_load_obj {
 public:
     int x = 0;
     int y = 0;
     std::string label = "";
 
-    // Explicit save function using ar.serialize("key", value)
-    // Templated for CRTP archive support
     template<typename Archive>
     void save(Archive& ar) const {
         ar.serialize("x", x);
@@ -128,7 +113,6 @@ public:
         ar.serialize("label", label);
     }
 
-    // Explicit load function using ar.serialize("key", value)
     template<typename Archive>
     void load(Archive& ar) {
         ar.serialize("x", x);
@@ -136,10 +120,6 @@ public:
         ar.serialize("label", label);
     }
 };
-
-// ============================================================================
-// Test Classes - Member serialize() function (unified save/load)
-// ============================================================================
 
 // `friend jai::access;` is the one declaration a type needs for private serialization
 // members — trait detection and dispatch both route through jai::access, cereal-style.
@@ -166,22 +146,18 @@ public:
     double value = 0.0;
     std::string tag = "";
 
-    // Unified serialize function - works for both reading and writing
-    // Uses ar.serialize("key", value) which dispatches correctly based on archive type
     template<typename Archive>
     void serialize(Archive& ar) {
         ar.serialize("value", value);
         ar.serialize("tag", tag);
     }
 
-    // For convenience function compatibility - save version (templated)
     template<typename Archive>
     void save(Archive& ar) const {
         ar.serialize("value", value);
         ar.serialize("tag", tag);
     }
 
-    // For convenience function compatibility - load version (templated)
     template<typename Archive>
     void load(Archive& ar) {
         ar.serialize("value", value);
@@ -189,25 +165,16 @@ public:
     }
 };
 
-// ============================================================================
-// Test Classes - property_owner + Extra Data (Blended)
-// ============================================================================
-
-// Blended object: Uses JAI_PROPERTY for some fields, and extra non-property fields
-// The save/load methods serialize properties PLUS extra data
 class blended_object : public property_owner<blended_object> {
 public:
     JAI_PROPERTY((int), score, 0);
     JAI_PROPERTY((std::string), player_name, "");
 
-    // Extra non-property data (serialized manually)
     int extra_data = 0;
     std::vector<float> history;
 
     blended_object() = default;
 
-    // Blended save: properties via property_mgr + extra fields via ar.serialize
-    // Templated for CRTP archive support
     template<typename Archive>
     void save(Archive& ar) const {
         property_mgr.save(ar);
@@ -215,7 +182,6 @@ public:
         ar.serialize("history", history);
     }
 
-    // Blended load: properties via property_mgr + extra fields via ar.serialize
     template<typename Archive>
     void load(Archive& ar) {
         property_mgr.load(ar);
@@ -224,18 +190,10 @@ public:
     }
 };
 
-// ============================================================================
-// Context for dependency injection
-// ============================================================================
-
 struct conv_test_context {
     std::string service_name = "TestService";
     int multiplier = 1;
 };
-
-// ============================================================================
-// Test Suite
-// ============================================================================
 
 class convenience_function_tests : public suite {
 public:
@@ -276,10 +234,6 @@ public:
             check_eq(int64_t(2), loaded.data[1], "root object member serialize element value");
         });
 
-        // ================================================================
-        // RAW BASE64 TESTS (no serialization, just string encoding)
-        // ================================================================
-
         test("base64_raw_string_roundtrip", [this]() {
             std::string original = "Hello, World!";
             std::string encoded = base64_encode(original);
@@ -303,105 +257,75 @@ public:
             check_eq(decoded, binary_data, "Binary data preserved through base64");
         });
 
-        // ================================================================
-        // JSON CONVENIENCE FUNCTION TESTS
-        // ================================================================
-
         test("json_basic_types", [this]() {
             auto eng = engine::make();
 
-            // Int
             std::string json_int = to_json(*eng, 42);
             check(json_int.find("42") != std::string::npos, "Int serialized");
             int i = from_json<int>(*eng, json_int);
             check_eq(i, 42, "Int roundtrip");
 
-            // Float
             std::string json_float = to_json(*eng, 3.14);
             check(json_float.find("3.14") != std::string::npos, "Float serialized");
 
-            // String
             std::string json_str = to_json(*eng, std::string("hello world"));
             check(json_str.find("hello world") != std::string::npos, "String serialized");
             std::string s = from_json<std::string>(*eng, json_str);
             check_eq(s, std::string("hello world"), "String roundtrip");
 
-            // Bool
             std::string json_bool = to_json(*eng, true);
             check(json_bool.find("true") != std::string::npos, "Bool serialized");
         });
 
-        // ================================================================
-        // BINARY CONVENIENCE FUNCTION TESTS
-        // ================================================================
-
         test("binary_basic_types", [this]() {
             auto eng = engine::make();
 
-            // Int roundtrip
             std::string bin_int = to_binary_string(*eng, 12345);
             int i = from_binary_string<int>(*eng, bin_int);
             check_eq(i, 12345, "Int binary roundtrip");
 
-            // Float roundtrip
             std::string bin_float = to_binary_string(*eng, 2.718);
             double d = from_binary_string<double>(*eng, bin_float);
             check(std::abs(d - 2.718) < 0.001, "Float binary roundtrip");
 
-            // String roundtrip
             std::string bin_str = to_binary_string(*eng, std::string("binary test"));
             std::string loaded_str = from_binary_string<std::string>(*eng, bin_str);
             check_eq(loaded_str, std::string("binary test"), "String binary roundtrip");
         });
 
-        // ================================================================
-        // BASE64 SERIALIZATION TESTS
-        // ================================================================
-
         test("base64_serialization_basic", [this]() {
             auto eng = engine::make();
 
-            // Serialize to base64
             std::string base64 = to_base64(*eng, 9999);
 
-            // Base64 should be ASCII-safe
             for (char c : base64) {
                 bool valid = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
                             (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=';
                 check(valid, "Base64 contains only valid characters");
             }
 
-            // Deserialize from base64
             int loaded = from_base64<int>(*eng, base64);
             check_eq(loaded, 9999, "Int base64 roundtrip");
         });
-
-        // ================================================================
-        // PROPERTY_OWNER AUTO-REGISTRATION TESTS
-        // ================================================================
 
         test("property_owner_json_roundtrip", [this]() {
             auto eng = engine::make();
             stdlib::register_all(*eng);
 
-            // Register player with auto-bound properties
             dynamic_binder<conv_player>(eng, "ConvPlayer")
                 .build();
 
-            // Create and modify player
             auto original = std::make_shared<conv_player>();
             original->health = 75;
             original->speed = 10.0f;
             original->name = "Hero";
 
-            // Serialize using explicit archive API (property_owner save)
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("ConvPlayer", 1);
             original->property_mgr.save(writer);
             writer.end_object();
             std::string json = writer.str();
 
-            // Verify JSON contains expected values
             check(json.find("75") != std::string::npos, "Health in JSON");
             check(json.find("Hero") != std::string::npos, "Name in JSON");
 
@@ -430,14 +354,12 @@ public:
             original->speed = 7.5f;
             original->name = "Binary Hero";
 
-            // Serialize using binary archive
             std::vector<uint8_t> buffer;
             serialization::binary_archive_writer writer(buffer, eng.get());
             writer.begin_object("ConvPlayer", 1);
             original->property_mgr.save(writer);
             writer.end_object();
 
-            // Deserialize
             conv_player loaded;
             serialization::binary_archive_reader reader(buffer, eng.get());
             std::string type_name;
@@ -460,7 +382,6 @@ public:
             original->items.get() = {"sword", "shield", "potion"};
             original->quantities.get() = {{"gold", 100}, {"gems", 5}};
 
-            // JSON roundtrip
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("ConvInventory", 1);
             original->property_mgr.save(writer);
@@ -480,10 +401,6 @@ public:
             check_eq(loaded.quantities.get()["gold"], 100, "Gold quantity");
         });
 
-        // ================================================================
-        // EXPLICIT SAVE/LOAD TESTS (ar(obj) dispatches to save/load)
-        // ================================================================
-
         test("explicit_save_load_json", [this]() {
             auto eng = engine::make();
 
@@ -492,19 +409,16 @@ public:
             original.y = 20;
             original.label = "test point";
 
-            // Serialize using obj.save(ar) - explicit call
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("ExplicitObj", 1);
             original.save(writer);
             writer.end_object();
             std::string json = writer.str();
 
-            // Verify JSON contains expected values
             check(json.find("10") != std::string::npos, "x in JSON");
             check(json.find("20") != std::string::npos, "y in JSON");
             check(json.find("test point") != std::string::npos, "label in JSON");
 
-            // Deserialize using obj.load(ar) - explicit call
             explicit_save_load_obj loaded;
             serialization::json_archive_reader reader(json, eng.get());
             std::string type_name;
@@ -526,14 +440,12 @@ public:
             original.y = 200;
             original.label = "binary point";
 
-            // Serialize using obj.save(ar)
             std::vector<uint8_t> buffer;
             serialization::binary_archive_writer writer(buffer, eng.get());
             writer.begin_object("ExplicitObj", 1);
             original.save(writer);
             writer.end_object();
 
-            // Deserialize using obj.load(ar)
             explicit_save_load_obj loaded;
             serialization::binary_archive_reader reader(buffer, eng.get());
             std::string type_name;
@@ -547,10 +459,6 @@ public:
             check_eq(loaded.label, std::string("binary point"), "label from binary");
         });
 
-        // ================================================================
-        // MEMBER SERIALIZE TESTS (explicit save/load calls)
-        // ================================================================
-
         test("member_serialize_json", [this]() {
             auto eng = engine::make();
 
@@ -558,18 +466,15 @@ public:
             original.value = 3.14159;
             original.tag = "pi";
 
-            // Serialize using obj.save(ar)
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("MemberSerializeObj", 1);
             original.save(writer);
             writer.end_object();
             std::string json = writer.str();
 
-            // Verify JSON content
             check(json.find("3.14159") != std::string::npos, "value in JSON");
             check(json.find("pi") != std::string::npos, "tag in JSON");
 
-            // Deserialize using obj.load(ar)
             member_serialize_obj loaded;
             serialization::json_archive_reader reader(json, eng.get());
             std::string type_name;
@@ -589,14 +494,12 @@ public:
             original.value = 2.71828;
             original.tag = "euler";
 
-            // Serialize using obj.save(ar)
             std::vector<uint8_t> buffer;
             serialization::binary_archive_writer writer(buffer, eng.get());
             writer.begin_object("MemberSerializeObj", 1);
             original.save(writer);
             writer.end_object();
 
-            // Deserialize using obj.load(ar)
             member_serialize_obj loaded;
             serialization::binary_archive_reader reader(buffer, eng.get());
             std::string type_name;
@@ -608,11 +511,6 @@ public:
             check(std::abs(loaded.value - 2.71828) < 0.00001, "value from binary");
             check_eq(loaded.tag, std::string("euler"), "tag from binary");
         });
-
-        // ================================================================
-        // BLENDED APPROACH TESTS (property_owner + extra fields via save/load)
-        // ================================================================
-        // save/load internally call property_mgr.save/load PLUS serialize extra fields
 
         test("blended_property_owner_json", [this]() {
             auto eng = engine::make();
@@ -626,21 +524,17 @@ public:
             original->extra_data = 42;
             original->history = {1.0f, 2.5f, 3.7f, 4.2f};
 
-            // Serialize using serialize_object_content - dispatches to save() which calls property_mgr.save + extras
-            // Must use serialize_object_content because we already opened the object with begin_object
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("BlendedObject", 1);
             writer.serialize_object_content(*original);
             writer.end_object();
             std::string json = writer.str();
 
-            // Verify JSON contains all data (properties + extra)
             check(json.find("1000") != std::string::npos, "Score in JSON");
             check(json.find("Champion") != std::string::npos, "Player name in JSON");
             check(json.find("42") != std::string::npos, "Extra data in JSON");
             check(json.find("history") != std::string::npos, "History key in JSON");
 
-            // Deserialize using ar(obj) - dispatches to load() which calls property_mgr.load + extras
             blended_object loaded;
             serialization::json_archive_reader reader(json, eng.get());
             std::string type_name;
@@ -668,14 +562,12 @@ public:
             original->extra_data = 99;
             original->history = {10.0f, 20.0f};
 
-            // Serialize using serialize_object_content (we already opened the object)
             std::vector<uint8_t> buffer;
             serialization::binary_archive_writer writer(buffer, eng.get());
             writer.begin_object("BlendedObject", 1);
             writer.serialize_object_content(*original);
             writer.end_object();
 
-            // Deserialize - reader(loaded) calls load() which handles begin_object/end_object internally
             blended_object loaded;
             serialization::binary_archive_reader reader(buffer, eng.get());
             std::string type_name;
@@ -690,7 +582,6 @@ public:
         });
 
         test("property_owner_auto_dispatch", [this]() {
-            // Test that property_owner WITHOUT save/load uses property_mgr automatically
             auto eng = engine::make();
             stdlib::register_all(*eng);
 
@@ -701,14 +592,12 @@ public:
             original->name = "AutoPlayer";
             original->speed = 12.5f;
 
-            // Serialize using serialize_object_content - we already opened the object with begin_object
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("ConvPlayer", 1);
             writer.serialize_object_content(*original);
             writer.end_object();
             std::string json = writer.str();
 
-            // Deserialize - property_mgr.load reads properties directly (no extra begin_object)
             conv_player loaded;
             serialization::json_archive_reader reader(json, eng.get());
             std::string type_name;
@@ -722,10 +611,6 @@ public:
             check(std::abs(loaded.speed.get() - 12.5f) < 0.001f, "Speed auto-restored");
         });
 
-        // ================================================================
-        // USER CONTEXT TESTS
-        // ================================================================
-
         test("json_with_user_context", [this]() {
             auto eng = engine::make();
             stdlib::register_all(*eng);
@@ -736,14 +621,12 @@ public:
             original->health = 60;
             original->name = "Context Player";
 
-            // Serialize
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("ConvPlayer", 1);
             original->property_mgr.save(writer);
             writer.end_object();
             std::string json = writer.str();
 
-            // Deserialize with user context
             conv_test_context ctx;
             ctx.service_name = "GameService";
             ctx.multiplier = 2;
@@ -758,40 +641,24 @@ public:
             loaded.property_mgr.load(reader);
             reader.end_object();
 
-            // Context was available during load (even if not used in this simple case)
             check_eq(loaded.health.get(), 60, "Health with context");
             check_eq(loaded.name.get(), std::string("Context Player"), "Name with context");
         });
 
-        // ================================================================
-        // PORTABLE BINARY (ENDIANNESS) TEST
-        // ================================================================
-
         test("binary_little_endian_portable", [this]() {
             auto eng = engine::make();
 
-            // Serialize a known multi-byte value
             int32_t value = 0x12345678;
             std::string binary = to_binary_string(*eng, value);
 
-            // Roundtrip should work regardless of host endianness
             int32_t loaded = from_binary_string<int32_t>(*eng, binary);
             check_eq(loaded, value, "Int32 portable binary roundtrip");
 
-            // Test a 64-bit value
             int64_t big_value = 0x123456789ABCDEF0LL;
             std::string big_binary = to_binary_string(*eng, big_value);
             int64_t big_loaded = from_binary_string<int64_t>(*eng, big_binary);
             check_eq(big_loaded, big_value, "Int64 portable binary roundtrip");
         });
-
-        // ================================================================
-        // SMART POINTER ROUND-TRIP TESTS
-        // ================================================================
-        // Tests the new object-based JSON format:
-        //   shared_ptr: {"$id": N, "$val": {...}} or {"$id": N} or null
-        //   weak_ptr:   {"$ref": N} or null
-        //   unique_ptr: {"$val": {...}} or null
 
         test("shared_ptr_json_roundtrip", [this]() {
             auto eng = engine::make();
@@ -800,7 +667,6 @@ public:
             ptr1->x = 42;
             ptr1->label = "hello";
 
-            // Serialize shared_ptr
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object();
             writer.serialize("ptr1", ptr1);
@@ -811,12 +677,10 @@ public:
 
             std::string json = writer.str();
 
-            // Verify JSON format: $id and $val keys present
             check(json.find("$id") != std::string::npos, "$id key present");
             check(json.find("$val") != std::string::npos, "$val key present");
             check(json.find("null") != std::string::npos, "null present for null_ptr");
 
-            // Deserialize
             std::shared_ptr<sp_inner_data> loaded_ptr1;
             std::shared_ptr<sp_inner_data> loaded_alias;
             std::shared_ptr<sp_inner_data> loaded_null;
@@ -828,16 +692,13 @@ public:
             reader.serialize("null_ptr", loaded_null);
             reader.end_object();
 
-            // Verify loaded values
             check(loaded_ptr1 != nullptr, "ptr1 not null");
             check_eq(loaded_ptr1->x, 42, "ptr1.x preserved");
             check_eq(loaded_ptr1->label, std::string("hello"), "ptr1.label preserved");
 
-            // Alias should point to same object (de-duplication)
             check(loaded_alias != nullptr, "alias not null");
             check(loaded_ptr1.get() == loaded_alias.get(), "alias is same object as ptr1");
 
-            // Null should remain null
             check(loaded_null == nullptr, "null_ptr stays null");
         });
 
@@ -848,7 +709,6 @@ public:
             ptr1->x = 99;
             ptr1->label = "binary_test";
 
-            // Serialize
             std::vector<uint8_t> buffer;
             serialization::binary_archive_writer writer(buffer, eng.get());
             writer.begin_object();
@@ -858,7 +718,6 @@ public:
             writer.serialize("null_ptr", null_ptr);
             writer.end_object();
 
-            // Deserialize
             std::shared_ptr<sp_inner_data> loaded_ptr1;
             std::shared_ptr<sp_inner_data> loaded_alias;
             std::shared_ptr<sp_inner_data> loaded_null;
@@ -886,7 +745,6 @@ public:
             auto uptr = std::make_unique<sp_simple_data>();
             uptr->value = 123;
 
-            // Serialize
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object();
             writer.serialize("uptr", uptr);
@@ -898,7 +756,6 @@ public:
             check(json.find("$val") != std::string::npos, "$val key present for unique_ptr");
             check(json.find("null") != std::string::npos, "null present for null unique_ptr");
 
-            // Deserialize
             std::unique_ptr<sp_simple_data> loaded_uptr;
             std::unique_ptr<sp_simple_data> loaded_null_uptr;
 
@@ -932,7 +789,6 @@ public:
             std::string json = writer.str();
             check(json.find("$ref") != std::string::npos, "$ref key present for weak_ptr");
 
-            // Deserialize
             std::shared_ptr<sp_simple_data> loaded_shared;
             std::weak_ptr<sp_simple_data> loaded_weak;
             std::weak_ptr<sp_simple_data> loaded_null_weak;
@@ -964,7 +820,6 @@ public:
 
             std::vector<std::shared_ptr<sp_id_data>> vec = {a, b, a};  // a appears twice
 
-            // Serialize
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object();
             writer.serialize("vec", vec);
@@ -972,7 +827,6 @@ public:
 
             std::string json = writer.str();
 
-            // Deserialize
             std::vector<std::shared_ptr<sp_id_data>> loaded_vec;
 
             serialization::json_archive_reader reader(json, eng.get());
@@ -999,7 +853,6 @@ public:
             original.data.get()->value = 555;
             original.extra = 10;
 
-            // Serialize
             serialization::json_archive_writer writer(2, eng.get());
             writer.begin_object("sp_ptr_holder", 1);
             original.property_mgr.save(writer);
@@ -1007,7 +860,6 @@ public:
 
             std::string json = writer.str();
 
-            // Deserialize
             sp_ptr_holder loaded;
             serialization::json_archive_reader reader(json, eng.get());
             std::string type_name;
@@ -1020,15 +872,6 @@ public:
             check_eq(loaded.data.get()->value, 555, "data.value preserved");
             check_eq(loaded.extra.get(), 10, "extra preserved");
         });
-
-        // ================================================================
-        // OWNING-ROOT POLYMORPHISM (B6 slicing fix)
-        // ================================================================
-        // to_*/from_*(shared_ptr<Base>) used to deref into static-type dispatch, dropping the
-        // derived data + $type. They now route the pointer through the archive's smart-ptr path so
-        // the dynamic type, the derived's own data (derivedTag), AND inherited base data (baseVal)
-        // all survive. (The inherited-field preservation was the separate property_owner chain bug,
-        // fixed in the Inheritance Serialization work — these assert it end-to-end through convenience.)
 
         test("convenience_owning_ptr_polymorphic_json", [this]() {
             auto eng = engine::make();
@@ -1082,8 +925,6 @@ public:
             check_eq(loadedDerived->baseVal.get(), 13, "inherited field preserved (base64)");
         });
 
-        // A non-polymorphic owning root (no $type) must still round-trip through convenience —
-        // this is the path that previously hit the broken serialize_object_content(shared_ptr).
         test("convenience_owning_ptr_nonpolymorphic_json", [this]() {
             auto eng = engine::make();
             auto ptr = std::make_shared<sp_simple_data>();
@@ -1095,9 +936,6 @@ public:
             check_eq(loaded->value, 321, "value preserved through convenience round-trip");
         });
 
-        // ================================================================
-        // JSON READER ROBUSTNESS (2026-05 audit regressions)
-        // ================================================================
         // These guard the parse_number/parse_string/parse_json hardening:
         // malformed input must raise jai::serialization_error (NOT a raw
         // std::out_of_range / std::invalid_argument, which derive from a sibling
@@ -1126,14 +964,12 @@ public:
 
         test("json_reader_bare_minus_is_serialization_error", [this, parseOutcome]() {
             auto eng = engine::make();
-            // Previously std::stoll("-") threw std::invalid_argument (outcome 2).
             check_eq(parseOutcome(eng.get(), "-"), 1, "bare '-' -> serialization_error");
             check_eq(parseOutcome(eng.get(), "1.2.3"), 1, "malformed number -> serialization_error");
         });
 
         test("json_reader_huge_int_degrades_to_double", [this]() {
             auto eng = engine::make();
-            // Previously std::stoll threw std::out_of_range and escaped the loader.
             serialization::json_archive_reader reader("99999999999999999999", eng.get());
             double v = reader.read_value().as<double>();
             check(v > 9.9e19 && v < 1.1e20, "out-of-range integer parses as double");
@@ -1141,15 +977,13 @@ public:
 
         test("json_reader_non_ascii_value_byte_no_ub", [this, parseOutcome]() {
             auto eng = engine::make();
-            // A non-ASCII byte where a value is expected previously reached
-            // std::isdigit(signed char) -> UB / debug-CRT abort. Must be a clean throw.
+            // std::isdigit(signed char) on a non-ASCII byte is UB / debug-CRT abort. Must be a clean throw.
             std::string bad = "\xC3\xA9";   // 'é' bytes, not a valid value start
             check_eq(parseOutcome(eng.get(), bad), 1, "non-ASCII value byte -> serialization_error, no UB");
         });
 
         test("json_reader_invalid_unicode_escape_is_serialization_error", [this, parseOutcome]() {
             auto eng = engine::make();
-            // Previously std::stoul on non-hex threw std::invalid_argument (outcome 2).
             check_eq(parseOutcome(eng.get(), "\"\\uZZZZ\""), 1, "non-hex \\u -> serialization_error");
             check_eq(parseOutcome(eng.get(), "\"\\uD8\""), 1, "truncated \\u -> serialization_error");
         });
@@ -1172,8 +1006,7 @@ public:
 
         test("json_string_escapes_and_utf8_roundtrip", [this]() {
             auto eng = engine::make();
-            // Exercises the bulk-copy parse_string rewrite + escape writer: quotes,
-            // backslash, control chars, and a multi-byte UTF-8 character.
+            // Covers string escapes (quotes, backslash, control chars) and multi-byte UTF-8 roundtrip.
             std::string original = "a\"b\\c\nd\te\xC3\xA9z";
             std::string json = to_json(*eng, original);
             std::string back = from_json<std::string>(*eng, json);
@@ -1182,22 +1015,14 @@ public:
 
         test("json_infinity_roundtrips", [this]() {
             auto eng = engine::make();
-            // Writer emits the 1e999 sentinel for infinity; the reader's from_chars now
-            // treats result_out_of_range as the (inf) value rather than throwing.
+            // Writer emits 1e999 as the infinity sentinel; reader treats from_chars result_out_of_range as inf.
             double inf = std::numeric_limits<double>::infinity();
             std::string json = to_json(*eng, inf);
             double back = from_json<double>(*eng, json);
             check(std::isinf(back) && back > 0, "+infinity round-trips via 1e999 sentinel");
         });
 
-        // ================================================================
-        // weak_ptr FORWARD REFERENCE (2026-05 audit, high-severity)
-        // ================================================================
-        // A std::weak_ptr serialized BEFORE the shared_ptr it points to used to write
-        // {"$ref": 0} (lookup_shared_id returned 0 for the not-yet-written object) and the
-        // link was silently dropped on load. Now the first (forward) reference inlines the
-        // object's data under a stable id, so it round-trips. Covers JSON and binary.
-
+        // weak_ptr serialized before its shared_ptr owner must round-trip (forward ref).
         test("weak_ptr_forward_reference_json", [this]() {
             auto eng = engine::make();
             auto shared = std::make_shared<sp_simple_data>();
@@ -1258,7 +1083,6 @@ public:
     }
 };
 
-// Register the test suite
 FOUNDRY_REGISTER(convenience_function_tests);
 
 } // namespace jai::foundry::tests

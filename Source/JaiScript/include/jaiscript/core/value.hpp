@@ -272,8 +272,6 @@ namespace jai {
         bool is_reference() const { return raw_storage_index() == TYPEID_REFERENCE; }  // Don't deref for this check!
         bool is_cpp_bound() const { return cpp_bound_ptr_ != nullptr; }
 
-        // Check if this is a non-owning C++ object reference
-        // Returns true when: cpp_bound_ptr_ is set AND object_holder has no owning data
         bool is_non_owning_object() const {
             if (!cpp_bound_ptr_) return false;
             auto idx = raw_storage_index();
@@ -282,12 +280,9 @@ namespace jai {
             return objHolder && !objHolder->data;
         }
 
-        // Get raw pointer to cpp_bound object (for non-owning method calls)
         // Returns nullptr if not cpp_bound. Caller is responsible for type safety.
         void* get_cpp_bound_ptr() const { return cpp_bound_ptr_; }
 
-        // Type-safe extraction of cpp_bound pointer
-        // Returns nullptr if not cpp_bound or type doesn't match
         template<typename T>
         T* get_cpp_bound_as() const {
             if (!cpp_bound_ptr_) return nullptr;

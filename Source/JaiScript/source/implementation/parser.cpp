@@ -1143,7 +1143,6 @@ checked_result<expression_ptr> parser::unary() {
                 "yield can only be used inside a coroutine function");
         }
         expression_ptr value = nullptr;
-        // yield can be followed by an expression, or stand alone
         if (!check(token_type::semicolon) && !check(token_type::right_paren) &&
             !check(token_type::right_brace) && !check(token_type::comma) &&
             !is_at_end()) {
@@ -1279,14 +1278,11 @@ checked_result<declaration_ptr> parser::declaration() {
         return decl;
     }
 
-    // Check for coroutine keyword before function declarations
     if (match(token_type::coroutine_keyword)) {
-        // coroutine must be followed by a function declaration
         bool was_in_coroutine = in_coroutine_;
         in_coroutine_ = true;
         JAISCRIPT_TRY_ASSIGN(auto result, function_declaration());
         in_coroutine_ = was_in_coroutine;
-        // Mark the function as a coroutine
         auto* func = static_cast<function_decl*>(result.get());
         func->is_coroutine = true;
         match(token_type::semicolon);
@@ -1315,13 +1311,11 @@ checked_result<declaration_ptr> parser::declaration() {
             auto loc = previous().location;
             auto decl = std::make_shared<destructuring_decl>(loc, nullptr);
 
-            // Parse variable names
             do {
                 JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected variable name in destructuring"));
                 auto [sym_id, sym_view] = symbolizer_->intern_with_view(name_tok.lexeme);
                 decl->names.push_back({sym_view, sym_id});
 
-                // Allocate slot if in function scope
                 if (in_function_scope()) {
                     decl->slot_indices.push_back(allocate_slot(sym_id));
                 } else {
@@ -1555,7 +1549,6 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
             parameter param(type, name, is_reference, is_const);
             param.symbol_id = symbolizer_->intern(name);
 
-            // Parse optional default value: = expression
             if (match(token_type::equal)) {
                 JAISCRIPT_TRY_ASSIGN(param.default_value, expression());
             }
@@ -1564,7 +1557,6 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
         } while (match(token_type::comma));
     }
 
-    // Validate: parameters with defaults must come after parameters without defaults
     bool seen_default = false;
     for (const auto& p : params) {
         if (p.default_value) {
@@ -1838,10 +1830,6 @@ checked_result<statement_ptr> parser::for_statement() {
 
                 // Allocate the loop variable's slot BEFORE parsing the body so
                 // that references to it inside the body resolve to this slot.
-                // (Previously the body was parsed first, leaving every use of
-                // the loop variable with slot_index == SIZE_MAX, which threw
-                // 'Undefined variable' at runtime for range-for inside any
-                // function/lambda.)
                 uint64_t var_id = get_symbol_id(varName);
                 size_t var_slot = SIZE_MAX;
                 if (in_function_scope() && var_id != UINT64_MAX) {

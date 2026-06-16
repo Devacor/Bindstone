@@ -417,6 +417,5 @@ public:
 
 } // namespace jai::foundry::tests
 
-// Auto-register with the test framework
 using review_regression_tests = jai::foundry::tests::review_regression_tests;
 FOUNDRY_REGISTER(review_regression_tests)

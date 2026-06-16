@@ -4,7 +4,7 @@
 #include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
-#include <jaiscript/serialization/serialization_metadata.hpp>  // For any_archive_reader
+#include <jaiscript/serialization/serialization_metadata.hpp>
 #include <jaiscript/core/dynamic_binder_serialization.hpp>  // Must be included after dynamic_binder and archive headers
 #include <memory>
 #include <string>
@@ -136,8 +136,6 @@ public:
         // The factory is invoked before begin_object, but seek_property requires being inside an object.
         // This advanced feature needs redesign to work with the CRTP archive changes.
         test("archive_only_factory", [this]() {
-            // Archive-based factory deserialization needs redesign for CRTP archives
-            // seek_property is called outside object context - need to fix the factory invocation timing
             return;
             auto eng = engine::make();
 
@@ -152,7 +150,6 @@ public:
                 .property("name", &property_preread_object::get_name, &property_preread_object::set_name)
                 .deserialization_factory([](serialization::any_archive_reader& archive) {
                     // Pre-read properties needed for construction
-                    // Use low-level archive methods - seek to property, then read value
                     std::string id;
                     int value = 0;
                     if (archive.seek_property("id")) {
@@ -195,8 +192,6 @@ public:
         });
 
         test("context_and_archive_factory", [this]() {
-            // Archive-based factory deserialization needs redesign for CRTP archives
-            // seek_property is called outside object context - need to fix the factory invocation timing
             return;
             auto eng = engine::make();
 

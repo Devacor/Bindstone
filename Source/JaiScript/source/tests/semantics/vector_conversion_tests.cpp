@@ -13,7 +13,6 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
-// Test classes for vector conversion scenarios
 class Point {
 public:
     double x, y;
@@ -36,7 +35,6 @@ public:
 
 class VectorProcessor {
 public:
-    // Test different vector parameter types
     static int sum_integers(std::vector<int> nums) {
         return std::accumulate(nums.begin(), nums.end(), 0);
     }
@@ -77,19 +75,16 @@ public:
         return total;
     }
     
-    // Test reference parameters with bound_array
     static void modify_vector(bound_array<int>& nums) {
         for (size_t i = 0; i < nums.size(); ++i) {
             nums[i] = nums[i] * 2;
         }
     }
     
-    // Test const reference parameters
     static size_t get_vector_size(std::vector<int> nums) {
         return nums.size();
     }
     
-    // Test nested vectors
     static std::vector<std::vector<int>> create_matrix(int rows, int cols) {
         std::vector<std::vector<int>> matrix(rows);
         for (int i = 0; i < rows; ++i) {
@@ -120,12 +115,10 @@ public:
         test("basic_vector_int_conversion", [this]() {
             auto engine = engine::make();
             
-            // Register vector processing functions
             engine->add_function("sum_integers", &VectorProcessor::sum_integers);
             engine->add_function("double_integers", &VectorProcessor::double_integers);
             engine->add_function("get_vector_size", &VectorProcessor::get_vector_size);
             
-            // Test basic vector<int> parameter
             try {
                 script_value result = engine->execute("sum_integers([1, 2, 3, 4, 5])");
                 check_eq(result.as<int>(), 15);
@@ -134,7 +127,6 @@ public:
                 std::cout << "    " << "✗ Basic vector<int> parameter failed: " << e.what() << std::endl;
             }
             
-            // Test vector<int> return value
             try {
                 script_value result = engine->execute("double_integers([1, 2, 3])");
                 auto vec = result.as<std::vector<script_value>>();
@@ -147,7 +139,6 @@ public:
                 std::cout << "    " << "✗ Vector<int> return value failed: " << e.what() << std::endl;
             }
             
-            // Test const reference parameter
             try {
                 script_value result = engine->execute("get_vector_size([10, 20, 30, 40])");
                 check_eq(result.as<int>(), 4);
@@ -162,7 +153,6 @@ public:
             
             engine->add_function("sum_doubles", &VectorProcessor::sum_doubles);
             
-            // Test vector<double> with integers (should convert)
             try {
                 script_value result = engine->execute("sum_doubles([1, 2, 3])");
                 check_eq(result.as<double>(), 6.0);
@@ -171,7 +161,6 @@ public:
                 std::cout << "    " << "✗ Vector<double> with integers failed: " << e.what() << std::endl;
             }
             
-            // Test vector<double> with floats
             try {
                 script_value result = engine->execute("sum_doubles([1.5, 2.5, 3.0])");
                 check_eq(result.as<double>(), 7.0);
@@ -180,7 +169,6 @@ public:
                 std::cout << "    " << "✗ Vector<double> with floats failed: " << e.what() << std::endl;
             }
             
-            // Test mixed numeric types
             try {
                 script_value result = engine->execute("sum_doubles([1, 2.5, 3])");
                 check_eq(result.as<double>(), 6.5);
@@ -195,7 +183,6 @@ public:
             
             engine->add_function("concatenate_strings", &VectorProcessor::concatenate_strings);
             
-            // Test vector<string> parameter
             try {
                 script_value result = engine->execute("concatenate_strings([\"Hello\", \" \", \"World\", \"!\"])");
                 check_eq(result.as<std::string>(), "Hello World!");
@@ -204,7 +191,6 @@ public:
                 std::cout << "    " << "✗ Vector<string> parameter failed: " << e.what() << std::endl;
             }
             
-            // Test empty vector
             try {
                 script_value result = engine->execute("concatenate_strings([])");
                 check_eq(result.as<std::string>(), "");
@@ -213,7 +199,6 @@ public:
                 std::cout << "    " << "✗ Empty vector<string> failed: " << e.what() << std::endl;
             }
             
-            // Test single element vector
             try {
                 script_value result = engine->execute("concatenate_strings([\"single\"])");
                 check_eq(result.as<std::string>(), "single");
@@ -226,7 +211,6 @@ public:
         test("vector_custom_object_conversion", [this]() {
             auto engine = engine::make();
             
-            // Register Point class
             dynamic_binder<Point>(*engine, "Point")
                 .constructor<>()
                 .constructor<double, double>()
@@ -235,11 +219,9 @@ public:
                 .property("y", &Point::y)
                 .build();
             
-            // Register functions that work with vectors of Points
             engine->add_function("create_points", &VectorProcessor::create_points);
             engine->add_function("sum_point_distances", &VectorProcessor::sum_point_distances);
             
-            // Test creating vector of custom objects
             try {
                 script_value result = engine->execute("create_points([0.0, 0.0, 3.0, 4.0, 1.0, 1.0])");
                 auto points = result.as<std::vector<script_value>>();
@@ -249,7 +231,6 @@ public:
                 std::cout << "    " << "✗ Vector of custom objects creation failed: " << e.what() << std::endl;
             }
             
-            // Test vector of custom objects as parameter
             try {
                 engine->execute(R"(
                     var points = create_points([0.0, 0.0, 3.0, 4.0]);
@@ -268,7 +249,6 @@ public:
             engine->add_function("create_matrix", &VectorProcessor::create_matrix);
             engine->add_function("sum_matrix", &VectorProcessor::sum_matrix);
             
-            // Test nested vector creation
             try {
                 script_value result = engine->execute("create_matrix(3, 3)");
                 auto matrix = result.as<std::vector<script_value>>();
@@ -285,7 +265,6 @@ public:
                 std::cout << "    " << "✗ Nested vector creation failed: " << e.what() << std::endl;
             }
             
-            // Test nested vector as parameter
             try {
                 engine->execute("var matrix = create_matrix(2, 2);");
                 script_value result = engine->execute("sum_matrix(matrix)");
@@ -295,7 +274,6 @@ public:
                 std::cout << "    " << "✗ Nested vector as parameter failed: " << e.what() << std::endl;
             }
             
-            // Test manual nested vector creation
             try {
                 script_value result = engine->execute("sum_matrix([[1, 2], [3, 4]])");
                 check_eq(result.as<int>(), 10);
@@ -311,7 +289,6 @@ public:
             engine->add_function("sum_integers", &VectorProcessor::sum_integers);
             engine->add_function("get_vector_size", &VectorProcessor::get_vector_size);
             
-            // Test empty vector
             try {
                 script_value result = engine->execute("sum_integers([])");
                 check_eq(result.as<int>(), 0);
@@ -320,7 +297,6 @@ public:
                 std::cout << "    " << "✗ Empty vector failed: " << e.what() << std::endl;
             }
             
-            // Test single element vector
             try {
                 script_value result = engine->execute("sum_integers([42])");
                 check_eq(result.as<int>(), 42);
@@ -329,7 +305,6 @@ public:
                 std::cout << "    " << "✗ Single element vector failed: " << e.what() << std::endl;
             }
             
-            // Test large vector
             try {
                 script_value result = engine->execute(R"(
                     var large_array = [];
@@ -348,12 +323,10 @@ public:
         test("vector_type_coercion", [this]() {
             auto engine = engine::make();
             
-            // Test functions that expect specific types
             engine->add_function("sum_integers", &VectorProcessor::sum_integers);
             engine->add_function("sum_doubles", &VectorProcessor::sum_doubles);
             engine->add_function("concatenate_strings", &VectorProcessor::concatenate_strings);
             
-            // Test mixed types in vector for integer function
             try {
                 script_value result = engine->execute("sum_integers([1, 2.5, 3])");
                 // This should either work with type coercion or fail gracefully
@@ -362,7 +335,6 @@ public:
                 std::cout << "    " << "Mixed types in integer vector failed (expected): " << e.what() << std::endl;
             }
             
-            // Test non-numeric types in numeric function
             try {
                 script_value result = engine->execute("sum_integers([1, \"hello\", 3])");
                 check(false); // "Should have failed with non-numeric type");
@@ -370,7 +342,6 @@ public:
                 std::cout << "    " << "Non-numeric types in numeric vector failed as expected: " << e.what() << std::endl;
             }
             
-            // Test numeric types in string function
             try {
                 script_value result = engine->execute("concatenate_strings([\"a\", 123, \"b\"])");
                 // This should either work with type coercion or fail
@@ -383,7 +354,6 @@ public:
         test("vector_script_value_compatibility", [this]() {
             auto engine = engine::make();
             
-            // Test function that takes vector<script_value> explicitly
             engine->add_function("process_mixed_vector", [](std::vector<script_value> values) -> int {
                 int count = 0;
                 for (const auto& val : values) {
@@ -392,7 +362,6 @@ public:
                 return count;
             });
             
-            // Test with mixed types
             try {
                 script_value result = engine->execute("process_mixed_vector([1, \"hello\", 3.14, true, 42])");
                 check_eq(result.as<int>(), 2); // Two integers: 1 and 42
@@ -401,7 +370,6 @@ public:
                 std::cout << "    " << "✗ Vector<script_value> with mixed types failed: " << e.what() << std::endl;
             }
             
-            // Test function that returns vector<script_value>
             engine->add_function("create_mixed_vector", [engine]() -> std::vector<script_value> {
                 std::vector<script_value> result;
                 // TODO: These should use engine references when lambda captures are available
@@ -430,6 +398,5 @@ public:
 
 } // namespace jai::foundry::tests
 
-// Auto-register with the test framework
 using vector_conversion_tests = jai::foundry::tests::vector_conversion_tests;
 FOUNDRY_REGISTER(vector_conversion_tests)

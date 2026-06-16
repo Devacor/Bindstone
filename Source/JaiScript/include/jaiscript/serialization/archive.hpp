@@ -4,10 +4,6 @@
 #define JAISCRIPT_SERIALIZATION_ARCHIVE_HPP
 #define JAISCRIPT_ARCHIVE_HPP_INCLUDED
 
-// Lightweight archive header for consumer code.
-// Provides concepts, nvp helpers, access class, and forward declarations.
-// For full CRTP archive implementations, include <jaiscript/serialization/archive_impl.hpp>.
-
 #include <concepts>
 #include <type_traits>
 #include <string>
@@ -22,7 +18,6 @@ class runtime_error;
 
 namespace serialization {
 
-// Base tag type for all JaiScript archives (used for concept detection)
 struct archive_base {
     static constexpr bool is_jai_archive = true;
 };
@@ -30,9 +25,6 @@ struct archive_base {
 // The serialization access class is jai::access (traits.hpp, included above).
 // Private serialize/save/load support needs exactly one declaration: `friend jai::access;`
 
-// ============================================================================
-// Name-value pair for serialization
-// ============================================================================
 template<typename T>
 struct nvp {
     const char* name;
@@ -52,9 +44,6 @@ nvp<const T> make_nvp(const char* name, const T& value) {
 
 #define JAI_NVP(x) ::jai::serialization::make_nvp(#x, x)
 
-// ============================================================================
-// Archive type detection concepts
-// ============================================================================
 template<typename T>
 concept jai_archive = requires { { T::is_jai_archive } -> std::convertible_to<bool>; } && T::is_jai_archive;
 
@@ -72,7 +61,6 @@ inline constexpr bool is_load = std::is_base_of_v<archive_base, std::decay_t<T>>
 #define JAI_ONLY_ARCHIVE std::enable_if_t<::jai::serialization::jai_archive<Archive>, int> = 0
 #define JAI_TEMPLATE template <class Archive, JAI_ONLY_ARCHIVE>
 
-// Forward declarations of concrete archive types
 class json_archive_writer;
 class json_archive_reader;
 class binary_archive_writer;

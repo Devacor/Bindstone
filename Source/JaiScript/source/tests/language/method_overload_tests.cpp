@@ -1,5 +1,5 @@
 // Tests for script-method overloading by arity and parameter type (mirrors the resolution
-// JaiScript already does for constructors). Written tests-first.
+// JaiScript already does for constructors).
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -15,7 +15,6 @@ public:
 
     void forge_tests() override {
 
-        // Two methods, same name, different arity — each call selects by argument count.
         test("overload_by_arity", [&]() {
             auto eng = engine::make();
             eng->execute(R"(
@@ -29,7 +28,6 @@ public:
             check_eq(eng->execute("c.add(5, 7)").as<int>(), 12);
         });
 
-        // Same name, same arity, different parameter TYPE — select by argument type.
         test("overload_by_type", [&]() {
             auto eng = engine::make();
             eng->execute(R"(

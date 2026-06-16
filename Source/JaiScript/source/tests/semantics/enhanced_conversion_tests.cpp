@@ -158,7 +158,6 @@ public:
             // Register standard conversions first
             engine->add_standard_conversions();
             
-            // Use dynamic_binder to register Point and all its conversions
             dynamic_binder<Point>(*engine, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)

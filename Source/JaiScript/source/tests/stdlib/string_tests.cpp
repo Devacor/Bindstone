@@ -466,10 +466,6 @@ public:
             check_eq(result.as<std::string>(), "bbb");
         });
 
-        // ============================================================
-        // Template strings (backtick syntax)
-        // ============================================================
-
         test("template_string_basic", [this]() {
             auto engine = engine::make();
             stdlib::register_all(*engine);

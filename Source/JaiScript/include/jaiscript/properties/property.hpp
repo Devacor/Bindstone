@@ -29,11 +29,7 @@ namespace jai {
 
 namespace jai {
 
-	// ============================================================================
-	// Serialization mode for properties
-	// ============================================================================
 	// Similar to Unreal Engine's "transient" property specifier.
-	// Controls whether a property is serialized or skipped.
 	enum class serialize_mode {
 		automatic,  // Default: property will be serialized (may hit static_assert if type not serializable)
 		transient   // Never serialize this property - skip silently
@@ -71,23 +67,18 @@ namespace jai {
 
 		const std::string& name() const { return m_property_name; }
 
-		// Serialization mode accessors
-		// serialize_mode controls compile-time behavior (transient = never serialize)
 		serialize_mode serialization() const { return m_serialize_mode; }
 		void serialization(serialize_mode mode) const { m_serialize_mode = mode; }
 
-		// Dynamic serialization toggle (runtime control)
 		// Only effective when serialize_mode is automatic
 		bool serialize_enabled() const { return m_allow_serialization; }
 		void serialize_enabled(bool allow_serialization) const {
 			m_allow_serialization = allow_serialization;
 		}
 
-		// Convenience method: mark this property as transient (won't serialize at compile-time)
 		serialize_mode get_serialize_mode() const { return m_serialize_mode; }
 		void set_serialize_mode(serialize_mode mode) const { m_serialize_mode = mode; }
 
-		// Convenience shorthands
 		void set_transient() const { m_serialize_mode = serialize_mode::transient; }
 		void clear_transient() const { m_serialize_mode = serialize_mode::automatic; }
 
@@ -98,9 +89,6 @@ namespace jai {
 			return m_serialize_mode != serialize_mode::transient && m_allow_serialization;
 		}
 
-		// Type-erased serialization interface (overloaded by archive type)
-		// Properties are "binding glue" - they just provide (name, value) to the archive
-		// Archive handles all serialization dispatch via any_archive_writer/reader
 		virtual void serialize(serialization::any_archive_writer& ar) const = 0;
 		virtual void serialize(serialization::any_archive_reader& ar) = 0;
 
@@ -196,7 +184,6 @@ namespace jai {
 			m_serialize_mode = mode;
 		}
 
-		// Convenience shorthands (delegate to base class set_serialize_mode)
 		const property& set_transient() const {
 			m_serialize_mode = serialize_mode::transient;
 			return *this;

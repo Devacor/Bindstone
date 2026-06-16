@@ -9,7 +9,6 @@
 namespace jai {
 namespace serialization {
 
-// Binary archive writer - produces portable binary format (CRTP, no virtual dispatch)
 class binary_archive_writer : public archive_writer_impl<binary_archive_writer> {
 public:
     binary_archive_writer() : archive_writer_impl<binary_archive_writer>() {}
@@ -21,7 +20,6 @@ public:
         buffer_->clear();
     }
 
-    // Binary format properties (compile-time constants, no virtual dispatch)
     static constexpr bool needs_property_keys = true;
     static constexpr bool is_text_format = false;
 
@@ -29,7 +27,6 @@ public:
     const std::vector<uint8_t>& data() const { return owned_buffer_.empty() ? *buffer_ : owned_buffer_; }
     std::vector<uint8_t>& data() { return owned_buffer_.empty() ? *buffer_ : owned_buffer_; }
 
-    // Basic type serialization (little-endian for portability) - non-virtual
     void write_int8(int8_t value) {
         write_raw(&value, sizeof(value));
     }
@@ -98,9 +95,8 @@ public:
         }
     }
     
-    // Object/array structure - non-virtual
     // Buffered mode: collect properties during begin_object..end_object, then flush with sizes
-    // No-argument version for inline objects (no type metadata)
+    // Buffered mode: collect properties during begin_object..end_object, then flush with sizes
     void begin_object() {
         write_uint8(0x01); // Object marker
         write_string("");  // Empty type name
@@ -114,7 +110,6 @@ public:
         write_uint32(version);
         set_version(version);
 
-        // Start buffering properties for this object
         object_write_stack_.emplace_back();
     }
 
@@ -124,20 +119,16 @@ public:
             auto state = std::move(object_write_stack_.back());
             object_write_stack_.pop_back();
 
-            // Write property count
             write_uint32(static_cast<uint32_t>(state.properties.size()));
 
-            // Write all property names first
             for (const auto& prop : state.properties) {
                 write_string(prop.name);
             }
 
-            // Write all property sizes
             for (const auto& prop : state.properties) {
                 write_uint32(static_cast<uint32_t>(prop.data.size()));
             }
 
-            // Write all property values (raw bytes)
             for (const auto& prop : state.properties) {
                 if (!prop.data.empty()) {
                     write_raw(prop.data.data(), prop.data.size());
@@ -148,14 +139,11 @@ public:
         write_uint8(0x02); // End object marker
     }
 
-    // Write property name - buffers instead of writing directly
     void write_property_name(const std::string& name) {
         if (!object_write_stack_.empty()) {
-            // Start a new property in the buffer
             object_write_stack_.back().properties.push_back({name, {}});
             object_write_stack_.back().current_property_buffer = &object_write_stack_.back().properties.back().data;
         } else {
-            // Not in buffered mode, write directly
             write_string(name);
         }
     }
@@ -361,7 +349,6 @@ private:
     std::vector<uint8_t>* buffer_ = nullptr;
     std::vector<uint8_t> owned_buffer_;
 
-    // Buffered property write state
     struct buffered_property { std::string name; std::vector<uint8_t> data; };
     struct object_write_state {
         std::vector<buffered_property> properties;
@@ -375,7 +362,6 @@ private:
     }
 
     void write_raw(const void* data, size_t size) {
-        // If buffering a property, write to property buffer instead
         if (!object_write_stack_.empty() && object_write_stack_.back().current_property_buffer) {
             auto* prop_buf = object_write_stack_.back().current_property_buffer;
             const uint8_t* bytes = static_cast<const uint8_t*>(data);
@@ -400,7 +386,6 @@ private:
     }
 };
 
-// Binary archive reader (CRTP, no virtual dispatch)
 class binary_archive_reader : public archive_reader_impl<binary_archive_reader> {
 public:
     // Engine is REQUIRED for binary reading since we need to create script_values
@@ -435,7 +420,6 @@ private:
     uint32_t seek_size_ = 0;    // Size of value to read (for validation)
 
 public:
-    // Binary format properties (compile-time constants, no virtual dispatch)
     static constexpr bool needs_property_keys = true;
     static constexpr bool is_text_format = false;
 
@@ -584,8 +568,7 @@ public:
         return result;
     }
 
-    // Object/array structure - reads new format: count, names[], sizes[], values[]
-    // No-argument version for inline objects (discard type metadata)
+    // Wire format must agree with the writer's end_object: count, names[], sizes[], values[]
     bool begin_object() {
         std::string type_name;
         uint32_t version = 0;
@@ -604,7 +587,6 @@ public:
         version = read_little_endian<uint32_t>();
         version_ = version;
 
-        // Read property count
         uint32_t prop_count = read_little_endian<uint32_t>();
         // Each property contributes at minimum a 4-byte name-length prefix and a 4-byte
         // size entry, so a valid prop_count can't exceed remaining/8. Reject a corrupt or
@@ -617,21 +599,17 @@ public:
         object_stack_.emplace_back();
         auto& state = object_stack_.back();
 
-        // Read all property names
         state.property_order.reserve(prop_count);
         for (uint32_t i = 0; i < prop_count; ++i) {
             state.property_order.push_back(read_string_raw());
         }
 
-        // Read all property sizes
         std::vector<uint32_t> sizes;
         sizes.reserve(prop_count);
         for (uint32_t i = 0; i < prop_count; ++i) {
             sizes.push_back(read_little_endian<uint32_t>());
         }
 
-        // Record base position for values, calculate offsets
-        // Store in both vector (O(1) index) and map (O(log n) name lookup)
         size_t values_base = pos_;
         size_t offset = 0;
         state.property_locations.reserve(prop_count);
@@ -641,7 +619,6 @@ public:
             offset += sizes[i];
         }
 
-        // Skip past all values to find end_object marker position
         state.end_object_pos = values_base + offset;
         return true;
     }
@@ -721,20 +698,17 @@ public:
     bool in_array() const { return false; }
 
     bool has_property(const std::string& name) {
-        // Check in pre-read property name index
         if (!object_stack_.empty()) {
             return object_stack_.back().property_name_to_index.find(name) != object_stack_.back().property_name_to_index.end();
         }
         return false;
     }
 
-    // Pre-read property access - returns count from current object context
     size_t get_object_property_count() const {
         if (object_stack_.empty()) return 0;
         return object_stack_.back().property_order.size();
     }
 
-    // Pre-read property access - returns names from current object context
     const std::vector<std::string>& get_object_property_names() const {
         if (object_stack_.empty()) {
             static const std::vector<std::string> empty;
@@ -743,9 +717,6 @@ public:
         return object_stack_.back().property_order;
     }
 
-    // Efficient property access by index - O(1) direct vector access
-    // Returns true if successful, false if index out of range
-    // This is the fast path when iterating through properties in order
     bool seek_property_by_index(size_t index) {
         current_property_value_ = nullptr;
         seek_size_ = 0;
@@ -762,8 +733,6 @@ public:
         return true;
     }
 
-    // Efficient property access by index with name validation
-    // Returns true if successful and name matches, false otherwise
     bool seek_property_by_index(size_t index, const std::string& expected_name) {
         current_property_value_ = nullptr;
         seek_size_ = 0;
@@ -773,7 +742,6 @@ public:
 
         if (index >= state.property_locations.size()) return false;
 
-        // Validate the name matches what we expect
         if (state.property_order[index] != expected_name) return false;
 
         const auto& loc = state.property_locations[index];
@@ -783,25 +751,19 @@ public:
         return true;
     }
 
-    // Seek to a specific property by name using offset-based seeking
-    // Fast path: if properties are in saved order, sequential access works
-    // Slow path: fall back to map lookup for out-of-order access or versioning
     bool seek_property(const std::string& name) {
         current_property_value_ = nullptr;
         seek_size_ = 0;
 
         if (object_stack_.empty()) {
-            // Not in object context - binary format requires begin_object first
             throw serialization_error("Binary seek_property called outside object context for '" + name + "'");
         }
 
         auto& state = object_stack_.back();
 
-        // Fast path: check if next sequential property matches
         if (state.next_sequential_index < state.property_order.size()) {
             const std::string& next_prop = state.property_order[state.next_sequential_index];
             if (next_prop == name) {
-                // Sequential match - use O(1) index access
                 const auto& loc = state.property_locations[state.next_sequential_index];
                 pos_ = loc.offset;
                 seek_size_ = loc.size;
@@ -810,14 +772,12 @@ public:
             }
         }
 
-        // Slow path: lookup by name in map (handles out-of-order access and versioning)
         auto it = state.property_name_to_index.find(name);
         if (it == state.property_name_to_index.end()) {
             // Property not found - this is OK for versioning (new property in newer code)
             return false;
         }
 
-        // Seek to the property's offset using O(1) index access
         const auto& loc = state.property_locations[it->second];
         pos_ = loc.offset;
         seek_size_ = loc.size;
@@ -825,14 +785,12 @@ public:
     }
 
     script_value read_value() {
-        // If we have a pre-read property value, return it directly
         if (current_property_value_) {
             auto val = *current_property_value_;
             current_property_value_ = nullptr;
             return val;
         }
 
-        // Otherwise read from stream using internal method
         return read_value_internal();
     }
 
@@ -885,8 +843,6 @@ private:
         return result;
     }
 
-    // Internal read_value that always reads from stream (used during pre-read phase)
-    // This is the same logic as read_value() but doesn't check current_property_value_
     script_value read_value_internal() {
         // Track depth - throws on overflow (hard failure, no partial data)
         depth_guard guard(current_depth_);
@@ -1083,7 +1039,6 @@ private:
     }
 };
 
-// Archive ID trait specializations for dispatch pattern
 template<> struct writer_archive_id_trait<binary_archive_writer> {
     static constexpr writer_archive_id value = writer_archive_id::binary;
 };

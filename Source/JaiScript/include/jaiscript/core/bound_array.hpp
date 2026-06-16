@@ -31,8 +31,8 @@ class bound_array {
 private:
     // Either owns the data (for by-value) or references it (for by-reference)
     mutable std::shared_ptr<script_value> owned_value_;
-    script_array* arr_ = nullptr;  // script_array is std::vector<script_value>
-    engine* engine_ref_ = nullptr;  // Engine reference for creating script_values
+    script_array* arr_ = nullptr;
+    engine* engine_ref_ = nullptr;
 
     // Helper to get engine reference
     engine* get_engine() const {

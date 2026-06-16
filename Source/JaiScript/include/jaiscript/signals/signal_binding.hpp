@@ -3,12 +3,6 @@
 #ifndef JAISCRIPT_SIGNALS_SIGNAL_BINDING_HPP
 #define JAISCRIPT_SIGNALS_SIGNAL_BINDING_HPP
 
-// Script-side surface for signal members. Expose a member on its owner with a
-// read-only property getter, register the signature once, and scripts can write:
-//
-//   creature.onDeath.connect("MyHandler", [=](var& who) -> void { ... });
-//   creature.onDeath.disconnect("MyHandler");
-//
 // Heavy on purpose (dynamic_binder + engine) — include from registrar .cpp files only.
 
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -17,8 +11,6 @@
 
 namespace jai {
 
-	// Registers the script surface of one signal SIGNATURE (idempotent per engine):
-	// connect by name with a script function or source string, disconnect, connected.
 	// Named connections are owned by the signal, so they persist for its lifetime.
 	// Registers both jai::signal<Sig> (a_name) and jai::signal_emitter<Sig>
 	// (a_name + "Emitter") — members are exposed as either.

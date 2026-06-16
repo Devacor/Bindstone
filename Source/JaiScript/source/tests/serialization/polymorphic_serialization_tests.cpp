@@ -723,10 +723,6 @@ public:
     }
 };
 
-// ============================================================================
-// Implicit polymorphic registration (property_owner) + loud unregistered failure
-// ============================================================================
-
 // No registrar anywhere: identity comes implicitly from property_owner.
 class ImplicitRegBase : public jai::property_owner<ImplicitRegBase> {
 public:

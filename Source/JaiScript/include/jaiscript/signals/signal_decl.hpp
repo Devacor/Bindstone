@@ -16,19 +16,11 @@
 #include <mutex>
 #endif
 
-// No forward declarations needed - serialization functions are fully templated
-
 namespace jai {
 
-// ============================================================================
-// Thread Safety Support
-// ============================================================================
-// Thread safety is ENABLED by default. All connect/disconnect/emit operations
-// are protected by a recursive_mutex to allow callbacks to modify the signal.
-//
-// Define JAI_SIGNALS_NO_THREADSAFE to disable mutex protection (for single-threaded
-// scenarios where you want maximum performance).
-
+// Thread safety is ENABLED by default: connect/disconnect/emit are guarded by a
+// recursive_mutex so callbacks may modify the signal while it fires. Define
+// JAI_SIGNALS_NO_THREADSAFE to drop the lock (single-threaded, max performance).
 #ifndef JAI_SIGNALS_NO_THREADSAFE
 #define JAI_SIGNAL_LOCK() std::lock_guard<std::recursive_mutex> _signal_lock(mutex_)
 #else
@@ -40,21 +32,6 @@ class engine;
 class script_value;
 template<typename T> class signal_emitter;
 
-// ============================================================================
-// receiver<T> - Holds a callback (C++ function or script string)
-// ============================================================================
-//
-// A receiver wraps either a C++ callback or a script string that gets
-// evaluated when the signal fires. Receivers can be blocked/unblocked
-// and support both notify (void return) and predicate (bool return) modes.
-//
-// Usage:
-//   auto recv = jai::receiver<void(int)>::make([](int x) { std::cout << x; });
-//   recv->notify(42);
-//
-//   auto script_recv = jai::receiver<void(int)>::make("print(x)", &engine, {"x"});
-//   script_recv->notify(42);
-
 template<typename T>
 class receiver {
 public:
@@ -62,7 +39,6 @@ public:
 	using shared_type = std::shared_ptr<receiver<T>>;
 	using weak_type = std::weak_ptr<receiver<T>>;
 
-	// Factory methods
 	static std::shared_ptr<receiver<T>> make(std::function<T> callback) {
 		return std::shared_ptr<receiver<T>>(new receiver<T>(std::move(callback), ++unique_id_));
 	}
@@ -75,7 +51,6 @@ public:
 		return std::shared_ptr<receiver<T>>(new receiver<T>(script, eng, parameter_names, ++unique_id_));
 	}
 
-	// Notify with arguments (void return)
 	template<typename... Args>
 	void notify(Args&&... args) {
 		if (!blocked() && !invalid()) {
@@ -87,7 +62,6 @@ public:
 		}
 	}
 
-	// Predicate with arguments (bool return)
 	template<typename... Args>
 	bool predicate(Args&&... args) {
 		if (!blocked() && !invalid()) {
@@ -100,7 +74,6 @@ public:
 		return true;  // Default: continue propagation
 	}
 
-	// Notify without arguments
 	void notify() {
 		if (!blocked() && !invalid()) {
 			if (script_callback_.empty()) {
@@ -111,7 +84,6 @@ public:
 		}
 	}
 
-	// Predicate without arguments
 	bool predicate() {
 		if (!blocked() && !invalid()) {
 			if (script_callback_.empty()) {
@@ -123,7 +95,6 @@ public:
 		return true;  // Default: continue propagation
 	}
 
-	// Function call operator (alias for notify)
 	template<typename... Args>
 	void operator()(Args&&... args) {
 		notify(std::forward<Args>(args)...);
@@ -133,17 +104,14 @@ public:
 		notify();
 	}
 
-	// Check if receiver is invalid (no callback set)
 	bool invalid() const {
 		return script_callback_.empty() && !callback_;
 	}
 
-	// Check if receiver is still connected to a signal
 	bool connected() const {
 		return !owner_signal_.expired();
 	}
 
-	// Block/unblock the receiver
 	void block() { ++is_blocked_; }
 
 	void unblock() {
@@ -155,16 +123,13 @@ public:
 
 	bool blocked() const { return is_blocked_ != 0; }
 
-	// One-shot flag
 	bool is_oneshot() const { return oneshot_; }
 
-	// Comparison operators for sorting/removal
 	bool operator<(const receiver<T>& rhs) const { return id_ < rhs.id_; }
 	bool operator>(const receiver<T>& rhs) const { return id_ > rhs.id_; }
 	bool operator==(const receiver<T>& rhs) const { return id_ == rhs.id_; }
 	bool operator!=(const receiver<T>& rhs) const { return id_ != rhs.id_; }
 
-	// Script accessors
 	const std::string& script() const { return script_callback_; }
 	bool has_script() const { return !script_callback_.empty(); }
 
@@ -178,15 +143,12 @@ public:
 	int64_t id() const { return id_; }
 
 private:
-	// Default constructor for serialization
 	receiver() : id_(0) {}
 
-	// C++ callback constructor
 	receiver(std::function<T> callback, int64_t id)
 		: callback_(std::move(callback))
 		, id_(id) {}
 
-	// Script callback constructor
 	receiver(
 		const std::string& script,
 		engine* eng,
@@ -198,7 +160,7 @@ private:
 		, script_engine_(eng)
 		, ordered_parameter_names_(parameter_names) {}
 
-	// Script execution - implemented in signal_impl.hpp (needs engine definition)
+	// Implemented in signal_impl.hpp (needs the full engine definition).
 	template<typename... Args>
 	void call_script(Args&&... args);
 
@@ -219,36 +181,12 @@ private:
 	int64_t id_;
 	static std::atomic<int64_t> unique_id_;
 
-	// Allow signal_emitter to access private members
 	template<typename U> friend class signal_emitter;
 };
 
 template<typename T>
 std::atomic<int64_t> receiver<T>::unique_id_ = 0;
 
-
-// ============================================================================
-// signal_emitter<T> - Multi-receiver signal dispatcher (private/internal use)
-// ============================================================================
-//
-// The signal_emitter owns the observer list and can emit signals.
-// Typically used as a private member, with a public `signal<T>` wrapper.
-//
-// Features:
-//   - Insertion-order iteration (vector-based)
-//   - One-shot connections (auto-disconnect after first fire)
-//   - Short-circuit emission (stop on predicate false)
-//   - Weak reference observers (auto-cleanup when receiver dies)
-//
-// Usage:
-//   class Button {
-//   private:
-//       jai::signal_emitter<void(int, int)> on_click_;
-//   public:
-//       jai::signal<void(int, int)> on_click{on_click_};
-//
-//       void click(int x, int y) { on_click_(x, y); }
-//   };
 
 template<typename T>
 class signal_emitter {
@@ -261,15 +199,12 @@ public:
 	signal_emitter() : prevent_shared_ownership_(std::make_shared<char>()) {}
 	~signal_emitter() = default;
 
-	// Non-copyable (prevent accidental copies of signal state)
 	signal_emitter(const signal_emitter&) = delete;
 	signal_emitter& operator=(const signal_emitter&) = delete;
 
-	// Moveable
 	signal_emitter(signal_emitter&&) = default;
 	signal_emitter& operator=(signal_emitter&&) = default;
 
-	// Connect a C++ callback (appends to end - last to be called)
 	[[nodiscard]]
 	shared_receiver_type connect(std::function<T> callback) {
 		JAI_SIGNAL_LOCK();
@@ -279,7 +214,6 @@ public:
 		return recv;
 	}
 
-	// Connect a script callback
 	[[nodiscard]]
 	shared_receiver_type connect(const std::string& script_callback) {
 		JAI_SIGNAL_LOCK();
@@ -289,7 +223,6 @@ public:
 		return recv;
 	}
 
-	// Connect one-shot (auto-disconnects after first fire)
 	[[nodiscard]]
 	shared_receiver_type connect_oneshot(std::function<T> callback) {
 		JAI_SIGNAL_LOCK();
@@ -300,7 +233,6 @@ public:
 		return recv;
 	}
 
-	// Connect one-shot script callback
 	[[nodiscard]]
 	shared_receiver_type connect_oneshot(const std::string& script_callback) {
 		JAI_SIGNAL_LOCK();
@@ -311,7 +243,6 @@ public:
 		return recv;
 	}
 
-	// Connect an existing receiver
 	bool connect(shared_receiver_type recv) {
 		JAI_SIGNAL_LOCK();
 		if (recv) {
@@ -322,7 +253,6 @@ public:
 		return false;
 	}
 
-	// Connect with named ID (owned connection - persists for signal lifetime)
 	shared_receiver_type connect(const std::string& id, std::function<T> callback) {
 		JAI_SIGNAL_LOCK();
 		auto recv = connect(std::move(callback));
@@ -342,20 +272,17 @@ public:
 	// source-string receivers. Defined in signal_impl.hpp (needs the full engine).
 	shared_receiver_type connect(const std::string& id, const script_value& fn_callback);
 
-	// Get owned connection by ID
 	shared_receiver_type connection(const std::string& id) {
 		JAI_SIGNAL_LOCK();
 		auto it = owned_connections_.find(id);
 		return it != owned_connections_.end() ? it->second : shared_receiver_type();
 	}
 
-	// Check if owned connection exists
 	bool connected(const std::string& id) const {
 		JAI_SIGNAL_LOCK();
 		return owned_connections_.find(id) != owned_connections_.end();
 	}
 
-	// Number of live observers
 	size_t observer_count() const {
 		JAI_SIGNAL_LOCK();
 		size_t count = 0;
@@ -365,7 +292,6 @@ public:
 		return count;
 	}
 
-	// Disconnect a receiver
 	void disconnect(shared_receiver_type recv) {
 		JAI_SIGNAL_LOCK();
 		if (recv) {
@@ -378,7 +304,6 @@ public:
 		}
 	}
 
-	// Disconnect by ID
 	void disconnect(const std::string& id) {
 		JAI_SIGNAL_LOCK();
 		auto it = owned_connections_.find(id);
@@ -388,7 +313,6 @@ public:
 		}
 	}
 
-	// Clear all observers
 	void clear() {
 		JAI_SIGNAL_LOCK();
 		for (auto& weak_obs : observers_) {
@@ -409,7 +333,6 @@ public:
 		}
 	}
 
-	// Block/unblock the signal
 	void block() {
 		if (is_blocked_++ == 0) {
 			called_while_blocked_ = false;
@@ -428,25 +351,20 @@ public:
 
 	bool blocked() const { return is_blocked_ != 0; }
 
-	// Emit signal with arguments
 	template<typename... Args>
 	void operator()(Args&&... args) {
 		emit_impl<false>(std::forward<Args>(args)...);
 	}
 
-	// Emit signal without arguments
 	void operator()() {
 		emit_impl_noargs<false>();
 	}
 
-	// Emit method (alias for operator())
 	template<typename... Args>
 	void emit(Args&&... args) {
 		emit_impl<false>(std::forward<Args>(args)...);
 	}
 
-	// Emit with short-circuit: stops if any receiver returns false
-	// Only available for signals where receivers return bool
 	template<typename... Args>
 	bool emit_while(Args&&... args)
 		requires std::is_same_v<typename std::function<T>::result_type, bool>
@@ -460,13 +378,11 @@ public:
 		return emit_impl_noargs<true>();
 	}
 
-	// Remove dead observers and return remaining count
 	size_t cull_dead_observers() {
 		JAI_SIGNAL_LOCK();
 		return cull_dead_observers_unlocked();
 	}
 
-	// Script engine configuration
 	signal_emitter& script_engine(engine* eng) {
 		script_engine_ = eng;
 		for (auto& weak_obs : observers_) {
@@ -479,7 +395,6 @@ public:
 
 	engine* script_engine() const { return script_engine_; }
 
-	// Parameter names for script receivers
 	signal_emitter& parameter_names(const std::vector<std::string>& names) {
 		ordered_parameter_names_ = names.empty()
 			? nullptr
@@ -495,13 +410,12 @@ public:
 		return ordered_parameter_names_ && !ordered_parameter_names_->empty();
 	}
 
-	// Set callback to invoke when signal is blocked
 	void set_blocked_callback(std::function<T> callback) {
 		blocked_callback_ = std::move(callback);
 	}
 
 private:
-	// Internal disconnect without acquiring lock (caller must hold lock)
+	// Caller must hold the lock.
 	void disconnect_unlocked(shared_receiver_type recv) {
 		if (recv) {
 			recv->owner_signal_.reset();
@@ -513,7 +427,7 @@ private:
 		}
 	}
 
-	// Internal cull without acquiring lock (caller must hold lock)
+	// Caller must hold the lock.
 	size_t cull_dead_observers_unlocked() {
 		observers_.erase(
 			std::remove_if(observers_.begin(), observers_.end(),
@@ -563,7 +477,6 @@ private:
 		emit_scope& operator=(const emit_scope&) = delete;
 	};
 
-	// Emit implementation with optional short-circuit
 	template<bool ShortCircuit, typename... Args>
 	bool emit_impl(Args&&... args) {
 		JAI_SIGNAL_LOCK();
@@ -606,7 +519,6 @@ private:
 		return result;
 	}
 
-	// Emit implementation without arguments
 	template<bool ShortCircuit>
 	bool emit_impl_noargs() {
 		JAI_SIGNAL_LOCK();
@@ -657,7 +569,7 @@ private:
 		);
 	}
 
-	// Vector for insertion-order iteration
+	// Vector, not set: receivers fire in insertion order.
 	std::vector<weak_receiver_type> observers_;
 	std::map<std::string, shared_receiver_type> owned_connections_;
 
@@ -687,35 +599,14 @@ private:
 	mutable std::recursive_mutex mutex_;
 #endif
 
-	// Allow signal<T> to access internals
 	template<typename U> friend class signal;
 
-	// Allow serialization functions to access internals (templated on Archive type)
 	template<typename Archive, typename U>
 	friend void save_signal_emitter(Archive& ar, const signal_emitter<U>& sig);
 	template<typename Archive, typename U>
 	friend void load_signal_emitter(Archive& ar, signal_emitter<U>& sig);
 };
 
-
-// ============================================================================
-// signal<T> - Public connection interface (connect-only, cannot emit)
-// ============================================================================
-//
-// A signal wraps a signal_emitter and provides a connect-only interface.
-// Use this as a public member to expose signal connection to external code
-// while keeping emission private.
-//
-// Usage:
-//   class Button {
-//   private:
-//       jai::signal_emitter<void(int, int)> on_click_;
-//   public:
-//       jai::signal<void(int, int)> on_click{on_click_};
-//   };
-//
-//   Button btn;
-//   btn.on_click.connect([](int x, int y) { ... });
 
 template<typename T>
 class signal {
@@ -725,47 +616,38 @@ public:
 	using shared_receiver_type = std::shared_ptr<receiver<T>>;
 	using weak_receiver_type = std::weak_ptr<receiver<T>>;
 
-	// Construct from signal_emitter reference
 	explicit signal(signal_emitter<T>& emitter) : emitter_(emitter) {}
 
-	// Copy constructor (copies the reference)
 	signal(const signal& other) : emitter_(other.emitter_) {}
 
-	// Connect a C++ callback
 	[[nodiscard]]
 	shared_receiver_type connect(std::function<T> callback) {
 		return emitter_.connect(std::move(callback));
 	}
 
-	// Connect a script callback
 	[[nodiscard]]
 	shared_receiver_type connect(const std::string& script_callback) {
 		return emitter_.connect(script_callback);
 	}
 
-	// Connect one-shot (auto-disconnects after first fire)
 	[[nodiscard]]
 	shared_receiver_type connect_oneshot(std::function<T> callback) {
 		return emitter_.connect_oneshot(std::move(callback));
 	}
 
-	// Connect one-shot script callback
 	[[nodiscard]]
 	shared_receiver_type connect_oneshot(const std::string& script_callback) {
 		return emitter_.connect_oneshot(script_callback);
 	}
 
-	// Connect an existing receiver
 	bool connect(shared_receiver_type recv) {
 		return emitter_.connect(recv);
 	}
 
-	// Connect with named ID
 	shared_receiver_type connect(const std::string& id, std::function<T> callback) {
 		return emitter_.connect(id, std::move(callback));
 	}
 
-	// Connect a script FUNCTION value (implementation rides in signal_impl.hpp)
 	shared_receiver_type connect(const std::string& id, const script_value& fn_callback) {
 		return emitter_.connect(id, fn_callback);
 	}
@@ -774,32 +656,26 @@ public:
 		return emitter_.connect(id, script_callback);
 	}
 
-	// Get owned connection by ID
 	shared_receiver_type connection(const std::string& id) {
 		return emitter_.connection(id);
 	}
 
-	// Check if owned connection exists
 	bool connected(const std::string& id) const {
 		return emitter_.connected(id);
 	}
 
-	// Number of live observers
 	size_t observer_count() const {
 		return emitter_.observer_count();
 	}
 
-	// Disconnect a receiver
 	void disconnect(shared_receiver_type recv) {
 		emitter_.disconnect(recv);
 	}
 
-	// Disconnect by ID
 	void disconnect(const std::string& id) {
 		emitter_.disconnect(id);
 	}
 
-	// Script engine configuration
 	void script_engine(engine* eng) {
 		emitter_.script_engine(eng);
 	}
@@ -808,7 +684,6 @@ public:
 		return emitter_.script_engine();
 	}
 
-	// Parameter names
 	void parameter_names(const std::vector<std::string>& names) {
 		emitter_.parameter_names(names);
 	}

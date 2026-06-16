@@ -150,7 +150,7 @@ namespace jai {
 
         // Context tracking for context-sensitive parsing
         bool in_switch_case_ = false;  // Track if we're inside a switch case
-        bool in_coroutine_ = false;   // Track if we're inside a coroutine function
+        bool in_coroutine_ = false;
 
         // Helper to check if a type name is registered for template parsing
         bool is_registered_template_type(const std::string& type_name) const;

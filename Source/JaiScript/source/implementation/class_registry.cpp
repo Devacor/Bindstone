@@ -10,10 +10,8 @@ checked_result<void> class_registry::register_script_class(std::shared_ptr<scrip
         return checked_result<void>(make_error_code(runtime_error_code::class_not_found));
     }
 
-    // Register the class
     script_classes_[class_def->get_name()] = class_def;
 
-    // Validate the complete hierarchy
     validate_class_hierarchy(class_def->get_name());
 
     return {};
@@ -40,10 +38,6 @@ std::shared_ptr<class_definition> class_registry::find_cpp_class(const std::stri
 }
 
 std::shared_ptr<base_class_definition> class_registry::find_class(const std::string& name) {
-    // Since base_class_definition is just a simple struct with a name,
-    // and both script_class_definition and class_definition have get_name(),
-    // we can create a base_class_definition to return
-    
     auto script_class = find_script_class(name);
     if (script_class) {
         auto base_def = std::make_shared<base_class_definition>();
@@ -82,7 +76,6 @@ std::shared_ptr<script_class_instance> class_registry::create_script_instance(
         throw std::runtime_error("Script class not found: " + class_name);
     }
     
-    // Use the class_definition's create_instance method
     auto instance = class_def->create_instance();
     
     // TODO: Handle constructor arguments
@@ -95,7 +88,6 @@ std::shared_ptr<script_class_instance> class_registry::create_script_instance(
 void class_registry::validate_class_hierarchy(const std::string& class_name) {
     auto class_def = find_script_class(class_name);
     if (!class_def) {
-        // Also check C++ classes
         auto cpp_def = find_cpp_class(class_name);
         if (!cpp_def) return;
         
@@ -108,7 +100,6 @@ void class_registry::validate_class_hierarchy(const std::string& class_name) {
         return;
     }
     
-    // Check for circular inheritance in script classes
     std::set<std::string> visited;
     std::shared_ptr<class_definition> current = class_def;
 
@@ -138,7 +129,6 @@ void class_registry::promote_methods_to_virtual(
 bool class_registry::check_inheritance_chain(const std::string& derived, const std::string& base) {
     if (derived == base) return true;
     
-    // First check script classes
     auto derived_script = find_script_class(derived);
     if (derived_script) {
         // Check if the derived class has the base as a parent
@@ -148,24 +138,19 @@ bool class_registry::check_inheritance_chain(const std::string& derived, const s
         // For now, we can only check direct parent relationships
         // A full implementation would need to maintain an inheritance graph
         // or have access to the parent_class_ member
-        
-        // Check if there's a C++ base class
         auto cpp_base = derived_script->get_cpp_base_class();
         if (cpp_base && cpp_base->get_name() == base) {
             return true;
         }
     }
     
-    // Check C++ classes
     auto derived_cpp = find_cpp_class(derived);
     if (derived_cpp) {
-        // Check C++ base class
         auto cpp_base = derived_cpp->get_cpp_base_class();
         if (cpp_base && cpp_base->get_name() == base) {
             return true;
         }
-        
-        // Recursively check the parent's inheritance chain
+
         if (cpp_base) {
             return check_inheritance_chain(cpp_base->get_name(), base);
         }
@@ -187,7 +172,6 @@ void class_registry::apply_default_field_values(
     std::shared_ptr<script_class_definition> class_def
 ) {
     // The create_instance() method already applies default field values
-    // This method is no longer needed with the current API
 }
 
 } // namespace jai

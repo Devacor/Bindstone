@@ -81,7 +81,6 @@ std::vector<token> lexer::tokenize() {
 }
 
 token lexer::next_token() {
-    // Drain pending tokens from template string desugaring
     if (pending_index_ < pending_tokens_.size()) {
         return pending_tokens_[pending_index_++];
     }
@@ -112,7 +111,6 @@ token lexer::next_token() {
         return scan_identifier();
     }
     
-    // Template string literals
     if (c == '`') {
         scan_template_string();
         if (pending_index_ < pending_tokens_.size()) {
@@ -375,7 +373,6 @@ token lexer::scan_number() {
     bool is_hex = false;
     bool is_binary = false;
 
-    // Check for hex/binary prefix after leading 0
     if (peek() == '0' && !is_at_end()) {
         advance(); // consume '0'
         if (peek() == 'x' || peek() == 'X') {
@@ -397,14 +394,12 @@ token lexer::scan_number() {
             }
         }
     } else {
-        // Regular integer part
         while (is_digit(peek())) {
             advance();
         }
     }
 
     if (!is_hex && !is_binary) {
-        // Look for decimal part
         if (peek() == '.' && is_digit(peek_next())) {
             is_float = true;
             advance(); // Consume '.'
@@ -413,7 +408,6 @@ token lexer::scan_number() {
             }
         }
 
-        // Look for exponent
         if (peek() == 'e' || peek() == 'E') {
             is_float = true;
             advance();
@@ -497,19 +491,16 @@ void lexer::scan_template_string() {
 
     while (!is_at_end() && peek() != '`') {
         if (peek() == '$' && peek_next() == '{') {
-            // Emit accumulated string part
             emit_plus();
             emit_string_part(current_part);
             current_part.clear();
 
-            // Emit + ( for the expression
             emit_plus();
             result.push_back(token(token_type::left_paren, symbolizer_->intern_with_view("(").second, current_location()));
 
             advance(); // skip $
             advance(); // skip {
 
-            // Tokenize the expression inside ${...}, tracking brace depth
             int brace_depth = 1;
             while (!is_at_end() && brace_depth > 0) {
                 if (peek() == '}') {
@@ -529,11 +520,9 @@ void lexer::scan_template_string() {
                 result.push_back(expr_tok);
             }
 
-            // Emit closing paren for the expression
             result.push_back(token(token_type::right_paren, symbolizer_->intern_with_view(")").second, current_location()));
 
         } else if (peek() == '\\') {
-            // Handle escape sequences
             advance(); // skip backslash
             if (!is_at_end()) {
                 char escaped = advance();
@@ -553,21 +542,17 @@ void lexer::scan_template_string() {
         }
     }
 
-    // Emit final string part
     if (!current_part.empty()) {
         emit_plus();
         emit_string_part(current_part);
     }
 
-    // Consume closing backtick
     if (!is_at_end() && peek() == '`') {
         advance();
     }
 
-    // Emit closing paren
     result.push_back(token(token_type::right_paren, symbolizer_->intern_with_view(")").second, current_location()));
 
-    // Now assign to pending_tokens_ for next_token() to drain
     pending_tokens_ = std::move(result);
     pending_index_ = 0;
 }

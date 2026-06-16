@@ -7,13 +7,7 @@
 
 namespace jai {
 
-// ============================================================================
 // fixed_string - C++20 NTTP-compatible compile-time string
-// ============================================================================
-// Allows compile-time string literals as template parameters:
-//   jai::registrar<MyType, "MyType"> reg{...};
-//   jai::named_property<int, "health"> health{...};
-//
 
 template<std::size_t N>
 struct fixed_string {
@@ -50,11 +44,9 @@ struct fixed_string {
         return value;
     }
 
-    // Comparison for use in template parameters
     constexpr bool operator==(const fixed_string&) const = default;
 };
 
-// Deduction guide
 template<std::size_t N>
 fixed_string(const char (&)[N]) -> fixed_string<N>;
 

@@ -14,7 +14,6 @@
 namespace jai {
 namespace stdlib {
 
-    // JSON escape helper
     inline std::string escape_json_string(const std::string& str) {
         std::ostringstream oss;
         for (size_t i = 0; i < str.size(); ++i) {
@@ -34,7 +33,6 @@ namespace stdlib {
                     } else if (c >= 0x20) {
                         oss << str[i];
                     } else {
-                        // Control characters below 0x20 (other than those handled above)
                         oss << "\\u" << std::hex << std::setw(4) << std::setfill('0')
                             << static_cast<int>(c);
                     }
@@ -43,7 +41,6 @@ namespace stdlib {
         return oss.str();
     }
 
-    // Convert script_value to JSON string
     inline std::string to_json_impl(const script_value& val, int indent, int current_depth) {
         std::ostringstream oss;
         const std::string indent_str(indent > 0 ? indent : 0, ' ');
@@ -233,7 +230,6 @@ namespace stdlib {
         return oss.str();
     }
 
-    // Simple JSON parser for from_json
     // NOTE: This parser is deprecated in favor of json_archive_reader
     // which properly handles engine references and shared_ptr reconstruction
     /*
@@ -525,15 +521,12 @@ namespace stdlib {
     inline void register_json_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
 
-        // to_json with optional pretty printing - now with shared_ptr support
         eng_ref.add_variadic_function("to_json", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() == 1) {
-                // Compact mode - use archive for shared_ptr support
                 serialization::json_archive_writer writer(-1, eng); // No indentation, with engine ref
                 writer.write_value(args[0]);
                 return script_value(writer.str(), eng);
             } else if (args.size() == 2) {
-                // Pretty mode with indentation
                 int indent = static_cast<int>(args[1].as_int());
                 serialization::json_archive_writer writer(indent, eng);
                 writer.write_value(args[0]);
@@ -543,13 +536,10 @@ namespace stdlib {
             }
         });
         
-        // from_json implementation - now with automatic object reconstruction and shared_ptr support
         eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
-            // Use JSON archive for shared_ptr reconstruction
             serialization::json_archive_reader reader(json, eng);
             script_value data = reader.read_value();
 
-            // Helper function to automatically reconstruct objects with _type_
             std::function<script_value(const script_value&)> processValue;
             processValue = [eng, &processValue](const script_value& val) -> script_value {
                 if (val.is_map()) {
@@ -565,7 +555,6 @@ namespace stdlib {
                         // unknown/unregistered type -> fall through to generic map processing
                     }
 
-                    // Process map values recursively
                     script_value mapValue = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
                     auto& resultMap = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
                     for (const auto& [k, v] : map) {
@@ -574,7 +563,6 @@ namespace stdlib {
                     return mapValue;
 
                 } else if (val.is_array()) {
-                    // Process arrays recursively
                     script_value arrayValue = script_value::make_array(nullptr, eng);
                     auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
 
@@ -584,7 +572,6 @@ namespace stdlib {
 
                     return arrayValue;
                 } else {
-                    // Primitive values pass through unchanged
                     return val;
                 }
             };
@@ -592,19 +579,14 @@ namespace stdlib {
             return processValue(data);
         });
         
-        // Binary serialization functions
         eng_ref.add_variadic_function("to_binary", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("to_binary expects exactly 1 argument, got " + std::to_string(args.size()));
             }
 
-            // Create binary archive and serialize
             serialization::binary_archive_writer writer;
-
-            // For simple values, use write_value directly
             writer.write_value(args[0]);
 
-            // Convert binary data to string for script access
             const auto& data = writer.data();
             script_string binary_str(data.begin(), data.end());
             return script_value(binary_str, eng);
@@ -620,10 +602,8 @@ namespace stdlib {
             }
 
             script_string binary_data = args[0].as<script_string>();
-            // Convert string back to binary data
             std::vector<uint8_t> data(binary_data.begin(), binary_data.end());
 
-            // Create binary archive reader and deserialize
             serialization::binary_archive_reader reader(data, eng);
 
             script_value result = reader.read_value();
@@ -642,28 +622,23 @@ namespace stdlib {
             return result;
         });
 
-        // Base64 serialization functions
         eng_ref.add_variadic_function("to_base64", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("to_base64 expects exactly 1 argument, got " + std::to_string(args.size()));
             }
 
-            // Serialize to binary first
             serialization::binary_archive_writer writer;
             writer.write_value(args[0]);
 
-            // Then base64 encode
             const auto& data = writer.data();
             std::string binary_str(data.begin(), data.end());
             return script_value(base64_encode(binary_str), eng);
         });
 
         eng_ref.add_function("from_base64", [eng](const std::string& base64_str) -> script_value {
-            // Decode base64 to binary
             std::string binary_str = base64_decode(base64_str);
             std::vector<uint8_t> data(binary_str.begin(), binary_str.end());
 
-            // Deserialize from binary
             serialization::binary_archive_reader reader(data, eng);
             script_value result = reader.read_value();
 
@@ -681,7 +656,6 @@ namespace stdlib {
             return result;
         });
 
-        // Raw base64 encoding/decoding (for strings, not serialization)
         eng_ref.add_function("base64_encode", [eng](const std::string& input) -> script_value {
             return script_value(base64_encode(input), eng);
         });

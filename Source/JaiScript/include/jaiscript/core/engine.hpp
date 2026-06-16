@@ -108,7 +108,6 @@ namespace jai {
         }
         
         // Add a global reference that binds to a C++ variable
-        // Supports both primitive types AND custom objects registered via dynamic_binder
         template<typename T>
         void add_global_ref(const std::string& name, T& value, bool is_serializable = false) {
             // For primitive types, use cpp_bound for direct binding
@@ -160,7 +159,6 @@ namespace jai {
 
         // Convenient script_value creation methods
         // Usage: engine->make_value(42) instead of script_value(42, engine)
-        // For primitive types (int, float, bool, char, string, string literals) - direct construction
         template<typename T>
         requires (std::is_arithmetic_v<std::remove_cvref_t<T>> ||
                   std::is_same_v<std::remove_cvref_t<T>, script_string> ||
@@ -171,7 +169,6 @@ namespace jai {
             return script_value(std::forward<T>(value), this);
         }
 
-        // For non-primitive lvalue references - use convert_reference_with_registry (defined in engine_impl.hpp)
         template<typename T>
         requires (!std::is_arithmetic_v<std::remove_cvref_t<T>> &&
                   !std::is_same_v<std::remove_cvref_t<T>, script_string> &&
@@ -181,8 +178,6 @@ namespace jai {
                   std::is_lvalue_reference_v<T>)
         script_value make_value(T&& value);  // Implemented in engine_impl.hpp
 
-        // For non-primitive rvalue references (class types passed by value)
-        // Uses convert_custom_type_with_registry to handle the conversion
         template<typename T>
         requires (!std::is_arithmetic_v<std::remove_cvref_t<T>> &&
                   !std::is_same_v<std::remove_cvref_t<T>, script_string> &&
@@ -194,7 +189,6 @@ namespace jai {
                   !std::is_lvalue_reference_v<T>)
         script_value make_value(T&& value);  // Implemented in engine_impl.hpp
 
-        // For shared_ptr types - convert to script object
         template<typename T>
         script_value make_value(const std::shared_ptr<T>& value) {
             if (!value) {
@@ -211,8 +205,6 @@ namespace jai {
             return make_object(std::move(value));
         }
 
-        // For raw pointer types - create non-owning bound reference
-        // This handles signals that emit raw pointers like void(T*, int)
         template<typename T>
         requires (!std::is_same_v<T, char> && !std::is_same_v<T, const char>)  // Exclude char* (handled as strings)
         script_value make_value(T* value) {
@@ -268,7 +260,6 @@ namespace jai {
             // Wrap the function to handle type conversion for return values
             script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
             
-            // Extract parameter types for type-based overloading (with C++ type info for objects)
             std::vector<param_type_info> paramTypes = extract_parameter_types_with_info<Func>();
 
             // Auto-detect numeric operator overrides and set flag
@@ -360,16 +351,6 @@ namespace jai {
         bool has_registered_class() const {
             return get_class_definition_by_type(std::type_index(typeid(T))) != nullptr;
         }
-
-        // ============================================================================
-        // Static type binding - bind compile-time type info to this engine instance
-        // ============================================================================
-        // For types registered with JAI_STATIC_BINDER, this creates the runtime
-        // class_definition and registers it with this engine.
-        //
-        // Usage:
-        //   eng->bind_static_type<MV::Point<int>>();
-        //   eng->bind_static_types<MV::Point<int>, MV::Color, MV::Size<int>>();
 
         template<typename T>
         void bind_static_type();  // Implemented in static_binder_impl.hpp
@@ -693,7 +674,6 @@ namespace jai {
             }
         }
 
-        // Extract parameter types with full type info (including C++ type_index for objects)
         template<typename Func>
         std::vector<param_type_info> extract_parameter_types_with_info() {
             using traits = detail::function_traits<std::decay_t<Func>>;
@@ -739,11 +719,9 @@ namespace jai {
             } else if constexpr (is_specialization_v<decay_t, bound_map>) {
                 return param_type_info(script_value_type::jai_map_type);
             } else if constexpr (is_specialization_v<decay_t, std::shared_ptr>) {
-                // For shared_ptr<T>, extract T and store its type_index
                 using element_type = typename decay_t::element_type;
                 return param_type_info(script_value_type::jai_shared_ptr_type, std::type_index(typeid(element_type)));
             } else {
-                // For unknown/object types, store the C++ type_index for class lookup
                 return param_type_info(script_value_type::jai_object_type, std::type_index(typeid(decay_t)));
             }
         }

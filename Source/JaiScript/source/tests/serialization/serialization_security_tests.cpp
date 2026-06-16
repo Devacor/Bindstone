@@ -1,6 +1,4 @@
 // Security regression tests for the Phase 2 deserialization findings (June release review, B5).
-// Written tests-first: each asserts the SAFE post-fix behavior, so it fails against the current
-// machinery (which executes attacker-controlled keys as script source) and passes once fixed.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -56,7 +54,6 @@ public:
             check_eq((script_int)0, eng->execute("g_flag").as_int());
         });
 
-        // ...and through the base64 path.
         test("from_base64_type_name_not_executed", [&]() {
             auto eng = engine::make();
             jai::stdlib::register_all(*eng);

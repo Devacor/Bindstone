@@ -21,18 +21,15 @@
 namespace jai {
 namespace serialization {
 
-// JSON archive writer (CRTP, no virtual dispatch)
 class json_archive_writer : public archive_writer_impl<json_archive_writer> {
 public:
     json_archive_writer(int indent = 2) : archive_writer_impl<json_archive_writer>(), indent_(indent), json_depth_(0) {}
     json_archive_writer(int indent, engine* eng) : archive_writer_impl<json_archive_writer>(eng), indent_(indent), json_depth_(0) {}
     explicit json_archive_writer(engine* eng) : archive_writer_impl<json_archive_writer>(eng), indent_(2), json_depth_(0) {}
 
-    // JSON format properties (compile-time constants, no virtual dispatch)
     static constexpr bool needs_property_keys = false;
     static constexpr bool is_text_format = true;
 
-    // Basic type serialization - non-virtual
     void write_int8(int8_t value) { write_json_value(value); }
     void write_int16(int16_t value) { write_json_value(value); }
     void write_int32(int32_t value) { write_json_value(value); }
@@ -68,10 +65,7 @@ public:
         write_json_value(s);
     }
 
-    // Object/array structure - non-virtual
-    // No-argument version for inline objects (no type metadata)
     void begin_object() {
-        // Check base class context: PropertyValue/MapValue context means we're after a property name
         auto ctx = this->current_context();
         bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
@@ -87,7 +81,6 @@ public:
     }
 
     void begin_object(const std::string& type_name, uint32_t version) {
-        // Check base class context: PropertyValue/MapValue context means we're after a property name
         auto ctx = this->current_context();
         bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
@@ -123,7 +116,6 @@ public:
     }
 
     void begin_array(size_t size) {
-        // Check base class context: PropertyValue/MapValue context means we're after a property name
         auto ctx = this->current_context();
         bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
@@ -163,7 +155,6 @@ public:
 
     // Map serialization - JSON uses native object format
     void begin_map(size_t size) {
-        // Check base class context: PropertyValue/MapValue context means we're after a property name
         auto ctx = this->current_context();
         bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
@@ -497,7 +488,6 @@ private:
     std::ostringstream oss_;
     std::stack<ContainerType> container_stack_;
     std::stack<bool> first_in_container_;
-    // Context tracking is now handled by base class (SerializationContext)
 
     bool in_container() const { return !container_stack_.empty(); }
 
@@ -515,12 +505,10 @@ private:
     
     template<typename T>
     void write_json_value(T value) {
-        // Check base class context: PropertyValue/MapValue context means we're after a property name
         auto ctx = this->current_context();
         bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
         if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-            // Only add comma in array context for non-first elements
             oss_ << ',';
             write_newline();
             write_indent();
@@ -558,7 +546,6 @@ private:
     }
 };
 
-// JSON archive reader (CRTP, no virtual dispatch)
 class json_archive_reader : public archive_reader_impl<json_archive_reader> {
 public:
     // Engine is REQUIRED for JSON reading since we need to create script_values
@@ -575,11 +562,9 @@ public:
 
     ~json_archive_reader() = default;
 
-    // JSON format properties (compile-time constants, no virtual dispatch)
     static constexpr bool needs_property_keys = false;
     static constexpr bool is_text_format = true;
 
-    // Basic type deserialization - non-virtual
     int8_t read_int8() { return static_cast<int8_t>(read_value().as<script_int>()); }
     int16_t read_int16() { return static_cast<int16_t>(read_value().as<script_int>()); }
     int32_t read_int32() { return static_cast<int32_t>(read_value().as<script_int>()); }
@@ -616,8 +601,7 @@ public:
         };
         std::vector<uint8_t> result;
         result.reserve(hex_str.length() / 2);
-        // Decode complete byte-pairs only. std::stoi on a 2-char substr threw on bad hex
-        // and silently mis-parsed an odd trailing nibble; this validates and skips it.
+        // Decode complete byte-pairs only; validates each nibble and skips an odd trailing nibble.
         for (size_t i = 0; i + 1 < hex_str.length(); i += 2) {
             int hi = nibble(hex_str[i]);
             int lo = nibble(hex_str[i + 1]);
@@ -629,8 +613,6 @@ public:
         return result;
     }
 
-    // Object/array structure - non-virtual
-    // No-argument version for inline objects (discard type metadata)
     bool begin_object() {
         std::string type_name;
         uint32_t version = 0;
@@ -842,10 +824,8 @@ public:
 
 private:
     // ---- Flat arena DOM ----------------------------------------------------------------
-    // Replaces the std::map<script_value,script_value>/std::vector<script_value> DOM the
-    // reader used to build at parse time. Objects/arrays are 16-byte nodes in one contiguous
-    // arena; string bytes live in one char arena. Composites become script_values only on
-    // demand (read_value/materialize). ~7x faster parse on real scene data.
+    // Objects/arrays are 16-byte nodes in one contiguous arena; string bytes live in one
+    // char arena. Composites become script_values only on demand (read_value/materialize).
     enum class JTag : uint8_t { Null, Bool, Int, Double, Str, Arr, Obj };
     struct JNode {
         JTag tag = JTag::Null;
@@ -903,9 +883,9 @@ private:
     }
 
     // Recursively builds a full script_value subtree from a flat node — only used when a raw
-    // composite is actually requested (stdlib from_json / a weak_ptr's $weak_ptr_data). Mirrors
-    // the old parse_object/parse_array exactly (make_map/make_array factories, ast_literal_tag
-    // keys) so map.find(script_value("_type_"/...)) and is_string()/is_int() still behave.
+    // composite is actually requested (stdlib from_json / a weak_ptr's $weak_ptr_data).
+    // Uses ast_literal_tag keys so map.find(script_value("_type_"/...)) and
+    // is_string()/is_int() behave correctly.
     script_value materialize(uint32_t idx) {
         depth_guard guard(current_depth_);
         engine* eng = engine_ref_;
@@ -1054,8 +1034,7 @@ private:
 
     // Reads the 4 hex digits at json_[pos_+1 .. pos_+4] and advances pos_ by 4 (to the
     // last digit; the caller's trailing pos_++ steps past it). Returns false on missing or
-    // non-hex input — replaces std::stoul, which threw std::invalid_argument (outside the
-    // serialization_error hierarchy) on malformed \u escapes.
+    // non-hex input (keeps errors in the serialization_error hierarchy on malformed \u escapes).
     bool read_hex4(uint32_t& out) {
         if (pos_ + 4 >= json_.length()) return false;
         uint32_t v = 0;
@@ -1072,8 +1051,7 @@ private:
         return true;
     }
 
-    // Parses a string body into the char arena, returning its [off,len). Same bulk-copy +
-    // escape handling as before, just appending to chars_ instead of a std::string.
+    // Parses a string body into the char arena, returning its [off,len).
     void parse_string_into(uint32_t& off, uint32_t& len) {
         expect('"');
         const uint32_t start = static_cast<uint32_t>(chars_.size());

@@ -62,12 +62,10 @@ inline std::shared_ptr<CppTreeNode> cpp_rotateRight(std::shared_ptr<CppTreeNode>
 class chaiscript_comparison : public suite {
 public:
     chaiscript_comparison() : suite("ChaiScript Performance Comparison") {
-        // Create engines once during construction, not for every test
         std::cout << "\n==============================================\n";
         std::cout << "Initializing engines for comparison benchmarks...\n";
         std::cout << "==============================================\n";
 
-        // Create JaiScript engine
         std::cout << "Creating JaiScript engine...\n";
         jai_engine = engine::make();
         jai::stdlib::register_all(jai_engine);
@@ -77,10 +75,8 @@ public:
         // Create ChaiScript engine with standard library
         std::cout << "Creating ChaiScript engine...\n";
         try {
-            // Create ChaiScript engine (default constructor includes stdlib)
             chai_engine = std::make_shared<chaiscript::ChaiScript>();
 
-            // Test basic execution to verify it works
             auto result = chai_engine->eval<int>("42");
             if (result != 42) {
                 throw std::runtime_error("ChaiScript basic eval test failed");
@@ -101,10 +97,6 @@ public:
 
         std::cout << "==============================================\n\n";
 
-        // Pre-declare functions and classes in BOTH engines ONCE during construction
-        // This way we only measure execution overhead, not parsing/declaration overhead
-
-        // JaiScript declarations - pre-declare functions and classes for fair comparison
         jai_engine->execute("function add(auto a, auto b) -> auto { return a + b; }");
         jai_engine->execute(R"(
             class Point {
@@ -124,7 +116,6 @@ public:
             }
         )");
 
-        // Algorithm function declarations for JaiScript
         jai_engine->execute("function factorial(auto n) -> auto { if (n <= 1) { return 1; } return n * factorial(n - 1); }");
         jai_engine->execute(R"(
             function binarySearch(auto arr, auto target, auto left, auto right) -> auto {
@@ -177,7 +168,6 @@ public:
             }
         )");
 
-        // Tree node class and tree operations for BST benchmark
         jai_engine->execute(R"(
             class TreeNode {
                 int value = 0;
@@ -234,7 +224,6 @@ public:
             }
         )");
 
-        // Bind C++ TreeNode class to JaiScript for fair comparison
         dynamic_binder<CppTreeNode>(*jai_engine, "CppTreeNode")
             .constructor<int>()
             .property("value", &CppTreeNode::value)
@@ -242,7 +231,6 @@ public:
             .property("right", &CppTreeNode::right, jai::skip_type_check)  // Self-referential
             .build();
 
-        // Register C++ tree operations
         jai_engine->add_function("cpp_insertNode", &cpp_insertNode);
         jai_engine->add_function("cpp_inorderSum", &cpp_inorderSum);
         jai_engine->add_function("cpp_treeHeight", &cpp_treeHeight);
@@ -254,7 +242,6 @@ public:
         jai_engine->execute("var sum = 0;");
         jai_engine->execute("var height = 0;");
 
-        // Pre-declare string benchmark variables (for fair comparison with ChaiScript)
         jai_engine->execute("var original = \"\";");
         jai_engine->execute("var copy1 = \"\";");
         jai_engine->execute("var copy2 = \"\";");
@@ -267,7 +254,6 @@ public:
         jai_engine->execute("var sub = \"\";");
         jai_engine->execute("var str_result = \"\";");
 
-        // Pre-declare arrays and benchmark functions for range-for benchmarks
         jai_engine->execute(R"(
             auto benchArr100 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
                                20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
@@ -302,9 +288,7 @@ public:
         )");
 
 #ifdef HAVE_CHAISCRIPT
-        // ChaiScript declarations - pre-declare functions, classes, and variables ONCE in constructor
         try {
-            // Pre-declare all variables that benchmarks will use
             chai_engine->eval("var x = 0");
             chai_engine->eval("var y = 0");
             chai_engine->eval("var z = 0");
@@ -323,7 +307,6 @@ public:
             chai_engine->eval("var root");
             chai_engine->eval("var height = 0");
 
-            // String benchmark variables
             chai_engine->eval("var original = \"\"");
             chai_engine->eval("var copy1 = \"\"");
             chai_engine->eval("var copy2 = \"\"");
@@ -336,10 +319,8 @@ public:
             chai_engine->eval("var sub = \"\"");
             chai_engine->eval("var str_result = \"\"");
 
-            // Declare add function for Function Calls benchmark
             chai_engine->eval("def add(a, b) { return a + b; }");
 
-            // Declare Point class for Class Creation benchmark
             chai_engine->eval(R"(
                 class Point {
                     var x;
@@ -351,7 +332,6 @@ public:
                 }
             )");
 
-            // Declare Calculator class for Method Invocation benchmark
             chai_engine->eval(R"(
                 class Calculator {
                     def Calculator() {
@@ -363,7 +343,6 @@ public:
                 }
             )");
 
-            // Algorithm function declarations for ChaiScript
             chai_engine->eval("def factorial(n) { if (n <= 1) { return 1; } return n * factorial(n - 1); }");
             chai_engine->eval(R"(
                 def binarySearch(arr, target, left, right) {
@@ -515,10 +494,8 @@ public:
                 }
             )");
 
-            // Bind C++ TreeNode class to ChaiScript for fair comparison
             chaiscript::ModulePtr m = std::make_shared<chaiscript::Module>();
 
-            // Register the class
             chaiscript::utility::add_class<CppTreeNode>(*m,
                 "CppTreeNode",
                 { chaiscript::constructor<CppTreeNode(int)>() },
@@ -527,7 +504,6 @@ public:
                   {chaiscript::fun(&CppTreeNode::right), "right"} }
             );
 
-            // Register tree operations
             m->add(chaiscript::fun(&cpp_insertNode), "cpp_insertNode");
             m->add(chaiscript::fun(&cpp_inorderSum), "cpp_inorderSum");
             m->add(chaiscript::fun(&cpp_treeHeight), "cpp_treeHeight");
@@ -540,7 +516,6 @@ public:
 
             chai_engine->add(m);
 
-            // Pre-declare variables for C++ BST benchmark (for fair comparison with JaiScript)
             chai_engine->eval("global root;");
             chai_engine->eval("global sum = 0;");
             chai_engine->eval("global height = 0;");
@@ -590,7 +565,6 @@ public:
 
         // ===== Integer Addition =====
         test("JaiScript vs ChaiScript: Integer Addition", [this]() {
-            // Verify both engines work correctly first
             auto jai_result = jai_engine->execute("42 + 58").as<int>();
             auto chai_result = chai_engine->eval<int>("42 + 58");
             if (jai_result != 100 || chai_result != 100) {
@@ -598,7 +572,6 @@ public:
                          << " ChaiScript=" << chai_result << "\n";
             }
 
-            // Increased iterations to get better metrics (from ~2uS to ~10uS)
             benchmark("JaiScript - Integer Addition", [this]() {
                 jai_engine->execute("42 + 58;");
             }, 5000);
@@ -610,7 +583,6 @@ public:
 
         // ===== Float Multiplication =====
         test("JaiScript vs ChaiScript: Float Multiplication", [this]() {
-            // Increased iterations to get better metrics (from ~2uS to ~10uS)
             benchmark("JaiScript - Float Multiplication", [this]() {
                 jai_engine->execute("3.14 * 2.71;");
             }, 5000);
@@ -716,7 +688,6 @@ public:
         test("JaiScript vs ChaiScript: Class Creation", [this]() {
             benchmark("JaiScript - Class Creation", [this]() {
                 try {
-                    // Point class pre-declared in pre_test(), just instantiate it
                     jai_engine->execute("auto p = Point(3.0, 4.0);");
                 } catch (const std::exception& e) {
                     std::cerr << "\n*** JaiScript Class Creation ERROR: " << e.what() << std::endl;
@@ -737,7 +708,6 @@ public:
         // ===== Method Invocation =====
         test("JaiScript vs ChaiScript: Method Invocation", [this]() {
             benchmark("JaiScript - Method Invocation", [this]() {
-                // Calculator class pre-declared in pre_test(), instantiate and call method
                 jai_engine->execute("auto calc = Calculator(); calc.add(5, 3);");
             });
 
@@ -889,7 +859,6 @@ public:
 
         // ===== Complex Expression =====
         test("JaiScript vs ChaiScript: Complex Expression", [this]() {
-            // Increased iterations to get better metrics (from ~4uS to ~20uS)
             benchmark("JaiScript - Complex Expression", [this]() {
                 jai_engine->execute("(10 + 20) * (30 - 15) / 5;");
             }, 5000);
@@ -1107,7 +1076,6 @@ public:
 
             // ChaiScript BST benchmark - skipped due to poor performance (~52ms/iteration)
             // The benchmark works correctly but is too slow to run in the test suite.
-            // Last measured: 52698uS/iteration (vs JaiScript's ~563uS - 94x slower)
             std::cout << "    ChaiScript - BST (15 nodes): 52698uS/iteration (skipped - too slow)\n";
         });
 
@@ -1250,5 +1218,4 @@ public:
 
 } // namespace jai::foundry::tests
 
-// Auto-register this test suite with Foundry
 FOUNDRY_REGISTER(jai::foundry::tests::chaiscript_comparison)

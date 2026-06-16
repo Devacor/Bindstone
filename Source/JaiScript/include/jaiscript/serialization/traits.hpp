@@ -27,7 +27,6 @@
 
 namespace jai {
 
-// Forward declarations for construct types
 namespace serialization {
 	template<typename T> class construct;
 	template<typename T> class construct_unique;
@@ -48,8 +47,6 @@ public:
 		return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 	}
 
-	// Forward to T::load_and_construct - allows access to private methods via friendship
-	// Templated on Archive to work with CRTP-based archives
 	template<typename Archive, typename T>
 	static auto load_and_construct(Archive& ar, serialization::construct<T>& c)
 		-> decltype(T::load_and_construct(ar, c)) {
@@ -92,10 +89,6 @@ public:
 
 namespace serialization_traits {
 
-// ============================================================================
-// Container type detection
-// ============================================================================
-
 template<typename T> struct is_std_vector : std::false_type {};
 template<typename T, typename A> struct is_std_vector<std::vector<T, A>> : std::true_type {};
 template<typename T> inline constexpr bool is_std_vector_v = is_std_vector<T>::value;
@@ -129,7 +122,6 @@ template<typename T> struct is_std_tuple : std::false_type {};
 template<typename... Ts> struct is_std_tuple<std::tuple<Ts...>> : std::true_type {};
 template<typename T> inline constexpr bool is_std_tuple_v = is_std_tuple<T>::value;
 
-// Specific set/list/deque detection (for explicit handling if needed)
 template<typename T> struct is_std_set : std::false_type {};
 template<typename K, typename C, typename A> struct is_std_set<std::set<K, C, A>> : std::true_type {};
 template<typename T> inline constexpr bool is_std_set_v = is_std_set<T>::value;
@@ -151,11 +143,6 @@ template<typename T> struct is_std_forward_list : std::false_type {};
 template<typename T, typename A> struct is_std_forward_list<std::forward_list<T, A>> : std::true_type {};
 template<typename T> inline constexpr bool is_std_forward_list_v = is_std_forward_list<T>::value;
 
-// ============================================================================
-// Generic container trait detection (elegant handling of all containers)
-// ============================================================================
-
-// Detect if type is iterable (has begin/end that return iterators)
 template<typename T, typename = void>
 struct is_iterable : std::false_type {};
 template<typename T>
@@ -165,30 +152,24 @@ struct is_iterable<T, std::void_t<
 >> : std::true_type {};
 template<typename T> inline constexpr bool is_iterable_v = is_iterable<T>::value;
 
-// Detect if type has key_type (associative containers)
 template<typename T, typename = void>
 struct has_key_type : std::false_type {};
 template<typename T>
 struct has_key_type<T, std::void_t<typename T::key_type>> : std::true_type {};
 template<typename T> inline constexpr bool has_key_type_v = has_key_type<T>::value;
 
-// Detect if type has mapped_type (map-like containers)
 template<typename T, typename = void>
 struct has_mapped_type : std::false_type {};
 template<typename T>
 struct has_mapped_type<T, std::void_t<typename T::mapped_type>> : std::true_type {};
 template<typename T> inline constexpr bool has_mapped_type_v = has_mapped_type<T>::value;
 
-// Map-like: has both key_type and mapped_type (std::map, std::unordered_map, etc.)
 template<typename T>
 inline constexpr bool is_map_like_v = has_key_type_v<T> && has_mapped_type_v<T>;
 
-// Set-like: has key_type but NOT mapped_type (std::set, std::unordered_set, etc.)
 template<typename T>
 inline constexpr bool is_set_like_v = has_key_type_v<T> && !has_mapped_type_v<T> && is_iterable_v<T>;
 
-// Sequence container: iterable with value_type, but not associative and not string
-// Covers: vector, list, deque, forward_list, array
 template<typename T, typename = void>
 struct has_value_type : std::false_type {};
 template<typename T>
@@ -202,10 +183,6 @@ inline constexpr bool is_sequence_container_v =
     !has_key_type_v<T> &&
     !std::is_same_v<T, std::string> &&
     !is_std_array_v<T>;  // std::array handled separately due to fixed size
-
-// ============================================================================
-// Container element type extractors
-// ============================================================================
 
 template<typename T> struct vector_element { using type = void; };
 template<typename T, typename A> struct vector_element<std::vector<T, A>> { using type = T; };
@@ -249,10 +226,6 @@ template<typename T> struct optional_element { using type = void; };
 template<typename T> struct optional_element<std::optional<T>> { using type = T; };
 template<typename T> using optional_element_t = typename optional_element<T>::type;
 
-// ============================================================================
-// Smart pointer type detection
-// ============================================================================
-
 template<typename T> struct is_std_weak_ptr : std::false_type {};
 template<typename T> struct is_std_weak_ptr<std::weak_ptr<T>> : std::true_type {};
 template<typename T> inline constexpr bool is_std_weak_ptr_v = is_std_weak_ptr<T>::value;
@@ -268,7 +241,6 @@ template<typename T> inline constexpr bool is_std_unique_ptr_v = is_std_unique_p
 template<typename T>
 inline constexpr bool is_smart_ptr_v = is_std_weak_ptr_v<T> || is_std_shared_ptr_v<T> || is_std_unique_ptr_v<T>;
 
-// Smart pointer element type extractors
 template<typename T> struct weak_ptr_element { using type = void; };
 template<typename T> struct weak_ptr_element<std::weak_ptr<T>> { using type = T; };
 template<typename T> using weak_ptr_element_t = typename weak_ptr_element<T>::type;
@@ -281,11 +253,6 @@ template<typename T> struct unique_ptr_element { using type = void; };
 template<typename T, typename D> struct unique_ptr_element<std::unique_ptr<T, D>> { using type = T; };
 template<typename T> using unique_ptr_element_t = typename unique_ptr_element<T>::type;
 
-// ============================================================================
-// jai::property<T> type detection
-// ============================================================================
-
-// Forward declaration of jai::property template
 } // namespace serialization_traits
 } // namespace jai
 
@@ -298,14 +265,9 @@ template<typename T> struct is_jai_property : std::false_type {};
 template<typename T> struct is_jai_property<::jai::property<T>> : std::true_type {};
 template<typename T> inline constexpr bool is_jai_property_v = is_jai_property<T>::value;
 
-// Property element type extractor
 template<typename T> struct property_element { using type = void; };
 template<typename T> struct property_element<::jai::property<T>> { using type = T; };
 template<typename T> using property_element_t = typename property_element<T>::type;
-
-// ============================================================================
-// Primitive type detection
-// ============================================================================
 
 template<typename T>
 inline constexpr bool is_direct_serializable_v =
@@ -314,10 +276,6 @@ inline constexpr bool is_direct_serializable_v =
 	std::is_same_v<T, std::string> ||
 	std::is_same_v<T, char> ||
 	std::is_same_v<T, unsigned char>;
-
-// ============================================================================
-// property_owner detection
-// ============================================================================
 
 template<typename T, typename = void>
 struct is_property_owner : std::false_type {};
@@ -330,42 +288,31 @@ struct is_property_owner<T, std::void_t<
 template<typename T>
 inline constexpr bool is_property_owner_v = is_property_owner<T>::value;
 
-// ============================================================================
 // load_and_construct detection (for types without default constructors)
-// ============================================================================
-
 // Note: These require jai::access to be complete, so they're declared here
 // but the actual detection happens when construct.hpp is included
-
-// Member load_and_construct for shared_ptr
 template<typename T, typename = void>
 struct has_member_load_and_construct : std::false_type {};
 
-// Free function load_and_construct for shared_ptr
 template<typename T, typename = void>
 struct has_free_load_and_construct : std::false_type {};
 
-// Combined for shared_ptr
 template<typename T>
 inline constexpr bool has_load_and_construct_v =
 	has_member_load_and_construct<T>::value || has_free_load_and_construct<T>::value;
 
-// Member load_and_construct for unique_ptr
 template<typename T, typename = void>
 struct has_member_load_and_construct_unique : std::false_type {};
 
-// Free function load_and_construct for unique_ptr
 template<typename T, typename = void>
 struct has_free_load_and_construct_unique : std::false_type {};
 
-// Combined for unique_ptr
 template<typename T>
 inline constexpr bool has_load_and_construct_unique_v =
 	has_member_load_and_construct_unique<T>::value || has_free_load_and_construct_unique<T>::value;
 
 } // namespace serialization_traits
 
-// Bring commonly used traits into jai namespace for convenience
 using serialization_traits::is_std_vector_v;
 using serialization_traits::is_std_map_v;
 using serialization_traits::is_std_unordered_map_v;

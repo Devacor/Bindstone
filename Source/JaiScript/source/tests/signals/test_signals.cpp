@@ -86,7 +86,7 @@ public:
             int total = 0;
             auto recv = sig.connect([&](int x) {
                 total += x;
-                if (x > 0) sig.emit(x - 1);  // recurse down to 0
+                if (x > 0) sig.emit(x - 1);
             });
             sig.emit(3);
             check_eq(3 + 2 + 1 + 0, total, "reentrant emits all fire without corruption");

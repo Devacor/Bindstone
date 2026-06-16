@@ -55,7 +55,7 @@ namespace jai {
         this_expr,
         super_expr,
         throw_expr,
-        yield_expr,     // yield / yield value
+        yield_expr,
 
         // Statements (20-39)
         expression_stmt = 20,
@@ -94,7 +94,7 @@ namespace jai {
         bool is_const = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
         mutable size_t slot_index = SIZE_MAX;     // Slot index for fast local access (SIZE_MAX = not assigned)
-        expression_ptr default_value;              // Optional default value expression (null = no default)
+        expression_ptr default_value;
 
         parameter(type_info_ptr t, const std::string& n, bool ref = false, bool c = false)
             : type(t), name(n), is_reference(ref), is_const(c), symbol_id(UINT64_MAX), slot_index(SIZE_MAX) {}
@@ -360,7 +360,6 @@ namespace jai {
         throw_expr(const source_location& loc, expression_ptr val = nullptr)
             : expression(loc, node_type::throw_expr), value(val) {}    };
 
-    // Yield expression (for coroutines)
     class yield_expr : public expression {
     public:
         expression_ptr value;  // Optional - null for void yield
@@ -547,7 +546,7 @@ namespace jai {
         std::vector<constructor_initializer> initializers; // For constructor initialization lists
         bool is_override = false; // For override keyword in derived classes
         bool is_static = false;   // For static methods
-        bool is_coroutine = false; // coroutine function (supports yield)
+        bool is_coroutine = false;
         size_t local_count = 0;   // Total slots needed (params + locals) for stack allocation
 
         function_decl(const source_location& loc, std::string_view n, uint64_t id = UINT64_MAX)
@@ -644,8 +643,8 @@ namespace jai {
     // Destructuring declaration: auto [x, y, z] = [1, 2, 3];
     class destructuring_decl : public declaration {
     public:
-        std::vector<std::pair<std::string_view, uint64_t>> names;  // variable names + symbol IDs
-        std::vector<size_t> slot_indices;  // slot indices for each variable
+        std::vector<std::pair<std::string_view, uint64_t>> names;
+        std::vector<size_t> slot_indices;
         expression_ptr initializer;
 
         destructuring_decl(const source_location& loc, expression_ptr init)

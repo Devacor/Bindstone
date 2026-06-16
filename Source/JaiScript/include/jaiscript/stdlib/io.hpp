@@ -12,30 +12,25 @@
 namespace jai {
 namespace stdlib {
 
-    // Helper function to check if a string contains format placeholders {} or {NUMBER}
     inline bool has_format_placeholders(const std::string& str) {
         size_t pos = 0;
         while (pos < str.length()) {
             size_t brace = str.find('{', pos);
             if (brace == std::string::npos) break;
             
-            // Check if it's escaped
             if (brace + 1 < str.length() && str[brace + 1] == '{') {
-                pos = brace + 2; // Skip escaped {{
+                pos = brace + 2;
                 continue;
             }
             
-            // Find closing brace
             size_t close = str.find('}', brace);
             if (close != std::string::npos) {
                 std::string content = str.substr(brace + 1, close - brace - 1);
                 
-                // Check if it's {} or {NUMBER}
                 if (content.empty()) {
-                    return true; // Found {}
+                    return true;
                 }
                 
-                // Check if content is all digits (valid number)
                 bool is_number = true;
                 for (char c : content) {
                     if (!std::isdigit(c)) {
@@ -45,7 +40,7 @@ namespace stdlib {
                 }
                 
                 if (is_number) {
-                    return true; // Found {NUMBER}
+                    return true;
                 }
             }
             
@@ -54,8 +49,7 @@ namespace stdlib {
         return false;
     }
     
-    // Helper function to process a format string with arguments
-    inline std::string process_format_string(const std::string& format_str, 
+    inline std::string process_format_string(const std::string& format_str,
                                            const std::vector<script_value>& args,
                                            size_t arg_offset = 0) {
         std::string result;
@@ -68,9 +62,8 @@ namespace stdlib {
             size_t next_close = format_str.find('}', pos);
             
             // Handle }} escaping
-            if (next_close != std::string::npos && 
+            if (next_close != std::string::npos &&
                 (next_open == std::string::npos || next_close < next_open)) {
-                // Found } before { or no { left
                 result += format_str.substr(pos, next_close - pos);
                 if (next_close + 1 < format_str.length() && format_str[next_close + 1] == '}') {
                     // }} -> }
@@ -78,30 +71,25 @@ namespace stdlib {
                     pos = next_close + 2;
                     continue;
                 } else {
-                    // Single } - just append it
                     result += '}';
                     pos = next_close + 1;
                     continue;
                 }
             }
-            
+
             if (next_open == std::string::npos) {
-                // No more format specifiers, append rest of string
                 result += format_str.substr(pos);
                 break;
             }
             
-            // Append text before the brace
             result += format_str.substr(pos, next_open - pos);
-            
-            // Check for escaped brace
+
             if (next_open + 1 < format_str.length() && format_str[next_open + 1] == '{') {
                 result += '{';
                 pos = next_open + 2;
                 continue;
             }
             
-            // Find closing brace
             size_t close_brace = format_str.find('}', next_open);
             if (close_brace == std::string::npos) {
                 // Invalid format string, append rest as-is
@@ -109,7 +97,6 @@ namespace stdlib {
                 break;
             }
             
-            // Extract content between braces
             std::string spec = format_str.substr(next_open + 1, close_brace - next_open - 1);
             
             if (spec.empty()) {
@@ -137,7 +124,6 @@ namespace stdlib {
         return result;
     }
     
-    // Helper function to process single argument with escape sequences
     inline std::string process_single_arg_escapes(const std::string& input) {
         std::string result;
         size_t pos = 0;
@@ -175,7 +161,6 @@ namespace stdlib {
                 }
             }
             
-            // No more special characters
             result += input.substr(pos);
             break;
         }
@@ -187,26 +172,19 @@ namespace stdlib {
     struct skip_newline_t {};
     struct skip_flush_t {};
     
-    // Global instances that can be used in scripts
     inline const skip_newline_t skip_newline{};
     inline const skip_flush_t skip_flush{};
 
-    // Register standard I/O functions with an engine
     inline void register_io_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
-        // Register the special control types
         dynamic_binder<skip_newline_t>(eng_ref, "skip_newline_t").build();
         dynamic_binder<skip_flush_t>(eng_ref, "skip_flush_t").build();
         
-        // Create shared instances that can be used as singletons
         auto skip_newline_ptr = std::make_shared<skip_newline_t>();
         auto skip_flush_ptr = std::make_shared<skip_flush_t>();
 
-        // Register global instances
         eng_ref.add_global("skip_newline", eng_ref.make_object(skip_newline_ptr));
         eng_ref.add_global("skip_flush", eng_ref.make_object(skip_flush_ptr));
-        // print function - formatted output to stdout
-        // 
         // Usage:
         //   print()                           - Prints just a newline
         //   print(value)                      - Prints value followed by newline
@@ -230,7 +208,6 @@ namespace stdlib {
         //   print("Debug: ", value, skip_flush)       // Output: Debug: <value> (no newline/flush)
         //
         eng_ref.add_variadic_function("print", [eng](const std::vector<script_value>& args) -> script_value {
-            // Get the output stream from the engine
             std::ostream& out = eng ? eng->get_output_stream() : std::cout;
 
             if (args.empty()) {
@@ -238,14 +215,12 @@ namespace stdlib {
                 return script_value(std::monostate{}, eng);
             }
 
-            // Check if last argument is a control type
             bool should_newline = true;
             bool should_flush = true;
             size_t effective_args = args.size();
 
             if (!args.empty()) {
                 const auto& last_arg = args.back();
-                // Check type name to determine if it's a control type
                 auto type_info = last_arg.get_type_info();
                 if (type_info && type_info->type_name == "skip_newline_t") {
                     should_newline = false;
@@ -259,7 +234,6 @@ namespace stdlib {
             }
 
             if (effective_args == 0) {
-                // Only control argument was passed
                 if (should_newline) {
                     out << std::endl;
                 } else if (should_flush) {
@@ -269,7 +243,6 @@ namespace stdlib {
             }
 
             if (effective_args == 1) {
-                // Single argument - just print it directly
                 out << args[0].to_string();
                 if (should_newline) {
                     out << std::endl;
@@ -279,12 +252,10 @@ namespace stdlib {
                 return script_value(std::monostate{}, eng);
             }
 
-            // Multiple arguments - check if first arg contains format placeholders
             std::string first_str = args[0].to_string();
             bool has_format_specs = has_format_placeholders(first_str);
 
             if (!has_format_specs) {
-                // No format specifiers - just print all arguments sequentially
                 for (size_t i = 0; i < effective_args; ++i) {
                     out << args[i].to_string();
                 }
@@ -296,8 +267,7 @@ namespace stdlib {
                 return script_value(std::monostate{}, eng);
             }
 
-            // Has format specifiers - use format string logic
-            // Note: for print, we pass effective_args as the vector size, and start at arg 1
+            // arg_offset=1: format string is args[0], actual values start at args[1]
             std::vector<script_value> format_args(args.begin(), args.begin() + effective_args);
             std::string result = process_format_string(first_str, format_args, 1);
 
@@ -307,11 +277,9 @@ namespace stdlib {
             } else if (should_flush) {
                 out << std::flush;
             }
-            return script_value(std::monostate{}, eng); // void return
+            return script_value(std::monostate{}, eng);
         });
         
-        // format function - builds formatted strings
-        // 
         // Usage:
         //   format(value)                      - Converts value to string
         //   format(format_str, args...)        - If format_str contains {}, uses format-style
@@ -342,16 +310,13 @@ namespace stdlib {
             }
 
             if (filtered_args.size() == 1) {
-                // Single argument - return as-is, no format processing
                 return script_value(filtered_args[0].to_string(), eng);
             }
 
-            // Multiple arguments - check if first arg contains format placeholders
             std::string first_str = filtered_args[0].to_string();
             bool has_format_specs = has_format_placeholders(first_str);
 
             if (!has_format_specs) {
-                // No format specifiers - concatenate all arguments
                 std::string result;
                 for (const auto& arg : filtered_args) {
                     result += arg.to_string();
@@ -359,13 +324,11 @@ namespace stdlib {
                 return script_value(result, eng);
             }
 
-            // Has format specifiers - use format string logic
             std::string result = process_format_string(first_str, filtered_args, 1);
 
             return script_value(result, eng);
         });
         
-        // to_string function - converts value to string
         // Register as variadic to bypass type matching issues
         eng_ref.add_variadic_function("to_string", [eng](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
@@ -374,7 +337,6 @@ namespace stdlib {
             return script_value(args[0].to_string(), eng);
         });
 
-        // type_of function - returns the type name of a value
         eng_ref.add_function("type_of", [](const script_value& val) -> std::string {
             switch (val.type()) {
                 case script_value_type::jai_null_type: return "null";

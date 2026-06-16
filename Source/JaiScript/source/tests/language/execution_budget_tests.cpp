@@ -20,7 +20,6 @@ public:
 			auto e = engine::make();
 			e->execution_budget(0.05);
 			check_throws([&]() { e->execute("while (true) { }"); });
-			// The engine stays usable after the budget error
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 

@@ -615,8 +615,7 @@ void interpreter::init_builtin_methods() {
         if (args.empty()) {
             // Default order: a strict weak ordering for ALL element types. Numerics
             // compare by value (int/float mixed too); everything else falls back to
-            // script_value's total <=> order. The previous comparator returned false
-            // for any mixed pair, which is NOT a strict weak ordering (std::sort UB).
+            // script_value's total <=> order.
             std::sort(tmp.begin(), tmp.end(), [](const script_value& a, const script_value& b) {
                 const bool an = a.is_int() || a.is_float();
                 const bool bn = b.is_int() || b.is_float();
@@ -6872,7 +6871,6 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 push_value(script_value::make_function(done_method, engine_));
                 return {};
             }
-            // Unknown member on coroutine handle
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
                 "coroutine_handle has no member '{0}'", expr->member_id);
         }
@@ -6956,7 +6954,6 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                     return {};
                 }
             }
-            // Map has no method or key
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
                 "Map has no method or key '{0}'", expr->member_id);
         }
@@ -7088,15 +7085,12 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Handle cpp_bound objects (non-owning references to C++ objects from T& returns)
     // These have is_class_instance_wrapper=false and data=nullptr, but cpp_bound_ptr_ set
     if (objectValue.is_cpp_bound() && !objHolder->is_class_instance_wrapper) {
-        // Get the class definition from the engine using the type name
         auto class_def = engine_->get_class_definition(objHolder->type_name);
         if (class_def) {
             uint64_t member_id = expr->member_id;
 
-            // Look for a method in the class definition
             script_value method = class_def->get_method(member_id, false);
             if (!method.is_null() && !method.is_invalid()) {
-                // Return a bound method with the cpp_bound value as 'this'
                 push_value(create_bound_method(objectValue, method));
                 return {};
             }
@@ -7131,7 +7125,6 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             push_value(make_value());
             return {};
         }
-        // Cannot access member on non-class object
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
@@ -9391,11 +9384,9 @@ checked_result<void> interpreter::visit_case_stmt(case_stmt* stmt) {
         auto result = dispatch_stmt(s.get());
         if (!result) return result;
 
-        // Stop the case body on return, exception unwind, OR a break/continue
-        // request. Previously only return/unwind stopped it, so statements after
-        // a `continue;` (or `break;`) kept executing. break terminates the switch
-        // and continue targets an enclosing loop; either way the rest of the case
-        // body must not run.
+        // Stop the case body on return, exception unwind, OR a break/continue request:
+        // break terminates the switch, continue targets an enclosing loop; either way
+        // the rest of the case body must not run.
         if (hasReturnValue_ || is_unwinding_ || hasBreakRequest_ || hasContinueRequest_) {
             break;
         }
@@ -10950,9 +10941,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         ~call_depth_guard() { --depth; }
     } depth_guard(current_call_depth_);
 
-    // Validate argument count (accounting for default parameter values)
     {
-        // Count required parameters (those without default values)
         size_t required_params = 0;
         for (const auto& p : function.parameters) {
             if (!p.default_value) {
@@ -11059,7 +11048,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     for (size_t i = 0; i < function.parameters.size(); ++i) {
         const auto& param = function.parameters[i];
 
-        // Handle default parameter values: if no argument provided, evaluate default expression
         if (i >= args.size()) {
             // Must have a default value (validated by argument count check above)
             if (param.default_value) {
@@ -11113,7 +11101,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                         if (env == environment_.get()) {
                             env_shared = environment_;
                         } else {
-                            // Search call stack for matching environment
                             for (size_t fi = frame_index; fi > 0; --fi) {
                                 auto& frame = call_stack_[fi - 1];
                                 if (frame.closure_env.get() == env) {
@@ -11121,7 +11108,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                                     break;
                                 }
                             }
-                            // Also check global environment
                             if (!env_shared) {
                                 auto global_env = get_global_environment();
                                 if (global_env.get() == env) {
@@ -11723,7 +11709,6 @@ void interpreter::reset_environment_pool() {
 // ============================================================
 // SWITCH-BASED DISPATCH (faster than virtual calls)
 checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
-    // Create a map with string keys -> int values for enum members
     auto enum_map = script_value::make_map(
         engine_->get_type_info_string(),
         engine_->get_type_info_int(),
@@ -11735,13 +11720,11 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
         map_ref[std::move(key)] = make_int_fast(static_cast<script_int>(i));
     }
 
-    // Define the enum name in the current environment
     environment_->define(decl->name_id, std::move(enum_map));
     return {};
 }
 
 checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* decl) {
-    // Evaluate the RHS
     JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
     script_value source = pop_value();
 

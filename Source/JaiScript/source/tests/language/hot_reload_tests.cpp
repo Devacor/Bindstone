@@ -14,20 +14,16 @@ class hot_reload_tests : public suite {
 public:
     hot_reload_tests() : suite("Hot Reload Tests") {}
 
-    // Reset any global state between tests
     void pre_test() override {
-        // No global state to reset currently, but this ensures clean test isolation
     }
 
     void post_test() override {
-        // Clean up after each test if needed
     }
 
     void forge_tests() override {
         test("basic_class_redefinition", [this]() {
             auto engine = jai::engine::make();
             
-            // Add print and check functions
             engine->add_variadic_function("print", [engine](const std::vector<jai::script_value>& args) {
                 for (const auto& arg : args) {
                     std::cout << arg.to_string() << " ";
@@ -35,14 +31,13 @@ public:
                 std::cout << std::endl;
                 return jai::script_value(std::monostate{}, engine.get());
             });
-            
+
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
                 test_results->push_back(desc + ": " + (result ? "PASS" : "FAIL"));
                 return jai::script_value(std::monostate{}, engine.get());
             });
-            
-            // First definition
+
             engine->execute(R"(
                 class Cat {
                     auto age = 0;
@@ -62,7 +57,6 @@ public:
                 check_value("initial name is Fluffy", cat.name == "Fluffy");
             )");
             
-            // Redefine class - remove age, add lives
             engine->execute(R"(
                 class Cat {
                     auto name = "unnamed";
@@ -91,14 +85,13 @@ public:
                 cat.dance();
             )");
             
-            // Verify all checks passed
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);
                 }
             }
         });
-        
+
         test("inheritance_hot_reload", [this]() {
             auto engine = jai::engine::make();
             
@@ -116,7 +109,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // Create base and derived classes
             engine->execute(R"(
                 class Animal {
                     auto legs = 4;
@@ -146,7 +138,6 @@ public:
                 check_value("cat legs is 4", cat.legs == 4);
             )");
             
-            // Redefine base class - should update derived instances too
             engine->execute(R"(
                 class Animal {
                     auto legs = 2;      // Changed default
@@ -171,14 +162,13 @@ public:
                 check_value("legs kept existing value", cat.legs == 4);
             )");
             
-            // Verify all checks passed
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);
                 }
             }
         });
-        
+
         test("multi_level_inheritance_hot_reload", [this]() {
             auto engine = jai::engine::make();
             
@@ -196,7 +186,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // Create three-level hierarchy
             engine->execute(R"(
                 class Vehicle {
                     auto wheels = 0;
@@ -244,7 +233,6 @@ public:
                 check_value("sports fuel is 50", sports.fuel == 50.0);
             )");
             
-            // Redefine base Vehicle class
             engine->execute(R"(
                 class Vehicle {
                     auto fuel = 0.0;      // Changed default
@@ -273,7 +261,6 @@ public:
                 return std::to_string(static_cast<int>(val));
             });
             
-            // Initial class definitions with method overrides
             engine->execute(R"(
                 class Shape {
                     auto name = "shape";
@@ -314,7 +301,6 @@ public:
             check_eq(method_calls[2], "I am a circle");
             method_calls.clear();
             
-            // Redefine Circle to change override behavior
             engine->execute(R"(
                 class Circle : Shape {
                     auto radius = 1.0;
@@ -355,7 +341,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // Class with constructor
             engine->execute(R"(
                 class Point {
                     auto x = 0;
@@ -376,7 +361,6 @@ public:
                 auto p2 = Point(10, 20);
             )");
             
-            // Redefine with different constructor behavior
             engine->execute(R"(
                 class Point {
                     auto x = -1;
@@ -410,7 +394,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // Test with various field types
             engine->execute(R"(
                 class DataHolder {
                     auto int_val = 42;
@@ -434,7 +417,6 @@ public:
                 check_value("bool_val is true", holder.bool_val == true);
             )");
             
-            // Redefine with some fields renamed/removed/added
             engine->execute(R"(
                 class DataHolder {
                     auto int_val = 0;           // Same name, different default
@@ -476,14 +458,13 @@ public:
                 check_value("map_val removed", !map_accessible);
             )");
             
-            // Verify all checks passed
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);
                 }
             }
         });
-        
+
         test("multiple_instances_hot_reload", [this]() {
             auto engine = jai::engine::make();
             
@@ -493,7 +474,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // Create multiple instances of same class
             engine->execute(R"(
                 class Player {
                     auto health = 100;
@@ -522,7 +502,6 @@ public:
                 check_value("p3 health is 50", p3.health == 50);
             )");
             
-            // Redefine class
             engine->execute(R"(
                 class Player {
                     auto health = 100;      // Same
@@ -554,14 +533,13 @@ public:
                 check_value("p3 health kept as 50", p3.health == 50);
             )");
             
-            // Verify all checks passed
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);
                 }
             }
         });
-        
+
         test("hot_reload_migrate_lifecycle", [this]() {
             auto engine = jai::engine::make();
             
@@ -577,7 +555,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // First definition - no migration
             engine->execute(R"(
                 class Config {
                     auto version = 1;
@@ -591,7 +568,6 @@ public:
                 cfg.flags = 42;
             )");
             
-            // Second definition - add hot_reload_migrate
             engine->execute(R"(
                 class Config {
                     auto version = 2;
@@ -617,7 +593,6 @@ public:
             check_eq((*migration_log)[0], "Migrate v1->v2");
             migration_log->clear();
             
-            // Third definition - different hot_reload_migrate
             engine->execute(R"(
                 class Config {
                     auto version = 3;
@@ -641,7 +616,6 @@ public:
             check_eq((*migration_log)[0], "Migrate v2->v3");
             migration_log->clear();
             
-            // Fourth definition - REMOVE hot_reload_migrate
             engine->execute(R"(
                 class Config {
                     auto version = 4;
@@ -655,10 +629,8 @@ public:
                 check_value("cfg.id is default", cfg.id == 0);
             )");
             
-            // Should NOT have called any migration
             check_eq(migration_log->size(), 0);
-            
-            // Fifth definition - add it back, ensure old one isn't used
+
             engine->execute(R"(
                 class Config {
                     auto version = 5;
@@ -678,14 +650,13 @@ public:
             check_eq(migration_log->size(), 1);
             check_eq((*migration_log)[0], "Migrate v4->v5");
             
-            // Verify all checks passed
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);
                 }
             }
         });
-        
+
         test("performance_stress_test", [this]() {
             auto engine = jai::engine::make();
             
@@ -695,7 +666,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // Create many instances
             engine->execute(R"(
                 class Entity {
                     auto x = 0.0;
@@ -714,7 +684,6 @@ public:
                 }
             )");
             
-            // Time the redefinition
             auto start = std::chrono::high_resolution_clock::now();
             
             engine->execute(R"(
@@ -735,7 +704,6 @@ public:
             // Should be reasonably fast even with 100 instances
             check_true(duration < 10000); // Less than 10ms
             
-            // Verify a few instances were migrated correctly in script
             engine->execute(R"(
                 // Check first entity
                 auto e0 = entities[0];
@@ -759,14 +727,13 @@ public:
                 check_value("e50.health is 50", e50.health == 50);
             )");
             
-            // Verify all checks passed
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);
                 }
             }
         });
-        
+
         test("fields_unchanged_optimization", [this]() {
             auto engine = jai::engine::make();
             
@@ -782,7 +749,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // Create class with migration method
             engine->execute(R"(
                 class Widget {
                     auto width = 100;
@@ -809,7 +775,6 @@ public:
             
             migration_log->clear();
             
-            // Redefine with SAME fields (optimization should skip migration)
             engine->execute(R"(
                 class Widget {
                     auto width = 100;    // Same field names
@@ -840,7 +805,6 @@ public:
                 w1.render();
             )");
             
-            // Migration should NOT have been called since fields didn't change
             if (migration_log->size() != 2) {
                 std::cout << "\nfields_unchanged_optimization FAILURE:" << std::endl;
                 std::cout << "  Expected migration_log size: 2" << std::endl;
@@ -854,7 +818,6 @@ public:
             check_eq((*migration_log)[0], "new process called");
             check_eq((*migration_log)[1], "render called");
             
-            // Verify no migration was logged
             for (const auto& log : *migration_log) {
                 check_true(log.find("migrate called") == std::string::npos, 
                           "hot_reload_migrate should not be called when fields unchanged");
@@ -862,7 +825,6 @@ public:
             
             migration_log->clear();
             
-            // Now change fields - migration SHOULD happen
             engine->execute(R"(
                 class Widget {
                     auto width = 100;
@@ -878,28 +840,24 @@ public:
                 check_value("w1.depth has default", w1.depth == 10);
             )");
             
-            // Now migration SHOULD have been called (once per instance: w1 and w2)
-            check_eq(migration_log->size(), 2);
+            check_eq(migration_log->size(), 2);  // once per instance: w1 and w2
             check_eq((*migration_log)[0], "migrate called - fields changed");
             check_eq((*migration_log)[1], "migrate called - fields changed");
             
-            // Verify all checks passed
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);
                 }
             }
         });
-        
+
         test("fields_unchanged_performance", [this]() {
             auto engine = jai::engine::make();
             
-            // Add to_string function
             engine->add_function("to_string", [](jai::script_int val) {
                 return std::to_string(val);
             });
-            
-            // Create a class with many instances
+
             engine->execute(R"(
                 class DataPoint {
                     auto x = 0.0;
@@ -929,7 +887,6 @@ public:
                 }
             )");
             
-            // Time redefinition with SAME fields (optimization active)
             auto start_optimized = std::chrono::high_resolution_clock::now();
             
             engine->execute(R"(
@@ -958,7 +915,6 @@ public:
             auto duration_optimized = std::chrono::duration_cast<std::chrono::microseconds>(
                 end_optimized - start_optimized).count();
             
-            // Verify instances still work
             engine->execute(R"(
                 // Check a few instances
                 auto dp0 = instances[0];
@@ -968,7 +924,6 @@ public:
                 dp500.analyze(); // New method should work
             )");
             
-            // Now time redefinition with CHANGED fields (no optimization)
             auto start_unoptimized = std::chrono::high_resolution_clock::now();
             
             engine->execute(R"(
@@ -993,25 +948,20 @@ public:
             auto duration_unoptimized = std::chrono::duration_cast<std::chrono::microseconds>(
                 end_unoptimized - start_unoptimized).count();
             
-            // Calculate speedup
             double speedup = static_cast<double>(duration_unoptimized) / duration_optimized;
-            
-            // Always output performance metrics
+
             std::cerr << "\nHot reload performance comparison (1000 instances):" << std::endl;
             std::cerr << "  Fields unchanged (optimized): " << duration_optimized << " uS" << std::endl;
             std::cerr << "  Fields changed (full migration): " << duration_unoptimized << " uS" << std::endl;
             std::cerr << "  Speedup: " << std::fixed << std::setprecision(2) << speedup << "x" << std::endl;
             std::cerr << std::endl;
             
-            // The optimized version should be significantly faster
-            check_true(duration_optimized < duration_unoptimized, 
+            check_true(duration_optimized < duration_unoptimized,
                       "Optimized hot reload should be faster than full migration");
-            
-            // Expect at least 2x speedup for meaningful optimization
-            check_true(speedup > 2.0, 
+            check_true(speedup > 2.0,
                       "Should see at least 2x speedup when fields unchanged");
         });
-        
+
         test("identical_class_fingerprint", [this]() {
             auto engine = jai::engine::make();
             
@@ -1027,7 +977,6 @@ public:
                 return jai::script_value(std::monostate{}, engine.get());
             });
             
-            // Create initial class
             engine->execute(R"(
                 auto global_calc = null;  // Declare global variable first
                 
@@ -1065,10 +1014,8 @@ public:
                 check_value("memory is 15", global_calc.memory == 15.0);
             )");
             
-            // Clear log
             log_messages.clear();
-            
-            // Redefine with IDENTICAL class (fingerprint should match)
+
             auto start_identical = std::chrono::high_resolution_clock::now();
             
             engine->execute(R"(
@@ -1102,14 +1049,12 @@ public:
             auto duration_identical = std::chrono::duration_cast<std::chrono::microseconds>(
                 end_identical - start_identical).count();
             
-            // Methods should still work
             engine->execute(R"(
                 global_calc.add(10);
                 check_value("result is 25", global_calc.result == 25.0);
                 check_value("memory still 15", global_calc.memory == 15.0);
             )");
             
-            // Now change something to force actual redefinition
             auto start_changed = std::chrono::high_resolution_clock::now();
             
             engine->execute(R"(
@@ -1143,12 +1088,10 @@ public:
             auto duration_changed = std::chrono::duration_cast<std::chrono::microseconds>(
                 end_changed - start_changed).count();
             
-            // Test new method behavior
             engine->execute(R"(
                 global_calc.add(5);  // Should log "add v2 called"
             )");
             
-            // Check that v2 was called
             bool found_v2 = false;
             for (const auto& msg : log_messages) {
                 if (msg == "add v2 called") {
@@ -1158,21 +1101,17 @@ public:
             }
             check_true(found_v2, "Updated method should be called");
             
-            // Fingerprint optimization should make identical redefinition essentially free
             std::cerr << "\nFingerprint optimization results:" << std::endl;
             std::cerr << "  Identical class redefinition: " << duration_identical << " uS" << std::endl;
             std::cerr << "  Changed class redefinition: " << duration_changed << " uS" << std::endl;
             std::cerr << std::endl;
             
-            // Identical should be at least as fast (with small tolerance for timing variance)
-            // Note: Most time is spent in parsing which is the same for both
-            // The optimization saves time on instance migration, not parsing
-            // At microsecond scale, timing variance can be significant, so allow generous tolerance
-            int64_t tolerance_us = 1000;  // Allow 1ms variance for timing reliability
+            // parsing cost is identical for both; optimization saves only migration time, so
+            // timing variance dominates at this granularity — allow generous tolerance
+            int64_t tolerance_us = 1000;  // 1ms variance budget
             check_true(duration_identical <= duration_changed + tolerance_us,
                       "Identical class redefinition should be roughly as fast as changed (within tolerance)");
             
-            // Verify all checks passed
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);

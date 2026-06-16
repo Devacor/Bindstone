@@ -15,10 +15,6 @@
 
 namespace jai::foundry::tests {
 
-// ============================================================================
-// Test Type 1: Pure JAI_STATIC_BINDER type (no property_owner)
-// This is a plain C++ struct that uses static binder for serialization.
-// ============================================================================
 struct Vector2D {
     double x = 0.0;
     double y = 0.0;
@@ -36,11 +32,6 @@ struct Vector2D {
     }
 };
 
-// ============================================================================
-// Test Type 2: property_owner with methods exposed to script
-// Properties come from JAI_PROPERTY, methods added via dynamic_binder.
-// This is the "mix/match" pattern - best of both worlds.
-// ============================================================================
 class Entity : public property_owner<Entity> {
 public:
     JAI_PROPERTY((int), id, 0);
@@ -53,7 +44,6 @@ public:
         name = name_;
     }
 
-    // Methods to expose to script
     bool is_alive() const { return health.get() > 0; }
     void damage(float amount) { health = std::max(0.0f, health.get() - amount); }
     void heal(float amount) { health = std::min(100.0f, health.get() + amount); }
@@ -65,10 +55,6 @@ public:
     }
 };
 
-// ============================================================================
-// Test Type 3: property_owner with composable save/load that calls
-// property_mgr.save() internally.
-// ============================================================================
 class Player : public property_owner<Player> {
 public:
     JAI_PROPERTY((std::string), username, "player");
@@ -80,7 +66,6 @@ public:
 
     Player() = default;
 
-    // Manual exp management
     void add_experience(int amount) {
         experience = experience.get() + amount;
         while (experience.get() >= level_up_threshold()) {
@@ -93,33 +78,23 @@ public:
         return level.get() * 100;
     }
 
-    // Composable serialization - calls property_mgr internally
-    // Templated on Archive for CRTP-based archive support
     template<typename Archive>
     void save(Archive& ar) const {
-        // Save all JAI_PROPERTY properties
         property_mgr.save(ar);
-        // Could add custom data here if needed (but not session_id - transient)
     }
 
     template<typename Archive>
     void load(Archive& ar) {
-        // Load all JAI_PROPERTY properties
         property_mgr.load(ar);
-        // Could load custom data here if needed
     }
 };
 
-// ============================================================================
-// Test Type 4: Pure C++ type with explicit save/load (no properties)
-// ============================================================================
 struct GameConfig {
     int max_players = 4;
     bool friendly_fire = false;
     double round_time = 300.0;
 };
 
-// Free functions for serialization (ADL) - templated for CRTP archives
 template<typename Archive>
 inline void save(Archive& ar, const GameConfig& cfg) {
     ar.serialize("max_players", cfg.max_players);
@@ -136,43 +111,23 @@ inline void load(Archive& ar, GameConfig& cfg) {
 
 } // namespace jai::foundry::tests
 
-// ============================================================================
-// JAI_STATIC_BINDER registrations (outside namespace for template specialization)
-// These provide compile-time type info for serialization
-// ============================================================================
-
-// Static binder for Vector2D - properties for serialization
 JAI_STATIC_BINDER(jai::foundry::tests::Vector2D, "Vector2D",
     .property("x", &jai::foundry::tests::Vector2D::x)
     .property("y", &jai::foundry::tests::Vector2D::y)
 );
 
-// Entity and Player use property_owner for properties, so no JAI_STATIC_BINDER needed
-// (property_mgr.save/load handles serialization)
-
 namespace jai::foundry::tests {
-
-// ============================================================================
-// Test Suite
-// ============================================================================
 
 class static_binder_tests : public suite {
 public:
     static_binder_tests() : suite("Static Binder") {}
 
     void forge_tests() override {
-        // ================================================================
-        // Mix/Match: property_owner with methods via dynamic_binder
-        // ================================================================
-
         test("property_owner_with_methods", [this]() {
             auto eng = engine::make();
 
-            // Bind Entity with:
-            // - Properties from property_owner (auto_bind)
-            // - Methods explicitly added
             dynamic_binder<Entity>(*eng, "Entity")
-                .auto_bind()  // Gets JAI_PROPERTY properties
+                .auto_bind()
                 .constructor<>()
                 .constructor<int, const std::string&>()
                 .method("is_alive", &Entity::is_alive)
@@ -183,12 +138,10 @@ public:
 
             eng->execute("auto e = Entity(1, \"Hero\");");
 
-            // Test property access (from property_owner)
             check_eq(eng->execute("e.id").as<int>(), 1, "Property id works");
             check_eq(eng->execute("e.name").as<std::string>(), "Hero", "Property name works");
             check_eq(eng->execute("e.health").as<float>(), 100.0f, "Property health works");
 
-            // Test methods
             check_eq(eng->execute("e.is_alive()").as<bool>(), true, "Method is_alive() works");
             check_eq(eng->execute("e.status()").as<std::string>(), "healthy", "Method status() works");
         });
@@ -209,7 +162,6 @@ public:
             cpp_entity->health = 50.0f;
             eng->add_global("entity", eng->make_object(cpp_entity));
 
-            // Method mutates property
             check_eq(eng->execute("entity.status()").as<std::string>(), "wounded", "Initial status is wounded");
 
             eng->execute("entity.damage(30);");
@@ -241,19 +193,13 @@ public:
             check_eq(eng->execute("e.status()").as<std::string>(), "dead", "Status is dead");
         });
 
-        // ================================================================
-        // Composable Serialization Tests
-        // ================================================================
-
         test("composable_save_load_property_owner", [this]() {
-            // Player has explicit save/load that calls property_mgr internally
             Player p1;
             p1.username = "TestUser";
             p1.level = 5;
             p1.experience = 250;
             p1.session_id = 99;  // Transient, should NOT be serialized
 
-            // Serialize using binary_archive_writer
             std::vector<uint8_t> buffer;
             {
                 serialization::binary_archive_writer ar(buffer);
@@ -262,7 +208,7 @@ public:
                 ar.end_object();
             }
 
-            // Deserialize into new object (binary_archive_reader needs an engine)
+            // binary_archive_reader needs an engine
             auto eng = engine::make();
             Player p2;
             {
@@ -295,19 +241,13 @@ public:
             cpp_player->experience = 0;
             eng->add_global("player", eng->make_object(cpp_player));
 
-            // Add experience via method
             eng->execute("player.add_experience(150);");  // 150 exp at level 1 (threshold=100)
             check_eq(cpp_player->level.get(), 2, "Leveled up to 2");
             check_eq(cpp_player->experience.get(), 50, "50 exp remaining after level up");
 
-            // Verify script sees the changes
             check_eq(eng->execute("player.level").as<int>(), 2, "Script sees level 2");
             check_eq(eng->execute("player.experience").as<int>(), 50, "Script sees 50 exp");
         });
-
-        // ================================================================
-        // Free function serialization tests (ADL)
-        // ================================================================
 
         test("free_function_save_load", [this]() {
             GameConfig cfg1;
@@ -315,16 +255,15 @@ public:
             cfg1.friendly_fire = true;
             cfg1.round_time = 600.0;
 
-            // Serialize using ADL
             std::vector<uint8_t> buffer;
             {
                 serialization::binary_archive_writer ar(buffer);
                 ar.begin_object("GameConfig", 1);
-                save(ar, cfg1);  // ADL finds free function
+                save(ar, cfg1);
                 ar.end_object();
             }
 
-            // Deserialize (binary_archive_reader needs an engine)
+            // binary_archive_reader needs an engine
             auto eng = engine::make();
             GameConfig cfg2;
             {
@@ -341,18 +280,9 @@ public:
             check_eq(cfg2.round_time, 600.0, "round_time restored");
         });
 
-        // ================================================================
-        // Detection trait tests
-        // ================================================================
-
         test("has_static_type_detection", [this]() {
-            // Vector2D is registered with JAI_STATIC_BINDER
             check(has_static_type_v<Vector2D>, "Vector2D has static type");
-
-            // GameConfig is NOT registered
             check(!has_static_type_v<GameConfig>, "GameConfig does NOT have static type");
-
-            // Built-in types don't have static type
             check(!has_static_type_v<int>, "int does NOT have static type");
             check(!has_static_type_v<std::string>, "string does NOT have static type");
         });
@@ -365,27 +295,16 @@ public:
             check(!property_serialization::is_property_owner_v<int>, "int is NOT property_owner");
         });
 
-        // ================================================================
-        // Compile-time property count tests
-        // ================================================================
-
         test("static_binder_compile_time_counts", [this]() {
-            // Check at compile time the counts are correct
             constexpr size_t vector_props = jai_static_type<Vector2D>::binder.property_count();
             constexpr size_t vector_methods = jai_static_type<Vector2D>::binder.method_count();
             check_eq(vector_props, size_t(2), "Vector2D has 2 properties (x, y)");
             check_eq(vector_methods, size_t(0), "Vector2D has 0 methods in static binder");
         });
 
-        // ================================================================
-        // JAI_STATIC_BINDER serialization test
-        // ================================================================
-
         test("static_binder_serialization", [this]() {
-            // Vector2D uses JAI_STATIC_BINDER for serialization
             Vector2D v1{3.0, 4.0};
 
-            // Serialize using named properties
             std::vector<uint8_t> buffer;
             {
                 serialization::binary_archive_writer ar(buffer);
@@ -395,7 +314,6 @@ public:
                 ar.end_object();
             }
 
-            // Deserialize
             auto eng = engine::make();
             Vector2D v2;
             {
@@ -410,19 +328,12 @@ public:
 
             check_eq(v2.x, 3.0, "x restored");
             check_eq(v2.y, 4.0, "y restored");
-
-            // Verify methods still work
             check_eq(v2.length(), 5.0, "length() correct (3-4-5 triangle)");
         });
-
-        // ================================================================
-        // Shared C++ object tests
-        // ================================================================
 
         test("shared_object_property_and_method_access", [this]() {
             auto eng = engine::make();
 
-            // Register Entity with properties and methods
             dynamic_binder<Entity>(*eng, "Entity")
                 .auto_bind()
                 .constructor<int, const std::string&>()
@@ -432,27 +343,20 @@ public:
                 .method("status", &Entity::status)
                 .build();
 
-            // Create C++ object and share with script
             auto cpp_entity = std::make_shared<Entity>(42, "Warrior");
             cpp_entity->health = 75.0f;
             eng->add_global("warrior", eng->make_object(cpp_entity));
 
-            // Script can read properties
             check_eq(eng->execute("warrior.id").as<int>(), 42, "Read id from script");
             check_eq(eng->execute("warrior.name").as<std::string>(), "Warrior", "Read name from script");
-
-            // Script can call methods
             check_eq(eng->execute("warrior.status()").as<std::string>(), "healthy", "status() works");
 
-            // Script modifies C++ object via property
             eng->execute("warrior.name = \"Champion\";");
             check_eq(cpp_entity->name.get(), "Champion", "C++ sees script property change");
 
-            // Script modifies C++ object via method
             eng->execute("warrior.damage(50);");
             check_eq(cpp_entity->health.get(), 25.0f, "C++ sees method mutation");
 
-            // Verify both script and C++ see consistent state
             check_eq(eng->execute("warrior.health").as<float>(), 25.0f, "Script sees updated health");
             check_eq(eng->execute("warrior.status()").as<std::string>(), "wounded", "Status reflects new health");
         });
@@ -468,15 +372,12 @@ public:
             auto cpp_entity = std::make_shared<Entity>();
             eng->add_global("e", eng->make_object(cpp_entity));
 
-            // Script sets property
             eng->execute("e.health = 75;");
             check_eq(cpp_entity->health.get(), 75.0f, "C++ sees script change");
 
-            // C++ sets property
             cpp_entity->health = 25.0f;
             check_eq(eng->execute("e.health").as<float>(), 25.0f, "Script sees C++ change");
 
-            // Script uses compound assignment
             eng->execute("e.health += 10;");
             check_eq(cpp_entity->health.get(), 35.0f, "C++ sees compound assignment");
         });
@@ -496,7 +397,6 @@ public:
                 .method("level_up_threshold", &Player::level_up_threshold)
                 .build();
 
-            // Use both types in one script
             eng->execute(R"(
                 auto entity = Entity(1, "Test");
                 auto player = Player();
@@ -510,5 +410,4 @@ public:
 
 } // namespace jai::foundry::tests
 
-// Auto-register with the test framework
 FOUNDRY_REGISTER(jai::foundry::tests::static_binder_tests)

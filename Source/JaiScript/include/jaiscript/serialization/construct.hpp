@@ -7,7 +7,6 @@
 
 namespace jai {
 
-// Forward declarations for construct types
 namespace serialization {
 	template<typename T> class construct;
 	template<typename T> class construct_unique;
@@ -18,9 +17,6 @@ namespace serialization {
 
 namespace serialization {
 
-	// construct<T> - for load_and_construct pattern (types without default constructors)
-	// Supports an optional on_construct callback for eager shared_ptr registration
-	// (so child weak_ptrs can resolve during load_and_construct, matching Cereal behavior)
 	template<typename T>
 	class construct {
 		std::shared_ptr<T>& ptr_ref_;
@@ -29,6 +25,8 @@ namespace serialization {
 	public:
 		explicit construct(std::shared_ptr<T>& ptr) : ptr_ref_(ptr) {}
 
+		// Fires eagerly inside operator() right after the shared_ptr exists, so child weak_ptrs
+		// can resolve back to this object during load_and_construct.
 		void set_on_construct(std::function<void()> cb) { on_construct_ = std::move(cb); }
 
 		template<typename... Args>

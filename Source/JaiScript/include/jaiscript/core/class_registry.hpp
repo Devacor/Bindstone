@@ -21,7 +21,6 @@ public:
     // Register script-defined class
     checked_result<void> register_script_class(std::shared_ptr<script_class_definition> class_def);
 
-    // Register C++ class (existing dynamic_binder)
     checked_result<void> register_cpp_class(std::shared_ptr<class_definition> class_def);
     
     // Unified lookup

@@ -16,10 +16,8 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
-// property_owner<Derived, Base> inheritance: a derived object's INHERITED properties must survive
-// serialization. The serialization paths historically walked only the most-derived property_mgr
-// (name-hiding), silently dropping every base-level property on both save and load. These pin that
-// the whole inheritance chain round-trips, on every archive format and via the polymorphic path.
+// property_owner<Derived, Base> inheritance: pins that the whole chain round-trips on every archive
+// format and via the polymorphic path.
 
 class InhBase : public property_owner<InhBase> {
 public:
@@ -50,7 +48,7 @@ public:
         test("inherited_property_survives_json", [&]() {
             auto eng = engine::make();
             auto derived = std::make_shared<InhDerived>();
-            derived->baseVal = 42;          // inherited from InhBase
+            derived->baseVal = 42;
             derived->derivedTag = "kept";
             std::shared_ptr<InhBase> original = derived;
 
@@ -58,7 +56,7 @@ public:
             auto ld = std::dynamic_pointer_cast<InhDerived>(loaded);
             check(ld != nullptr, "dynamic type preserved");
             check_eq(std::string("kept"), ld->derivedTag.get());
-            check_eq(42, ld->baseVal.get());  // inherited property must round-trip
+            check_eq(42, ld->baseVal.get());
         });
 
         test("inherited_property_survives_binary", [&]() {
@@ -78,16 +76,16 @@ public:
         test("deep_inheritance_chain_json", [&]() {
             auto eng = engine::make();
             auto leaf = std::make_shared<InhLeaf>();
-            leaf->baseVal = 10;   // InhBase
-            leaf->midVal = 20;    // InhMid
+            leaf->baseVal = 10;
+            leaf->midVal = 20;
             leaf->leafTag = "deep";
             std::shared_ptr<InhBase> original = leaf;
 
             auto loaded = roundtrip_json(*eng, original);
             auto ll = std::dynamic_pointer_cast<InhLeaf>(loaded);
             check(ll != nullptr, "deep dynamic type preserved");
-            check_eq(10, ll->baseVal.get());   // two levels up
-            check_eq(20, ll->midVal.get());    // one level up
+            check_eq(10, ll->baseVal.get());
+            check_eq(20, ll->midVal.get());
             check_eq(std::string("deep"), ll->leafTag.get());
         });
 

@@ -26,10 +26,9 @@ public:
                 return sum;
             });
             
-            // Create large array in script
             engine->execute("auto large_array = [];");
             engine->execute("for (auto i = 0; i < 10000; i += 1) { large_array.push(i); }");
-            
+
             auto start = std::chrono::high_resolution_clock::now();
             auto result = engine->execute("sum_large(large_array)");
             auto end = std::chrono::high_resolution_clock::now();
@@ -43,7 +42,6 @@ public:
         test("vector_int_basic", [this]() {
             auto engine = engine::make();
             
-            // Test passing vector<int> to C++ function
             engine->add_function("sum_ints", [](std::vector<int> nums) -> int {
                 return std::accumulate(nums.begin(), nums.end(), 0);
             });
@@ -62,7 +60,6 @@ public:
                 return sum / nums.size();
             });
             
-            // Mixed int/double array
             auto result = engine->execute("avg_doubles([1, 2.5, 3, 4.5])");
             check_eq(result.as<double>(), 2.75);
         });
@@ -86,7 +83,6 @@ public:
         test("vector_return_values", [this]() {
             auto engine = engine::make();
             
-            // Test returning vector from C++ to script
             engine->add_function("range", [](int start, int end) -> std::vector<int> {
                 std::vector<int> result;
                 for (int i = start; i < end; ++i) {
@@ -106,7 +102,6 @@ public:
         test("nested_vectors", [this]() {
             auto engine = engine::make();
             
-            // Test vector<vector<int>> (2D arrays)
             engine->add_function("sum_matrix", [](std::vector<std::vector<int>> matrix) -> int {
                 int sum = 0;
                 for (const auto& row : matrix) {
@@ -153,7 +148,6 @@ public:
         test("map_int_string", [this]() {
             auto engine = engine::make();
             
-            // Test map with int keys
             engine->add_function("number_names", [](std::map<int, std::string> nums) -> std::string {
                 std::string result;
                 for (const auto& [num, name] : nums) {
@@ -192,7 +186,6 @@ public:
         test("large_vector_performance", [this]() {
             auto engine = engine::make();
             
-            // Register stdlib functions
             engine->add_function("print", [](const std::string& str) { std::cout << str << std::endl; });
             engine->add_function("to_string", [](int val) -> std::string { return std::to_string(val); });
             
@@ -211,7 +204,6 @@ public:
                 return sum;
             });
             
-            // Add a function that takes script_value directly to see what's being passed
             engine->add_variadic_function("debug_sum_large", [engine](std::vector<script_value> args) -> script_value {
                 if (args.size() != 1) {
                     throw runtime_error("debug_sum_large expects 1 argument");
@@ -230,18 +222,14 @@ public:
                 return engine->make_value(0);
             });
             
-            // Create large array in script
             engine->execute("auto large_array = [];");
             engine->execute("for (auto i = 0; i < 10000; i += 1) { large_array.push(i); }");
-            
-            // Debug: print what we're about to call
+
             engine->execute("print(\"About to call sum_large with array size: \" + to_string(large_array.size()));");
-            
-            // Debug: check array size
+
             auto size_result = engine->execute("large_array.size()");
             std::cout << "    Array size: " << size_result.as<int>() << std::endl;
-            
-            // Debug: check first few elements
+
             auto array_val = engine->get_variable("large_array");
             auto& arr = array_val.as_array();
             std::cout << "    First few elements in large_array: ";
@@ -249,8 +237,7 @@ public:
                 std::cout << arr[i].as_int() << " ";
             }
             std::cout << std::endl;
-            
-            // Debug: Let's test with a direct call first
+
             std::cout << "    Testing direct sum_large([1,2,3,4,5])..." << std::endl;
             auto test_result = engine->execute("sum_large([1, 2, 3, 4, 5])");
             std::cout << "    Direct call result: " << test_result.as<int64_t>() << std::endl;
@@ -271,7 +258,6 @@ public:
             
             engine->add_function("needs_int_vec", [](std::vector<int>) {});
             
-            // Should throw when passing wrong types
             check_throws<runtime_error>([&]() {
                 engine->execute("needs_int_vec([\"not\", \"ints\"])");
             });
@@ -314,7 +300,6 @@ public:
             
             struct Point { double x, y; };
             
-            // Register Point class
             dynamic_binder<Point>(*engine, "Point")
                 .constructor<>()
                 .property("x", &Point::x)
@@ -329,7 +314,6 @@ public:
                 return total;
             });
             
-            // This should work with custom type vectors
             auto result = engine->execute(R"(
                 auto points = [];
                 auto p1 = Point();
@@ -345,7 +329,6 @@ public:
         test("performance_comparison", [this]() {
             auto engine = engine::make();
             
-            // Compare performance of different approaches
             engine->add_variadic_function("sum_variadic", [engine](std::vector<script_value> args) -> script_value {
                 if (args.size() != 1 || !args[0].is_array()) {
                     throw runtime_error("Expected single array argument");
@@ -362,11 +345,9 @@ public:
                 return std::accumulate(nums.begin(), nums.end(), 0);
             });
             
-            // Create test array
             engine->execute("auto test_array = [];");
             engine->execute("for (auto i = 0; i < 1000; i += 1) { test_array.push(i); }");
             
-            // Measure variadic version
             auto start1 = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < 100; ++i) {
                 engine->execute("sum_variadic(test_array)");
@@ -374,7 +355,6 @@ public:
             auto end1 = std::chrono::high_resolution_clock::now();
             auto variadic_time = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1).count();
             
-            // Measure typed version (when it works)
             try {
                 auto start2 = std::chrono::high_resolution_clock::now();
                 for (int i = 0; i < 100; ++i) {

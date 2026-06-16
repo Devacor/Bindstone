@@ -49,7 +49,6 @@ static int compute_param_match_cost(
             continue;
         }
 
-        // Handle object/shared_ptr types with inheritance checking
         if ((paramInfo.base_type == script_value_type::jai_object_type ||
              paramInfo.base_type == script_value_type::jai_shared_ptr_type) &&
             (argType == script_value_type::jai_object_type ||
@@ -87,7 +86,6 @@ static int compute_param_match_cost(
                 totalCost += 50;                 // no C++ type info - typed overloads preferred
             }
         } else {
-            // Non-object types (or mixed) - primitive + custom conversions via the registry.
             int cost = convReg ? convReg->get_builtin_conversion_cost(argType, paramInfo.base_type)
                                : (argType == paramInfo.base_type ? 0 : 1000);
             if (cost >= 1000) {
@@ -417,8 +415,6 @@ engine::implementation::implementation()
     global_environment_ = std::make_shared<environment>(&string_symbolizer_);
 
     // The tree-walk interpreter is the only backend (the bytecode VM is unfinished/LEGACY).
-    // A previous JAISCRIPT_BACKEND env read could silently route a shipped engine to the
-    // throwing VM stub, so it was removed.
     current_backend_type = backend_type::interpreter;
     backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
 
@@ -587,7 +583,6 @@ void engine::initialize_engine_reference() {
     
     // Set up custom extractor for class_instance objects in the conversion registry
     impl->conversions->set_custom_extractor([this](const std::string& type_name, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
-        // Check if this is a class that was registered with dynamic_binder
         // dynamic_binder creates objects with type_name matching the class name
         auto classIt = impl->classes.find(type_name);
         if (classIt != impl->classes.end()) {

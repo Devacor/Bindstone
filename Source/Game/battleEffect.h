@@ -140,7 +140,6 @@ public:
 		return gameInstance;
 	}
 
-	// Registers private members with the script engine (called by dynamic_binder::auto_bind)
 	static void jai_auto_bind(jai::dynamic_binder<BattleEffect>& builder);
 
 protected:

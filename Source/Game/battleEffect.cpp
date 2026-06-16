@@ -6,10 +6,6 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/signals/signal_binding.hpp>
 
-// ============================================================================
-// JaiScript bindings (ported from the ChaiScript-era gameHooks)
-// ============================================================================
-
 static jai::registrar<BattleEffectNetworkState, MV::Services> _hookBattleEffectNetworkState("BattleEffectNetworkState",
 	[](jai::dynamic_binder<BattleEffectNetworkState>& builder, const MV::Services& a_services) {
 	if (auto* eng = a_services.get<jai::engine>(false)) {

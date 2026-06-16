@@ -6,10 +6,6 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/signals/signal_binding.hpp>
 
-// ============================================================================
-// JaiScript bindings (ported from the ChaiScript-era gameHooks)
-// ============================================================================
-
 static jai::registrar<BuildTree, MV::Services> _hookBuildTree("BuildTree",
 	[](jai::dynamic_binder<BuildTree>& builder, const MV::Services&) {
 	builder.property("id", &BuildTree::id);

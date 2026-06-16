@@ -7,7 +7,6 @@
 #include <jaiscript/signals/signal_binding.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
-// JaiScript binding for StandardMessages
 static jai::registrar<StandardMessages, MV::Services> _hookStandardMessages("StandardMessages",
 	[](jai::dynamic_binder<StandardMessages>& builder, const MV::Services& a_services) {
 	if (auto* eng = a_services.get<jai::engine>(false)) {
@@ -49,7 +48,6 @@ Game::Game(Managers& a_managers) :
 	done(false),
 	jaiEngine_(jai::engine::make()) {
 
-	// Register stdlib and trigger all registrars
 	jai::stdlib::register_all(*jaiEngine_);
 	jai::bind_registrar<MV::Services>(*jaiEngine_, a_managers.services);
 

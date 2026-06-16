@@ -3,7 +3,6 @@
 
 #include <jaiscript/core/registrar.hpp>
 
-// JaiScript binding for Team (ported from the ChaiScript-era gameHooks)
 static jai::registrar<Team, MV::Services> _hookTeam("Team",
 	[](jai::dynamic_binder<Team>& builder, const MV::Services&) {
 	builder.method("ourWell", &Team::ourWell);

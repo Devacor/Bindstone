@@ -48,7 +48,6 @@ namespace MV {
 			return false;
 		}
 
-		// Called by dynamic_binder::auto_bind() to register private members
 		static void jai_auto_bind(jai::dynamic_binder<Interface>& builder);
 
 	private:
@@ -72,7 +71,6 @@ namespace MV {
 	public:
 		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, jai::engine& a_engine, std::string a_scriptName);
 
-		// Non-copyable due to unique_ptr and reference members
 		InterfaceManager(const InterfaceManager&) = delete;
 		InterfaceManager& operator=(const InterfaceManager&) = delete;
 
@@ -126,7 +124,6 @@ namespace MV {
 		void setActiveText(Interface* a_current);
 		void removeActiveText(Interface* a_current);
 
-		// Called by dynamic_binder::auto_bind() to register private members
 		static void jai_auto_bind(jai::dynamic_binder<InterfaceManager>& builder);
 
 	private:

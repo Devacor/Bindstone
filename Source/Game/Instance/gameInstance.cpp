@@ -8,7 +8,6 @@
 
 #include <jaiscript/core/registrar.hpp>
 
-// JaiScript binding for GameInstance (ported from the ChaiScript-era gameHooks)
 static jai::registrar<GameInstance, MV::Services> _hookGameInstance("GameInstance",
 	[](jai::dynamic_binder<GameInstance>& builder, const MV::Services&) {
 	builder.method("creature", [](GameInstance& a_self, int64_t a_id) { return a_self.creature(a_id); });

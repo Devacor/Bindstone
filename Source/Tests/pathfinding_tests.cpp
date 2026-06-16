@@ -1,6 +1,3 @@
-// Pathfinding Budget and Urgency System Tests
-// Tests for the amortized A* pathfinding with urgency-based recalculation
-
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include <thread>
@@ -15,10 +12,6 @@ public:
     pathfinding_tests() : suite("Pathfinding") {}
 
     void forge_tests() override {
-        // ==========================================
-        // Map Budget Tests
-        // ==========================================
-
         test("map_budget_initial_state", [this]() {
             auto map = MV::Map::make(MV::Size<int>(10, 10));
 
@@ -44,7 +37,6 @@ public:
             map->consumeBudget(500);
             check_eq(map->remainingBudget(), MV::Map::FRAME_NODE_BUDGET - 500, "Budget consumed");
 
-            // Sleep for more than frame time to trigger reset
             std::this_thread::sleep_for(std::chrono::milliseconds(20));  // > 16.67ms
             map->tickBudget();
 
@@ -55,15 +47,11 @@ public:
             auto map = MV::Map::make(MV::Size<int>(10, 10));
 
             map->consumeBudget(500);
-            map->tickBudget();  // Immediate tick, no time passed
+            map->tickBudget();
 
             check_eq(map->remainingBudget(), MV::Map::FRAME_NODE_BUDGET - 500,
                      "Budget NOT reset within same frame");
         });
-
-        // ==========================================
-        // Basic Pathfinding Tests
-        // ==========================================
 
         test("agent_basic_creation", [this]() {
             auto map = MV::Map::make(MV::Size<int>(20, 20));
@@ -89,7 +77,6 @@ public:
         test("agent_blocked_path", [this]() {
             auto map = MV::Map::make(MV::Size<int>(10, 10));
 
-            // Create a wall blocking the path
             for (int y = 0; y < 10; ++y) {
                 map->get(MV::Point<int>(5, y)).staticBlock();
             }
@@ -98,13 +85,8 @@ public:
             agent->goal(MV::Point<int>(9, 0));
 
             auto path = agent->path();
-            // Path should exist (even if just start position when fully blocked)
             check_true(path.size() >= 1, "Path exists (even if just start position)");
         });
-
-        // ==========================================
-        // Urgency-Based Recalculation Tests
-        // ==========================================
 
         test("agent_distant_blockage_deferred", [this]() {
             auto map = MV::Map::make(MV::Size<int>(20, 20));
@@ -142,26 +124,17 @@ public:
                 blocked_signal_received = true;
             });
 
-            // Block the next node in path (urgent)
             if (path.size() > 1) {
                 auto next_pos = path[1].position();
                 map->get(next_pos).block();
 
-                // Simulate update
                 agent->update(0.016);
-
-                // Agent should have tried to recalculate
             }
         });
-
-        // ==========================================
-        // Budget Limiting Tests
-        // ==========================================
 
         test("multiple_agents_share_budget", [this]() {
             auto map = MV::Map::make(MV::Size<int>(50, 50));
 
-            // Create multiple agents
             std::vector<std::shared_ptr<MV::NavigationAgent>> agents;
             for (int i = 0; i < 10; ++i) {
                 auto agent = MV::NavigationAgent::make(map, MV::Point<int>(0, i * 5));
@@ -174,7 +147,6 @@ public:
                 agent->update(0.016);
             }
 
-            // Budget should be consumed by the agents
             check_true(map->remainingBudget() < MV::Map::FRAME_NODE_BUDGET,
                       "Budget consumed by agent updates");
         });
@@ -183,25 +155,18 @@ public:
             auto map = MV::Map::make(MV::Size<int>(20, 20));
             auto agent = MV::NavigationAgent::make(map, MV::Point<int>(0, 0));
 
-            // Exhaust budget
             map->consumeBudget(MV::Map::FRAME_NODE_BUDGET + 1000);
             check_false(map->hasBudget(), "Budget exhausted");
 
-            // Agent should not be able to pathfind
             agent->goal(MV::Point<int>(19, 0));
 
             // When budget is zero, attemptToRecalculate should return early
         });
 
-        // ==========================================
-        // Path Calculation Tests
-        // ==========================================
-
         test("path_uses_budget_limit", [this]() {
             auto map = MV::Map::make(MV::Size<int>(100, 100));
             auto agent = MV::NavigationAgent::make(map, MV::Point<int>(0, 0));
 
-            // Create some obstacles to make pathfinding harder
             for (int x = 10; x < 90; ++x) {
                 map->get(MV::Point<int>(x, 50)).staticBlock();
             }
@@ -209,17 +174,14 @@ public:
             agent->goal(MV::Point<int>(99, 99));
             auto path = agent->path();
 
-            // Path should exist, limited by search budget
             check_true(path.size() >= 1, "Some path calculated within budget");
         });
 
         test("clearance_for_unit_size", [this]() {
             auto map = MV::Map::make(MV::Size<int>(20, 20));
 
-            // Create a 2x2 unit
             auto agent = MV::NavigationAgent::make(map, MV::Point<int>(0, 0), 2);
 
-            // Create a narrow passage (only 1 cell wide)
             for (int y = 0; y < 20; ++y) {
                 if (y != 10) {  // Leave one gap
                     map->get(MV::Point<int>(5, y)).staticBlock();
@@ -233,10 +195,6 @@ public:
             // Path should be blocked or go around
         });
 
-        // ==========================================
-        // Signal Tests
-        // ==========================================
-
         test("on_arrive_signal", [this]() {
             auto map = MV::Map::make(MV::Size<int>(10, 10));
             auto agent = MV::NavigationAgent::make(map, MV::Point<int>(0, 0));
@@ -249,7 +207,6 @@ public:
             agent->goal(MV::Point<int>(2, 0));
             agent->speed(100.0f);  // Fast speed to arrive quickly
 
-            // Simulate updates until arrival
             for (int i = 0; i < 100 && agent->pathfinding(); ++i) {
                 agent->update(0.1);
             }
@@ -260,7 +217,6 @@ public:
         test("on_blocked_signal_not_repeated", [this]() {
             auto map = MV::Map::make(MV::Size<int>(10, 10));
 
-            // Block everything except start
             for (int x = 1; x < 10; ++x) {
                 for (int y = 0; y < 10; ++y) {
                     map->get(MV::Point<int>(x, y)).staticBlock();
@@ -276,20 +232,14 @@ public:
 
             agent->goal(MV::Point<int>(9, 9));
 
-            // Multiple updates
             for (int i = 0; i < 10; ++i) {
                 // Sleep to reset budget between frames
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 agent->update(0.016);
             }
 
-            // Signal should fire at most once per blocking situation
             check_true(blocked_count <= 2, "onBlocked signal not fired excessively");
         });
-
-        // ==========================================
-        // Movement Tests
-        // ==========================================
 
         test("agent_stops_on_stop", [this]() {
             auto map = MV::Map::make(MV::Size<int>(20, 20));
@@ -312,7 +262,6 @@ public:
             auto map = MV::Map::make(MV::Size<int>(10, 10));
             auto agent = MV::NavigationAgent::make(map, MV::Point<int>(5, 5));
 
-            // Agent should block its position
             check_true(map->blocked(MV::Point<int>(5, 5)), "Agent blocks its cell");
 
             agent->disableFootprint();
@@ -322,14 +271,9 @@ public:
             check_true(map->blocked(MV::Point<int>(5, 5)), "Cell blocked after enabling footprint");
         });
 
-        // ==========================================
-        // Temporary Cost Tests
-        // ==========================================
-
         test("temporary_cost_affects_pathfinding", [this]() {
             auto map = MV::Map::make(MV::Size<int>(10, 10));
 
-            // Add high temporary cost to middle row
             std::vector<MV::TemporaryCost> costs;
             for (int x = 0; x < 10; ++x) {
                 costs.emplace_back(map, MV::Point<int>(x, 5), 100.0f);
@@ -340,7 +284,6 @@ public:
 
             auto path = agent->path();
 
-            // Path should exist and potentially avoid the high-cost area
             check_true(path.size() >= 1, "Path calculated with temporary costs");
         });
     }

@@ -33,8 +33,8 @@ struct Managers {
 		services.connect(&defaultLogin);
 		//services.connect(&audio);
 
-		textures.loadThreadPool(&pool);   // lets the texture manager stream image decodes off-thread
-		textures.renderer(&renderer);     // supplies the active Render::Device for GPU texture uploads
+		textures.loadThreadPool(&pool);
+		textures.renderer(&renderer);
 	}
 
 	MV::Stopwatch timer;

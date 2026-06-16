@@ -180,7 +180,6 @@ public:
 		return owner()->worldFromLocal(spawnPoint);
 	}
 
-	// Registers private members with the script engine (called by dynamic_binder::auto_bind)
 	static void jai_auto_bind(jai::dynamic_binder<Building>& builder);
 
 protected:

@@ -1,5 +1,4 @@
 // Bindstone Foundry Test Runner
-// Uses JaiScript's Foundry test framework for MV/Bindstone tests
 
 #include <jaiscript/testing/foundry.hpp>
 #include <iostream>
@@ -7,7 +6,6 @@
 #include <chrono>
 #include <sstream>
 
-// Parse filter from command line arguments
 struct test_filter_config {
     std::string suite_pattern;
     std::string test_pattern;

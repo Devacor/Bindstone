@@ -15,7 +15,6 @@
 namespace MV {
 	namespace Render {
 
-		// ---- GL object tables (PIMPL payloads; see glDevice.h) ---------------------
 		struct GLDevice::State {
 			struct GLTexture {
 				GLuint name = 0;
@@ -78,7 +77,6 @@ namespace MV {
 		};
 
 		namespace {
-			// Maps an RHI PixelFormat to the GL (internalFormat, clientFormat, clientType) triple.
 			void glFormatTriple(PixelFormat a_format, GLint &a_internal, GLenum &a_client, GLenum &a_type) {
 				switch (a_format) {
 				case PixelFormat::RGBA8_UNORM:        a_internal = GL_RGBA8;             a_client = GL_RGBA;            a_type = GL_UNSIGNED_BYTE; break;
@@ -231,7 +229,6 @@ namespace MV {
 			return deviceCaps;
 		}
 
-		// ---- buffers ----------------------------------------------------------------
 		BoundBuffer GLDevice::createBuffer(BufferUsage a_usage, BufferUpdateHint a_hint, const void *a_data, size_t a_bytes) {
 			const GLenum target =
 				a_usage == BufferUsage::Index   ? GL_ELEMENT_ARRAY_BUFFER :
@@ -258,7 +255,6 @@ namespace MV {
 			if (state->buffers.remove(a_handle, b) && b.name) { glDeleteBuffers(1, &b.name); }
 		}
 
-		// ---- textures ---------------------------------------------------------------
 		BoundTexture GLDevice::createTexture(const TextureDesc &a_desc, const void *a_initialPixels) {
 			require<ResourceException>(a_desc.dimension == TextureDimension::Tex2D,
 				"GLDevice::createTexture currently supports only Tex2D (arrays/cube/3D arrive with the 3D path)");
@@ -306,7 +302,6 @@ namespace MV {
 			return t ? static_cast<uint32_t>(t->name) : 0u;
 		}
 
-		// ---- samplers ---------------------------------------------------------------
 		BoundSampler GLDevice::createSampler(const SamplerDesc &a_desc) {
 			GLuint name = 0;
 			glGenSamplers(1, &name);
@@ -322,7 +317,6 @@ namespace MV {
 			return state->samplers.create(State::GLSampler{ name });
 		}
 
-		// ---- frame / pass / draw recording -----------------------------------------
 		void GLDevice::beginFrame() {
 			// GL is immediate-mode and Draw2D makes the context current; nothing to acquire.
 		}
@@ -350,7 +344,6 @@ namespace MV {
 			}
 		}
 
-		// ---- shader modules ---------------------------------------------------------
 		BoundShaderModule GLDevice::createShaderModule(const ShaderModuleDesc &a_desc) {
 			require<ResourceException>(!a_desc.glslSource.empty(),
 				"GLDevice::createShaderModule needs glslSource (the GL backend compiles GLSL, not SPIR-V)");
@@ -372,7 +365,6 @@ namespace MV {
 			return state->shaderModules.create(State::GLShaderModule{ shader, a_desc.stage });
 		}
 
-		// ---- pipelines --------------------------------------------------------------
 		BoundPipeline GLDevice::createPipeline(const PipelineDesc &a_desc) {
 			State::GLShaderModule *vs = state->shaderModules.get(a_desc.vertex);
 			State::GLShaderModule *fs = state->shaderModules.get(a_desc.fragment);
@@ -410,7 +402,6 @@ namespace MV {
 			if (state->pipelines.remove(a_handle, pipe) && pipe.program) { glDeleteProgram(pipe.program); }
 		}
 
-		// ---- render targets (FBO) ---------------------------------------------------
 		BoundRenderTarget GLDevice::createRenderTarget(const RenderTargetDesc &a_desc) {
 			require<ResourceException>(!a_desc.color.empty(), "GLDevice::createRenderTarget needs at least one color attachment");
 			State::GLRenderTarget rt;
@@ -443,7 +434,6 @@ namespace MV {
 			}
 		}
 
-		// ---- uniform sets (CPU-recorded; replayed in draw) --------------------------
 		BoundUniformSet GLDevice::createUniformSet(BoundPipeline a_pipeline) {
 			State::GLUniformSet set;
 			set.pipeline = a_pipeline;
@@ -475,7 +465,6 @@ namespace MV {
 			set->textures[a_name] = State::TextureSlot{ a_texture, a_sampler };
 		}
 
-		// ---- passes -----------------------------------------------------------------
 		void GLDevice::beginPass(BoundRenderTarget a_target, const RenderTargetDesc &a_clearInfo) {
 			GLuint fbo = 0;
 			int w = 0, h = 0;
@@ -535,7 +524,6 @@ namespace MV {
 			glClear(GL_STENCIL_BUFFER_BIT);
 		}
 
-		// ---- draw -------------------------------------------------------------------
 		void GLDevice::draw(const DrawItem &a_item) {
 			State::GLPipeline *pipe = state->pipelines.get(a_item.pipeline);
 			require<ResourceException>(pipe != nullptr, "GLDevice::draw given a stale/null pipeline");
@@ -648,7 +636,7 @@ namespace MV {
 		}
 
 		void GLDevice::onSurfaceResized(int a_widthPixels, int a_heightPixels) {
-			// No swapchain to recreate; just reset the default-target viewport to the new size.
+			// No swapchain to recreate.
 			glViewport(0, 0, a_widthPixels, a_heightPixels);
 		}
 

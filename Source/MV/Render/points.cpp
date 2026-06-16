@@ -7,7 +7,6 @@
 #include <jaiscript/serialization/archive.hpp>
 #include "MV/Utility/services.hpp"
 
-// Helper function to hook Point types
 template<typename T>
 void hookPointType(jai::dynamic_binder<MV::Point<T>>& builder) {
 	builder.auto_bind();
@@ -27,19 +26,16 @@ void hookPointType(jai::dynamic_binder<MV::Point<T>>& builder) {
 	builder.method("clear", &MV::Point<T>::clear);
 }
 
-// JaiScript binding for Point<float>
 static jai::registrar<MV::Point<MV::PointPrecision>, MV::Services> _hookPoint("Point",
 	[](jai::dynamic_binder<MV::Point<MV::PointPrecision>>& builder, const MV::Services&) {
 	hookPointType(builder);
 });
 
-// JaiScript binding for Point<int>
 static jai::registrar<MV::Point<int>, MV::Services> _hookPointi("Pointi",
 	[](jai::dynamic_binder<MV::Point<int>>& builder, const MV::Services&) {
 	hookPointType(builder);
 });
 
-// Helper function to hook Size types
 template<typename T>
 void hookSizeType(jai::dynamic_binder<MV::Size<T>>& builder) {
 	builder.auto_bind();
@@ -55,19 +51,16 @@ void hookSizeType(jai::dynamic_binder<MV::Size<T>>& builder) {
 	builder.method("set", static_cast<MV::Size<T>&(MV::Size<T>::*)(T, T, T)>(&MV::Size<T>::set));
 }
 
-// JaiScript binding for Size<float>
 static jai::registrar<MV::Size<MV::PointPrecision>, MV::Services> _hookSize("Size",
 	[](jai::dynamic_binder<MV::Size<MV::PointPrecision>>& builder, const MV::Services&) {
 	hookSizeType(builder);
 });
 
-// JaiScript binding for Size<int>
 static jai::registrar<MV::Size<int>, MV::Services> _hookSizei("Sizei",
 	[](jai::dynamic_binder<MV::Size<int>>& builder, const MV::Services&) {
 	hookSizeType(builder);
 });
 
-// JaiScript binding for Color
 static jai::registrar<MV::Color, MV::Services> _hookColor("Color",
 	[](jai::dynamic_binder<MV::Color>& builder, const MV::Services&) {
 	builder.auto_bind();
@@ -96,7 +89,6 @@ static jai::registrar<MV::Color, MV::Services> _hookColor("Color",
 	builder.method("set", static_cast<MV::Color&(MV::Color::*)(int, int, int, int)>(&MV::Color::set));
 });
 
-// JaiScript binding for TexturePoint
 static jai::registrar<MV::TexturePoint, MV::Services> _hookTexturePoint("TexturePoint",
 	[](jai::dynamic_binder<MV::TexturePoint>& builder, const MV::Services&) {
 	builder.auto_bind();

@@ -6,25 +6,20 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for Parallax
 static jai::registrar<MV::Scene::Parallax, MV::Services> _hookParallax("Parallax",
 	[](jai::dynamic_binder<MV::Scene::Parallax>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
 	builder.auto_bind();
 
-	// Translate ratio
 	builder.method("translateRatio", static_cast<MV::Point<>(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::translateRatio));
 	builder.method("translateRatio", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(const MV::Point<>&)>(&MV::Scene::Parallax::translateRatio));
 
-	// Local offset
 	builder.method("localOffset", static_cast<MV::Point<>(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::localOffset));
 	builder.method("localOffset", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(const MV::Point<>&)>(&MV::Scene::Parallax::localOffset));
 
-	// World zoom offset
 	builder.method("worldZoomOffset", static_cast<MV::Point<>(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::worldZoomOffset));
 	builder.method("worldZoomOffset", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(const MV::Point<>&)>(&MV::Scene::Parallax::worldZoomOffset));
 
-	// Enable/disable
 	builder.method("enabled", static_cast<bool(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::enabled));
 	builder.method("enabled", static_cast<std::shared_ptr<MV::Scene::Parallax>(MV::Scene::Parallax::*)(bool)>(&MV::Scene::Parallax::enabled));
 	builder.method("enable", &MV::Scene::Parallax::enable);

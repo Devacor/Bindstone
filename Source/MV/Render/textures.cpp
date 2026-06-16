@@ -164,9 +164,6 @@ namespace MV {
 		return existing->boundTexture.valid();
 	}
 
-	// Uploads an already-decoded surface on the calling (GL) thread and caches it so a later
-	// LoadedTexture(params) is a hit. Called serially from flushDeferredLoad after the parallel
-	// decode; a null/failed surface is left uncached (the eventual load() retries inline).
 	void LoadedTexture::cacheDecodedSurface(const TextureParameters &a_parameters, const std::shared_ptr<OwnedSurface> &a_surface, Render::Device* a_device) {
 		if (!a_surface || !a_surface->get()) { return; }
 		std::scoped_lock guard(lock);
@@ -205,16 +202,11 @@ namespace MV {
 		const bool canStream = !a_blocking && ourLoadThreadPool && !RUNNING_IN_HEADLESS && !LoadedTexture::isCached(params);
 
 		if (!canStream) {
-			// Synchronous: blocking/headless, or already cached (a hit, so this is cheap).
-			// load() decodes+uploads inline if needed, sets loadedTexture, and fires onReload.
 			a_definition->load();
 			if (a_onLoaded) { a_onLoaded(); }
 			return;
 		}
 
-		// Stream it: decode on a worker thread, then upload + finalize on the MAIN thread (the
-		// onFinish runs via ThreadPool::run(), which the game loop drains each frame). Until the
-		// upload lands, textureId() reports the loading-placeholder checker.
 		a_definition->loadPending = true;
 		++ourPendingTextureLoads;
 
@@ -250,7 +242,6 @@ namespace MV {
 			ThreadPool::Job::Continue::MAIN_THREAD));
 	}
 
-	// ---- LoadedTextureData: GL name resolution + GPU lifetime --------------------------
 	GLuint LoadedTextureData::id() const {
 		// Device path: native GL name behind the BoundTexture (transition shim). Legacy: owned name.
 		if (renderDevice && boundTexture.valid()) {
@@ -344,7 +335,7 @@ namespace MV {
 		results->sourceParameters = a_parameters;
 
 		if (a_device && !RUNNING_IN_HEADLESS) {
-			results->bindToDevice(a_device);                 // device binding from the retained surface
+			results->bindToDevice(a_device);
 		} else if (!RUNNING_IN_HEADLESS) {
 			results->uploadLegacyGl(surfaceToWorkWith->get(), a_parameters); // transitional raw-GL upload
 		}
@@ -387,20 +378,17 @@ namespace MV {
 		ourDevice = a_device;
 		if (!loaded()) { return; }
 
-		// Shared (file) textures: upgrade the shared cache entry in place; our loadedTexture already points at it.
 		if (deviceBackSharedCache(a_device)) {
 			if (isShared) { onReloadAction(shared_from_this()); }
 			return;
 		}
 
-		// Locally-owned with a retained surface: bind in place, no regen/decode.
 		if (loadedTexture && loadedTexture->data().sourceSurface) {
 			loadedTexture->data().bindToDevice(a_device);
 			if (isShared) { onReloadAction(shared_from_this()); }
 			return;
 		}
 
-		// Raw-pixel textures (dynamic/atlas/white): no surface, so rebuild via the device.
 		loadedTexture.reset();
 		reloadImplementation();
 		if (isShared) { onReloadAction(shared_from_this()); }
@@ -558,12 +546,10 @@ namespace MV {
 		textureSize.height = roundUpPowerOfTwo(textureSize.height);
 		if (RUNNING_IN_HEADLESS) { return; }
 
-		// Create Storage Space For Texture Data (background-filled RGBA).
 		std::vector<unsigned char> pixels(static_cast<size_t>(textureSize.width) * textureSize.height * 4);
 		memset(pixels.data(), backgroundColor.hex(), pixels.size() * sizeof(unsigned char));
 
 		if (ourDevice) {
-			// Device path: allocate+upload through the RHI; hold the BoundTexture in locally-owned data.
 			Render::TextureDesc desc;
 			desc.width = textureSize.width;
 			desc.height = textureSize.height;
@@ -718,9 +704,6 @@ namespace MV {
 			}
 		}
 		if (needsLoad) {
-			// Stream file textures through the manager: decode off-thread, upload on the main
-			// thread, showing the loading-placeholder checker meanwhile. Non-file definitions
-			// (dynamic/surface) generate in memory, so they load inline.
 			if (a_sharedTextures) {
 				// Route GPU upload through the active device (the definition may have been created via
 				// a path that didn't inject it — e.g. deserialization).

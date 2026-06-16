@@ -21,12 +21,10 @@ namespace MV {
 			GLDevice();
 			~GLDevice() override;
 
-			// -- lifecycle / device --
 			bool initialize(const SwapchainDesc&) override;
 			void shutdown() override;
 			const DeviceCaps& caps() const override;
 
-			// -- resources --
 			BoundBuffer createBuffer(BufferUsage, BufferUpdateHint, const void* data, size_t bytes) override;
 			void        updateBuffer(BoundBuffer, const void* data, size_t bytes, size_t offset) override;
 			void        destroyBuffer(BoundBuffer) override;
@@ -45,13 +43,11 @@ namespace MV {
 			BoundRenderTarget createRenderTarget(const RenderTargetDesc&) override;
 			void              destroyRenderTarget(BoundRenderTarget) override;
 
-			// -- uniform/texture binding group --
 			BoundUniformSet createUniformSet(BoundPipeline) override;
 			void setUniform(BoundUniformSet, const std::string& name, const float* data, uint32_t floatCount) override;
 			void setUniformMatrix(BoundUniformSet, const std::string& name, const float* columnMajor16) override;
 			void setTexture(BoundUniformSet, const std::string& name, BoundTexture, BoundSampler) override;
 
-			// -- frame / pass / draw recording --
 			void beginFrame() override;
 			void beginPass(BoundRenderTarget, const RenderTargetDesc& clearInfo) override;
 			void beginDefaultPass(const float clearColor[4]) override;

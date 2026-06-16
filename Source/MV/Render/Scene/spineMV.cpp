@@ -13,7 +13,6 @@
 #include <jaiscript/signals/signal_binding.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript bindings for spine animation event/track types
 static jai::registrar<MV::Scene::AnimationEventData, MV::Services> _hookAnimationEventData("AnimationEventData",
 	[](jai::dynamic_binder<MV::Scene::AnimationEventData>& builder, const MV::Services&) {
 	builder.property("name", &MV::Scene::AnimationEventData::name);
@@ -30,13 +29,11 @@ static jai::registrar<MV::Scene::AnimationTrack, MV::Services> _hookAnimationTra
 	builder.method("trackIndex", &MV::Scene::AnimationTrack::trackIndex);
 });
 
-// JaiScript binding for Spine
 static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	[](jai::dynamic_binder<MV::Scene::Spine>& builder, const MV::Services& a_services) {
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 
-	// Script-facing signal surface
 	if (auto* eng = a_services.get<jai::engine>(false)) {
 		jai::bind_signal_type<void(std::shared_ptr<MV::Scene::Spine>, int)>(*eng, "SignalSpineTrack");
 		jai::bind_signal_type<void(std::shared_ptr<MV::Scene::Spine>, int, const MV::Scene::AnimationEventData&)>(*eng, "SignalSpineEvent");
@@ -45,7 +42,6 @@ static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	builder.property("onEnd", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int)>& { return a_self.onEnd; }, nullptr);
 	builder.property("onEvent", [](MV::Scene::Spine& a_self) -> jai::signal<void(std::shared_ptr<MV::Scene::Spine>, int, const MV::Scene::AnimationEventData&)>& { return a_self.onEvent; }, nullptr);
 
-	// Node binding
 	builder.method("bindNode", &MV::Scene::Spine::bindNode);
 	builder.method("unbindSlot", &MV::Scene::Spine::unbindSlot);
 	builder.method("unbindNode", &MV::Scene::Spine::unbindNode);
@@ -53,24 +49,19 @@ static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	builder.method("boundSlots", &MV::Scene::Spine::boundSlots);
 	builder.method("slotPosition", &MV::Scene::Spine::slotPosition);
 
-	// Time scale
 	builder.method("timeScale", static_cast<double(MV::Scene::Spine::*)() const>(&MV::Scene::Spine::timeScale));
 	builder.method("timeScale", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(double)>(&MV::Scene::Spine::timeScale));
 
-	// Crossfade
 	builder.method("crossfade", &MV::Scene::Spine::crossfade);
 
-	// Track
 	builder.method("track", static_cast<MV::Scene::AnimationTrack&(MV::Scene::Spine::*)(int)>(&MV::Scene::Spine::track));
 	builder.method("track", static_cast<MV::Scene::AnimationTrack&(MV::Scene::Spine::*)()>(&MV::Scene::Spine::track));
 	builder.method("currentTrack", &MV::Scene::Spine::currentTrack);
 
-	// Animation
 	builder.method("animate", &MV::Scene::Spine::animate);
 	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, double, bool)>(&MV::Scene::Spine::queueAnimation));
 	builder.method("queueAnimation", static_cast<std::shared_ptr<MV::Scene::Spine>(MV::Scene::Spine::*)(const std::string&, bool)>(&MV::Scene::Spine::queueAnimation));
 
-	// Load/unload
 	builder.method("load", [](MV::Scene::Spine& self, const MV::Scene::Spine::FileBundle& bundle) { return self.load(bundle); });
 	builder.method("unload", &MV::Scene::Spine::unload);
 	builder.method("loaded", &MV::Scene::Spine::loaded);

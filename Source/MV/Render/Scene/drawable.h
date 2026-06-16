@@ -68,7 +68,6 @@ namespace MV {
 			friend jai::access;
 			friend Drawable;
 			friend jai::property<Anchors>;
-			// JaiScript serialization support (templated for CRTP archives)
 			template<typename Archive>
 			friend void save(Archive& ar, const Anchors& anchors) requires jai::serialization::jai_archive<Archive>;
 			template<typename Archive>
@@ -133,7 +132,6 @@ namespace MV {
 			void registerWithParent();
 		};
 
-		// JaiScript serialization free functions for Anchors
 		template<typename Archive>
 		void save(Archive& ar, const Anchors& anchors) requires jai::serialization::jai_archive<Archive>;
 		template<typename Archive>
@@ -315,7 +313,6 @@ namespace MV {
 
 			template<class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
-				// property_mgr.load() handles all JAI_PROPERTY fields including points/vertexIndices
 				property_mgr.load(archive);
 				Component::load(archive, 0);
 			}
@@ -410,11 +407,9 @@ namespace MV {
 			void forceInitializeShader();
 		};
 
-		// JaiScript serialization implementations for Anchors (using requires clause)
 		template<typename Archive>
 		void save(Archive& ar, const Anchors& anchors) requires jai::serialization::jai_archive<Archive> {
-			// Anchor parents resolve by component id at postLoadInitialize (same contract as the
-			// old cereal format); a parent outside the saved subtree must carry an id to survive.
+			// Anchor parents resolve by component id at postLoadInitialize; a parent outside the saved subtree must carry an id to survive.
 			std::string parentId;
 			if (auto lockedParent = anchors.parentReference.lock()) {
 				parentId = lockedParent->id();

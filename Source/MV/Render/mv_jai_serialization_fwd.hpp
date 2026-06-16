@@ -2,8 +2,6 @@
 #ifndef MV_JAI_SERIALIZATION_FWD_HPP
 #define MV_JAI_SERIALIZATION_FWD_HPP
 
-// JaiScript serialization for MV types
-//
 // JaiScript archives now use CRTP (no virtual dispatch) and all save/load
 // functions are templated. Forward declarations aren't useful for templates
 // since definitions must be visible at instantiation sites.

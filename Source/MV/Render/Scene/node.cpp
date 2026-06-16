@@ -14,16 +14,13 @@
 #include "MV/Utility/threadPool.hpp"
 #include "MV/Render/sharedTextures.h"
 
-// JaiScript serialization support
 #include "MV/Serialization/serialize.h"
 #include <jaiscript/properties/property_serialization.hpp>
 
-// JaiScript binding for Node
 static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 	[](jai::dynamic_binder<MV::Scene::Node>& builder, const MV::Services&) {
 	builder.auto_bind();
 
-	// Core node methods
 	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)()>(&MV::Scene::Node::make));
 	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::make));
 	builder.method("makeOrGet", &MV::Scene::Node::makeOrGet);
@@ -36,25 +33,20 @@ static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 	builder.method("empty", &MV::Scene::Node::empty);
 	builder.method("task", &MV::Scene::Node::task);
 
-	// Id
 	builder.method("id", static_cast<std::string(MV::Scene::Node::*)() const>(&MV::Scene::Node::id));
 	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::id));
 
-	// Depth
 	builder.method("depth", static_cast<MV::PointPrecision(MV::Scene::Node::*)() const>(&MV::Scene::Node::depth));
 	builder.method("depth", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(MV::PointPrecision)>(&MV::Scene::Node::depth));
 
-	// Position
 	builder.method("position", static_cast<MV::Point<>(MV::Scene::Node::*)() const>(&MV::Scene::Node::position));
 	builder.method("position", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const MV::Point<>&)>(&MV::Scene::Node::position));
 
-	// Visibility
 	builder.method("visible", static_cast<bool(MV::Scene::Node::*)() const>(&MV::Scene::Node::visible));
 	builder.method("visible", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(bool)>(&MV::Scene::Node::visible));
 	builder.method("show", &MV::Scene::Node::show);
 	builder.method("hide", &MV::Scene::Node::hide);
 
-	// Bounds
 	builder.method("bounds", &MV::Scene::Node::bounds);
 	builder.method("worldBounds", &MV::Scene::Node::worldBounds);
 	builder.method("screenBounds", &MV::Scene::Node::screenBounds);
@@ -226,10 +218,6 @@ namespace MV {
 			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
 			auto* engine = a_services.get<jai::engine>();
 
-			// Phase split (printed only for large scenes). parse = JSON text -> script_value
-			// DOM; walk = DOM -> node/component tree, running setters + (via post_load depth
-			// tracking) the load_complete/postLoadStep fix-up on the root. Pair this with the
-			// recalculate* bounds counters to see whether bounds recompute dominates.
 			const auto tParse0 = std::chrono::steady_clock::now();
 			jai::serialization::json_archive_reader ar(contents, engine);
 			const auto tParse1 = std::chrono::steady_clock::now();
@@ -264,7 +252,6 @@ namespace MV {
 			auto contents = fileContents(a_filename);
 			require<ResourceException>(!contents.empty(), "File not found for Node::loadBinary: ", a_filename);
 
-			// Low-level binary reader (mirrors loadJai's json_archive_reader); matches saveBinary's writer.
 			auto* engine = a_services.get<jai::engine>();
 			jai::serialization::binary_archive_reader ar(reinterpret_cast<const uint8_t*>(contents.data()), contents.size(), engine);
 			ar.set_user_context<MV::Services>(&a_services);
@@ -309,7 +296,6 @@ namespace MV {
 				childComponents = originalChildComponents;
 			};
 
-			// Low-level binary writer (mirrors saveJai's json_archive_writer), matched by loadBinary.
 			auto* engine = a_services.get<jai::engine>();
 			jai::serialization::binary_archive_writer ar(engine);
 			ar(self);
@@ -336,12 +322,6 @@ namespace MV {
 			return toAdd;
 		}
 
-		// ============================================================
-		// JaiScript Serialization Implementation
-		// ============================================================
-		// Uses property_owner pattern - Node inherits from jai::property_owner<Node>
-		// which provides property_mgr for automatic serialization of JAI_PROPERTY fields
-
 		std::shared_ptr<Node> Node::saveJai(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile) {
 			return saveJai(a_filename, a_services, a_renameNodeToFile ? fileNameFromPath(a_filename) : nodeId.get());
 		}
@@ -349,14 +329,12 @@ namespace MV {
 		std::shared_ptr<Node> Node::saveJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_newId) {
 			auto self = shared_from_this();
 
-			// Temporarily update id and clear parent for root serialization
 			std::string oldId = nodeId.get();
 			auto oldParent = myParent;
 			SCOPE_EXIT{ nodeId = oldId; myParent = oldParent; };
 			nodeId = a_newId;
 			myParent = nullptr;
 
-			// Filter non-serializable children and swap into properties
 			auto originalChildNodes = childNodes.get();
 			auto originalChildComponents = childComponents.get();
 
@@ -370,7 +348,6 @@ namespace MV {
 				std::back_inserter(filteredComponents),
 				[](const auto& comp) { return comp->serializable(); });
 
-			// Temporarily replace with filtered versions
 			childNodes = filteredChildren;
 			childComponents = filteredComponents;
 			SCOPE_EXIT{
@@ -396,9 +373,6 @@ namespace MV {
 
 			auto* engine = a_services.get<jai::engine>();
 
-			// Phase timing (printed only for large scenes so prefab loads stay quiet) so we
-			// can see where a JaiScript scene load spends its time: parse (JSON text -> DOM),
-			// walk (DOM -> node/component tree, runs setters), postLoad (tree fix-up/bounds).
 			const auto tParse0 = std::chrono::steady_clock::now();
 			jai::serialization::json_archive_reader ar(contents, engine);
 			const auto tParse1 = std::chrono::steady_clock::now();

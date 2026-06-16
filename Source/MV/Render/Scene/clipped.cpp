@@ -7,31 +7,25 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for Clipped
 static jai::registrar<MV::Scene::Clipped, MV::Services> _hookClipped("Clipped",
 	[](jai::dynamic_binder<MV::Scene::Clipped>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Sprite>();
 	builder.auto_bind();
 
-	// Refresh
 	builder.method("refreshTexture", &MV::Scene::Clipped::refreshTexture);
 	builder.method("refreshEveryFrame", static_cast<bool(MV::Scene::Clipped::*)() const>(&MV::Scene::Clipped::refreshEveryFrame));
 	builder.method("refreshEveryFrame", static_cast<std::shared_ptr<MV::Scene::Clipped>(MV::Scene::Clipped::*)(bool)>(&MV::Scene::Clipped::refreshEveryFrame));
 
-	// Capture bounds
 	builder.method("clearCaptureBounds", &MV::Scene::Clipped::clearCaptureBounds);
 	builder.method("captureBounds", static_cast<MV::BoxAABB<>(MV::Scene::Clipped::*)()>(&MV::Scene::Clipped::captureBounds));
 	builder.method("captureBounds", static_cast<std::shared_ptr<MV::Scene::Clipped>(MV::Scene::Clipped::*)(const MV::BoxAABB<>&)>(&MV::Scene::Clipped::captureBounds));
 
-	// Capture offset
 	builder.method("clearCaptureOffset", &MV::Scene::Clipped::clearCaptureOffset);
 	builder.method("captureOffset", static_cast<MV::Point<>(MV::Scene::Clipped::*)() const>(&MV::Scene::Clipped::captureOffset));
 	builder.method("captureOffset", static_cast<std::shared_ptr<MV::Scene::Clipped>(MV::Scene::Clipped::*)(const MV::Point<>&)>(&MV::Scene::Clipped::captureOffset));
 
-	// Capture size
 	builder.method("captureSize", static_cast<std::shared_ptr<MV::Scene::Clipped>(MV::Scene::Clipped::*)(const MV::Size<>&, bool)>(&MV::Scene::Clipped::captureSize));
 
-	// Refresh shader
 	builder.method("refreshShader", static_cast<std::string(MV::Scene::Clipped::*)()>(&MV::Scene::Clipped::refreshShader));
 	builder.method("refreshShader", static_cast<std::shared_ptr<MV::Scene::Clipped>(MV::Scene::Clipped::*)(const std::string&)>(&MV::Scene::Clipped::refreshShader));
 });

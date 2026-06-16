@@ -5,57 +5,46 @@
 #include <jaiscript/signals/signal_binding.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for Text
 static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
 	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services& a_services) {
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 
-	// Script-facing signal surface
 	if (auto* eng = a_services.get<jai::engine>(false)) {
 		jai::bind_signal_type<MV::Scene::Text::TextSignalSignature>(*eng, "SignalText");
 	}
 	builder.property("onEnter", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onEnter; }, nullptr);
 	builder.property("onChange", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onChange; }, nullptr);
 
-	// Text content
 	builder.method("text", static_cast<MV::UtfString(MV::Scene::Text::*)() const>(&MV::Scene::Text::text));
 	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::text));
 
-	// Number
 	builder.method("number", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::number));
 	builder.method("number", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::number));
 	builder.method("number", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(int)>(&MV::Scene::Text::number));
 
-	// Justification
 	builder.method("justification", static_cast<MV::TextJustification(MV::Scene::Text::*)() const>(&MV::Scene::Text::justification));
 	builder.method("justification", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextJustification)>(&MV::Scene::Text::justification));
 
-	// Wrapping
 	builder.method("wrapping", static_cast<MV::TextWrapMethod(MV::Scene::Text::*)() const>(&MV::Scene::Text::wrapping));
 	builder.method("wrapping", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextWrapMethod)>(&MV::Scene::Text::wrapping));
 	builder.method("wrapping", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::TextWrapMethod, MV::PointPrecision)>(&MV::Scene::Text::wrapping));
 	builder.method("wrappingWidth", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::wrappingWidth));
 	builder.method("wrappingWidth", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::wrappingWidth));
 
-	// Append/Insert
 	builder.method("append", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::append));
 	builder.method("insertAtCursor", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(const MV::UtfString&)>(&MV::Scene::Text::insertAtCursor));
 	builder.method("backspace", &MV::Scene::Text::backspace);
 
-	// Cursor
 	builder.method("enableCursor", &MV::Scene::Text::enableCursor);
 	builder.method("disableCursor", &MV::Scene::Text::disableCursor);
 
-	// Line height
 	builder.method("minimumLineHeight", static_cast<MV::PointPrecision(MV::Scene::Text::*)() const>(&MV::Scene::Text::minimumLineHeight));
 	builder.method("minimumLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(MV::PointPrecision)>(&MV::Scene::Text::minimumLineHeight));
 
-	// Password field
 	builder.method("passwordField", static_cast<bool(MV::Scene::Text::*)() const>(&MV::Scene::Text::passwordField));
 	builder.method("passwordField", static_cast<void(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::passwordField));
 
-	// Bounds for line height
 	builder.method("useBoundsForLineHeight", static_cast<bool(MV::Scene::Text::*)() const>(&MV::Scene::Text::useBoundsForLineHeight));
 	builder.method("useBoundsForLineHeight", static_cast<std::shared_ptr<MV::Scene::Text>(MV::Scene::Text::*)(bool)>(&MV::Scene::Text::useBoundsForLineHeight));
 });

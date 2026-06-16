@@ -151,7 +151,6 @@ namespace MV {
 		template<class Archive>
 		void serialize(Archive& archive) {
 			if constexpr (jai::serialization::is_save<Archive>) {
-				// JaiScript save - need manual variant handling
 				int typeIndex = static_cast<int>(value.index());
 				archive.serialize("type", typeIndex);
 				std::visit([&archive](const auto& v) {
@@ -161,7 +160,6 @@ namespace MV {
 					}
 				}, value);
 			} else {
-				// JaiScript load
 				int typeIndex = 0;
 				archive.serialize("type", typeIndex);
 				switch (typeIndex) {
@@ -251,7 +249,6 @@ namespace MV {
 			return value;
 		}
 
-		// Named serialization (with field name)
 		template <typename ArchiveType>
 		auto& serialize(ArchiveType& a_archive, const std::string& a_archivedName, bool a_force = false) {
 			if constexpr (jai::serialization::is_save<ArchiveType>) {
@@ -270,7 +267,6 @@ namespace MV {
 			return a_archive;
 		}
 
-		// Unnamed serialization (binary style)
 		template <typename ArchiveType>
 		auto& serialize(ArchiveType& a_archive, MV::ExactType<bool> a_force = false) {
 			if constexpr (jai::serialization::is_save<ArchiveType>) {

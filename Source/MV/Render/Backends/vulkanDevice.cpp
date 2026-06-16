@@ -304,9 +304,6 @@ namespace MV {
 				DeviceCaps deviceCaps{};
 			};
 
-			// =====================================================================
-			// lifecycle
-			// =====================================================================
 			bool VulkanDevice::initialize(const SwapchainDesc &a_desc) {
 				swapDesc = a_desc;
 				window = static_cast<SDL_Window*>(a_desc.sdlWindow);
@@ -710,7 +707,6 @@ namespace MV {
 			void VulkanDevice::shutdown() {
 				if (device) { fns.vkDeviceWaitIdle(device); }
 
-				// Drain any leaked GPU resources.
 				if (device) {
 					buffers.forEachLive([&](BufferRes &b) {
 						if (b.buffer) { fns.vkDestroyBuffer(device, b.buffer, nullptr); }
@@ -748,9 +744,6 @@ namespace MV {
 				if (libraryLoaded) { SDL_Vulkan_UnloadLibrary(); libraryLoaded = false; }
 			}
 
-			// =====================================================================
-			// frame / pass
-			// =====================================================================
 			void VulkanDevice::beginFrame() {
 				if (!device || swapchain == VK_NULL_HANDLE) { return; }
 				fns.vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
@@ -880,9 +873,6 @@ namespace MV {
 				recreateSwapchain();
 			}
 
-			// =====================================================================
-			// helpers
-			// =====================================================================
 			uint32_t VulkanDevice::findMemoryType(uint32_t a_typeBits, VkMemoryPropertyFlags a_props) const {
 				for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
 					if ((a_typeBits & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & a_props) == a_props) {
@@ -948,9 +938,6 @@ namespace MV {
 				                         0, 0, nullptr, 0, nullptr, 1, &barrier);
 			}
 
-			// =====================================================================
-			// resources: buffers
-			// =====================================================================
 			BoundBuffer VulkanDevice::createBuffer(BufferUsage a_usage, BufferUpdateHint, const void *a_data, size_t a_bytes) {
 				VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 				switch (a_usage) {
@@ -996,9 +983,6 @@ namespace MV {
 				if (b.memory) { fns.vkFreeMemory(device, b.memory, nullptr); } // implicitly unmaps
 			}
 
-			// =====================================================================
-			// resources: textures
-			// =====================================================================
 			BoundTexture VulkanDevice::createTexture(const TextureDesc &a_desc, const void *a_initialPixels) {
 				require<ResourceException>(a_desc.dimension == TextureDimension::Tex2D,
 					"VulkanDevice::createTexture currently supports only Tex2D (arrays/cube/3D arrive with the 3D path)");
@@ -1152,13 +1136,11 @@ namespace MV {
 			void VulkanDevice::generateMips(BoundTexture a_handle) {
 				TextureRes *t = textures.get(a_handle);
 				require<ResourceException>(t != nullptr, "VulkanDevice::generateMips called with a stale/null texture handle");
-				// Nothing to do for a 1-level image, or one already finalized to shader-read.
 				if (t->mipLevels <= 1 || t->layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) { return; }
 				// Contract (from createTexture): every level in TRANSFER_DST, level 0 holding the source image.
 				oneTimeSubmit([&](VkCommandBuffer cmd) {
 					int32_t mipW = t->width, mipH = t->height;
 					for (uint32_t i = 1; i < t->mipLevels; ++i) {
-						// Source level (i-1) is in TRANSFER_DST: move to SRC, blit down into i, then retire to shader-read.
 						transitionImage(cmd, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, i - 1, 1);
 
 						VkImageBlit blit{};
@@ -1231,9 +1213,6 @@ namespace MV {
 				fns.vkFreeMemory(device, stagingMem, nullptr);
 			}
 
-			// =====================================================================
-			// resources: samplers
-			// =====================================================================
 			BoundSampler VulkanDevice::createSampler(const SamplerDesc &a_desc) {
 				VkSamplerCreateInfo sci{};
 				sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -1255,9 +1234,6 @@ namespace MV {
 				return samplers.create(res);
 			}
 
-			// =====================================================================
-			// Phase-3 stubs (need SPIR-V shaders, descriptor sets and the DrawList batcher)
-			// =====================================================================
 			BoundShaderModule VulkanDevice::createShaderModule(const ShaderModuleDesc&) {
 				require<ResourceException>(false, "VulkanDevice::createShaderModule not implemented yet (Phase 3: SPIR-V pipeline cache)");
 				return {};

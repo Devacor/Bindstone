@@ -791,8 +791,7 @@ namespace MV {
 	void Draw2D::clearScreen(){
 		updateCameraProjectionMatrices();
 		sdlWindow.refreshContext();
-		// The clear is the frame's first render-pass boundary. The GL backend issues glClear;
-		// the headless backend is inert — so this replaces the old `if (!headless())` guard.
+		// The clear is the frame's first render-pass boundary. The GL backend issues glClear; the headless backend is inert.
 		if (backend) {
 			const float clear[4] = { clearBackgroundColor.R, clearBackgroundColor.G, clearBackgroundColor.B, clearBackgroundColor.A };
 			backend->beginDefaultPass(clear);
@@ -943,7 +942,6 @@ namespace MV {
 					glDeleteProgram(shader->programId);
 					shader->programId = newId;
 					if (device()) {
-						// Recreate the backend modules and drop cached pipelines so drawables re-resolve.
 						shader->initializeDeviceModules(device(), vertexShaderCode, fragmentShaderCode);
 						clearPipelineCache();
 					}
@@ -984,7 +982,6 @@ namespace MV {
 	}
 
 	namespace {
-		// BlendMode -> RHI BlendState (BLEND_DEFAULT == the device.h default).
 		Render::BlendState blendStateForMode(BlendMode a_mode) {
 			using namespace Render;
 			BlendState s; // default == premultiplied separate (BLEND_DEFAULT).
@@ -1005,7 +1002,6 @@ namespace MV {
 			return s;
 		}
 
-		// The canonical sprite vertex layout (pos float3, uv float2, color float4) from DrawPoint offsets.
 		Render::VertexLayout spriteVertexLayout() {
 			using namespace Render;
 			VertexLayout layout;

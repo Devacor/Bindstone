@@ -9,43 +9,35 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for Drawable
 static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable("Drawable",
 	[](jai::dynamic_binder<MV::Scene::Drawable>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
 	builder.auto_bind();
 
-	// Visibility
 	builder.method("visible", &MV::Scene::Drawable::visible);
 	builder.method("show", &MV::Scene::Drawable::show);
 	builder.method("hide", &MV::Scene::Drawable::hide);
 
-	// Color
 	builder.method("color", static_cast<MV::Color(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::color));
 	builder.method("color", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const MV::Color&)>(&MV::Scene::Drawable::color));
 	builder.method("colors", &MV::Scene::Drawable::colors);
 
-	// Shader/Material
 	builder.method("shader", static_cast<std::string(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::shader));
 	builder.method("shader", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(const std::string&)>(&MV::Scene::Drawable::shader));
 	builder.method("material", static_cast<std::shared_ptr<MV::Material>(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::material));
 	builder.method("material", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::Material>)>(&MV::Scene::Drawable::material));
 
-	// Texture
 	builder.method("texture", static_cast<std::shared_ptr<MV::TextureHandle>(MV::Scene::Drawable::*)(size_t) const>(&MV::Scene::Drawable::texture));
 	builder.method("texture", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(std::shared_ptr<MV::TextureHandle>, size_t)>(&MV::Scene::Drawable::texture));
 	builder.method("clearTexture", &MV::Scene::Drawable::clearTexture);
 	builder.method("clearTextures", &MV::Scene::Drawable::clearTextures);
 
-	// Blend mode
 	builder.method("blend", static_cast<MV::BlendMode(MV::Scene::Drawable::*)() const>(&MV::Scene::Drawable::blend));
 	builder.method("blend", static_cast<std::shared_ptr<MV::Scene::Drawable>(MV::Scene::Drawable::*)(MV::BlendMode)>(&MV::Scene::Drawable::blend));
 
-	// Points
 	builder.method("pointSize", &MV::Scene::Drawable::pointSize);
 	builder.method("getPoints", &MV::Scene::Drawable::getPoints);
 
-	// Anchors
 	builder.method("anchors", &MV::Scene::Drawable::anchors);
 });
 
@@ -241,7 +233,6 @@ namespace MV {
 			Render::Device* dev = ourRenderer.device();
 			syncDeviceBuffers(dev, Render::BufferUpdateHint::Dynamic);
 
-			// Resolve the shared pipeline (blend = material override or preset; topology = drawType).
 			const BlendMode effectiveBlend = materialInstance ? materialInstance->blend() : blendModePreset;
 			if (devicePipeline != cachedPipelineForKey || cachedBlendMode != effectiveBlend
 			    || cachedTopologyDrawType != drawType || cachedColorWriteMask != devicePipelineColorWriteMask || !deviceUniformSet.valid()) {
@@ -547,6 +538,5 @@ namespace MV {
 			}
 		}
 
-		// JaiScript serialization for Anchors is now inline templated in drawable.h
 	}
 }

@@ -44,7 +44,7 @@ namespace MV {
 		auto foundDefinition = fileDefinitions.find(identifier);
 		if(foundDefinition == fileDefinitions.end()){
 			std::shared_ptr<FileTextureDefinition> newDefinition = FileTextureDefinition::make(a_filename, true, a_repeat, a_pixel);
-			newDefinition->renderDevice(device());   // route GPU uploads through the active RHI device
+			newDefinition->renderDevice(device());
 			fileDefinitions[identifier] = newDefinition;
 			return newDefinition;
 		} else{

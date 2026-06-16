@@ -25,7 +25,6 @@ using MV::Scene::Node;
 
 static volatile double sink = 0.0;
 
-// Build a balanced-ish subtree of about `count` nodes under `parent` (fanout 4), collecting them.
 static void buildSubtree(std::shared_ptr<Node> parent, int count, int& idCounter,
                          std::vector<std::shared_ptr<Node>>& all) {
     std::vector<std::shared_ptr<Node>> frontier{ parent };
@@ -70,7 +69,6 @@ int main(int argc, char** argv) {
     TransformMatrix renderOrigin;
     renderOrigin.translate(Point<>(-200.0f, -120.0f, 0.0f));
 
-    // Pick the animated subset (every Nth node across both subtrees).
     std::vector<std::shared_ptr<Node>> animated;
     int stride = animatedPct > 0 ? std::max(1, 100 / animatedPct) : 1000000;
     for (size_t i = 0; i < worldAll.size(); ++i) if ((int)(i % stride) == 0) animated.push_back(worldAll[i]);
@@ -79,12 +77,9 @@ int main(int argc, char** argv) {
     auto runFrames = [&](int n)->int64_t {
         Node::recalculateMatrixCalls = 0;
         for (int f = 0; f < n; ++f) {
-            // 1) animate a fraction of nodes (transform churn -> markMatrixDirty)
             float a = float(f) * 0.01f;
             for (auto& nd : animated) nd->rotation(AxisAngles(a, a * 0.5f, a * 0.25f));
-            // 2) normal draw: every drawable world node needs its world matrix
             for (auto& nd : worldAll) { auto w = nd->worldTransform(); sink += w[12]; }
-            // 3) UI clip refresh through the override-parent path
             uiClip->drawChildren(renderOrigin);
         }
         return Node::recalculateMatrixCalls;

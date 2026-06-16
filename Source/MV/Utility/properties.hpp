@@ -16,7 +16,6 @@
 
 namespace MV {
 
-	// C++20 Concepts for cleaner constraints
 	template<typename T>
 	concept SmartPointer = requires(T t) {
 		typename T::element_type;
@@ -82,7 +81,6 @@ namespace MV {
 		PropertyManager& reflection() { return propertyManager; }
 		const PropertyManager& reflection() const { return propertyManager; }
 
-		// Default constructor and move operations
 		PropertyOwner() = default;
 		PropertyOwner(PropertyOwner&&) = default;
 		PropertyOwner& operator=(PropertyOwner&&) = default;
@@ -104,7 +102,6 @@ namespace MV {
 		}
 	};
 
-	// PropertyBase - abstract base for all properties
 	class PropertyBase {
 	public:
 		virtual ~PropertyBase() = default;
@@ -153,14 +150,12 @@ namespace MV {
 	public:
 		using value_type = T;
 
-		// Constructor 1: No default value, no clone function
 		inline Property(PropertyManager& reg, std::string name)
 			: PropertyBase(reg, std::move(name))
 			, customClone()
 			, value{} {
 		}
 
-		// Constructor 2: With value (but NOT a function type)
 		template<typename U, std::enable_if_t<!is_clone_function_v<U>, int> = 0>
 		inline Property(PropertyManager& reg, std::string name, U&& def)
 			: PropertyBase(reg, std::move(name))
@@ -168,7 +163,6 @@ namespace MV {
 			, value(std::forward<U>(def)) {
 		}
 
-		// Constructor 3: With clone function only
 		template<typename Fn, std::enable_if_t<is_clone_function_v<Fn>, int> = 0>
 		inline Property(PropertyManager& reg, std::string name, Fn&& cl)
 			: PropertyBase(reg, std::move(name))
@@ -176,14 +170,12 @@ namespace MV {
 			, value{} {
 		}
 
-		// Constructor 4: With T constructed from initializer list
 		inline Property(PropertyManager& reg, std::string name, T def)
 			: PropertyBase(reg, std::move(name))
 			, customClone()
 			, value(std::move(def)) {
 		}
 
-		// Constructor 5: With value and clone function
 		template<typename U, typename Fn>
 		inline Property(PropertyManager& reg, std::string name, U&& def, Fn&& cl)
 			: PropertyBase(reg, std::move(name))
@@ -191,7 +183,6 @@ namespace MV {
 			, value(std::forward<U>(def)) {
 		}
 
-		// Constructor 6: With T constructed from initializer list and clone function
 		inline Property(PropertyManager& reg, std::string name, T def,
 			std::function<void(Property<T>&, Property<T>&)> cl)
 			: PropertyBase(reg, std::move(name))
@@ -199,7 +190,6 @@ namespace MV {
 			, value(std::move(def)) {
 		}
 
-		// Move constructor
 		Property(Property&& other) noexcept
 			: PropertyBase(std::move(other))
 			, customClone(std::move(other.customClone))
@@ -208,7 +198,7 @@ namespace MV {
 
 		Property& operator=(Property&& other) noexcept {
 			if (this != &other) {
-				// Note: Don't move PropertyBase, we stay registered with our original manager
+				// Don't move PropertyBase, we stay registered with our original manager
 				customClone = std::move(other.customClone);
 				value = std::move(other.value);
 			}
@@ -224,26 +214,21 @@ namespace MV {
 			return *this;
 		}
 
-		// Assignment operators
 		Property& operator=(const T& v) { value = v; return *this; }
 		Property& operator=(T&& v) { value = std::move(v); return *this; }
 
-		// ===== CONVERSION OPERATORS =====
 		operator const T& () const {
 			return value;
 		}
 
-		// Mutable access  
 		operator T& () {
 			return value;
 		}
 
-		// Boolean conversion for all non-bool types
 		operator bool() const requires (!std::is_same_v<T, bool>) && requires(const T& t) { static_cast<bool>(t); } {
 			return static_cast<bool>(value);
 		}
 
-		// ===== ACCESSOR METHODS =====
 		T& get() {
 			return value;
 		}
@@ -251,8 +236,6 @@ namespace MV {
 			return value;
 		}
 
-		// ===== DEREFERENCE OPERATORS =====
-		// For smart pointers: operator* returns the smart pointer itself
 		T& operator*() requires SmartPointer<T> {
 			return value;
 		}
@@ -260,7 +243,6 @@ namespace MV {
 			return value;
 		}
 
-		// For raw pointers: operator* dereferences
 		auto& operator*() requires std::is_pointer_v<T> {
 			return *value;
 		}
@@ -268,7 +250,6 @@ namespace MV {
 			return *value;
 		}
 
-		// For non-pointer types: operator* returns the value
 		T& operator*() requires (!PointerLike<T>) {
 			return value;
 		}
@@ -276,8 +257,6 @@ namespace MV {
 			return value;
 		}
 
-		// ===== ARROW OPERATORS =====
-		// For smart pointers: arrow goes through to element_type
 		template<typename U = T>
 		auto operator->() -> std::enable_if_t<SmartPointer<U>, typename U::element_type*> {
 			return value.get();
@@ -288,7 +267,6 @@ namespace MV {
 			return value.get();
 		}
 
-		// For raw pointers: just return the pointer
 		T operator->() requires std::is_pointer_v<T> {
 			return value;
 		}
@@ -296,7 +274,6 @@ namespace MV {
 			return value;
 		}
 
-		// For class types: return pointer to value
 		T* operator->() requires std::is_class_v<T> && (!PointerLike<T>) {
 			return &value;
 		}
@@ -304,20 +281,15 @@ namespace MV {
 			return &value;
 		}
 
-		// ===== COMPARISON OPERATORS =====
 		// We provide both spaceship and traditional operators to avoid ambiguity
-
-		// Three-way comparison with another Property
 		auto operator<=>(const Property& other) const requires std::three_way_comparable<T> {
 			return value <=> other.value;
 		}
 
-		// Equality with another Property
 		bool operator==(const Property& other) const {
 			return value == other.value;
 		}
 
-		// Traditional comparison operators with any type U
 		template<typename U>
 		bool operator<(const U& other) const {
 			return value < other;
@@ -348,7 +320,6 @@ namespace MV {
 			return value != other;
 		}
 
-		// Friend operators for reverse comparisons (e.g., 0 > property)
 		template<typename U>
 		friend bool operator<(const U& lhs, const Property& rhs) {
 			return lhs < rhs.value;
@@ -379,8 +350,6 @@ namespace MV {
 			return lhs != rhs.value;
 		}
 
-		// ===== ARITHMETIC OPERATORS =====
-		// Enable arithmetic operations for arithmetic types
 		template<typename U>
 		friend auto operator+(const Property& lhs, const U& rhs)
 			requires std::is_arithmetic_v<T>&& std::is_arithmetic_v<U> {
@@ -441,7 +410,6 @@ namespace MV {
 			return lhs % rhs.value;
 		}
 
-		// ===== COMPOUND ASSIGNMENT OPERATORS =====
 		template<typename U>
 		Property& operator+=(const U& rhs)
 			requires std::is_arithmetic_v<T>&& std::is_arithmetic_v<U> {
@@ -477,7 +445,6 @@ namespace MV {
 			return *this;
 		}
 
-		// Increment/decrement operators
 		Property& operator++() requires std::is_arithmetic_v<T> {
 			++value;
 			return *this;
@@ -500,8 +467,6 @@ namespace MV {
 			return old;
 		}
 
-		// ===== CONTAINER OPERATIONS =====
-		// operator[] for container types
 		template<typename I>
 		auto& operator[](I&& i) requires requires { value[std::forward<I>(i)]; } {
 			return value[std::forward<I>(i)];
@@ -512,7 +477,6 @@ namespace MV {
 			return value[std::forward<I>(i)];
 		}
 
-		// Function call operator
 		template<typename... Args>
 		auto operator()(Args&&... args)
 			requires std::invocable<T, Args...> {
@@ -525,7 +489,6 @@ namespace MV {
 			return value(std::forward<Args>(args)...);
 		}
 
-		// Iterator support
 		auto begin() requires requires { value.begin(); } {
 			return value.begin();
 		}
@@ -542,7 +505,6 @@ namespace MV {
 			return value.end();
 		}
 
-		// Clone method
 		void setCustomClone(std::function<void(Property<T>&, Property<T>&)> a_customClone) {
 			customClone = a_customClone;
 		}
@@ -557,7 +519,6 @@ namespace MV {
 		}
 	};
 
-	// DeletedProperty - placeholder for removed properties in serialization
 	template<typename T>
 	class DeletedProperty : public PropertyBase {
 	public:
@@ -571,16 +532,13 @@ namespace MV {
 
 		bool allowSave() const override { return false; }
 
-		// No accessors, no value.
 		const T& get() const = delete;
 		T& get() = delete;
 
 		void cloneToTarget(PropertyBase&) override {
-			// No-op
 		}
 	};
 
-	// ObservableProperty - Property with change notifications
 	template<typename T>
 	class ObservableProperty : public Property<T> {
 	private:
@@ -591,54 +549,46 @@ namespace MV {
 	public:
 		using ChangeSignature = void(const T& newValue, const T& oldValue, bool isFromLoad);
 
-		// Constructor 1: No default value, no clone function
 		inline ObservableProperty(PropertyManager& registry, std::string name)
 			: Property<T>(registry, std::move(name))
 			, onChanged(onChangedSignal) {
 		}
 
-		// Constructor 2: With value (but NOT a function type)
 		template<typename U, std::enable_if_t<!is_clone_function_v<U>, int> = 0>
 		inline ObservableProperty(PropertyManager& registry, std::string name, U&& defaultValue)
 			: Property<T>(registry, std::move(name), std::forward<U>(defaultValue))
 			, onChanged(onChangedSignal) {
 		}
 
-		// Constructor 3: With clone function only
 		template<typename Fn, std::enable_if_t<is_clone_function_v<Fn>, int> = 0>
 		inline ObservableProperty(PropertyManager& registry, std::string name, Fn&& cloneFn)
 			: Property<T>(registry, std::move(name), std::forward<Fn>(cloneFn))
 			, onChanged(onChangedSignal) {
 		}
 
-		// Constructor 4: With T constructed from initializer list
 		inline ObservableProperty(PropertyManager& registry, std::string name, T defaultValue)
 			: Property<T>(registry, std::move(name), std::move(defaultValue))
 			, onChanged(onChangedSignal) {
 		}
 
-		// Constructor 5: With value and clone function
 		template<typename U, typename Fn>
 		inline ObservableProperty(PropertyManager& registry, std::string name, U&& defaultValue, Fn&& cloneFn)
 			: Property<T>(registry, std::move(name), std::forward<U>(defaultValue), std::forward<Fn>(cloneFn))
 			, onChanged(onChangedSignal) {
 		}
 
-		// Constructor 6: With T constructed from initializer list and clone function
 		inline ObservableProperty(PropertyManager& registry, std::string name, T defaultValue,
 			std::function<void(Property<T>&, Property<T>&)> cloneFn)
 			: Property<T>(registry, std::move(name), std::move(defaultValue), std::move(cloneFn))
 			, onChanged(onChangedSignal) {
 		}
 
-		// Move constructor
 		ObservableProperty(ObservableProperty&& other) noexcept
 			: Property<T>(std::move(other))
 			, onChangedSignal(std::move(other.onChangedSignal))
 			, onChanged(onChangedSignal) {  // Re-bind to our own signal
 		}
 
-		// Move assignment
 		ObservableProperty& operator=(ObservableProperty&& other) noexcept {
 			if (this != &other) {
 				Property<T>::operator=(std::move(other));
@@ -648,7 +598,6 @@ namespace MV {
 			return *this;
 		}
 
-		// Override assignment operators to emit change signals
 		inline ObservableProperty& operator=(const T& newVal) {
 			if (this->value != newVal) {
 				T oldVal = this->value;
@@ -667,7 +616,6 @@ namespace MV {
 			return *this;
 		}
 
-		// Override compound assignments to emit signals
 		template<typename U>
 		ObservableProperty& operator+=(const U& rhs)
 			requires std::is_arithmetic_v<T>&& std::is_arithmetic_v<U> {
@@ -757,7 +705,6 @@ namespace MV {
 		jai::signal_emitter<ChangeSignature> onChangedSignal;
 	};
 
-	// PropertyRegistry implementation
 	inline void PropertyManager::add(PropertyBase* prop) {
 		properties[prop->name()] = prop;
 	}
@@ -800,12 +747,10 @@ namespace MV {
 
 #endif // _MV_PROPERTIES_H_
 
-// Helper macros
 #define MV_EXPAND(x) x
 #define MV_REMOVE_PARENS_IMPL(...) __VA_ARGS__
 #define MV_REMOVE_PARENS(x) MV_EXPAND(MV_REMOVE_PARENS_IMPL x)
 
-// Main property macros
 #define MV_PROPERTY(type, name, ...) \
     MV::Property<MV_REMOVE_PARENS(type)> name{ propertyManager, #name, ##__VA_ARGS__ }
 
@@ -815,7 +760,6 @@ namespace MV {
 #define MV_DELETED_PROPERTY(type, name) \
     MV::DeletedProperty<MV_REMOVE_PARENS(type)> name{ propertyManager, #name }
 
-// Named property macros
 #define MV_NAMED_PROPERTY(type, propName, varName, ...) \
     MV::Property<MV_REMOVE_PARENS(type)> varName{ propertyManager, propName, ##__VA_ARGS__ }
 

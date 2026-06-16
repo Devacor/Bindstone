@@ -66,8 +66,8 @@ public:
                 TransformMatrix M = randomAffine(rng);
                 float t = ang(rng), c = std::cos(t), s = std::sin(t);
                 for (int axis = 0; axis < 3; ++axis) {
-                    TransformMatrix R;        // identity rotation built the old way
-                    TransformMatrix live = M; // rotated in place the new way
+                    TransformMatrix R;
+                    TransformMatrix live = M;
                     if (axis == 0)      { R.access(1,1)=c; R.access(2,1)=-s; R.access(1,2)=s; R.access(2,2)=c; live.rotateXSupplyCosSin(c, s); }
                     else if (axis == 1) { R.access(0,0)=c; R.access(2,0)=s; R.access(0,2)=-s; R.access(2,2)=c; live.rotateYSupplyCosSin(c, s); }
                     else                { R.access(0,0)=c; R.access(1,0)=-s; R.access(0,1)=s; R.access(1,1)=c; live.rotateZSupplyCosSin(c, s); }

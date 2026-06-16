@@ -8,13 +8,11 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for Button
 static jai::registrar<MV::Scene::Button, MV::Services> _hookButton("Button",
 	[](jai::dynamic_binder<MV::Scene::Button>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Clickable>();
 	builder.auto_bind();
 
-	// View nodes
 	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::activeNode));
 	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::activeNode));
 	builder.method("idleNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::idleNode));
@@ -22,7 +20,6 @@ static jai::registrar<MV::Scene::Button, MV::Services> _hookButton("Button",
 	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::disabledNode));
 	builder.method("disabledNode", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::shared_ptr<MV::Scene::Node>&)>(&MV::Scene::Button::disabledNode));
 
-	// Text
 	builder.method("text", static_cast<std::string(MV::Scene::Button::*)() const>(&MV::Scene::Button::text));
 	builder.method("text", static_cast<std::shared_ptr<MV::Scene::Button>(MV::Scene::Button::*)(const std::string&)>(&MV::Scene::Button::text));
 });

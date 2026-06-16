@@ -184,7 +184,6 @@ namespace MV {
 			std::shared_ptr<Node> saveBinary(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> saveBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId);
 
-			// JaiScript serialization
 			std::shared_ptr<Node> saveJai(const std::string &a_filename, MV::Services& a_services, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> saveJai(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId);
 			static std::shared_ptr<Node> loadJai(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep = true);
@@ -927,7 +926,6 @@ namespace MV {
 
 			Draw2D &draw2d;
 
-			// Serializable properties (JAI_PROPERTY)
 			JAI_PROPERTY((std::vector<std::shared_ptr<Node>>), childNodes);
 			JAI_PROPERTY((std::vector<std::shared_ptr<Component>>), childComponents);
 			JAI_PROPERTY((std::string), nodeId);
@@ -942,7 +940,6 @@ namespace MV {
 			JAI_PROPERTY((bool), allowDraw, true);
 			JAI_PROPERTY((int32_t), ourCameraId, 0);
 
-			// Non-serializable runtime state
 			bool onChangeCallNeeded = false;
 			bool allowChangeCallNeeded = true;
 

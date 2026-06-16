@@ -359,7 +359,6 @@ namespace MV {
 			return false;
 		}
 
-		// --- RHI device path ----------------------------------------------------------
 		// Creates the backend shader modules from GLSL; after this, draw routes through pipelineFor + a recorded set.
 		void initializeDeviceModules(Render::Device* a_device, const std::string& a_vertexSource, const std::string& a_fragmentSource) {
 			renderDevice = a_device;

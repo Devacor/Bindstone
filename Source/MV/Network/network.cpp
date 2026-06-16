@@ -7,7 +7,6 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for DynamicVariable
 static jai::registrar<MV::DynamicVariable, MV::Services> _hookDynamicVariable("DynamicVariable",
 	[](jai::dynamic_binder<MV::DynamicVariable>& builder, const MV::Services&) {
 	builder.auto_bind();
@@ -20,14 +19,12 @@ static jai::registrar<MV::DynamicVariable, MV::Services> _hookDynamicVariable("D
 	builder.constructor<double>();
 	builder.constructor<const std::string&>();
 
-	// Assignment operators
 	builder.method("=", [](MV::DynamicVariable& self, bool v) -> MV::DynamicVariable& { return self = v; });
 	builder.method("=", [](MV::DynamicVariable& self, int64_t v) -> MV::DynamicVariable& { return self = v; });
 	builder.method("=", [](MV::DynamicVariable& self, int v) -> MV::DynamicVariable& { return self = v; });
 	builder.method("=", [](MV::DynamicVariable& self, double v) -> MV::DynamicVariable& { return self = v; });
 	builder.method("=", [](MV::DynamicVariable& self, const std::string& v) -> MV::DynamicVariable& { return self = v; });
 
-	// Comparison operators
 	builder.method("==", [](MV::DynamicVariable& self, bool v) { return self == v; });
 	builder.method("==", [](MV::DynamicVariable& self, int64_t v) { return self == v; });
 	builder.method("==", [](MV::DynamicVariable& self, int v) { return self == v; });
@@ -40,7 +37,6 @@ static jai::registrar<MV::DynamicVariable, MV::Services> _hookDynamicVariable("D
 	builder.method("!=", [](MV::DynamicVariable& self, double v) { return self != v; });
 	builder.method("!=", [](MV::DynamicVariable& self, const std::string& v) { return self != v; });
 
-	// Type getters
 	builder.method("bool", [](MV::DynamicVariable& self) { return self.getBool(); });
 	builder.method("int", [](MV::DynamicVariable& self) { return self.getInt(); });
 	builder.method("double", [](MV::DynamicVariable& self) { return self.getDouble(); });
@@ -49,7 +45,6 @@ static jai::registrar<MV::DynamicVariable, MV::Services> _hookDynamicVariable("D
 	builder.method("clear", [](MV::DynamicVariable& self) { return self.clear(); });
 });
 
-// JaiScript binding for Client
 static jai::registrar<MV::Client, MV::Services> _hookClient("Client",
 	[](jai::dynamic_binder<MV::Client>& builder, const MV::Services&) {
 	builder.auto_bind();

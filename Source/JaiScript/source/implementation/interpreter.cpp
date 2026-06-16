@@ -3178,7 +3178,7 @@ void interpreter::prepare_for_execution() {
 
     // Clear exception state
     current_exception_.reset();
-    is_unwinding_ = false;
+    is_unwinding_ = false; trace_captured_ = false;
     active_exception_value_.reset();  // No need to create a value here either
     current_catch_var_id_ = 0;
 
@@ -3228,6 +3228,9 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
     // std::cerr << "DEBUG: interpreter::execute called with " << declarations.size() << " declarations\n";
     script_value last_script_value = make_value();
     hasReturnValue_ = false;  // Reset return value state
+    captured_trace_.clear();
+    trace_captured_ = false;
+    top_level_node_ = nullptr;
 
     for (size_t i = 0; i < declarations.size(); i++) {
         const auto& decl = declarations[i];
@@ -3264,6 +3267,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
 
         // Check if we're unwinding due to an uncaught exception
         if (is_unwinding_) {
+            if (!trace_captured_) capture_stack_trace();
             // Stop executing further declarations
             break;
         }
@@ -9175,7 +9179,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         current_exception_.reset();
         active_exception_value_ = make_value();
     }
-    is_unwinding_ = false;
+    is_unwinding_ = false; trace_captured_ = false;
     current_catch_var_id_ = 0;
 
     // Execute try block
@@ -9197,7 +9201,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
 
     if (caught_error) {
         // Reset unwinding flag
-        is_unwinding_ = false;
+        is_unwinding_ = false; trace_captured_ = false;
 
         // Set the current catch variable ID so identifier lookup can find it (symbolize once here)
         if (auto eng = engine_) {
@@ -10470,7 +10474,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // belongs to the migration, not to the class declaration — clear it so the reload is
         // atomic and doesn't propagate a per-instance hook failure as the statement's result.
         if (is_unwinding_) {
-            is_unwinding_ = false;
+            is_unwinding_ = false; trace_captured_ = false;
             current_exception_.reset();
             active_exception_value_.reset();
         }
@@ -10975,6 +10979,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // parameter conversion calls constructors that push more frames onto call_stack_
     call_stack_.emplace_back();
     const size_t frame_index = call_stack_.size() - 1;
+    call_stack_[frame_index].function_name = function.name;
 
     // Pre-allocate locals for all slots (params + local variables)
     // Slot indices are assigned by the parser at parse time
@@ -11022,7 +11027,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     // Helper lambda to cleanup and restore state
     auto cleanup = [&](bool clear_this = true) {
-        // Pop the call frame
+        // capture before pop_back: deeper frames are still present
+        if (is_unwinding_ && !trace_captured_) capture_stack_trace();
         call_stack_.pop_back();
 
         auto function_env = environment_;
@@ -11792,7 +11798,36 @@ checked_result<void> interpreter::dispatch_expr(expression* expr) {
     }
 }
 
+void interpreter::capture_stack_trace() {
+    captured_trace_.clear();
+    for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) {
+        const ast_node* node = it->current_node;
+        captured_trace_.push_back({
+            it->function_name.empty() ? std::string("<anonymous>") : std::string(it->function_name),
+            node ? node->location.filename : std::string(),
+            node ? node->location.line : 0
+        });
+    }
+    captured_trace_.push_back({
+        "<script>",
+        top_level_node_ ? top_level_node_->location.filename : std::string(),
+        top_level_node_ ? top_level_node_->location.line : 0
+    });
+    trace_captured_ = true;
+}
+
+std::string interpreter::format_stack_trace() const {
+    std::string out;
+    for (const auto& e : captured_trace_) {
+        out += "  at " + e.function + " (" +
+            (e.file.empty() ? std::string("<script>") : e.file) + ":" + std::to_string(e.line) + ")\n";
+    }
+    return out;
+}
+
 checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
+    if (!call_stack_.empty()) call_stack_.back().current_node = stmt;
+    else top_level_node_ = stmt;
     switch (stmt->get_type()) {
         case node_type::expression_stmt:
             return visit_expression_stmt(static_cast<expression_stmt*>(stmt));
@@ -11829,6 +11864,8 @@ checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
 }
 
 checked_result<void> interpreter::dispatch_decl(declaration* decl) {
+    if (!call_stack_.empty()) call_stack_.back().current_node = decl;
+    else top_level_node_ = decl;
     switch (decl->get_type()) {
         case node_type::variable_decl:
             return visit_variable_decl(static_cast<variable_decl*>(decl));

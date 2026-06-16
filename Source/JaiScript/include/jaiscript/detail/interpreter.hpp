@@ -262,6 +262,12 @@ namespace jai {
         std::shared_ptr<environment> env_;
     };
 
+    struct stack_trace_entry {
+        std::string function;
+        std::string file;
+        size_t line = 0;
+    };
+
     /// This avoids hash map overhead for the most frequently accessed variables.
     /// Defined at namespace scope so coroutine_handle can reference it without circular includes.
     struct call_frame {
@@ -273,6 +279,9 @@ namespace jai {
 
         std::shared_ptr<class_definition> static_class_def;
         bool is_static_method = false;
+
+        std::string_view function_name;
+        const ast_node* current_node = nullptr;
 
         /// O(1) access by slot index - much faster than hash map or linear search
         std::vector<script_value> locals;
@@ -517,6 +526,9 @@ namespace jai {
         // Exception handling methods
         bool is_unwinding() const { return is_unwinding_; }
         const script_exception& get_current_exception() const { return current_exception_.value(); }
+
+        const std::vector<stack_trace_entry>& last_stack_trace() const { return captured_trace_; }
+        std::string format_stack_trace() const;
 
         // expression visitors
         checked_result<void> visit_literal_expr(literal_expr* expr) override;
@@ -791,6 +803,11 @@ namespace jai {
         std::optional<script_exception> current_exception_;
         bool is_unwinding_ = false;
         std::optional<script_value> active_exception_value_;  // The exception message as a script_value (optional)
+
+        std::vector<stack_trace_entry> captured_trace_;
+        bool trace_captured_ = false;
+        const ast_node* top_level_node_ = nullptr;
+        void capture_stack_trace();
 
         // Class parsing context - tracks unresolved identifiers in methods
         struct class_context {

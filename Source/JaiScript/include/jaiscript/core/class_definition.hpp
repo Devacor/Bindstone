@@ -63,7 +63,15 @@ public:
 
         for (const auto& [id, default_value] : new_field_defaults) {
             auto it = fields_.find(id);
-            if (it != fields_.end()) {
+            // Keep the existing runtime value, EXCEPT when the field's declared type changed: a
+            // non-null new default whose kind differs from the held value means the old value is
+            // no longer type-compatible (an int field reloaded as string), so adopt the new
+            // default. A null default carries no type (an uninitialized field's slot), so it can
+            // never trigger a reset. Compared against the instance's actual value — NOT the old
+            // stored default, which for instance fields is a null placeholder until first reload.
+            bool retyped = !default_value.is_null() && it != fields_.end() &&
+                it->second.deref().current_type() != default_value.deref().current_type();
+            if (it != fields_.end() && !retyped) {
                 new_fields.emplace(id, std::move(it->second));
             } else {
                 new_fields.emplace(id, default_value.clone());
@@ -963,6 +971,27 @@ public:
             }
         }
 
+        // A field that kept its id but changed declared type (int -> string) leaves the id-set
+        // identical, so the comparison above stays false and migration would be skipped. The old
+        // stored default can't reveal this (instance-field defaults are null placeholders until
+        // the first reload), so detect it against a live instance: a held value whose kind no
+        // longer matches the new non-null default means the type changed. migrate_fields then
+        // resets exactly those fields.
+        if (!fields_changed) {
+            for (const auto& weak_instance : instances_) {
+                auto instance = weak_instance.lock();
+                if (!instance) continue;
+                for (const auto& [id, new_default] : new_field_defaults) {
+                    if (new_default.is_null() || !instance->has_field_value(id)) continue;
+                    if (instance->get_field(id).deref().current_type() != new_default.deref().current_type()) {
+                        fields_changed = true;
+                        break;
+                    }
+                }
+                if (fields_changed) break;
+            }
+        }
+
         std::set<uint64_t> old_fields;
         if (fields_changed) {
             for (const auto& [id, _] : field_defaults_) {
@@ -1082,6 +1111,10 @@ public:
         const auto& all_fields = get_all_field_defaults();
         std::set<uint64_t> dummy_old_fields;
 
+        // migrate_fields keeps each instance's runtime value but resets any field whose declared
+        // type changed against its new non-null default — so a base reload that retypes an
+        // inherited field resets it on derived instances, while a base field still carrying a
+        // null placeholder (never reloaded) leaves derived runtime data untouched.
         for (auto& weak_instance : instances_) {
             if (auto instance = weak_instance.lock()) {
                 instance->migrate_fields(dummy_old_fields, all_fields);

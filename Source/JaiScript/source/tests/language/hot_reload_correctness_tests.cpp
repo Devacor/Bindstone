@@ -51,18 +51,42 @@ public:
             check_eq(eng->execute("d.nb").as<int>(), 7);  // new inherited field added
         });
 
-        // PENDING (deferred): changing a field's declared type on reload should adopt the
-        // new-typed default, not keep the stale old-typed value. The real fix is in the
-        // change-detection: a type-only change keeps the same field-id set, so `fields_changed`
-        // stays false and migration never runs. The fix must fold field value-kinds into the
-        // fingerprint / fields_changed test, and reset only the type-changed field — without
-        // disturbing the base-reload (update_instances_from_base) path. Left as the next target.
-        // test("field_type_change_resets_value", [&]() {
-        //     auto eng = engine::make();
-        //     eng->execute(R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )");
-        //     eng->execute("class Box { string val = \"\"; }"); // int -> string
-        //     check_eq(eng->execute("b.val").as<std::string>(), std::string(""));
-        // });
+        // Changing a field's declared type on reload (int -> string) must adopt the new-typed
+        // default, not keep the stale old-typed value. The retype leaves the field-id set
+        // identical, so `fields_changed` stayed false and migration was skipped — the type
+        // change is detected against the live instance value instead.
+        test("field_type_change_resets_value", [&]() {
+            auto eng = engine::make();
+            eng->execute(R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )");
+            eng->execute("class Box { string val = \"\"; }"); // int -> string
+            check_eq(std::string(""), eng->execute("b.val").as<std::string>());
+        });
+
+        // The flip side: only a *type* change resets. Changing an initializer to a new value of
+        // the SAME type is not a type change — existing instances keep their runtime value (only
+        // new instances get the new default), matching established reload semantics.
+        test("same_type_initializer_change_keeps_value", [&]() {
+            auto eng = engine::make();
+            eng->execute(R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )");
+            eng->execute("class Box { int val = 7; }"); // initializer 0 -> 7, still int
+            check_eq(eng->execute("b.val").as<int>(), 42); // runtime value preserved, not reset
+        });
+
+        // An inherited field whose declared type changes when the BASE reloads must reset on the
+        // derived instance too — the retype is propagated through update_instances_from_base.
+        test("inherited_field_type_change_resets_on_derived", [&]() {
+            auto eng = engine::make();
+            eng->execute(R"(
+                class Base { int bv = 0; }
+                class Derived : Base { int dv = 0; }
+                auto d = Derived();
+                d.bv = 42;
+                d.dv = 99;
+            )");
+            eng->execute("class Base { string bv = \"\"; }"); // inherited bv int -> string
+            check_eq(std::string(""), eng->execute("d.bv").as<std::string>()); // retyped, reset
+            check_eq(eng->execute("d.dv").as<int>(), 99); // derived-own data preserved
+        });
 
         // An error in one instance's hot_reload_migrate hook must not abort the reload for
         // the others.

@@ -142,6 +142,14 @@ namespace jai {
         void execution_budget(double seconds);
         double execution_budget() const;
 
+        struct stack_frame {
+            std::string function;
+            std::string file;
+            size_t line = 0;
+        };
+        std::vector<stack_frame> last_stack_trace() const;
+        std::string format_stack_trace() const;
+
         // Object creation through registered class system
         template<typename T, typename... Args>
         script_value make_object(Args&&... args) {

@@ -1618,6 +1618,22 @@ double engine::execution_budget() const {
     return impl->execution_budget_seconds_;
 }
 
+std::vector<engine::stack_frame> engine::last_stack_trace() const {
+    std::vector<stack_frame> out;
+    auto* backend = dynamic_cast<interpreter_backend*>(impl->backend.get());
+    if (!backend || !backend->get_interpreter()) return out;
+    for (const auto& e : backend->get_interpreter()->last_stack_trace()) {
+        out.push_back({e.function, e.file, e.line});
+    }
+    return out;
+}
+
+std::string engine::format_stack_trace() const {
+    auto* backend = dynamic_cast<interpreter_backend*>(impl->backend.get());
+    if (!backend || !backend->get_interpreter()) return {};
+    return backend->get_interpreter()->format_stack_trace();
+}
+
 script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {
     // Check if current backend is an interpreter
     auto* interpreter_backend_ptr = dynamic_cast<interpreter_backend*>(impl->backend.get());

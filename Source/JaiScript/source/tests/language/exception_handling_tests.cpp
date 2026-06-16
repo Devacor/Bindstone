@@ -212,6 +212,42 @@ public:
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "outer test");
         });
+
+        test("throw_captures_nested_stack_trace", [this]() {
+            auto engine = engine::make();
+            const char* src =
+                "auto inner() { throw \"boom\"; }\n"   // line 1
+                "auto middle() { return inner(); }\n"  // line 2
+                "auto outer() { return middle(); }\n"  // line 3
+                "outer();\n";                          // line 4
+            try { engine->execute(src); } catch (...) {}
+
+            auto trace = engine->last_stack_trace();
+            check_ge(trace.size(), (size_t)4);
+            check_eq(std::string("inner"), trace[0].function);
+            check_eq(std::string("middle"), trace[1].function);
+            check_eq(std::string("outer"), trace[2].function);
+            check_eq(std::string("<script>"), trace[3].function);
+            check_eq((size_t)1, trace[0].line);
+            check_eq((size_t)2, trace[1].line);
+            check_eq((size_t)3, trace[2].line);
+            check_eq((size_t)4, trace[3].line);
+        });
+
+        test("top_level_throw_captures_script_frame", [this]() {
+            auto engine = engine::make();
+            try { engine->execute("throw \"x\";"); } catch (...) {}
+            auto trace = engine->last_stack_trace();
+            check_false(trace.empty());
+            check_eq(std::string("<script>"), trace.back().function);
+        });
+
+        test("format_stack_trace_lists_frames", [this]() {
+            auto engine = engine::make();
+            try { engine->execute("auto f() { throw \"x\"; }\nf();\n"); } catch (...) {}
+            auto s = engine->format_stack_trace();
+            check_true(s.find("at f") != std::string::npos);
+        });
     }
 };
 

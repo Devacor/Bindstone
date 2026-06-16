@@ -30,7 +30,7 @@ public:
 
             // A degenerate zero-rect exposes exactly the inset amount (0.5 / POT) per axis.
             auto inset = pack->percentBounds(BoxAABB<int>(Point<int>(), Point<int>()));
-            const PointPrecision halfU = inset.minPoint.x;   // = 0.5 / 32
+            const PointPrecision halfU = inset.minPoint.x;
             const PointPrecision halfV = inset.minPoint.y;
             check(halfU > 0.0f && halfV > 0.0f,
                   "percentBounds must inset by a positive half-texel — without it, exact-edge UVs bleed the neighbour");

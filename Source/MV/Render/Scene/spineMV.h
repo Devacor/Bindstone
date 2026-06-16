@@ -124,9 +124,7 @@ namespace MV {
 
 				FileBundle();
 
-				// Add copy constructor and assignment operator
 				FileBundle(const FileBundle& other) : jai::property_owner<FileBundle>(other) {
-					// property_owner copy constructor handles property cloning
 				}
 
 				FileBundle& operator=(const FileBundle& other) {

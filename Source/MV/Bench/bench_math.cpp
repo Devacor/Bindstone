@@ -90,19 +90,19 @@ static inline double sum16(const Matrix<4,4>& m) {
 // ---- verbatim copies of the PRE-CHANGE implementations, so old-vs-new is measured in the
 //      SAME binary (no cross-build noise). These mirror matrix.hpp before this optimization. ----
 static inline Matrix<4,4> oldTranspose(const Matrix<4,4>& in) {
-    Matrix<4,4> result(in);                       // old: full copy of *this, then overwrite all
+    Matrix<4,4> result(in);
     for (size_t x = 0; x < 4; ++x)
         for (size_t y = 0; y < 4; ++y)
             result.accessTransposed(x, y) = in.access(x, y);
     return result;
 }
 static inline void oldRotateZSupplyCosSin(TransformMatrix& self, float cosR, float sinR) {
-    TransformMatrix rotation;                     // old: build identity rotation...
+    TransformMatrix rotation;
     rotation.access(0, 0) = cosR;
     rotation.access(1, 0) = -sinR;
     rotation.access(0, 1) = sinR;
     rotation.access(1, 1) = cosR;
-    self = self * rotation;                       // ...then full 4x4 multiply
+    self = self * rotation;
 }
 
 struct Stat { double minNs, medianNs; };

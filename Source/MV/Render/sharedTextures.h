@@ -82,17 +82,14 @@ namespace MV {
 			return a_filename + (a_repeat ? "1" : "0") + (a_pixel ? "1" : "");
 		}
 
-		// ---- Streaming / parallel texture loading (manager-owned) ------------------------
-		// loadFile decodes a file texture's image on the thread pool and uploads it to GL on
-		// the MAIN thread (delivered when the pool's main-thread completion callbacks run from
-		// the game loop, i.e. ThreadPool::run()). Until then the definition reports the
-		// magenta/black "loading" checker placeholder. on_loaded (optional) fires on the main
-		// thread once the texture is live. a_blocking=true decodes + uploads inline instead.
-		// This is owned entirely by the texture system, so every load path benefits — the scene
-		// loader no longer brackets anything.
 		void loadThreadPool(ThreadPool* a_pool) { ourLoadThreadPool = a_pool; }
 		ThreadPool* loadThreadPool() const { return ourLoadThreadPool; }
 
+		// Decodes a file texture's image on the thread pool and uploads it to GL on the MAIN
+		// thread (delivered when the pool's main-thread completion callbacks run from the game
+		// loop, i.e. ThreadPool::run()). Until then the definition reports the magenta/black
+		// "loading" checker placeholder. a_onLoaded (optional) fires on the main thread once the
+		// texture is live. a_blocking=true decodes + uploads inline instead.
 		void loadFile(const std::shared_ptr<FileTextureDefinition>& a_definition,
 		              bool a_blocking = false,
 		              std::function<void()> a_onLoaded = {});

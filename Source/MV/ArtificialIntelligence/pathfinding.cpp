@@ -4,7 +4,6 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for PathNode
 static jai::registrar<MV::PathNode, MV::Services> _hookPathNode("PathNode",
 	[](jai::dynamic_binder<MV::PathNode>& builder, const MV::Services&) {
 	builder.auto_bind();
@@ -13,7 +12,6 @@ static jai::registrar<MV::PathNode, MV::Services> _hookPathNode("PathNode",
 	builder.method("cost", &MV::PathNode::cost);
 });
 
-// JaiScript binding for NavigationAgent
 static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent("NavigationAgent",
 	[](jai::dynamic_binder<MV::NavigationAgent>& builder, const MV::Services&) {
 	builder.auto_bind();
@@ -25,18 +23,15 @@ static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent("N
 	builder.method("disableFootprint", &MV::NavigationAgent::disableFootprint);
 	builder.method("enableFootprint", &MV::NavigationAgent::enableFootprint);
 
-	// Overloaded speed
 	builder.method("speed", static_cast<MV::PointPrecision(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::speed));
 	builder.method("speed", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(MV::PointPrecision)>(&MV::NavigationAgent::speed));
 
-	// Overloaded goal
 	builder.method("goal", static_cast<MV::Point<MV::PointPrecision>(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::goal));
 	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&)>(&MV::NavigationAgent::goal));
 	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&)>(&MV::NavigationAgent::goal));
 	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&, MV::PointPrecision)>(&MV::NavigationAgent::goal));
 	builder.method("goal", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&, MV::PointPrecision)>(&MV::NavigationAgent::goal));
 
-	// Overloaded position
 	builder.method("position", static_cast<MV::Point<MV::PointPrecision>(MV::NavigationAgent::*)() const>(&MV::NavigationAgent::position));
 	builder.method("position", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<>&)>(&MV::NavigationAgent::position));
 	builder.method("position", static_cast<std::shared_ptr<MV::NavigationAgent>(MV::NavigationAgent::*)(const MV::Point<int>&)>(&MV::NavigationAgent::position));
@@ -554,12 +549,10 @@ namespace MV {
 	}
 
 	bool NavigationAgent::attemptToRecalculate() {
-		// Determine if we need recalculation
 		bool mustRecalc = dirtyPath || calculatedPath.empty() ||
 		                  (calculatedPath.size() > 1 && currentPathIndex >= calculatedPath.size());
 		bool urgentRecalc = needsUrgentRecalculation();
 
-		// Attempt recalculation if needed
 		if (mustRecalc || urgentRecalc) {
 			if (!map->hasBudget()) {
 				// No budget - if urgent, we must stop; otherwise can keep moving toward distant blockage
@@ -571,7 +564,6 @@ namespace MV {
 			map->consumeBudget(searchLimit);
 		}
 
-		// Check if recalculation resulted in fully blocked state (path is just current position)
 		if (calculatedPath.size() <= 1) {
 			if (calculatedPath.empty() || calculatedPath[0].position() != cast<int>(ourGoal)) {
 				if (!blockedSignalFired) {
@@ -583,7 +575,6 @@ namespace MV {
 			}
 		}
 
-		// Verify next step is clear (real-time collision check)
 		if (calculatedPath.size() > currentPathIndex + 1) {
 			auto nextPos = calculatedPath[currentPathIndex + 1].position();
 			unblockMap();
@@ -592,7 +583,6 @@ namespace MV {
 
 			if (nextBlocked) {
 				markPathBlockedAt(static_cast<int>(currentPathIndex + 1));
-				// If this is now urgent and we have no budget, stop
 				if (needsUrgentRecalculation() && !map->hasBudget()) {
 					onBlockedSignal(shared_from_this());
 					return false;
@@ -617,7 +607,7 @@ namespace MV {
 			costs.push_back(TemporaryCost(map, calculatedPath[i].position(), temporaryCostAmount));
 
 			auto& mapNode = map->get(calculatedPath[i].position());
-			int pathIndex = static_cast<int>(i);  // Capture path index for blockage tracking
+			int pathIndex = static_cast<int>(i);
 
 			if(unitSize <= 1) {
 				auto receiver = mapNode.onBlock.connect([=](const std::shared_ptr<Map> &a_map, const Point<int> &a_position) {

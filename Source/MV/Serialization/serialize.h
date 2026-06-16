@@ -13,10 +13,6 @@
 
 namespace MV {
 
-	// ============================================================================
-	// Base64 encoding (uses JaiScript's implementation)
-	// ============================================================================
-
 	inline std::string toBase64(const std::string& input) {
 		return jai::base64_encode(input);
 	}
@@ -29,14 +25,6 @@ namespace MV {
 	inline std::string fromBase64(const char* input) {
 		return jai::base64_decode(std::string(input));
 	}
-
-	// ============================================================================
-	// JaiScript-based serialization (default)
-	// ============================================================================
-	// Uses jai::to_json, jai::from_json etc. from jaiscript/serialization/convenience.hpp
-	// Engine is obtained from MV::Services. Overloads without Services use the singleton.
-
-	// --- With explicit Services parameter ---
 
 	template <typename T>
 	std::string toBinaryString(const T& a_input, MV::Services& a_services) {
@@ -62,8 +50,6 @@ namespace MV {
 		return jai::from_json<T>(*engine, a_input, a_services);
 	}
 
-	// --- Cast helpers ---
-
 	template <typename C, typename T>
 	std::string toBinaryStringCast(const std::shared_ptr<T>& a_input, MV::Services& a_services) {
 		return toBinaryString(std::static_pointer_cast<C>(a_input), a_services);
@@ -73,8 +59,6 @@ namespace MV {
 	std::string toJsonCast(const std::shared_ptr<T>& a_input, MV::Services& a_services) {
 		return toJson(std::static_pointer_cast<C>(a_input), a_services);
 	}
-
-	// --- Inline JSON helpers ---
 
 	template <typename T>
 	std::string toJsonInline(const T& a_input, MV::Services& a_services) {
@@ -88,8 +72,6 @@ namespace MV {
 	T fromJsonInline(const std::string& a_input, MV::Services& a_services) {
 		return fromJson<T>("{\"value0\":" + a_input + "}", a_services);
 	}
-
-	// --- Base64 serialization helpers ---
 
 	template <typename T>
 	T fromBase64(const std::string& a_input, MV::Services& a_services) {

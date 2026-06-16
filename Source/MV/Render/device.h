@@ -27,7 +27,6 @@
 namespace MV {
 	namespace Render {
 
-		// ---- Opaque, type-safe resource handles ---------------------------------
 		// A handle is a {index, generation} pair, NOT a GL name. Trivially copyable;
 		// null == {0,0}. The backend maps it internally to VkBuffer / MTLBuffer /
 		// GLuint. The generation lets the backend detect use-after-free of a slot.
@@ -51,7 +50,6 @@ namespace MV {
 		using BoundRenderTarget = Handle<RenderTargetTag>;  // null/default handle == the swapchain target.
 		using BoundUniformSet   = Handle<UniformSetTag>;    // a bound group of uniforms+textures (descriptor set / argument buffer).
 
-		// ---- Enums replacing every GLenum/GLuint leak ---------------------------
 		enum class PixelFormat : uint8_t {
 			RGBA8_UNORM, RGBA8_SRGB, BGRA8_UNORM, BGRA8_SRGB,
 			R8_UNORM, RG8_UNORM, RGBA16_FLOAT,
@@ -102,7 +100,6 @@ namespace MV {
 		//   Metal: z in [0,1], origin top-left  (Y up in NDC).
 		enum class ClipSpace : uint8_t { GL_NegOneToOne, ZeroToOne_YDown, ZeroToOne_YUp };
 
-		// ---- Descriptors --------------------------------------------------------
 		struct VertexAttribute { uint32_t location = 0; VertexAttributeFormat format = VertexAttributeFormat::Float3; uint32_t offset = 0; };
 		struct VertexLayout {
 			uint32_t stride = 0;
@@ -229,7 +226,6 @@ namespace MV {
 			bool flipViewportY = false;
 		};
 
-		// ---- A single recorded draw --------------------------------------------
 		// In the batched 2D path the renderer-layer DrawList concatenates many
 		// drawables into one shared Stream vertexBuffer+indexBuffer and emits ONE
 		// DrawItem per flushed batch, spanning [firstIndex, firstIndex+indexCount)
@@ -252,12 +248,10 @@ namespace MV {
 			BoundBuffer     instanceBuffer;                 // null today.
 		};
 
-		// ============================ THE INTERFACE ============================
 		class Device {
 		public:
 			virtual ~Device() = default;
 
-			// -- lifecycle / device --
 			virtual bool initialize(const SwapchainDesc&) = 0;
 			virtual void shutdown() = 0;
 			virtual const DeviceCaps& caps() const = 0;
@@ -289,16 +283,12 @@ namespace MV {
 			virtual BoundRenderTarget createRenderTarget(const RenderTargetDesc&) = 0;
 			virtual void              destroyRenderTarget(BoundRenderTarget) = 0;
 
-			// -- uniform/texture binding group --
-			// Replaces Shader::set(name,...) + glActiveTexture/glBindTexture/glUniform1i.
 			// Names resolve to binding slots via the pipeline's reflection at build time.
 			virtual BoundUniformSet createUniformSet(BoundPipeline) = 0;
 			virtual void setUniform(BoundUniformSet, const std::string& name, const float* data, uint32_t floatCount) = 0; // 1/2/3/4.
 			virtual void setUniformMatrix(BoundUniformSet, const std::string& name, const float* columnMajor16) = 0;       // backend applies ClipSpace correction.
 			virtual void setTexture(BoundUniformSet, const std::string& name, BoundTexture, BoundSampler) = 0;
 
-			// -- frame / pass / draw recording --
-			// Replaces clearScreen/refreshContext/SwapWindow + Framebuffer start/stop.
 			virtual void beginFrame() = 0;                                       // acquire swapchain image; reset cmd buffer.
 			virtual void beginPass(BoundRenderTarget, const RenderTargetDesc& clearInfo) = 0; // null target == swapchain pass.
 			virtual void beginDefaultPass(const float clearColor[4]) = 0;        // convenience: swapchain pass w/ clear.

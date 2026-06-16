@@ -334,9 +334,8 @@ namespace MV {
 
 		// Right-multiply by a sparse axis rotation in place. Equivalent to *this *= R (the full
 		// 4x4 product) but only the two columns the rotation actually mixes are recomputed; the
-		// other columns (and any projective row entries) are left untouched. Results are
-		// bit-identical to the previous build-identity-then-multiply form for all inputs: the
-		// dropped terms are exact-zero products and operand order is preserved.
+		// other columns (and any projective row entries) are left untouched. The dropped terms are
+		// exact-zero products and operand order is preserved.
 		inline TransformMatrix& rotateXSupplyCosSin(PointPrecision a_cosRad, PointPrecision a_sinRad) {
 			//1	0	0
 			//0	cos	-sin

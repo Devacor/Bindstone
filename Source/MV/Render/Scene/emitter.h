@@ -130,9 +130,6 @@ namespace MV {
 				scale = mix(change.beginScale, change.endScale, mixValue);
 				color = mix(change.beginColor, change.endColor, mixValue);
 
-				// Velocity = the per-particle direction applied to (0, speed*dt, 0). This used to build
-				// a TransformMatrix and do an identity*rotation 4x4 matmul + a matrix*vector PER PARTICLE
-				// PER FRAME; rotatedYAxis computes the identical result from just column 1 of the rotation.
 				position += rotatedYAxis(direction, speed * timeScale);
 				position += gravityConstant * timeScale;
 
@@ -169,7 +166,7 @@ namespace MV {
 			// Rotates the +Y vector (0, a_magnitude, 0) by an XYZ-Euler rotation. Numerically identical
 			// to (TransformMatrix().rotateXYZ(a_angles) * Point(0, a_magnitude, 0)) — since the input is
 			// along +Y, only column 1 of the XYZ rotation matrix contributes, so we skip building and
-			// multiplying a full 4x4 matrix (the matmul-against-identity was pure waste).
+			// multiplying a full 4x4 matrix.
 			static inline Point<> rotatedYAxis(const AxisAngles &a_angles, float a_magnitude) {
 				const float cX = std::cos(a_angles.x), sX = std::sin(a_angles.x);
 				const float cY = std::cos(a_angles.y), sY = std::sin(a_angles.y);

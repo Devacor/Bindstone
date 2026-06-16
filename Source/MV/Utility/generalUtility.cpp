@@ -216,7 +216,6 @@ namespace MV {
 	}
 
 	bool writeToFile(const std::string& a_path, const std::string& a_contents) {
-		// Use path as-is if absolute or explicitly relative (./ or .\), otherwise use playerPreferencesPath
 		bool useAsIs = std::filesystem::path(a_path).is_absolute() ||
 			a_path.starts_with("./") || a_path.starts_with(".\\");
 		std::filesystem::path finalPath = useAsIs ? a_path : playerPreferencesPath() + a_path;

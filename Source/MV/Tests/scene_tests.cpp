@@ -27,7 +27,6 @@ static bool sameMatrix(const Matrix<4, 4>& a, const Matrix<4, 4>& b) {
     return std::memcmp(a.getMatrixArray().data(), b.getMatrixArray().data(), 16 * sizeof(float)) == 0;
 }
 
-// Build ~count nodes under `parent` (fanout 4), each with a non-trivial TRS; collect them.
 static void buildClipSubtree(std::shared_ptr<Node> parent, int count, int& idc,
                              std::vector<std::shared_ptr<Node>>& all) {
     std::vector<std::shared_ptr<Node>> frontier{ parent };
@@ -60,10 +59,10 @@ public:
 
             std::vector<std::array<float, 16>> before(all.size());
             for (size_t i = 0; i < all.size(); ++i) {
-                TransformMatrix w = all[i]->worldTransform();   // clean real-world baseline
+                TransformMatrix w = all[i]->worldTransform();
                 std::memcpy(before[i].data(), w.getMatrixArray().data(), 16 * sizeof(float));
             }
-            clip->drawChildren(origin);                          // the Clipped override-parent draw
+            clip->drawChildren(origin);
             for (size_t i = 0; i < all.size(); ++i) {
                 TransformMatrix w = all[i]->worldTransform();
                 check(std::memcmp(before[i].data(), w.getMatrixArray().data(), 16 * sizeof(float)) == 0,
@@ -84,7 +83,7 @@ public:
             for (int k = 0; k < 5; ++k) clip->drawChildren(origin);
             check(sameMatrix(probe->worldTransform(), refClean), "static node drifted across override draws");
 
-            probe->position(probe->position() + Point<>(17, -23, 5));   // move it
+            probe->position(probe->position() + Point<>(17, -23, 5));
             TransformMatrix movedClean = probe->worldTransform();
             for (int k = 0; k < 5; ++k) clip->drawChildren(origin);
             check(sameMatrix(probe->worldTransform(), movedClean), "moved node not preserved through override draws");
@@ -101,7 +100,7 @@ public:
 
             clip->drawChildren(origin);                                  // warm up (settle dirty flags)
             int64_t base = Node::recalculateMatrixCalls;
-            for (int f = 0; f < 500; ++f) clip->drawChildren(origin);    // static scene: nothing changes
+            for (int f = 0; f < 500; ++f) clip->drawChildren(origin);
             int64_t recomputes = Node::recalculateMatrixCalls - base;
             check_eq((int64_t)0, recomputes,
                      "static clipped subtree recomputed world matrices over 500 idle frames "

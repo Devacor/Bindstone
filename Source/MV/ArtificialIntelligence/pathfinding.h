@@ -25,7 +25,7 @@ namespace MV {
 	class MapNode {
 		friend TemporaryCost;
 		friend Map;  // For sparse serialization access to travelCost/staticBlockedSemaphore
-		friend class jai::access;  // JaiScript load_and_construct support
+		friend class jai::access;
 		friend jai::access;
 	public:
 		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
@@ -94,7 +94,6 @@ namespace MV {
 		static const int MAXIMUM_CLEARANCE = 8;
 	private:
 
-		// Versioned save/load for JaiScript only
 		// Defined out-of-line after Map class because it needs Map to be complete
 		template<class Archive>
 			requires jai::serialization::jai_archive<Archive>
@@ -137,17 +136,17 @@ namespace MV {
 	};
 
 	class Map : public std::enable_shared_from_this<Map> {
-		friend class jai::access;  // JaiScript load_and_construct support
+		friend class jai::access;
 		friend jai::access;
 	public:
-		// JaiScript load_and_construct - must be public for trait detection
+		// load_and_construct must be public for trait detection
 		template<typename Archive>
 		static void load_and_construct(Archive& ar,
 		                               jai::serialization::construct<Map>& c)
 			requires jai::serialization::jai_archive<Archive> {
 			c();  // Default construct via jai::access friend
 			ar("usingCorners", c->usingCorners);
-			ar("squares", c->squares);  // Generic vector<vector<MapNode>> deserialization
+			ar("squares", c->squares);
 			// Set map pointer for all nodes (not serialized)
 			for (auto& column : c->squares) {
 				for (auto& node : column) {
@@ -220,9 +219,8 @@ namespace MV {
 			return usingCorners;
 		}
 
-		// Pathfinding budget management - amortizes pathfinding costs across frames
-		static constexpr int64_t FRAME_NODE_BUDGET = 1000;  // Max A* nodes to search per frame
-		static constexpr double BUDGET_RESET_INTERVAL = 1.0 / 60.0;  // ~16.67ms
+		static constexpr int64_t FRAME_NODE_BUDGET = 1000;
+		static constexpr double BUDGET_RESET_INTERVAL = 1.0 / 60.0;
 
 		void tickBudget() const {
 			auto now = std::chrono::steady_clock::now();
@@ -253,7 +251,6 @@ namespace MV {
 
 		void hookUpObservation();
 
-		// Versioned save/load for JaiScript only
 		template<class Archive>
 			requires jai::serialization::jai_archive<Archive>
 		void save(Archive & archive, std::uint32_t const /*version*/) const {
@@ -266,7 +263,7 @@ namespace MV {
 		void load(Archive & archive, std::uint32_t const /*version*/) {
 			archive("usingCorners", usingCorners);
 			archive("squares", squares);
-			// Note: map pointers for nodes are set in load_and_construct
+			// map pointers for nodes are set in load_and_construct
 			hookUpObservation();
 		}
 
@@ -664,7 +661,6 @@ namespace MV {
 			}
 		}
 
-		// Versioned save/load for JaiScript only
 		template<class Archive>
 			requires jai::serialization::jai_archive<Archive>
 		void save(Archive & archive, std::uint32_t const /*version*/) const {
@@ -724,7 +720,7 @@ namespace MV {
 			currentPathIndex = !calculatedPath.empty() && cast<int>(ourPosition) == calculatedPath[0].position() ? 1 : 0;
 			updateObservedNodes();
 			dirtyPath = false;
-			blockedAtPathIndex = -1;  // Clear blockage tracking after recalculation
+			blockedAtPathIndex = -1;
 			blockedSignalFired = false;
 		}
 
@@ -809,12 +805,11 @@ namespace MV {
 
 		bool dirtyPath = true;
 
-		// Deferred recalculation with urgency-based prioritization
-		static constexpr int RECALC_URGENCY_THRESHOLD = 3;  // Recalc when blockage within N nodes
+		static constexpr int RECALC_URGENCY_THRESHOLD = 3;
 		static constexpr int64_t DEFAULT_SEARCH_LIMIT = 200;
 
 		int blockedAtPathIndex = -1;  // Earliest known blockage in path (-1 = none)
-		bool blockedSignalFired = false;  // Prevent repeated blocked signals
+		bool blockedSignalFired = false;
 
 		void markPathBlockedAt(int pathIndex) {
 			if (blockedAtPathIndex < 0 || pathIndex < blockedAtPathIndex) {
@@ -851,7 +846,6 @@ namespace MV {
 		int ourDebugId = 0;
 	};
 
-	// Out-of-line MapNode save/load for JaiScript only
 	template<class Archive>
 		requires jai::serialization::jai_archive<Archive>
 	void MapNode::save(Archive& archive, std::uint32_t const /*version*/) const {

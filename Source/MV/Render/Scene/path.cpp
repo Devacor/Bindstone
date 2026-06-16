@@ -4,63 +4,52 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for PathMap
 static jai::registrar<MV::Scene::PathMap, MV::Services> _hookPathMap("PathMap",
 	[](jai::dynamic_binder<MV::Scene::PathMap>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 
-	// Grid operations
 	builder.method("resizeGrid", &MV::Scene::PathMap::resizeGrid);
 	builder.method("cellSize", static_cast<MV::Size<>(MV::Scene::PathMap::*)() const>(&MV::Scene::PathMap::cellSize));
 	builder.method("cellSize", static_cast<std::shared_ptr<MV::Scene::PathMap>(MV::Scene::PathMap::*)(const MV::Size<>&)>(&MV::Scene::PathMap::cellSize));
 	builder.method("gridSize", &MV::Scene::PathMap::gridSize);
 
-	// Node lookups
 	builder.method("nodeFromGrid", static_cast<MV::MapNode&(MV::Scene::PathMap::*)(const MV::Point<int>&)>(&MV::Scene::PathMap::nodeFromGrid));
 	builder.method("nodeFromLocal", &MV::Scene::PathMap::nodeFromLocal);
 
-	// Coordinate conversions
 	builder.method("gridFromLocal", static_cast<MV::Point<>(MV::Scene::PathMap::*)(const MV::Point<>&)>(&MV::Scene::PathMap::gridFromLocal));
 	builder.method("localFromGrid", static_cast<MV::Point<>(MV::Scene::PathMap::*)(const MV::Point<int>&)>(&MV::Scene::PathMap::localFromGrid));
 
-	// Queries
 	builder.method("inBounds", &MV::Scene::PathMap::inBounds);
 	builder.method("blocked", &MV::Scene::PathMap::blocked);
 	builder.method("staticallyBlocked", &MV::Scene::PathMap::staticallyBlocked);
 	builder.method("traverseCorners", &MV::Scene::PathMap::traverseCorners);
 });
 
-// JaiScript binding for PathAgent
 static jai::registrar<MV::Scene::PathAgent, MV::Services> _hookPathAgent("PathAgent",
 	[](jai::dynamic_binder<MV::Scene::PathAgent>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Component>();
 	builder.auto_bind();
 
-	// Position
 	builder.method("gridPosition", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridPosition));
 	builder.method("gridPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridPosition));
 	builder.method("localPosition", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localPosition));
 	builder.method("localPosition", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localPosition));
 
-	// Goal
 	builder.method("gridGoal", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridGoal));
 	builder.method("gridGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<int>&)>(&MV::Scene::PathAgent::gridGoal));
 	builder.method("localGoal", static_cast<MV::Point<MV::PointPrecision>(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localGoal));
 	builder.method("localGoal", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(const MV::Point<>&)>(&MV::Scene::PathAgent::localGoal));
 
-	// Speed
 	builder.method("gridSpeed", static_cast<MV::PointPrecision(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::gridSpeed));
 	builder.method("gridSpeed", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(MV::PointPrecision)>(&MV::Scene::PathAgent::gridSpeed));
 	builder.method("localSpeed", static_cast<MV::PointPrecision(MV::Scene::PathAgent::*)() const>(&MV::Scene::PathAgent::localSpeed));
 	builder.method("localSpeed", static_cast<std::shared_ptr<MV::Scene::PathAgent>(MV::Scene::PathAgent::*)(MV::PointPrecision)>(&MV::Scene::PathAgent::localSpeed));
 
-	// Control
 	builder.method("pathfinding", &MV::Scene::PathAgent::pathfinding);
 	builder.method("stop", &MV::Scene::PathAgent::stop);
 	builder.method("path", &MV::Scene::PathAgent::path);
 
-	// Size and footprint
 	builder.method("gridSize", &MV::Scene::PathAgent::gridSize);
 	builder.method("gridOverlaps", &MV::Scene::PathAgent::gridOverlaps);
 	builder.method("localOverlaps", &MV::Scene::PathAgent::localOverlaps);

@@ -8,23 +8,19 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// JaiScript binding for Emitter
 static jai::registrar<MV::Scene::Emitter, MV::Services> _hookEmitter("Emitter",
 	[](jai::dynamic_binder<MV::Scene::Emitter>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 
-	// Relative emission
 	builder.method("relativeEmission", static_cast<std::weak_ptr<MV::Scene::Node>(MV::Scene::Emitter::*)() const>(&MV::Scene::Emitter::relativeEmission));
 	builder.method("relativeEmission", static_cast<std::shared_ptr<MV::Scene::Emitter>(MV::Scene::Emitter::*)(std::shared_ptr<MV::Scene::Node>)>(&MV::Scene::Emitter::relativeEmission));
 	builder.method("removeRelativeEmission", &MV::Scene::Emitter::removeRelativeEmission);
 	builder.method("makeRelativeToParent", &MV::Scene::Emitter::makeRelativeToParent);
 
-	// Properties
 	builder.method("properties", static_cast<const MV::Scene::EmitterSpawnProperties&(MV::Scene::Emitter::*)() const>(&MV::Scene::Emitter::properties));
 	builder.method("properties", static_cast<std::shared_ptr<MV::Scene::Emitter>(MV::Scene::Emitter::*)(const MV::Scene::EmitterSpawnProperties&)>(&MV::Scene::Emitter::properties));
 
-	// Enable/disable
 	builder.method("enabled", &MV::Scene::Emitter::enabled);
 	builder.method("disabled", &MV::Scene::Emitter::disabled);
 	builder.method("enable", &MV::Scene::Emitter::enable);
@@ -471,8 +467,6 @@ namespace MV {
 			item.uniforms = deviceUniformSet;
 			dev->draw(item);
 		}
-
-		// JaiScript serialization is now inline templated in emitter.h
 
 	}
 }

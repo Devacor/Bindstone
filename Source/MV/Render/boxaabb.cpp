@@ -8,7 +8,6 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
-// Helper function to hook BoxAABB types
 template<typename T>
 void hookBoxAABBType(jai::dynamic_binder<MV::BoxAABB<T>>& builder) {
 	builder.auto_bind();
@@ -29,13 +28,11 @@ void hookBoxAABBType(jai::dynamic_binder<MV::BoxAABB<T>>& builder) {
 	builder.property("maxPoint", &MV::BoxAABB<T>::maxPoint);
 }
 
-// JaiScript binding for BoxAABB<float>
 static jai::registrar<MV::BoxAABB<MV::PointPrecision>, MV::Services> _hookBoxAABB("BoxAABB",
 	[](jai::dynamic_binder<MV::BoxAABB<MV::PointPrecision>>& builder, const MV::Services&) {
 	hookBoxAABBType(builder);
 });
 
-// JaiScript binding for BoxAABB<int>
 static jai::registrar<MV::BoxAABB<int>, MV::Services> _hookBoxAABBi("BoxAABBi",
 	[](jai::dynamic_binder<MV::BoxAABB<int>>& builder, const MV::Services&) {
 	hookBoxAABBType(builder);

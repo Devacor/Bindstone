@@ -248,6 +248,48 @@ public:
             auto s = engine->format_stack_trace();
             check_true(s.find("at f") != std::string::npos);
         });
+
+        test("runtime_error_captures_nested_stack_trace", [this]() {
+            auto engine = engine::make();
+            const char* src =
+                "auto inner() { return missingVar; }\n"  // line 1: undefined variable
+                "auto middle() { return inner(); }\n"     // line 2
+                "auto outer() { return middle(); }\n"     // line 3
+                "outer();\n";                             // line 4
+            try { engine->execute(src); } catch (...) {}
+            auto trace = engine->last_stack_trace();
+            check_ge(trace.size(), (size_t)4);
+            check_eq(std::string("inner"), trace[0].function);
+            check_eq(std::string("middle"), trace[1].function);
+            check_eq(std::string("outer"), trace[2].function);
+            check_eq((size_t)1, trace[0].line);
+        });
+
+        test("method_throw_captures_stack_trace", [this]() {
+            auto engine = engine::make();
+            const char* src =
+                "class Foo {\n"
+                "    auto boom() { throw \"x\"; }\n"   // line 2
+                "}\n"
+                "auto f = Foo();\n"
+                "f.boom();\n";                          // line 5
+            try { engine->execute(src); } catch (...) {}
+            auto trace = engine->last_stack_trace();
+            check_false(trace.empty());
+            check_eq((size_t)2, trace[0].line);
+            check_eq(std::string("boom"), trace[0].function);
+        });
+
+        test("lambda_throw_captures_stack_trace", [this]() {
+            auto engine = engine::make();
+            const char* src =
+                "auto fn = []() -> auto { throw \"x\"; };\n"  // line 1
+                "fn();\n";                                     // line 2
+            try { engine->execute(src); } catch (...) {}
+            auto trace = engine->last_stack_trace();
+            check_false(trace.empty());
+            check_eq((size_t)1, trace[0].line);
+        });
     }
 };
 

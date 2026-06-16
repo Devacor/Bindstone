@@ -11181,6 +11181,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
         // Check for error codes - propagate errors
         if (!result && result.error() != std::error_code()) {
+            if (!trace_captured_) capture_stack_trace();
             cleanup();
             // Propagate the error with static message - nice formatting at API boundary
             return result.error_value();

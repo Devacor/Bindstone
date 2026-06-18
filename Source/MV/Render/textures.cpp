@@ -20,10 +20,14 @@
 #endif
 
 #include <jaiscript/core/registrar.hpp>
+#include <jaiscript/serialization/polymorphic.hpp>
 static jai::registrar<MV::FileTextureDefinition, MV::Services> _regFileTexDef("FileTextureDefinition");
 static jai::registrar<MV::DynamicTextureDefinition, MV::Services> _regDynTexDef("DynamicTextureDefinition");
 static jai::registrar<MV::SurfaceTextureDefinition, MV::Services> _regSurfTexDef("SurfaceTextureDefinition");
 static jai::registrar<MV::TextureHandle, MV::Services> _regTexHandle("TextureHandle");
+static jai::serialization::register_relation<MV::FileTextureDefinition, MV::TextureDefinition> _relFileTexDef;
+static jai::serialization::register_relation<MV::DynamicTextureDefinition, MV::TextureDefinition> _relDynTexDef;
+static jai::serialization::register_relation<MV::SurfaceTextureDefinition, MV::TextureDefinition> _relSurfTexDef;
 
 namespace MV {
 

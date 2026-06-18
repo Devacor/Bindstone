@@ -51,6 +51,10 @@ namespace jai {
 
 namespace jai {
 
+namespace serialization {
+    template<typename Derived, typename Base> void register_polymorphic_base_relation();
+}
+
 template<typename T> class signal_emitter;
 template<typename T> class signal;
 template<typename T> class observable_property;
@@ -973,6 +977,10 @@ public:
             base_type_index_ = std::type_index(typeid(Base));
         }
         has_base_class_ = true;
+
+        // Record the serialization assignability edge too (what property_owner does), so a
+        // shared_ptr<Base> with $type Derived passes the polymorphic load type check.
+        serialization::register_polymorphic_base_relation<T, Base>();
 
         return *this;
     }

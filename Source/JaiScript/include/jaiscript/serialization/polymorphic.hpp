@@ -362,6 +362,13 @@ void register_polymorphic_base_relation() {
     polymorphic_registry::register_base_relation<Derived, Base>();
 }
 
+// Declare as a static object to register polymorphic base relations at init, for types not using
+// property_owner (e.g. friend-access or third-party types): static register_relation<D, B...> x;
+template<typename Derived, typename... Bases>
+struct register_relation {
+    register_relation() { (register_polymorphic_base_relation<Derived, Bases>(), ...); }
+};
+
 } // namespace serialization
 } // namespace jai
 

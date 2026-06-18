@@ -1373,41 +1373,17 @@ public:
         classes_[class_name] = metadata;
     }
 
-    // Register class with type_index for runtime lookup by C++ type
-    void register_class(const std::string& class_name, std::type_index type_idx, const class_metadata& metadata) {
-        classes_[class_name] = metadata;
-        type_to_class_name_[type_idx] = class_name;
-    }
-
     const class_metadata* get_class_metadata(const std::string& class_name) const {
         auto it = classes_.find(class_name);
         return it != classes_.end() ? &it->second : nullptr;
-    }
-
-    const class_metadata* get_class_metadata_by_type(std::type_index type_idx) const {
-        auto it = type_to_class_name_.find(type_idx);
-        if (it != type_to_class_name_.end()) {
-            return get_class_metadata(it->second);
-        }
-        return nullptr;
-    }
-
-    const std::string* get_class_name_by_type(std::type_index type_idx) const {
-        auto it = type_to_class_name_.find(type_idx);
-        return it != type_to_class_name_.end() ? &it->second : nullptr;
     }
 
     bool has_class(const std::string& class_name) const {
         return classes_.find(class_name) != classes_.end();
     }
 
-    bool has_class_by_type(std::type_index type_idx) const {
-        return type_to_class_name_.find(type_idx) != type_to_class_name_.end();
-    }
-
 private:
     std::map<std::string, class_metadata> classes_;
-    std::map<std::type_index, std::string> type_to_class_name_;
 };
 
 // NOTE: STL container serialization (vector, array, map, unordered_map, pair,

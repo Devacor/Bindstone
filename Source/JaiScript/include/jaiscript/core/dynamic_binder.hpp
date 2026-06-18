@@ -1480,7 +1480,7 @@ public:
         engine_.add_class<T>(class_name_, class_def_);
 
         // Register serialization metadata with the engine's registry (with type_index for runtime lookup)
-        engine_.get_serialization_registry().register_class(class_name_, std::type_index(typeid(T)), serialization_metadata_);
+        engine_.get_serialization_registry().register_class(class_name_, serialization_metadata_);
         
         
         // Register custom conversions for shared_ptr<T> to handle class_instance wrapping

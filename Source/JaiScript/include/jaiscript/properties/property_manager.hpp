@@ -29,7 +29,7 @@ namespace jai {
 		// (same pattern as registrar.hpp): implicit polymorphic registration for
 		// property_owner types, and the base-pointer adjuster registration for MI.
 		template<typename T> void try_auto_register_implicit();
-		template<typename Derived, typename Base> void register_polymorphic_base_relation();
+		template<typename Derived, typename... Bases> struct register_relation;
 	}
 
 	class property_manager {
@@ -216,7 +216,7 @@ namespace jai {
 			// inheritance (each base is also a property_owner and records its own bases,
 			// so adjust_to_base composes them transitively).
 			if constexpr (sizeof...(Bases) > 0) {
-				(serialization::register_polymorphic_base_relation<Derived, Bases>(), ...);
+				serialization::register_relation<Derived, Bases...>{};
 			}
 			return true;
 		}();

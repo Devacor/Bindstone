@@ -556,15 +556,7 @@ namespace jai {
 
         // Reference support for function parameters
         script_value try_create_reference(size_t arg_index, const script_value& fallback);
-        
-        // Register polymorphic copier for derived types
-        template<typename Derived>
-        void register_polymorphic_copier(std::type_index derived_type, 
-                                       std::type_index base_type,
-                                       std::function<std::shared_ptr<void>(const void*)> copier) {
-            register_polymorphic_copier_impl(derived_type, base_type, std::move(copier));
-        }
-        
+
         // Output stream redirection
         // Set a custom output stream for print() and related functions
         // Pass nullptr to reset to std::cout
@@ -616,9 +608,6 @@ namespace jai {
         void add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef);
         void register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName);
         void register_type_converter_impl(const std::type_info& type, std::function<script_value(const void*)> converter);
-        void register_polymorphic_copier_impl(std::type_index derived_type, 
-                                             std::type_index base_type,
-                                             std::function<std::shared_ptr<void>(const void*)> copier);
         void register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef);
         
         // Allow dynamic_binder to access implementation details

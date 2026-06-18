@@ -803,7 +803,7 @@ struct MIRawDerived : MIRawLeft, MIRawRight {
 };
 static jai::registrar<MIRawDerived, void> _miRawReg("MIRawDerived");
 static const bool _miRawRelation = [] {
-    jai::serialization::register_polymorphic_base_relation<MIRawDerived, MIRawRight>();
+    jai::serialization::register_relation<MIRawDerived, MIRawRight>{};
     return true;
 }();
 

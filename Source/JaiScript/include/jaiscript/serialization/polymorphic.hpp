@@ -357,16 +357,12 @@ void try_auto_register_implicit() {
     polymorphic_registry::try_auto_register_implicit<T>();
 }
 
-template<typename Derived, typename Base>
-void register_polymorphic_base_relation() {
-    polymorphic_registry::register_base_relation<Derived, Base>();
-}
-
-// Declare as a static object to register polymorphic base relations at init, for types not using
-// property_owner (e.g. friend-access or third-party types): static register_relation<D, B...> x;
+// The one way to declare a polymorphic Derived->Base serialization relation. property_owner and
+// dynamic_binder::base_class<>() construct it internally; friend-access / third-party types
+// declare it at namespace scope: static jai::serialization::register_relation<Derived, Base...> x;
 template<typename Derived, typename... Bases>
 struct register_relation {
-    register_relation() { (register_polymorphic_base_relation<Derived, Bases>(), ...); }
+    register_relation() { (polymorphic_registry::register_base_relation<Derived, Bases>(), ...); }
 };
 
 } // namespace serialization

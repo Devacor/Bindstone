@@ -116,48 +116,6 @@ struct engine::implementation {
     // Class registry for both C++ and script classes (replaces global singleton)
     class_registry class_registry_;
     
-    // Polymorphic type registry for deep copying
-    struct polymorphic_type_registry {
-        struct type_copier {
-            std::type_index type_id;
-            std::function<std::shared_ptr<void>(const void*)> copy_func;
-        };
-        
-        // Maps base type -> all registered derived type copiers
-        std::unordered_map<std::type_index, std::vector<type_copier>> base_to_derived_;
-        
-        // Register a derived type with its copy function
-        void register_type(std::type_index derived_type, std::type_index base_type,
-                          std::function<std::shared_ptr<void>(const void*)> copier) {
-            type_copier tc{derived_type, copier};
-            base_to_derived_[base_type].push_back(tc);
-            // Also register under its own type for direct copying
-            base_to_derived_[derived_type].push_back(tc);
-        }
-        
-        // Copy a polymorphic object, maintaining its actual derived type
-        std::shared_ptr<void> copy_polymorphic(const void* obj, std::type_index stored_type) const {
-            // For polymorphic types, we need the actual runtime type
-            // Since we registered the copier with the exact type, we can just use stored_type
-            // The polymorphic behavior is handled by registering derived types with their base
-            
-            // Find copier for this type
-            auto it = base_to_derived_.find(stored_type);
-            if (it != base_to_derived_.end() && !it->second.empty()) {
-                // Use the first copier (there should only be one per type)
-                return it->second[0].copy_func(obj);
-            }
-            
-            // No copier found
-            return nullptr;
-        }
-        
-        bool has_copier(std::type_index type) const {
-            return base_to_derived_.find(type) != base_to_derived_.end();
-        }
-    };
-    
-    polymorphic_type_registry polymorphic_copiers;
 
     // Structure to hold overloaded functions with type information
     struct OverloadSet {
@@ -1329,11 +1287,6 @@ void engine::setHasCustomNumericOps(bool value) {
 
 // Removed duplicate - already defined at line 748
 
-void engine::register_polymorphic_copier_impl(std::type_index derived_type, 
-                                             std::type_index base_type,
-                                             std::function<std::shared_ptr<void>(const void*)> copier) {
-    impl->polymorphic_copiers.register_type(derived_type, base_type, std::move(copier));
-}
 
 void engine::register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef) {
     impl->classesByType[type] = classDef;

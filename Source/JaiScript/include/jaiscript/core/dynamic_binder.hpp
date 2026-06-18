@@ -52,7 +52,7 @@ namespace jai {
 namespace jai {
 
 namespace serialization {
-    template<typename Derived, typename Base> void register_polymorphic_base_relation();
+    template<typename Derived, typename... Bases> struct register_relation;
 }
 
 template<typename T> class signal_emitter;
@@ -380,8 +380,6 @@ public:
         , class_name_(std::move(other.class_name_))
         , class_def_(std::move(other.class_def_))
         , serialization_metadata_(std::move(other.serialization_metadata_))
-        , has_base_class_(other.has_base_class_)
-        , base_type_index_(other.base_type_index_)
         , has_explicit_constructor_(other.has_explicit_constructor_)
         , built_(other.built_)
     {
@@ -971,16 +969,9 @@ public:
             }
         }
 
-        // Store base type info for polymorphic copy registration
-        // For multiple inheritance, this stores the last base (first base is used for primary polymorphism)
-        if (!has_base_class_) {
-            base_type_index_ = std::type_index(typeid(Base));
-        }
-        has_base_class_ = true;
-
-        // Record the serialization assignability edge too (what property_owner does), so a
+        // Record the serialization assignability edge (what property_owner does) so a
         // shared_ptr<Base> with $type Derived passes the polymorphic load type check.
-        serialization::register_polymorphic_base_relation<T, Base>();
+        serialization::register_relation<T, Base>{};
 
         return *this;
     }
@@ -1484,20 +1475,6 @@ public:
                 const T* typed_src = static_cast<const T*>(src);
                 return std::make_shared<T>(*typed_src);
             });
-            
-            // If this is a polymorphic type with a base class, register polymorphic copier
-            if constexpr (std::is_polymorphic_v<T>) {
-                if (has_base_class_) {
-                    engine_.register_polymorphic_copier<T>(
-                        std::type_index(typeid(T)), 
-                        base_type_index_,
-                        [](const void* obj) -> std::shared_ptr<void> {
-                            const T* typed = static_cast<const T*>(obj);
-                            return std::make_shared<T>(*typed);
-                        }
-                    );
-                }
-            }
         }
         
         engine_.add_class<T>(class_name_, class_def_);
@@ -1752,9 +1729,6 @@ private:
                     throw std::runtime_error("Diamond inheritance detected: class '" + class_name_ +
                         "' would have multiple paths to the same base class");
                 }
-                has_base_class_ = true;
-                // Store first base type index for polymorphic copy
-                base_type_index_ = std::type_index(typeid(std::tuple_element_t<0, std::tuple<Bases...>>));
             }
         }
     }
@@ -1774,8 +1748,6 @@ private:
     std::string class_name_;
     std::shared_ptr<class_definition> class_def_;
     serialization::class_metadata serialization_metadata_;
-    bool has_base_class_ = false;
-    std::type_index base_type_index_ = std::type_index(typeid(void));
     bool has_explicit_constructor_ = false;  // Track if user registered any constructor
     bool built_ = false;  // Track if build() was called
     

@@ -408,6 +408,7 @@ int main(int argc, char *argv[]) {
 
 	std::string name;
 	std::string pass;
+	bool autoStart = false;
 	for (int i = 0; i < argc-1; ++i) {
 		if (strcmp(argv[i], "-n") == 0) {
 			name = argv[i + 1];
@@ -427,6 +428,9 @@ int main(int argc, char *argv[]) {
 	MV::Services::instance().connect<jai::engine>(testEngine.get());
 
 	for (int i = 0; i < argc; ++i) {
+		if (strcmp(argv[i], "-auto") == 0) {
+			autoStart = true;
+		}
 		if (strcmp(argv[i], "-bench") == 0) {
 			RunJsonParseBenchmark(testEngine.get());
 			return 0;
@@ -559,7 +563,7 @@ int main(int argc, char *argv[]) {
 
 	pool2.synchronize(pool.updated());
 
-	GameEditor menu(name, pass);
+	GameEditor menu(name, pass, autoStart);
 
 	menu.start();
 	

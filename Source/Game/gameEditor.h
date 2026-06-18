@@ -8,7 +8,7 @@
 
 class GameEditor {
 public:
-	GameEditor(std::string a_username, std::string a_password);
+	GameEditor(std::string a_username, std::string a_password, bool a_autoStart);
 
 	void start() {
 		runLimbo();

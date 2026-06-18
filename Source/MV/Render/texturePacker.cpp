@@ -5,8 +5,10 @@
 #include "sharedTextures.h"
 
 #include <jaiscript/core/registrar.hpp>
+#include <jaiscript/serialization/polymorphic.hpp>
 static jai::registrar<MV::PackedTextureDefinition, MV::Services> _regPackedTexDef("PackedTextureDefinition");
 static jai::registrar<MV::TexturePack, MV::Services> _regTexturePack("TexturePack");
+static jai::serialization::register_relation<MV::PackedTextureDefinition, MV::DynamicTextureDefinition> _relPackedTexDef;
 
 namespace MV{
 

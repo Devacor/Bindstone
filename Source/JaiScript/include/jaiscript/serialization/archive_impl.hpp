@@ -1272,7 +1272,9 @@ private:
                     // below would reinterpret an unrelated object as elem_type (type confusion
                     // reachable from untrusted payloads). B5.
                     if (!polymorphic_registry::instance().is_assignable(entry->type, std::type_index(typeid(elem_type)))) {
-                        throw serialization_error("Polymorphic type '" + poly_type + "' is not a subtype of the requested base type");
+                        throw serialization_error("Polymorphic type '" + poly_type + "' is not a registered subtype of requested base '" +
+                            std::type_index(typeid(elem_type)).name() + "' (declare it: static jai::serialization::register_relation<" +
+                            poly_type + ", Base>, or .base<Base>() on its registrar)");
                     }
                     if (!self()->seek_property("$val")) {
                         throw serialization_error("Expected '$val' for polymorphic shared_ptr");

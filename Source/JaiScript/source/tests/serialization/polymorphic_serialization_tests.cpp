@@ -38,6 +38,14 @@ public:
     std::string get_type_name() const override { return "SerCharacter"; }
 };
 
+// Fresh hierarchies used ONLY to pin that .base_class<>() and register_relation<> register the
+// polymorphic assignability edge (the B5 load check). Isolated so the edge can only come from
+// the test under it.
+struct EdgeBase { virtual ~EdgeBase() = default; };
+struct EdgeDerived : EdgeBase {};
+struct RelBase { virtual ~RelBase() = default; };
+struct RelDerived : RelBase {};
+
 // Another C++ derived class
 class SerItem : public SerEntity {
 public:
@@ -1008,6 +1016,25 @@ public:
             auto loaded = roundtrip_json(*eng, exact);
             check(loaded != nullptr, "non-polymorphic-context save must still work");
             check_eq(9, loaded->extra);
+        });
+
+        // dynamic_binder::base_class<>() must register the polymorphic assignability edge (not
+        // just engine inheritance), so a shared_ptr<Base> with a derived $type passes the B5 load
+        // check. Regression for the FileTextureDefinition-through-base load failure.
+        test("base_class_registers_polymorphic_assignability_edge", [&]() {
+            auto eng = engine::make();
+            dynamic_binder<EdgeDerived>(*eng, "EdgeDerived").constructor<>().base_class<EdgeBase>().build();
+            auto& reg = jai::serialization::polymorphic_registry::instance();
+            check_true(reg.is_assignable(std::type_index(typeid(EdgeDerived)), std::type_index(typeid(EdgeBase))));
+            check_false(reg.is_assignable(std::type_index(typeid(EdgeBase)), std::type_index(typeid(EdgeDerived))));
+        });
+
+        // register_relation<Derived, Base> declares the same edge externally (for friend-access /
+        // third-party types that can't use property_owner or .base_class<>()).
+        test("register_relation_registers_assignability_edge", [&]() {
+            jai::serialization::register_relation<RelDerived, RelBase> _r;
+            auto& reg = jai::serialization::polymorphic_registry::instance();
+            check_true(reg.is_assignable(std::type_index(typeid(RelDerived)), std::type_index(typeid(RelBase))));
         });
     }
 };

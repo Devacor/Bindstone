@@ -41,6 +41,7 @@ template<typename T> class dynamic_binder;
 // its definition rides in with that bottom include.
 namespace serialization {
 	template<typename T> void try_auto_register(const std::string& name);
+	template<typename Derived, typename... Bases> struct register_relation;
 }
 
 // ============================================================================
@@ -198,12 +199,14 @@ inline std::string registrar_auto_name() {
 // C++17-compatible registrar (runtime name)
 // ============================================================================
 
-// Primary template - with context
-template<typename T, typename Context>
+// Primary template - with context. Bases... optionally declare polymorphic base relations so a
+// shared_ptr<Base> with this $type passes the load type check (registrar<T, Ctx, Base>).
+template<typename T, typename Context, typename... Bases>
 class registrar {
     static void register_simple(std::string name_str) {
         type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
+        if constexpr (sizeof...(Bases) > 0) { serialization::register_relation<T, Bases...>{}; }
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [name_str](engine& eng, const Context&) {
@@ -218,6 +221,7 @@ class registrar {
     static void register_configured(std::string name_str, F&& configure) {
         type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
+        if constexpr (sizeof...(Bases) > 0) { serialization::register_relation<T, Bases...>{}; }
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [name_str, configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
@@ -244,11 +248,12 @@ public:
 };
 
 // Specialization for no context
-template<typename T>
-class registrar<T, void> {
+template<typename T, typename... Bases>
+class registrar<T, void, Bases...> {
     static void register_simple(std::string name_str) {
         type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
+        if constexpr (sizeof...(Bases) > 0) { serialization::register_relation<T, Bases...>{}; }
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [name_str](engine& eng) {
@@ -263,6 +268,7 @@ class registrar<T, void> {
     static void register_configured(std::string name_str, F&& configure) {
         type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
+        if constexpr (sizeof...(Bases) > 0) { serialization::register_relation<T, Bases...>{}; }
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [name_str, configure = std::forward<F>(configure)](engine& eng) {

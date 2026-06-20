@@ -11,6 +11,7 @@
 
 #include "MV/Utility/scopeGuard.hpp"
 #include "Game/NetworkLayer/synchronizeAction.h"
+#include "Game/NetworkLayer/clientActions.h"
 #include "MV/Network/networkObject.h"
 
 #include "JaiScript/stdlib/stdlib.hpp"
@@ -243,6 +244,20 @@ static void RunSceneLoadBenchmark(bool a_headless) {
 	timeLoad("[JaiScript map.scene]", [&] { return MV::Scene::Node::load("Scenes/map.scene", managers.services, true); });
 }
 
+// Save a NetworkAction as shared_ptr<NetworkAction> (the wire form) and reload it through the base
+// — exercises the polymorphic save + the B5 is_assignable load check the way the matchmaking wire does.
+template<typename T>
+static bool roundtripNetworkAction(MV::Services& a_services) {
+	try {
+		std::shared_ptr<NetworkAction> original = std::make_shared<T>();
+		std::string wire = MV::toBinaryStringCast<NetworkAction>(original, a_services);
+		auto back = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(wire, a_services);
+		return back != nullptr && std::dynamic_pointer_cast<T>(back) != nullptr;
+	} catch (const std::exception&) {
+		return false;
+	}
+}
+
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
 // jai asset format end to end. Run: BindstoneClient.exe -verifyassets
 static void RunAssetVerification() {
@@ -299,7 +314,12 @@ static void RunAssetVerification() {
 			auto root = MV::Scene::Node::load(path, managers.services, false);
 			fakeRoot->add(root);
 			root->postLoadStep();
-			std::cout << "[OK]   " << path << " (root=" << root->id() << ")" << std::endl;
+			// Save and reload to exercise the save side too (catches unregistered-on-save
+			// polymorphic types that a load-only check misses).
+			auto blob = MV::toBinaryString(root, managers.services);
+			auto reloaded = MV::fromBinaryString<std::shared_ptr<MV::Scene::Node>>(blob, managers.services);
+			if (!reloaded) { throw std::runtime_error("save/reload round-trip returned null"); }
+			std::cout << "[OK]   " << path << " (root=" << root->id() << ", round-trip ok)" << std::endl;
 			root->removeFromParent();
 			++passed;
 		} catch (std::exception& e) {
@@ -307,6 +327,14 @@ static void RunAssetVerification() {
 			++failed;
 		}
 	}
+
+	// Matchmaking-wire round-trip: each NetworkAction is serialized through shared_ptr<NetworkAction>.
+	auto checkAction = [&](const char* name, bool ok) {
+		std::cout << (ok ? "[OK]   NetworkAction " : "[FAIL] NetworkAction ") << name << std::endl;
+		if (ok) { ++passed; } else { ++failed; }
+	};
+	checkAction("MessageAction", roundtripNetworkAction<MessageAction>(managers.services));
+	checkAction("LoginResponse", roundtripNetworkAction<LoginResponse>(managers.services));
 	try {
 		GameData catalogCheck(managers, false);
 		std::cout << "[OK]   Catalogs (creatures/buildings/battleEffects)" << std::endl;

@@ -10,10 +10,10 @@
 
 #include <jaiscript/core/registrar.hpp>
 
-static jai::registrar<CreatePlayer, MV::Services> _regCreatePlayer("CreatePlayer");
-static jai::registrar<LoginRequest, MV::Services> _regLoginRequest("LoginRequest");
-static jai::registrar<FindMatchRequest, MV::Services> _regFindMatchRequest("FindMatchRequest");
-static jai::registrar<ExpectedPlayersNoted, MV::Services> _regExpectedPlayersNoted("ExpectedPlayersNoted");
+static jai::registrar<CreatePlayer, MV::Services, NetworkAction> _regCreatePlayer("CreatePlayer");
+static jai::registrar<LoginRequest, MV::Services, NetworkAction> _regLoginRequest("LoginRequest");
+static jai::registrar<FindMatchRequest, MV::Services, NetworkAction> _regFindMatchRequest("FindMatchRequest");
+static jai::registrar<ExpectedPlayersNoted, MV::Services, NetworkAction> _regExpectedPlayersNoted("ExpectedPlayersNoted");
 
 
 #ifdef BINDSTONE_SERVER

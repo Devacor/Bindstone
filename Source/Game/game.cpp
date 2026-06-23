@@ -1,5 +1,6 @@
 #include "game.h"
 #include "MV\Utility\stringUtility.h"
+#include "MV/Utility/generalUtility.h"
 #include <functional>
 
 #include <jaiscript/core/registrar.hpp>
@@ -56,6 +57,10 @@ Game::Game(Managers& a_managers) :
 	jaiEngine_->add_global("messages", jaiEngine_->make_object(std::shared_ptr<StandardMessages>(&a_managers.messages, [](StandardMessages*) {})));
 	jaiEngine_->add_global("DefaultLoginId", jai::script_value(a_managers.defaultLogin.id, jaiEngine_.get()));
 	jaiEngine_->add_global("DefaultPassword", jai::script_value(a_managers.defaultLogin.password, jaiEngine_.get()));
+
+	jaiEngine_->add_function("eval_file", [eng = jaiEngine_.get()](const std::string& a_path) {
+		eng->execute(MV::fileContents("Interface/" + a_path, true));
+	});
 
 	returnFromBackground();
 

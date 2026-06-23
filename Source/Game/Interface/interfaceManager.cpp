@@ -3,6 +3,19 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "Game/state.h"
+#include "MV/Script/script.h"
+#include "MV/Utility/generalUtility.h"
+
+namespace {
+	template <typename T>
+	void evalSelfScript(jai::engine& a_engine, const std::string& a_scriptPath, T* a_self) {
+		std::string body = MV::fileContents(a_scriptPath);
+		if (!body.empty()) {
+			MV::Script(a_engine).eval(a_scriptPath, body,
+				{ { "self", a_engine.make_object(std::shared_ptr<T>(a_self, [](T*) {})) } });
+		}
+	}
+}
 
 static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
 	[](jai::dynamic_binder<MV::Interface>& builder, const MV::Services&) {
@@ -86,6 +99,7 @@ namespace MV {
 			manager.root()->add(node);
 			node->active(false);
 
+			evalSelfScript(manager.script(), "Interface/" + pageId + "/initialize.script", this);
 			if (scriptInitialize) {
 				scriptInitialize(*this);
 			}
@@ -100,6 +114,7 @@ namespace MV {
 	}
 
 	InterfaceManager& InterfaceManager::initialize() {
+		evalSelfScript(jaiEngine_, node->id(), this);
 		if (scriptInitialize) {
 			scriptInitialize(*this);
 		}

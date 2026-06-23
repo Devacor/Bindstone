@@ -7,6 +7,9 @@
 #include "MV/Utility/signal.hpp"
 #include "MV/Utility/visitor.hpp"
 #include "Box2D/Box2D.h"
+#include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/serialization/construct.hpp>
+#include "MV/Utility/services.hpp"
 #include <list>
 #include <map>
 
@@ -72,6 +75,7 @@ namespace MV {
 
 		class Environment : public Component {
 			friend Node;
+			friend jai::access;
 
 		public:
 			ComponentDerivedAccessors(Environment)
@@ -105,6 +109,32 @@ namespace MV {
 				return &world;
 			}
 		protected:
+			template <class Archive>
+			void save(Archive & archive, std::uint32_t const /*version*/) const {
+				archive(
+					jai::serialization::make_nvp("gravityX", world.GetGravity().x),
+					jai::serialization::make_nvp("gravityY", world.GetGravity().y)
+				);
+				Component::save(archive, 0);
+			}
+
+			template <class Archive>
+			void load(Archive & archive, std::uint32_t const /*version*/) {
+				MV::require<MV::ResourceException>(false, "Cannot properly load an environment, must load_and_construct. This might happen if you derive from environment wrongly.");
+			}
+
+			template <typename Archive>
+			static void load_and_construct(Archive & ar, jai::serialization::construct<Environment> &construct) {
+				b2Vec2 loadedGravity;
+				ar(
+					jai::serialization::make_nvp("gravityX", loadedGravity.x),
+					jai::serialization::make_nvp("gravityY", loadedGravity.y)
+				);
+				construct(std::shared_ptr<Node>(), cast(loadedGravity));
+				construct->Component::load(ar, 0);
+				construct->initialize();
+			}
+
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<Environment>(cast(world.GetGravity())).self());
 			}
@@ -145,6 +175,7 @@ namespace MV {
 
 		class CollisionBodyAttributes {
 			friend Collider;
+			friend jai::access;
 		public:
 			CollisionBodyAttributes();
 
@@ -191,6 +222,29 @@ namespace MV {
 			CollisionBodyAttributes& allowSleep();
 			CollisionBodyAttributes& disallowSleep();
 
+			template <class Archive>
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+				syncronize();
+				archive(
+					jai::serialization::make_nvp("x", details.position.x),
+					jai::serialization::make_nvp("y", details.position.y),
+					jai::serialization::make_nvp("angle", details.angle),
+					jai::serialization::make_nvp("vX", details.linearVelocity.x),
+					jai::serialization::make_nvp("vY", details.linearVelocity.y),
+					jai::serialization::make_nvp("vAngle", details.angularVelocity),
+					jai::serialization::make_nvp("linearDamping", details.linearDamping),
+					jai::serialization::make_nvp("angularDamping", details.angularDamping),
+					jai::serialization::make_nvp("allowSleep", details.allowSleep),
+					jai::serialization::make_nvp("awake", details.awake),
+					jai::serialization::make_nvp("fixedRotation", details.fixedRotation),
+					jai::serialization::make_nvp("bullet", details.bullet),
+					jai::serialization::make_nvp("type", details.type),
+					jai::serialization::make_nvp("active", details.active),
+					jai::serialization::make_nvp("gravityScale", details.gravityScale),
+					jai::serialization::make_nvp("parent", parent)
+				);
+			}
+
 		private:
 			void syncronize() const;
 
@@ -200,6 +254,7 @@ namespace MV {
 
 		class RotationJointAttributes {
 			friend Collider;
+			friend jai::access;
 		public:
 			~RotationJointAttributes() {
 				destroy();
@@ -250,6 +305,9 @@ namespace MV {
 				return *this;
 			}
 
+			template <class Archive>
+			void serialize(Archive & archive, std::uint32_t const version);
+
 		private:
 			void initialize(const std::shared_ptr<Collider> &a_lhs, const std::shared_ptr<Collider> &a_rhs, Point<> a_offset);
 			void loadedCollider(Collider* a_loaded);
@@ -290,6 +348,7 @@ namespace MV {
 
 		class CollisionPartAttributes {
 			friend Collider;
+			friend jai::access;
 		public:
 			CollisionPartAttributes() {
 				details.restitution = 0.0f;
@@ -345,6 +404,19 @@ namespace MV {
 				return *this;
 			}
 
+			template <class Archive>
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+				archive(
+					jai::serialization::make_nvp("restitution", details.restitution),
+					jai::serialization::make_nvp("friction", details.friction),
+					jai::serialization::make_nvp("density", details.density),
+					jai::serialization::make_nvp("sensor", details.isSensor),
+					jai::serialization::make_nvp("filterCategory", details.filter.categoryBits),
+					jai::serialization::make_nvp("filterInteractions", details.filter.maskBits),
+					jai::serialization::make_nvp("id", ourId)
+				);
+			}
+
 		private:
 			std::string ourId;
 			b2FixtureDef details;
@@ -371,6 +443,7 @@ namespace MV {
 
 		class Collider : public Component {
 			friend Node;
+			friend jai::access;
 			friend CollisionBodyAttributes;
 			friend RotationJointAttributes;
 			friend ContactListener;
@@ -509,6 +582,62 @@ namespace MV {
 			void attachInternal(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 			void attachInternal(const std::vector<Point<>> &a_points, const Point<> &a_offset = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
+			template <class Archive>
+			void save(Archive & archive, std::uint32_t const /*version*/) const {
+				collisionAttributes.syncronize();
+				archive(
+					jai::serialization::make_nvp("world", world),
+					jai::serialization::make_nvp("collisionAttributes", collisionAttributes),
+					jai::serialization::make_nvp("useBodyAngle", useBodyAngle),
+					jai::serialization::make_nvp("collisionParts", collisionParts),
+					jai::serialization::make_nvp("currentPosition", currentPosition),
+					jai::serialization::make_nvp("currentAngle", currentAngle),
+					jai::serialization::make_nvp("useBodyPosition", useBodyPosition),
+					jai::serialization::make_nvp("rotationJoints", rotationJoints)
+				);
+				Component::save(archive, 0);
+			}
+
+			template <class Archive>
+			void load(Archive & archive, std::uint32_t const /*version*/) {
+				MV::require<MV::ResourceException>(false, "Cannot properly load a collider with load... Must be load_and_construct. Might implement if ever derived from.");
+			}
+
+			template <typename Archive>
+			static void load_and_construct(Archive & ar, jai::serialization::construct<Collider> &construct) {
+				CollisionBodyAttributes collisionAttributes;
+				std::shared_ptr<Environment> world;
+				ar(
+					jai::serialization::make_nvp("world", world),
+					jai::serialization::make_nvp("collisionAttributes", collisionAttributes)
+				);
+				construct(std::shared_ptr<Node>(), world, collisionAttributes, false);
+				construct->loadedFromJson = true;
+				ar(
+					jai::serialization::make_nvp("useBodyAngle", construct->useBodyAngle),
+					jai::serialization::make_nvp("collisionParts", construct->collisionParts),
+					jai::serialization::make_nvp("currentPosition", construct->currentPosition),
+					jai::serialization::make_nvp("currentAngle", construct->currentAngle),
+					jai::serialization::make_nvp("useBodyPosition", construct->useBodyPosition),
+					jai::serialization::make_nvp("rotationJoints", construct->rotationJoints)
+				);
+				construct->Component::load(ar, 0);
+				construct->initialize();
+				for (auto&& attribute : construct->collisionParts) {
+					if (attribute.shapeType == FixtureParameters::CIRCLE) {
+						construct->attachInternal(attribute.diameter, attribute.position, attribute.attributes);
+					} else if (attribute.shapeType == FixtureParameters::RECTANGLE) {
+						construct->attachInternal(attribute.size, attribute.position, attribute.rotation, attribute.attributes);
+					} else if (attribute.shapeType == FixtureParameters::POLYGON) {
+						construct->attachInternal(attribute.points, attribute.position, attribute.attributes);
+					}
+				}
+
+				for (auto&& joint : construct->rotationJoints) {
+					joint->loadedCollider(construct.get_ptr().get());
+				}
+			}
+
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<Collider>(world, collisionAttributes).self());
 			}
@@ -525,6 +654,19 @@ namespace MV {
 				Point<> position;
 				std::vector<Point<>> points;
 				CollisionPartAttributes attributes;
+
+				template <class Archive>
+				void serialize(Archive & archive, std::uint32_t const /*version*/) {
+					archive(
+						jai::serialization::make_nvp("type", shapeType),
+						jai::serialization::make_nvp("size", size),
+						jai::serialization::make_nvp("points", points),
+						jai::serialization::make_nvp("rotation", rotation),
+						jai::serialization::make_nvp("diameter", diameter),
+						jai::serialization::make_nvp("position", position),
+						jai::serialization::make_nvp("attributes", attributes)
+					);
+				}
 			};
 
 			Collider(const std::weak_ptr<Node> &a_owner, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes(), bool a_maintainOwnerPosition = true);
@@ -600,6 +742,41 @@ namespace MV {
 			bool useBodyPosition = true;
 			bool loadedFromJson = false;
 		};
+
+		template <class Archive>
+		void RotationJointAttributes::serialize(Archive & archive, std::uint32_t const /*version*/) {
+			worldPosition = Point<>();
+			if (joint) {
+				jointDef.motorSpeed = joint->GetMotorSpeed();
+				jointDef.maxMotorTorque = joint->GetMaxMotorTorque();
+				jointDef.referenceAngle = A.lock()->physicsBody->GetAngle() - B.lock()->physicsBody->GetAngle() - joint->GetJointAngle();
+				worldPosition = A.lock()->world->owner()->localFromWorld(A.lock()->owner()->worldFromLocal(offset));
+			}
+
+			archive(
+				jai::serialization::make_nvp("A", A),
+				jai::serialization::make_nvp("B", B),
+				jai::serialization::make_nvp("Offset", offset),
+				jai::serialization::make_nvp("Position", worldPosition),
+				jai::serialization::make_nvp("Motor", jointDef.enableMotor),
+				jai::serialization::make_nvp("Limit", jointDef.enableLimit),
+				jai::serialization::make_nvp("Angle", jointDef.referenceAngle)
+			);
+
+			if (jointDef.enableMotor) {
+				archive(
+					jai::serialization::make_nvp("Speed", jointDef.motorSpeed),
+					jai::serialization::make_nvp("MaxTorque", jointDef.maxMotorTorque)
+				);
+			}
+
+			if (jointDef.enableLimit) {
+				archive(
+					jai::serialization::make_nvp("Min", jointDef.lowerAngle),
+					jai::serialization::make_nvp("Max", jointDef.upperAngle)
+				);
+			}
+		}
 	}
 }
 

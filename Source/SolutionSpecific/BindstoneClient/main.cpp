@@ -6,6 +6,7 @@
 
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "MV/Serialization/serialize.h"
+#include "MV/Render/Scene/clickable.h"
 //#include "vld.h"
 
 
@@ -258,6 +259,52 @@ static bool roundtripNetworkAction(MV::Services& a_services) {
 	}
 }
 
+// One-time restoration of the button onAccept eval_file receivers that the Cereal->jai scene
+// conversion dropped (the receivers were serialized on the Clickable signal; the conversion
+// lost them). Connects an owned script receiver to each button and re-saves the scene now that
+// Clickable::onAccept serializes again. Run: BindstoneClient.exe -wirebuttons
+static void RunButtonWiring() {
+	Managers managers({ "", "" });
+	auto jaiEngine = jai::engine::make();
+	jai::stdlib::register_all(*jaiEngine);
+	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	static MV::TapDevice wireMouse;
+	managers.services.connect(&wireMouse);
+	managers.renderer.makeHeadless();
+	if (!managers.renderer.initialize(MV::Size<int>(1280, 720))) {
+		std::cout << "[wire] renderer init failed\n";
+		return;
+	}
+	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);
+	MV::FontDefinition::make(managers.textLibrary, "small", "Fonts/Verdana.ttf", 9);
+	MV::FontDefinition::make(managers.textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	MV::initializeSpineBindings();
+
+	auto fakeRoot = MV::Scene::Node::make(managers.renderer);
+	fakeRoot->attach<MV::Scene::Sprite>()->hide()->id("ScreenScaler");
+
+	struct Wire { const char* scene; const char* button; const char* script; };
+	Wire wires[] = {
+		{ "Assets/Interface/Login/view.scene", "LoginButton", "eval_file(\"Login/loginButton.script\");" },
+		{ "Assets/Interface/Main/view.scene", "Play", "eval_file(\"Main/playButton.script\");" },
+	};
+	for (auto& w : wires) {
+		try {
+			auto root = MV::Scene::Node::load(w.scene, managers.services, false);
+			fakeRoot->add(root);
+			root->postLoadStep();
+			auto clickable = root->get(w.button)->componentInChildren<MV::Scene::Clickable>(false, true, true).self();
+			clickable->onAccept.connect("onAccept", w.script);
+			root->saveJai(w.scene, managers.services, false);
+			std::cout << "[wired] " << w.button << " -> " << w.script << " in " << w.scene << std::endl;
+			root->removeFromParent();
+		} catch (std::exception& e) {
+			std::cout << "[FAIL] wiring " << w.button << ": " << e.what() << std::endl;
+		}
+	}
+}
+
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
 // jai asset format end to end. Run: BindstoneClient.exe -verifyassets
 static void RunAssetVerification() {
@@ -473,6 +520,10 @@ int main(int argc, char *argv[]) {
 		}
 		if (strcmp(argv[i], "-verifyassets") == 0) {
 			RunAssetVerification();
+			return 0;
+		}
+		if (strcmp(argv[i], "-wirebuttons") == 0) {
+			RunButtonWiring();
 			return 0;
 		}
 		if (strcmp(argv[i], "-emitterbench") == 0) {

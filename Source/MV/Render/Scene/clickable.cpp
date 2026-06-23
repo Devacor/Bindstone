@@ -125,12 +125,6 @@ namespace MV {
 		Clickable::Clickable(const std::weak_ptr<Node>& a_owner, TapDevice & a_mouse) :
 			jai::property_owner<Clickable, Sprite>(a_owner),
 			ourMouse(a_mouse),
-			onPress(onPressSignal),
-			onRelease(onReleaseSignal),
-			onCancel(onCancelSignal),
-			onAccept(onAcceptSignal),
-			onDrag(onDragSignal),
-			onDrop(onDropSignal),
 			onEnabled(onEnabledSignal),
 			onDisabled(onDisabledSignal) {
 

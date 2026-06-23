@@ -3,6 +3,7 @@
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/properties/macros.hpp>
+#include <jaiscript/signals/signal_property.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>  // For any_archive_reader
@@ -188,6 +189,18 @@ public:
     }
 };
 
+// A JAI_SIGNAL_PROPERTY rides property_mgr serialization: its owned script receivers persist.
+class signal_test_object : public property_owner<signal_test_object> {
+public:
+    typedef void PingSignature(int);
+    JAI_SIGNAL_PROPERTY(PingSignature, onPing);
+
+    void addOwned(const std::string& id, const std::string& script) { onPingSignal.connect(id, script); }
+    bool hasOwned(const std::string& id) { return onPingSignal.connected(id); }
+
+    signal_test_object() = default;
+};
+
 class property_serialization_tests : public suite {
 public:
     property_serialization_tests() : suite("Property Serialization Tests") {}
@@ -205,6 +218,44 @@ public:
 
             obj.health = 50;
             check_eq(obj.health.get(), 50);
+        });
+
+        test("signal_property_roundtrip", [&]() {
+            signal_test_object original;
+            original.addOwned("ping1", "print(\"pinged\")");
+            check_true(original.hasOwned("ping1"));
+
+            serialization::json_archive_writer json_writer;
+            json_writer.begin_object("signal_test_object", 1);
+            original.property_mgr.save(json_writer);
+            json_writer.end_object();
+            std::string json = json_writer.str();
+
+            auto eng = engine::make();
+            serialization::json_archive_reader json_reader(json, eng.get());
+            std::string type_name; uint32_t version;
+            json_reader.begin_object(type_name, version);
+            signal_test_object restored;
+            restored.property_mgr.load(json_reader);
+            json_reader.end_object();
+
+            check_true(restored.hasOwned("ping1"));
+
+            // Binary round-trip too — the positional binary archive needs the same data, and
+            // raw begin_array/write_property_name framing (json-only) corrupts the binary stream.
+            std::vector<uint8_t> binary_buffer;
+            serialization::binary_archive_writer binary_writer(binary_buffer);
+            binary_writer.begin_object("signal_test_object", 1);
+            original.property_mgr.save(binary_writer);
+            binary_writer.end_object();
+
+            signal_test_object bin_restored;
+            serialization::binary_archive_reader binary_reader(binary_buffer, eng.get());
+            binary_reader.begin_object(type_name, version);
+            bin_restored.property_mgr.load(binary_reader);
+            binary_reader.end_object();
+
+            check_true(bin_restored.hasOwned("ping1"));
         });
 
         test("property_transparent_conversion", [&]() {

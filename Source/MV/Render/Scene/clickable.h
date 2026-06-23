@@ -7,6 +7,7 @@
 #include "MV/Interface/tapDevice.h"
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
+#include <jaiscript/signals/signal_property.hpp>
 
 #define ClickableComponentDerivedAccessors(ComponentType) \
 	SpriteDerivedAccessors(ComponentType) \
@@ -52,37 +53,20 @@ namespace MV {
 			jai::signal_emitter<ButtonSignalSignature> onDisabledSignal;
 			jai::signal_emitter<ButtonSignalSignature> onEnabledSignal;
 
-			jai::signal_emitter<ButtonSignalSignature> onPressSignal;
-			jai::signal_emitter<DropSignalSignature> onReleaseSignal;
-
-			jai::signal_emitter<ButtonSignalSignature> onAcceptSignal;
-			jai::signal_emitter<ButtonSignalSignature> onCancelSignal;
-
-			jai::signal_emitter<DragSignalSignature> onDragSignal;
-			jai::signal_emitter<DropSignalSignature> onDropSignal;
-
 		public:
 			SpriteDerivedAccessors(Clickable)
 
-				//void (std::shared_ptr<Clickable>)
 				jai::signal<ButtonSignalSignature> onEnabled;
-			//void (std::shared_ptr<Clickable>)
 			jai::signal<ButtonSignalSignature> onDisabled;
 
-			//void (std::shared_ptr<Clickable>)
-			jai::signal<ButtonSignalSignature> onPress;
-			//void (std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity)
-			jai::signal<DropSignalSignature> onRelease;
-
-			//void (std::shared_ptr<Clickable>)
-			jai::signal<ButtonSignalSignature> onAccept;
-			//void (std::shared_ptr<Clickable>)
-			jai::signal<ButtonSignalSignature> onCancel;
-
-			//void (std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition)
-			jai::signal<DragSignalSignature> onDrag;
-			//void (std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity)
-			jai::signal<DropSignalSignature> onDrop;
+			// Serialized through property_mgr (script receivers persist across save/load);
+			// emit through the generated onXSignal(args) emitter as before.
+			JAI_SIGNAL_PROPERTY(ButtonSignalSignature, onPress);
+			JAI_SIGNAL_PROPERTY(DropSignalSignature, onRelease);
+			JAI_SIGNAL_PROPERTY(ButtonSignalSignature, onAccept);
+			JAI_SIGNAL_PROPERTY(ButtonSignalSignature, onCancel);
+			JAI_SIGNAL_PROPERTY(DragSignalSignature, onDrag);
+			JAI_SIGNAL_PROPERTY(DropSignalSignature, onDrop);
 
 			std::shared_ptr<Clickable> clickDetectionType(BoundsType a_type);
 

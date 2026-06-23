@@ -1,6 +1,22 @@
 #include "collider.h"
 #include "MV/Utility/generalUtility.h"
 
+#include <jaiscript/core/registrar.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include "MV/Utility/services.hpp"
+
+static jai::registrar<MV::Scene::Environment, MV::Services, jai::bases<MV::Scene::Component>> _hookEnvironment("Environment",
+	[](jai::dynamic_binder<MV::Scene::Environment>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Component>();
+	builder.auto_bind();
+});
+
+static jai::registrar<MV::Scene::Collider, MV::Services, jai::bases<MV::Scene::Component>> _hookCollider("Collider",
+	[](jai::dynamic_binder<MV::Scene::Collider>& builder, const MV::Services&) {
+	builder.base_class<MV::Scene::Component>();
+	builder.auto_bind();
+});
+
 bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
 	return !(a_lhs == a_rhs);
 }

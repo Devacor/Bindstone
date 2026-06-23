@@ -601,10 +601,11 @@ private:
 
 	template<typename U> friend class signal;
 
+	// ADL serialization hooks (named save/load so the archive's ADL dispatch finds them).
 	template<typename Archive, typename U>
-	friend void save_signal_emitter(Archive& ar, const signal_emitter<U>& sig);
+	friend void save(Archive& ar, const signal_emitter<U>& sig);
 	template<typename Archive, typename U>
-	friend void load_signal_emitter(Archive& ar, signal_emitter<U>& sig);
+	friend void load(Archive& ar, signal_emitter<U>& sig);
 };
 
 

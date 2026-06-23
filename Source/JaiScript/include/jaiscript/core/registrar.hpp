@@ -44,6 +44,16 @@ namespace serialization {
 	template<typename Derived, typename... Bases> struct register_relation;
 }
 
+// Optional polymorphic base marker: registrar<T, Ctx, bases<Base...>> declares the serialization
+// base edge(s) inline so a shared_ptr<Base> carrying this $type passes the load type check.
+template<typename... Bases>
+struct bases {};
+
+template<typename T, typename... Bs>
+inline void register_polymorphic_bases(bases<Bs...>) {
+	if constexpr (sizeof...(Bs) > 0) { serialization::register_relation<T, Bs...>{}; }
+}
+
 // ============================================================================
 // Type Name Registry - Global mapping from type_index to script name
 // ============================================================================
@@ -199,14 +209,14 @@ inline std::string registrar_auto_name() {
 // C++17-compatible registrar (runtime name)
 // ============================================================================
 
-// Primary template - with context. Bases... optionally declare polymorphic base relations so a
-// shared_ptr<Base> with this $type passes the load type check (registrar<T, Ctx, Base>).
-template<typename T, typename Context, typename... Bases>
+// Primary template - with context. Optional bases<...> tag declares polymorphic base relations
+// inline: registrar<T, Ctx, bases<Base>>.
+template<typename T, typename Context, typename BasesTag = bases<>>
 class registrar {
     static void register_simple(std::string name_str) {
         type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
-        if constexpr (sizeof...(Bases) > 0) { serialization::register_relation<T, Bases...>{}; }
+        register_polymorphic_bases<T>(BasesTag{});
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [name_str](engine& eng, const Context&) {
@@ -221,7 +231,7 @@ class registrar {
     static void register_configured(std::string name_str, F&& configure) {
         type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
-        if constexpr (sizeof...(Bases) > 0) { serialization::register_relation<T, Bases...>{}; }
+        register_polymorphic_bases<T>(BasesTag{});
         registrar_registry<Context>::instance().add(
             std::type_index(typeid(T)),
             [name_str, configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
@@ -248,12 +258,12 @@ public:
 };
 
 // Specialization for no context
-template<typename T, typename... Bases>
-class registrar<T, void, Bases...> {
+template<typename T, typename BasesTag>
+class registrar<T, void, BasesTag> {
     static void register_simple(std::string name_str) {
         type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
-        if constexpr (sizeof...(Bases) > 0) { serialization::register_relation<T, Bases...>{}; }
+        register_polymorphic_bases<T>(BasesTag{});
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [name_str](engine& eng) {
@@ -268,7 +278,7 @@ class registrar<T, void, Bases...> {
     static void register_configured(std::string name_str, F&& configure) {
         type_name_registry::instance().register_type<T>(name_str);
         serialization::try_auto_register<T>(name_str);
-        if constexpr (sizeof...(Bases) > 0) { serialization::register_relation<T, Bases...>{}; }
+        register_polymorphic_bases<T>(BasesTag{});
         registrar_registry<void>::instance().add(
             std::type_index(typeid(T)),
             [name_str, configure = std::forward<F>(configure)](engine& eng) {

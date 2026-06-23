@@ -14,14 +14,14 @@
 
 // Polymorphic wire registrations: without these, toBinaryStringCast<NetworkAction> writes a
 // typeless base payload and the receiving side cannot reconstruct the action.
-static jai::registrar<GameServerAvailable, MV::Services, NetworkAction> _regGameServerAvailable("GameServerAvailable");
-static jai::registrar<GameServerStateChange, MV::Services, NetworkAction> _regGameServerStateChange("GameServerStateChange");
-static jai::registrar<MatchResult, MV::Services, NetworkAction> _regMatchResult("MatchResult");
-static jai::registrar<AssignPlayersToGame, MV::Services, NetworkAction> _regAssignPlayersToGame("AssignPlayersToGame");
-static jai::registrar<GetInitialGameState, MV::Services, NetworkAction> _regGetInitialGameState("GetInitialGameState");
-static jai::registrar<SuppliedInitialGameState, MV::Services, NetworkAction> _regSuppliedInitialGameState("SuppliedInitialGameState");
-static jai::registrar<RequestBuildingUpgrade, MV::Services, NetworkAction> _regRequestBuildingUpgrade("RequestBuildingUpgrade");
-static jai::registrar<RequestFullGameState, MV::Services, NetworkAction> _regRequestFullGameState("RequestFullGameState");
+static jai::registrar<GameServerAvailable, MV::Services, jai::bases<NetworkAction>> _regGameServerAvailable("GameServerAvailable");
+static jai::registrar<GameServerStateChange, MV::Services, jai::bases<NetworkAction>> _regGameServerStateChange("GameServerStateChange");
+static jai::registrar<MatchResult, MV::Services, jai::bases<NetworkAction>> _regMatchResult("MatchResult");
+static jai::registrar<AssignPlayersToGame, MV::Services, jai::bases<NetworkAction>> _regAssignPlayersToGame("AssignPlayersToGame");
+static jai::registrar<GetInitialGameState, MV::Services, jai::bases<NetworkAction>> _regGetInitialGameState("GetInitialGameState");
+static jai::registrar<SuppliedInitialGameState, MV::Services, jai::bases<NetworkAction>> _regSuppliedInitialGameState("SuppliedInitialGameState");
+static jai::registrar<RequestBuildingUpgrade, MV::Services, jai::bases<NetworkAction>> _regRequestBuildingUpgrade("RequestBuildingUpgrade");
+static jai::registrar<RequestFullGameState, MV::Services, jai::bases<NetworkAction>> _regRequestFullGameState("RequestFullGameState");
 
 #ifdef BINDSTONE_SERVER
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {

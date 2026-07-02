@@ -162,7 +162,7 @@ public:
     
     void forge_tests() override {
         test("basic_string_int_map_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register basic map functions
             engine->add_function("sum_string_to_int_map", &MapProcessor::sum_string_to_int_map);
@@ -210,7 +210,7 @@ public:
         });
         
         test("map_return_values", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("create_string_int_map", &MapProcessor::create_string_int_map);
             engine->add_function("reverse_map", &MapProcessor::reverse_map);
@@ -245,7 +245,7 @@ public:
         });
         
         test("string_string_map_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("concatenate_string_values", &MapProcessor::concatenate_string_values);
             
@@ -278,7 +278,7 @@ public:
         });
         
         test("double_value_map_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_double_values", &MapProcessor::sum_double_values);
             
@@ -311,7 +311,7 @@ public:
         });
         
         test("nested_map_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("create_nested_map", &MapProcessor::create_nested_map);
             engine->add_function("sum_nested_map", &MapProcessor::sum_nested_map);
@@ -355,7 +355,7 @@ public:
         });
         
         test("map_with_custom_objects", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register Person class
             dynamic_binder<Person>(*engine, "Person")
@@ -408,7 +408,7 @@ public:
         });
         
         test("map_key_lookup_operations", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("map_contains_key", &MapProcessor::map_contains_key);
             engine->add_function("get_map_value", &MapProcessor::get_map_value);
@@ -449,7 +449,7 @@ public:
         });
         
         test("map_edge_cases", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_string_to_int_map", &MapProcessor::sum_string_to_int_map);
             engine->add_function("get_map_size", &MapProcessor::get_map_size);
@@ -493,7 +493,7 @@ public:
         });
         
         test("map_script_value_compatibility", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test function that takes map<script_value, script_value> explicitly
             engine->add_function("count_map_types", [](std::map<script_value, script_value> map) -> int {

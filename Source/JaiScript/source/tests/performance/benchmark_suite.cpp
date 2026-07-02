@@ -16,7 +16,7 @@ public:
 
     void pre_test() override {
         // Create engine once before tests
-        test_engine = engine::make();
+        test_engine = make_engine();
         jai::stdlib::register_all(test_engine);
     }
 
@@ -121,11 +121,11 @@ public:
 
         // Keep these separate - they measure engine overhead specifically
         benchmark("Engine Creation", []() {
-            auto engine = engine::make();
+            auto engine = make_engine();
         });
 
         benchmark("Stdlib Registration", []() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
         });
 

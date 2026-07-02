@@ -103,7 +103,7 @@ public:
     
     void forge_tests() override {
         test("basic_class_registration", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<>()
@@ -118,7 +118,7 @@ public:
         });
         
         test("constructors", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<>()
@@ -139,7 +139,7 @@ public:
         });
         
         test("methods", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
@@ -155,7 +155,7 @@ public:
         });
         
         test("properties", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<>()
@@ -171,7 +171,7 @@ public:
         });
         
         test("operator_overloading", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
@@ -188,7 +188,7 @@ public:
         });
         
         test("static_methods", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
@@ -205,7 +205,7 @@ public:
         });
         
         test("static_properties", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<>()
@@ -223,7 +223,7 @@ public:
         });
         
         test("method_chaining", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Counter>(*eng, "Counter")
                 .constructor<>()
@@ -239,7 +239,7 @@ public:
         });
         
         test("lambda_methods", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
@@ -268,7 +268,7 @@ public:
         });
         
         test("custom_getters_setters", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
@@ -293,7 +293,7 @@ public:
         });
         
         test("shared_ptr_support", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
@@ -316,7 +316,7 @@ public:
         });
         
         test("const_correctness", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<Counter>(*eng, "Counter")
                 .constructor<int>()
@@ -332,7 +332,7 @@ public:
         });
         
         test("overloaded_methods", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             class Calculator {
             public:
@@ -361,7 +361,7 @@ public:
         // MV::Color: set(float...) stores channels raw; set(int...) divides by 255. Before the fix
         // the two collapsed to the last registration (int), so a float set() truncated to near-black.
         test("same_arity_overload_resolves_by_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             class ColorLike {
             public:
@@ -394,7 +394,7 @@ public:
         // recursion bug: routing the 2nd ctor through the typed entry point used to migrate the
         // dispatcher into the overload set, so a 0-arg call self-recursed into a stack overflow.
         test("same_arity_constructor_resolves_by_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             class Rgb {
             public:
@@ -426,7 +426,7 @@ public:
         });
 
         test("equality_operator", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
@@ -459,7 +459,7 @@ public:
         });
 
         test("equality_operator_via_lambda", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test registering operator== via lambda (for cases where the class
             // doesn't have a C++ operator==, or for custom comparison logic)
@@ -481,7 +481,7 @@ public:
         });
 
         test("comparison_operators", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register Point with all comparison operators
             dynamic_binder<Point>(*eng, "Point")
@@ -521,7 +521,7 @@ public:
         });
 
         test("comparison_operators_via_lambda", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register Counter with comparison operators via lambda
             dynamic_binder<Counter>(*eng, "Counter")
@@ -544,7 +544,7 @@ public:
         });
 
         test("arithmetic_operators", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register Point with arithmetic operators
             dynamic_binder<Point>(*eng, "Point")
@@ -569,7 +569,7 @@ public:
         });
 
         test("arithmetic_operators_all", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register Counter with all arithmetic operators
             dynamic_binder<Counter>(*eng, "Counter")
@@ -602,7 +602,7 @@ public:
         });
 
         test("arithmetic_operators_via_lambda", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register Point with arithmetic operators via lambda
             dynamic_binder<Point>(*eng, "Point")
@@ -631,7 +631,7 @@ public:
         });
 
         test("compound_assignment_operators", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register Point with arithmetic operators
             dynamic_binder<Point>(*eng, "Point")
@@ -720,7 +720,7 @@ public:
                 std::string a_method() const { return "from_A"; }
             };
 
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register in dependency order: C first, then B, then A
             dynamic_binder<TestC>(*eng, "TestC")
@@ -768,7 +768,7 @@ public:
                 std::string multi_method() const { return "from_Multi"; }
             };
 
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register base classes first
             dynamic_binder<Left>(*eng, "Left")
@@ -830,7 +830,7 @@ public:
                 std::string child_method() const { return "from_Child"; }
             };
 
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register in dependency order (grandparents first)
             dynamic_binder<GrandparentA>(*eng, "GrandparentA")
@@ -881,7 +881,7 @@ public:
                 bool operator==(const EqualityTest& other) const { return value == other.value; }
             };
 
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<EqualityTest>(*eng, "EqualityTest")
                 .auto_bind()  // Should auto-detect operator== and register == and !=
@@ -903,7 +903,7 @@ public:
 
         test("jai_property_auto_bind_read", [this]() {
             // Test that JAI_PROPERTY macros work with auto_bind for reading properties
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
                 .auto_bind()  // Should auto-detect JAI_PROPERTY macros and bind them
@@ -922,7 +922,7 @@ public:
         test("jai_property_auto_bind_write", [this]() {
             // Test that JAI_PROPERTY macros work with auto_bind for writing properties
             // This is the critical test: script modifications must update the C++ property
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
                 .auto_bind()
@@ -958,7 +958,7 @@ public:
 
         test("jai_property_auto_bind_compound_assignment", [this]() {
             // Test that compound assignment operators work with JAI_PROPERTY
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
                 .auto_bind()
@@ -987,7 +987,7 @@ public:
 
         test("jai_property_cpp_to_script_sync", [this]() {
             // Test that C++ modifications to properties are visible in script
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<PropertyOwnerTest>(*eng, "PropertyOwnerTest")
                 .auto_bind()
@@ -1012,7 +1012,7 @@ public:
 
         test("observable_property_auto_bind", [this]() {
             // Test that JAI_OBSERVABLE_PROPERTY macros work with auto_bind
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
@@ -1037,7 +1037,7 @@ public:
 
         test("observable_property_script_callback", [this]() {
             // Test that script can register callbacks for observable property changes
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
@@ -1084,7 +1084,7 @@ public:
 
         test("observable_property_multiple_callbacks", [this]() {
             // Test that multiple script callbacks can be registered
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
@@ -1110,7 +1110,7 @@ public:
         test("observable_property_on_change_syntax", [this]() {
             // Test the new player.score.on_change(callback) API syntax
             // This uses transparent wrappers to allow accessing on_change on the property itself
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()
@@ -1159,7 +1159,7 @@ public:
 
         test("observable_property_transparent_comparison", [this]() {
             // Test that observable properties work in comparisons (transparent wrapper)
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
                 .auto_bind()

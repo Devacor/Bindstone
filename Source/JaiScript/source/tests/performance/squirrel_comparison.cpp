@@ -304,7 +304,7 @@ public:
 
         // Create JaiScript engine
         std::cout << "Creating JaiScript engine...\n";
-        jai_engine = engine::make();
+        jai_engine = make_engine();
         jai::stdlib::register_all(jai_engine);
         std::cout << "JaiScript engine ready.\n";
 

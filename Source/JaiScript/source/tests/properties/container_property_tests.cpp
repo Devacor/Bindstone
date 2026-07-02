@@ -42,7 +42,7 @@ public:
 
         test("basic_vector_access", [this]() {
             // Test basic access to pre-populated vector
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(eng);
 
             dynamic_binder<Cat>(*eng, "Cat")
@@ -75,7 +75,7 @@ public:
         });
 
         test("vector_registration", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Cat>(*eng, "Cat")
                 .constructor<>()
@@ -94,7 +94,7 @@ public:
         });
 
         test("cpp_populate_script_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Cat>(*eng, "Cat")
                 .constructor<>()
@@ -125,7 +125,7 @@ public:
         });
 
         test("script_populate_and_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Cat>(*eng, "Cat")
                 .constructor<>()

@@ -9,37 +9,37 @@ public:
 
     void forge_tests() override {
         test("has_true", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(var m = {"a": 1, "b": 2}; m.has("a");)");
             check_eq(result.as<bool>(), true);
         });
 
         test("has_false", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(var m = {"a": 1, "b": 2}; m.has("z");)");
             check_eq(result.as<bool>(), false);
         });
 
         test("get_existing", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(var m = {"a": 10, "b": 20}; m.get("a", 0);)");
             check_eq(result.as<int>(), 10);
         });
 
         test("get_default", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(var m = {"a": 10, "b": 20}; m.get("z", 99);)");
             check_eq(result.as<int>(), 99);
         });
 
         test("length", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(var m = {"a": 1, "b": 2, "c": 3}; m.length();)");
             check_eq(result.as<int>(), 3);
         });
 
         test("remove_existing", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var m = {"a": 1, "b": 2, "c": 3};
                 var removed = m.remove("b");
@@ -52,7 +52,7 @@ public:
         });
 
         test("remove_nonexistent", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var m = {"a": 1, "b": 2};
                 m.remove("z");
@@ -61,7 +61,7 @@ public:
         });
 
         test("remove_if", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var m = {"a": 1, "b": 2, "c": 3, "d": 4};
                 m.remove_if([](auto k, auto v) -> auto { return v % 2 == 0; });
@@ -73,7 +73,7 @@ public:
         });
 
         test("filter", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var m = {"a": 1, "b": 2, "c": 3, "d": 4};
                 var filtered = m.filter([](auto k, auto v) -> auto { return v > 2; });
@@ -83,7 +83,7 @@ public:
         });
 
         test("to_array", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var m = {"x": 10, "y": 20};
                 var pairs = m.to_array();

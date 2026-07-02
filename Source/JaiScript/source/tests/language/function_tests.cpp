@@ -12,7 +12,7 @@ public:
     
     void forge_tests() override {
         test("simple_function_declaration_and_call", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 auto add(auto a, auto b) -> auto {
@@ -29,7 +29,7 @@ public:
         });
 
         test("function_with_no_parameters", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 auto getValue() -> auto {
@@ -45,7 +45,7 @@ public:
         });
 
         test("function_with_side_effects", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 auto x = 10;
@@ -64,7 +64,7 @@ public:
         });
 
         test("function_with_multiple_parameters", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 function multiply(auto a, auto b, auto c) -> auto {
@@ -80,7 +80,7 @@ public:
         });
 
         test("recursive_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 function factorial(auto n) -> auto {
@@ -99,7 +99,7 @@ public:
         });
 
         test("function_returning_string", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 function greeting(auto name) -> auto {
@@ -115,7 +115,7 @@ public:
         });
 
         test("nested_function_calls", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 function double(auto x) -> auto {
@@ -135,7 +135,7 @@ public:
         });
 
         test("function_with_local_variables", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 function compute(auto n) -> auto {
@@ -153,7 +153,7 @@ public:
         });
 
         test("function_with_conditional_return", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 function max(auto a, auto b) -> auto {
@@ -173,7 +173,7 @@ public:
         });
 
         test("function_with_early_return", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 function findFirst(auto n) -> auto {
@@ -194,7 +194,7 @@ public:
         });
 
         test("function_scope_isolation", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 auto global_var = 100;
@@ -213,7 +213,7 @@ public:
         });
 
         test("function_parameter_shadowing", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 auto x = 10;
@@ -231,7 +231,7 @@ public:
         });
 
         test("function_with_different_syntax_styles", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 // C++ style
@@ -258,7 +258,7 @@ public:
         });
 
         test("default_parameter_basic", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 function add(int a, int b = 10) -> int { return a + b; }
@@ -268,7 +268,7 @@ public:
         });
 
         test("default_parameter_override", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 function add(int a, int b = 10) -> int { return a + b; }
@@ -278,7 +278,7 @@ public:
         });
 
         test("default_parameter_multiple", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 function make_point(int x = 0, int y = 0, int z = 0) -> int { return x + y + z; }
@@ -288,7 +288,7 @@ public:
         });
 
         test("default_parameter_string", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 function greet(string name, string greeting = "hello") -> string {
@@ -300,7 +300,7 @@ public:
         });
 
         test("enum_basic", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 enum Direction { north, south, east, west }
@@ -310,7 +310,7 @@ public:
         });
 
         test("enum_comparison", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 enum Color { red, green, blue }
@@ -321,7 +321,7 @@ public:
         });
 
         test("enum_in_switch", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 enum Weapon { sword, bow, staff }
@@ -338,7 +338,7 @@ public:
         });
 
         test("null_safe_on_null", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 auto obj = null;
@@ -348,7 +348,7 @@ public:
         });
 
         test("null_safe_on_value", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 auto s = "hello";
@@ -358,7 +358,7 @@ public:
         });
 
         test("null_safe_chain", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto result = eng->execute(R"(
                 auto obj = null;
@@ -369,7 +369,7 @@ public:
         });
 
         test("destructuring_basic", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
                 auto [x, y, z] = [1, 2, 3];
@@ -380,7 +380,7 @@ public:
         });
 
         test("destructuring_fewer_vars", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
                 auto [a, b] = [10, 20, 30];
@@ -390,7 +390,7 @@ public:
         });
 
         test("destructuring_more_vars", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
                 auto [a, b, c] = [10, 20];
@@ -401,7 +401,7 @@ public:
         });
 
         test("destructuring_from_variable", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
                 auto arr = [100, 200];

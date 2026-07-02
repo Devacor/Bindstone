@@ -11,7 +11,7 @@ public:
     
     void forge_tests() override {
         test("basic_throw_catch", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 try {
@@ -27,7 +27,7 @@ public:
         });
         
         test("throw_without_catch_bubbles_to_cpp", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 throw "Unhandled exception";
@@ -45,7 +45,7 @@ public:
         });
         
         test("catch_without_variable", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 try {
@@ -61,7 +61,7 @@ public:
         });
         
         test("nested_try_catch", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             std::string script = R"(
                 try {
@@ -87,7 +87,7 @@ public:
         });
         
         test("cpp_runtime_error_interop", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Add a C++ function that throws std::runtime_error
             engine->add_function("risky_function", []() {
@@ -114,7 +114,7 @@ public:
         });
         
         test("cpp_generic_exception_interop", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Add a C++ function that throws generic std::exception
             engine->add_function("generic_exception", []() {
@@ -141,7 +141,7 @@ public:
         });
         
         test("throw_rethrow", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 try {
@@ -161,7 +161,7 @@ public:
         });
         
         test("throw_in_expressions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 auto result = "Start";
@@ -179,7 +179,7 @@ public:
         });
         
         test("exception_with_numeric_values", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 try {
@@ -195,7 +195,7 @@ public:
         });
         
         test("exception_scope_isolation", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             std::string script = R"(
                 auto outer_var = "outer";
@@ -214,7 +214,7 @@ public:
         });
 
         test("throw_captures_nested_stack_trace", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             const char* src =
                 "auto inner() { throw \"boom\"; }\n"   // line 1
                 "auto middle() { return inner(); }\n"  // line 2
@@ -235,7 +235,7 @@ public:
         });
 
         test("top_level_throw_captures_script_frame", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             try { engine->execute("throw \"x\";"); } catch (...) {}
             auto trace = engine->last_stack_trace();
             check_false(trace.empty());
@@ -243,14 +243,14 @@ public:
         });
 
         test("format_stack_trace_lists_frames", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             try { engine->execute("auto f() { throw \"x\"; }\nf();\n"); } catch (...) {}
             auto s = engine->format_stack_trace();
             check_true(s.find("at f") != std::string::npos);
         });
 
         test("runtime_error_captures_nested_stack_trace", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             const char* src =
                 "auto inner() { return missingVar; }\n"  // line 1: undefined variable
                 "auto middle() { return inner(); }\n"     // line 2
@@ -266,7 +266,7 @@ public:
         });
 
         test("method_throw_captures_stack_trace", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             const char* src =
                 "class Foo {\n"
                 "    auto boom() { throw \"x\"; }\n"   // line 2
@@ -281,7 +281,7 @@ public:
         });
 
         test("lambda_throw_captures_stack_trace", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             const char* src =
                 "auto fn = []() -> auto { throw \"x\"; };\n"  // line 1
                 "fn();\n";                                     // line 2

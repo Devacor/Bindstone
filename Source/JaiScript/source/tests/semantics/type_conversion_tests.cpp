@@ -14,7 +14,7 @@ public:
     
     void forge_tests() override {
         test("integer_type_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             script_value result = engine->execute("42;");
             check_eq(result.as<script_int>(), 42);
@@ -24,7 +24,7 @@ public:
         });
         
         test("integer_size_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test various integer sizes
             script_value small_int = engine->execute("127;");
@@ -41,7 +41,7 @@ public:
         });
         
         test("unsigned_integer_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             script_value byte_val = engine->execute("255;");
             check_eq(static_cast<uint8_t>(byte_val.as<script_int>()), static_cast<uint8_t>(255));
@@ -58,7 +58,7 @@ public:
         });
         
         test("float_type_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             script_value pi = engine->execute("3.14159;");
             check_near(pi.as<script_float>(), 3.14159, 0.00001);
@@ -67,7 +67,7 @@ public:
         });
         
         test("string_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             script_value str = engine->execute("\"hello world\";");
             check_eq(str.as_string(), "hello world");
@@ -79,7 +79,7 @@ public:
         });
         
         test("boolean_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             script_value true_val = engine->execute("true;");
             check_eq(true_val.as<bool>(), true);
@@ -91,7 +91,7 @@ public:
         });
         
         test("implicit_numeric_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test int to float conversion
             script_value result = engine->execute(R"(
@@ -110,7 +110,7 @@ public:
         });
         
         test("array_element_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             script_value arr = engine->execute("[42, 3.14, \"hello\", true];");
             auto array = arr.as_array();
@@ -122,7 +122,7 @@ public:
         });
         
         test("map_value_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             script_value map = engine->execute(R"(
                 {
@@ -141,7 +141,7 @@ public:
         });
         
         test("null_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             script_value null_val = engine->execute("null;");
             check(null_val.is_null());
@@ -149,7 +149,7 @@ public:
         });
         
         test("type_coercion_in_operations", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(*engine);  // Need stdlib for to_string
             
             // String concatenation with number - need explicit to_string

@@ -1,8 +1,8 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
-// JVM backend is already included in jaiscript.hpp
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -15,15 +15,8 @@
 
 namespace jai {
 
-// Forward declaration for VM backend stub
+// Factory defined by the VM backend TU (source/implementation/vm/vm_backend.cpp)
 std::unique_ptr<execution_backend> create_vm_backend();
-
-namespace jvm {
-    // Temporary stub until VM is refactored
-    inline std::unique_ptr<execution_backend> create_vm_backend(string_symbolizer*, std::shared_ptr<environment>) {
-        return ::jai::create_vm_backend();
-    }
-}
 
 // Cost of matching args[first_arg .. first_arg+paramTypes.size()) against paramTypes, using the
 // same ranking as free-function overload resolution: exact 0 > int<->float small > convertible >
@@ -35,7 +28,8 @@ static int compute_param_match_cost(
         size_t first_arg,
         const std::vector<param_type_info>& paramTypes,
         const conversions::conversion_registry* convReg,
-        const std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type) {
+        const std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type,
+        const std::unordered_map<std::string, std::shared_ptr<class_definition>>* classes_by_name) {
     int totalCost = 0;
     for (size_t i = 0; i < paramTypes.size(); ++i) {
         const auto& paramInfo = paramTypes[i];
@@ -59,25 +53,42 @@ static int compute_param_match_cost(
                 if (paramClassIt != classes_by_type->end()) {
                     std::string expectedClassName = paramClassIt->second->get_name();
                     auto instance = const_cast<script_value&>(arg).get_class_instance();
+                    class_definition* argClassDef = nullptr;
+                    const std::string* argClassName = nullptr;
                     if (instance) {
-                        auto argClassDef = instance->get_class_definition();
-                        if (argClassDef) {
-                            if (argClassDef->get_name() == expectedClassName) {
-                                // Exact match; shared_ptr<T> -> T counts as a small conversion.
-                                if (argType == script_value_type::jai_shared_ptr_type &&
-                                    paramInfo.base_type == script_value_type::jai_object_type) {
-                                    totalCost += 1;
+                        argClassDef = instance->get_class_definition();
+                        argClassName = &instance->get_class_name();
+                    } else {
+                        // cpp_bound / raw C++ holders carry the registered name on the holder
+                        auto holder = arg.get_object_holder();
+                        if (holder && !holder->type_name.empty()) {
+                            argClassName = &holder->type_name;
+                            if (classes_by_name) {
+                                auto argClassIt = classes_by_name->find(holder->type_name);
+                                if (argClassIt != classes_by_name->end()) {
+                                    argClassDef = argClassIt->second.get();
                                 }
-                            } else if (argClassDef->is_subtype_of(expectedClassName)) {
-                                totalCost += 1;  // derived type
-                            } else {
-                                return -1;       // incompatible class types
                             }
-                        } else if (instance->get_class_name() != expectedClassName) {
+                        }
+                    }
+                    if (argClassDef) {
+                        if (argClassDef->get_name() == expectedClassName) {
+                            // Exact match; shared_ptr<T> -> T counts as a small conversion.
+                            if (argType == script_value_type::jai_shared_ptr_type &&
+                                paramInfo.base_type == script_value_type::jai_object_type) {
+                                totalCost += 1;
+                            }
+                        } else if (argClassDef->is_subtype_of(expectedClassName)) {
+                            totalCost += 1;  // derived type
+                        } else {
+                            return -1;       // incompatible class types
+                        }
+                    } else if (argClassName) {
+                        if (*argClassName != expectedClassName) {
                             return -1;
                         }
                     } else {
-                        return -1;               // no instance - not a valid object
+                        return -1;           // no class identity - not a valid object
                     }
                 } else {
                     totalCost += 100;            // expected class not found - accept with high cost
@@ -110,6 +121,9 @@ struct engine::implementation {
     // Custom output stream for print() - nullptr means use std::cout
     std::shared_ptr<std::ostream> output_stream;
 
+    // Sink for script errors surfacing at the C++ boundary - nullptr means std::cerr
+    std::function<void(const std::string&)> script_error_handler;
+
     // Serialization registry for class metadata (non-static to ensure test isolation)
     serialization::serialization_registry serialization_registry;
     
@@ -136,9 +150,10 @@ struct engine::implementation {
         
         std::vector<Overload> overloads;
 
-        // Reference to the conversion registry and class lookup
+        // Reference to the conversion registry and class lookups
         std::shared_ptr<const conversions::conversion_registry> conversions;
         std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type = nullptr;
+        std::unordered_map<std::string, std::shared_ptr<class_definition>>* classes_by_name = nullptr;
 
         OverloadSet() : conversions() {}
 
@@ -146,8 +161,10 @@ struct engine::implementation {
             conversions = registry;
         }
 
-        void set_class_lookup(std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* lookup) {
+        void set_class_lookup(std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* lookup,
+                              std::unordered_map<std::string, std::shared_ptr<class_definition>>* name_lookup) {
             classes_by_type = lookup;
+            classes_by_name = name_lookup;
         }
 
         // Convert legacy script_value_type vector to param_type_info vector
@@ -218,7 +235,7 @@ struct engine::implementation {
                 // Calculate conversion cost for typed overload (shared scorer; first_arg = 0 for
                 // free functions / constructors, where args[0] is already the first parameter).
                 int totalCost = compute_param_match_cost(args, 0, overload.paramTypes,
-                                                         conversions.get(), classes_by_type);
+                                                         conversions.get(), classes_by_type, classes_by_name);
                 if (totalCost >= 0) {
                     viableCandidates.push_back({&overload, totalCost});
                 }
@@ -339,6 +356,10 @@ struct engine::implementation {
     
     execution_backend_ptr backend;
     backend_type current_backend_type = backend_type::interpreter; // Default to interpreter
+    bool has_executed_ = false; // Once true, set_backend is forbidden (defined callables capture the backend)
+
+    // Script namespace registry (engine-owned so namespaces survive across backends)
+    std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>> script_namespaces_;
 
     // Include/Import support
     std::vector<std::string> include_paths;
@@ -361,7 +382,7 @@ struct engine::implementation {
         auto& overloadSet = overloadedFunctions[name];
         if (!overloadSet.conversions) {
             overloadSet.set_conversion_registry(conversions);
-            overloadSet.set_class_lookup(&classesByType);
+            overloadSet.set_class_lookup(&classesByType, &classes);
         }
         return overloadSet;
     }
@@ -372,20 +393,11 @@ engine::implementation::implementation()
       class_definition_type_id_(string_symbolizer_.intern("class_definition")) {
     global_environment_ = std::make_shared<environment>(&string_symbolizer_);
 
-    // The tree-walk interpreter is the only backend (the bytecode VM is unfinished/LEGACY).
     current_backend_type = backend_type::interpreter;
     backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
+    // Backend callbacks/config are applied by engine::wire_backend() via initialize_engine_reference().
 
 
-    // Set up class lookup callback
-    backend->set_class_lookup_callback([this](const std::string& name) -> std::shared_ptr<class_definition> {
-        auto it = classes.find(name);
-        if (it != classes.end()) {
-            return it->second;
-        }
-        return nullptr;
-    });
-    
     // Initialize commonly used type_info objects for fast access
     // These are interned immediately so basic types are always available
     type_info int_info = type_info::make_int(string_symbolizer_);
@@ -451,41 +463,16 @@ void engine::implementation::updateOverloadedFunction(const std::string& name, e
     global_environment_->define(name, dispatcherValue);
 }
 
-engine::engine() : impl(std::make_unique<implementation>()) {
-    // Set up the subscript resolver for custom [] operators
-    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
-        auto it = impl->overloadedFunctions.find("[]");
-        if (it == impl->overloadedFunctions.end()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-                "No custom subscript operator registered");
-        }
+engine::engine() : impl(std::make_unique<implementation>()) {}
 
-        script_value bestMatch = it->second.findBestMatch(args);
-        if (bestMatch.is_null()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                "No matching overload found for '[]' with {0} arguments",
-                static_cast<uint64_t>(args.size()));
-        }
-
-        const script_function& func = bestMatch.as_function();
-        return func(args);
-    });
-    
-    // Custom extractor will be set up in the conversion registry in initialize_engine_reference()
-    
-    // TODO: Remove static converter setup - now using engine-bound conversions
-    
-    // Built-in functions will be added in initialize_engine_reference() after engine is fully constructed
-    
-    // Standard container conversions will be added in initialize_engine_reference()
-    // when we have proper engine reference
-    
-    // Custom conversions that create script_value will be added in initialize_engine_reference()
-    
-    // Built-in functions that create script_value will be added in initialize_engine_reference()
+// Reset the backend before impl members unwind so callable thunks (destructor deleters,
+// stored function values) firing during teardown see get_execution_backend() == nullptr
+// and fail soft instead of re-entering a half-destroyed backend.
+engine::~engine() {
+    if (impl) {
+        impl->backend.reset();
+    }
 }
-
-engine::~engine() = default;  // pimpl: defined here where `implementation` is complete
 
 int engine::select_cpp_overload(const std::vector<script_value>& args,
                                 const std::vector<std::vector<param_type_info>>& candidateParamTypes) const {
@@ -498,7 +485,7 @@ int engine::select_cpp_overload(const std::vector<script_value>& args,
         const auto& sig = candidateParamTypes[c];
         int cost = sig.empty()
             ? 1000
-            : compute_param_match_cost(args, 1, sig, impl->conversions.get(), &impl->classesByType);
+            : compute_param_match_cost(args, 1, sig, impl->conversions.get(), &impl->classesByType, &impl->classes);
         if (cost >= 0 && cost < bestCost) {
             bestCost = cost;
             bestIdx = static_cast<int>(c);
@@ -511,9 +498,8 @@ engine::engine(engine&&) noexcept = default;
 engine& engine::operator=(engine&&) noexcept = default;
 
 void engine::initialize_engine_reference() {
-    // Pass the engine reference to the backend
-    impl->backend->set_engine_reference(this);
-    
+    wire_backend();
+
     // Pass the engine reference to the conversion registry
     impl->conversions->set_engine(this);
 
@@ -770,80 +756,8 @@ script_value engine::execute(const std::string& scriptContent) {
 }
 
 script_value engine::execute(const std::string& scriptContent, const instance_variables& instanceVars) {
+    impl->has_executed_ = true;
     try {
-        // Auto-select backend based on script length if in auto mode
-        if (impl->current_backend_type == backend_type::auto_select) {
-            const size_t SCRIPT_LENGTH_THRESHOLD = 1000; // Characters
-            backend_type selected_type = (scriptContent.length() > SCRIPT_LENGTH_THRESHOLD) 
-                                       ? backend_type::jvm 
-                                       : backend_type::interpreter;
-            
-            // Switch backend if needed
-            if (selected_type == backend_type::jvm && dynamic_cast<interpreter_backend*>(impl->backend.get())) {
-                impl->backend = jvm::create_vm_backend(&impl->string_symbolizer_, impl->global_environment_);
-                impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
-                                                          impl->overloadedFunctions.count("-") > 0 ||
-                                                          impl->overloadedFunctions.count("*") > 0 ||
-                                                          impl->overloadedFunctions.count("/") > 0);
-                impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
-                    auto it = impl->overloadedFunctions.find("[]");
-                    if (it == impl->overloadedFunctions.end()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-                            "No custom subscript operator registered");
-                    }
-
-                    script_value bestMatch = it->second.findBestMatch(args);
-                    if (bestMatch.is_null()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                            "No matching overload found for '[]' with {0} arguments",
-                static_cast<uint64_t>(args.size()));
-                    }
-
-                    const script_function& func = bestMatch.as_function();
-                    return func(args);
-                });
-                
-                impl->backend->set_class_lookup_callback([this](const std::string& name) -> std::shared_ptr<class_definition> {
-                    auto it = impl->classes.find(name);
-                    if (it != impl->classes.end()) {
-                        return it->second;
-                    }
-                    return nullptr;
-                });
-            } else if (selected_type == backend_type::interpreter && !dynamic_cast<interpreter_backend*>(impl->backend.get())) {
-                impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
-                impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
-                                                          impl->overloadedFunctions.count("-") > 0 ||
-                                                          impl->overloadedFunctions.count("*") > 0 ||
-                                                          impl->overloadedFunctions.count("/") > 0);
-                impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
-                    auto it = impl->overloadedFunctions.find("[]");
-                    if (it == impl->overloadedFunctions.end()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-                            "No custom subscript operator registered");
-                    }
-
-                    script_value bestMatch = it->second.findBestMatch(args);
-                    if (bestMatch.is_null()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                            "No matching overload found for '[]' with {0} arguments",
-                static_cast<uint64_t>(args.size()));
-                    }
-
-                    const script_function& func = bestMatch.as_function();
-                    return func(args);
-                });
-                
-                impl->backend->set_class_lookup_callback([this](const std::string& name) -> std::shared_ptr<class_definition> {
-                    auto it = impl->classes.find(name);
-                    if (it != impl->classes.end()) {
-                        return it->second;
-                    }
-                    return nullptr;
-                });
-            }
-        }
-        
         // Prepare backend for new execution
         impl->backend->prepare_for_execution();
         
@@ -1197,75 +1111,80 @@ std::unordered_set<std::string> engine::get_registered_template_types() const {
     return impl->registeredTemplateTypes;
 }
 
+// Single source of backend configuration: every backend, however installed (construction,
+// set_backend by type, or injected instance), gets the full engine wiring.
+void engine::wire_backend() {
+    impl->backend->set_engine_reference(this);
+
+    impl->backend->set_class_lookup_callback([this](const std::string& name) -> std::shared_ptr<class_definition> {
+        auto it = impl->classes.find(name);
+        return it != impl->classes.end() ? it->second : nullptr;
+    });
+
+    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
+        auto it = impl->overloadedFunctions.find("[]");
+        if (it == impl->overloadedFunctions.end()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+                "No custom subscript operator registered");
+        }
+
+        script_value bestMatch = it->second.findBestMatch(args);
+        if (bestMatch.is_null()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                "No matching overload found for '[]' with {0} arguments",
+                static_cast<uint64_t>(args.size()));
+        }
+
+        const script_function& func = bestMatch.as_function();
+        return func(args);
+    });
+
+    impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 ||
+                                              impl->overloadedFunctions.count("-") > 0 ||
+                                              impl->overloadedFunctions.count("*") > 0 ||
+                                              impl->overloadedFunctions.count("/") > 0);
+
+    auto budget = impl->execution_budget_seconds_ > 0
+        ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(impl->execution_budget_seconds_))
+        : std::chrono::nanoseconds(0);
+    impl->backend->set_execution_budget(budget);
+}
+
 void engine::set_backend(backend_type type) {
     if (type == impl->current_backend_type) {
         return;
     }
-    
-    impl->current_backend_type = type;
-    
-    switch (type) {
-        case backend_type::jvm:
-            impl->backend = jvm::create_vm_backend(&impl->string_symbolizer_, impl->global_environment_);
-            break;
-        case backend_type::interpreter:
-            impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
-            break;
-        case backend_type::auto_select:
-            impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
-            break;
+    if (impl->has_executed_) {
+        throw runtime_error("set_backend after execute() is unsupported: defined functions and classes capture the executing backend");
     }
-    
-    impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
-                                              impl->overloadedFunctions.count("-") > 0 ||
-                                              impl->overloadedFunctions.count("*") > 0 ||
-                                              impl->overloadedFunctions.count("/") > 0);
+    if (type == backend_type::custom) {
+        throw runtime_error("backend_type::custom requires set_backend(std::unique_ptr<execution_backend>)");
+    }
 
-    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
-        auto it = impl->overloadedFunctions.find("[]");
-        if (it == impl->overloadedFunctions.end()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-                "No custom subscript operator registered");
-        }
+    impl->current_backend_type = type;
 
-        script_value bestMatch = it->second.findBestMatch(args);
-        if (bestMatch.is_null()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                "No matching overload found for '[]' with {0} arguments",
-                static_cast<uint64_t>(args.size()));
-        }
+    if (type == backend_type::vm) {
+        impl->backend = create_vm_backend();
+    } else {
+        // interpreter, and auto_select as its legacy alias
+        impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
+    }
 
-        const script_function& func = bestMatch.as_function();
-        return func(args);
-    });
+    wire_backend();
 }
 
 void engine::set_backend(std::unique_ptr<execution_backend> backend) {
+    if (!backend) {
+        throw runtime_error("set_backend requires a non-null backend");
+    }
+    if (impl->has_executed_) {
+        throw runtime_error("set_backend after execute() is unsupported: defined functions and classes capture the executing backend");
+    }
+
     impl->backend = std::move(backend);
-    impl->current_backend_type = backend_type::auto_select;
-    
-    impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
-                                              impl->overloadedFunctions.count("-") > 0 ||
-                                              impl->overloadedFunctions.count("*") > 0 ||
-                                              impl->overloadedFunctions.count("/") > 0);
+    impl->current_backend_type = backend_type::custom;
 
-    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
-        auto it = impl->overloadedFunctions.find("[]");
-        if (it == impl->overloadedFunctions.end()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-                "No custom subscript operator registered");
-        }
-
-        script_value bestMatch = it->second.findBestMatch(args);
-        if (bestMatch.is_null()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                "No matching overload found for '[]' with {0} arguments",
-                static_cast<uint64_t>(args.size()));
-        }
-
-        const script_function& func = bestMatch.as_function();
-        return func(args);
-    });
+    wire_backend();
 }
 
 backend_type engine::get_backend_type() const {
@@ -1277,7 +1196,11 @@ std::string engine::get_backend_name() const {
 }
 
 execution_backend* engine::get_execution_backend() const {
-    return impl->backend.get();
+    return impl ? impl->backend.get() : nullptr;
+}
+
+std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::script_namespaces() {
+    return impl->script_namespaces_;
 }
 
 void engine::setHasCustomNumericOps(bool value) {
@@ -1572,34 +1495,53 @@ double engine::execution_budget() const {
 }
 
 std::vector<engine::stack_frame> engine::last_stack_trace() const {
-    std::vector<stack_frame> out;
-    auto* backend = dynamic_cast<interpreter_backend*>(impl->backend.get());
-    if (!backend || !backend->get_interpreter()) return out;
-    for (const auto& e : backend->get_interpreter()->last_stack_trace()) {
-        out.push_back({e.function, e.file, e.line});
-    }
-    return out;
+    return impl->backend->last_stack_trace();
 }
 
 std::string engine::format_stack_trace() const {
-    auto* backend = dynamic_cast<interpreter_backend*>(impl->backend.get());
-    if (!backend || !backend->get_interpreter()) return {};
-    return backend->get_interpreter()->format_stack_trace();
+    return impl->backend->format_stack_trace();
+}
+
+void engine::set_script_error_handler(std::function<void(const std::string&)> a_handler) {
+    impl->script_error_handler = std::move(a_handler);
+}
+
+void engine::report_script_error(const std::string& a_message) {
+    std::string message = a_message;
+    std::string trace = format_stack_trace();
+    if (!trace.empty()) {
+        message += "\n" + trace;
+    }
+    if (impl->script_error_handler) {
+        impl->script_error_handler(message);
+    } else {
+        std::cerr << "[jaiscript] " << message << std::endl;
+    }
+}
+
+void engine::push_external_call_scope() {
+    impl->backend->push_external_call_scope();
+}
+
+void engine::pop_external_call_scope() {
+    impl->backend->pop_external_call_scope();
 }
 
 script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {
-    // Check if current backend is an interpreter
+    // Vestigial public API with zero callers: the one deliberate interpreter_backend
+    // dynamic_cast left outside interpreter-owned code — not worth a seam method until
+    // a non-interpreter backend needs arg-metadata access.
     auto* interpreter_backend_ptr = dynamic_cast<interpreter_backend*>(impl->backend.get());
     if (!interpreter_backend_ptr) {
         return fallback; // Not using interpreter backend, use fallback
     }
-    
+
     // Get the interpreter instance from the backend
     interpreter* current_interpreter = interpreter_backend_ptr->get_interpreter();
     if (!current_interpreter) {
         return fallback; // No interpreter available, use fallback
     }
-    
+
     // Access the current argument metadata
     const auto& metadata = current_interpreter->get_current_arg_metadata();
     if (arg_index >= metadata.size()) {
@@ -1779,6 +1721,38 @@ script_value engine::execute_import(const std::string& resolved_path) {
 
 std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng) {
     return eng ? eng->get_conversion_registry() : nullptr;
+}
+
+bool engine_holder_matches_type(engine* eng, const std::string& holder_type_name, const std::type_info& requested) {
+    if (!eng) {
+        return true;
+    }
+    auto requested_def = eng->get_class_definition_by_type(std::type_index(requested));
+    if (!requested_def) {
+        return true;  // requested type unregistered - nothing to validate against
+    }
+    if (requested_def->get_name() == holder_type_name) {
+        return true;
+    }
+    auto holder_def = eng->get_class_definition(holder_type_name);
+    return holder_def && holder_def->is_subtype_of(requested_def->get_name());
+}
+
+std::shared_ptr<void> engine_extract_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data) {
+    if (!eng || !instance_data) {
+        return nullptr;
+    }
+    auto instance = std::static_pointer_cast<class_instance>(instance_data);
+    uint64_t field_id = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
+    if (!instance->has_field_value(field_id)) {
+        return nullptr;
+    }
+    const script_value& cppObjValue = instance->get_field(field_id);
+    if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
+        auto objHolder = cppObjValue.get_object_holder();
+        return objHolder ? objHolder->data : nullptr;
+    }
+    return nullptr;
 }
 
 } // namespace jai

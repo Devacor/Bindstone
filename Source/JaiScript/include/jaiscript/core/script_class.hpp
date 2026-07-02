@@ -9,15 +9,15 @@
 
 // Include class_definition (extracted from dynamic_binder.hpp for faster compilation)
 #include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/core/overload_resolution.hpp>
 
-// Need these for the inline implementation at the end
-#include <jaiscript/detail/interpreter.hpp>
+// Needed for the inline thunk implementations at the end (execute_callable seam)
+#include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/ast.hpp>
 
 namespace jai {
 
 // Forward declarations - class_definition is available since we're included after it's defined
-class interpreter;
 class function_decl;
 
 // Script class definition - now inherits from class_definition!
@@ -32,7 +32,7 @@ public:
     // Helper to add a script method from AST
     void add_method_from_ast(std::string_view name,
                             std::shared_ptr<function_decl> ast,
-                            interpreter* interp,
+                            std::shared_ptr<environment> definition_env,
                             bool is_hot_reload = false) {
         // Intern the name for fast lookups
         auto eng = get_engine();
@@ -93,9 +93,9 @@ public:
         
         // Store AST for potential VM compilation later (keyed by ID)
         method_asts_[name_id] = ast;
-        
-        // Use inherited add_script_method - pass current environment as definition environment
-        add_script_method(name, ast, interp, interp->get_current_environment());
+
+        // Use inherited add_script_method with the caller-supplied definition environment
+        add_script_method(name, ast, definition_env);
         
         // Set metadata for this method
         method_metadata metadata;
@@ -105,22 +105,21 @@ public:
     }
     
     // Add constructor from AST
-    void add_constructor_from_ast(std::shared_ptr<function_decl> ctor_ast,
-                                 interpreter* interp) {
+    void add_constructor_from_ast(std::shared_ptr<function_decl> ctor_ast) {
         // Store for later reference
         constructor_asts_.push_back(ctor_ast);
-        
+
         // The constructor is already added to the environment by visit_class_decl
         // We just need to store it for potential VM compilation
     }
-    
+
     // Add destructor from AST
     void add_destructor_from_ast(std::shared_ptr<function_decl> dtor_ast,
-                                interpreter* interp) {
+                                std::shared_ptr<environment> definition_env) {
         destructor_ast_ = dtor_ast;
-        
+
         // Add as a special method (will be marked virtual automatically)
-        add_method_from_ast("~" + get_name(), dtor_ast, interp);
+        add_method_from_ast("~" + get_name(), dtor_ast, definition_env);
     }
     
     // Get ASTs for VM compilation
@@ -182,9 +181,10 @@ private:
 // For backward compatibility during migration
 using script_class_instance = class_instance;
 
-// Implementation of add_script_method (needs full interpreter definition)
-inline void class_definition::add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
-    auto eng = get_engine();
+// Implementation of add_script_method. The stored dispatcher captures only
+// (engine*, backend-neutral payload) and resolves the live backend at call time.
+inline void class_definition::add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env) {
+    engine* eng = get_engine();
     if (!eng) return;
 
     // Track if this is a property getter for fast-path optimization
@@ -207,214 +207,46 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
     }
 
     // Capture shared_ptr to this class definition for overload resolution
+    // (intentional lifetime cycle: methods_ -> thunk -> class_def keeps the class alive
+    // for bound-method copies)
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
     methods_.insert_or_assign(name_id, script_value::make_function(
-        [class_def, name_id, interp, definition_env](const std::vector<script_value>& args) -> checked_result<script_value> {
+        [class_def, name_id, definition_env, eng](const std::vector<script_value>& args) -> checked_result<script_value> {
             // First argument should be 'this' object
             if (args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::this_outside_method), "Method called without 'this' object");
             }
 
-            // Extract 'this' from first argument
-            script_value this_obj = args[0];
-
-            // Create remaining arguments (excluding 'this')
             std::vector<script_value> method_args(args.begin() + 1, args.end());
 
-            // Get the overloads for this method and find the best match
-            auto it = class_def->method_overloads_.find(name_id);
-            if (it == class_def->method_overloads_.end() || it->second.empty()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "No method overloads found", name_id);
+            auto resolved = class_def->resolve_method_overload(name_id, method_args);
+            if (!resolved) {
+                return resolved.error_value();
             }
 
-            const auto& overloads = it->second;
-
-            // Overload resolution cache: only used when there are multiple overloads
-            // Key by (name_id, arity) — only valid when exactly one overload matches the arity
-            if (overloads.size() > 1) {
-                typename class_definition::overload_cache_key cache_key{name_id, method_args.size()};
-                auto cache_it = class_def->overload_resolution_cache_.find(cache_key);
-                if (cache_it != class_def->overload_resolution_cache_.end()) {
-                    std::shared_ptr<function_decl> ast = cache_it->second;
-
-                    auto method_env = interp->get_pooled_method_environment(
-                        definition_env,
-                        this_obj
-                    );
-                    method_env->define("this", this_obj);
-
-                    auto result = interp->execute_method_ast(ast, method_env, method_args);
-
-                    interp->release_environment(method_env, false);
-
-                    return result;
-                }
+            execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+            if (!backend) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
             }
 
-            // Find best matching overload using C++-style resolution
-            // Priority: 1) all typed + exact match, 2) all typed + conversions (fewest first)
-            //           3) var/any parameters (fallback), 4) arity-only fallback
-            std::shared_ptr<function_decl> best_ast;
-            int best_score = INT_MAX;  // Lower is better: 0=exact, 1-N=conversions, 1000=has_var, 2000=arity_only
-            size_t best_conversion_count = SIZE_MAX;
-
-            for (const auto& overload_ast : overloads) {
-                if (overload_ast->parameters.size() != method_args.size()) {
-                    continue;
-                }
-
-                // Analyze this overload
-                bool all_typed = true;      // All parameters have explicit types
-                bool all_exact = true;      // All typed parameters match exactly
-                bool all_convertible = true; // All typed parameters can be converted
-                size_t conversion_count = 0; // Number of conversions needed
-                bool has_var = false;       // Has any var/any parameters
-
-                for (size_t i = 0; i < method_args.size(); ++i) {
-                    const auto& param = overload_ast->parameters[i];
-                    // Check if parameter has explicit type (not var/auto/any/empty)
-                    // Note: var keyword creates type_info with type_name="any" and base_type=jai_any_type
-                    bool has_explicit_type = param.type &&
-                                            !param.type->type_name.empty() &&
-                                            param.type->type_name != "any" &&
-                                            param.type->base_type != script_value_type::jai_any_type;
-                    if (has_explicit_type) {
-                        // Parameter has explicit type
-                        auto arg_type = method_args[i].type();
-
-                        // Handle object types (including shared_ptr<T> -> T conversion)
-                        if (arg_type == script_value_type::jai_object_type ||
-                            arg_type == script_value_type::jai_shared_ptr_type) {
-                            // For objects and shared_ptr, check class name with inheritance support
-                            auto instance = const_cast<script_value&>(method_args[i]).get_class_instance();
-                            if (instance) {
-                                auto arg_class_def = instance->get_class_definition();
-                                if (arg_class_def) {
-                                    // Check if argument type is same or derived from parameter type
-                                    if (arg_class_def->get_name() == param.type->type_name) {
-                                        // Exact match (or shared_ptr<T> -> T which we count as exact)
-                                        if (arg_type == script_value_type::jai_shared_ptr_type &&
-                                            param.type->base_type == script_value_type::jai_object_type) {
-                                            // shared_ptr<T> -> T requires unwrapping, count as conversion
-                                            all_exact = false;
-                                            conversion_count++;
-                                        }
-                                    } else if (arg_class_def->is_subtype_of(param.type->type_name)) {
-                                        // Derived type - allow but mark as needing implicit conversion
-                                        all_exact = false;
-                                        conversion_count++;  // Count as a conversion for ranking
-                                    } else {
-                                        // Incompatible types
-                                        all_exact = false;
-                                        all_convertible = false;
-                                    }
-                                } else {
-                                    // Can't get class def, fall back to name comparison
-                                    if (instance->get_class_name() != param.type->type_name) {
-                                        all_exact = false;
-                                        all_convertible = false;
-                                    }
-                                }
-                            } else {
-                                all_exact = false;
-                                all_convertible = false;
-                            }
-                        } else {
-                            // For primitives, check base type
-                            if (arg_type != param.type->base_type) {
-                                all_exact = false;
-                                // Check if numeric conversion is allowed
-                                bool is_numeric_conversion =
-                                    (arg_type == script_value_type::jai_int_type &&
-                                     param.type->base_type == script_value_type::jai_float_type) ||
-                                    (arg_type == script_value_type::jai_float_type &&
-                                     param.type->base_type == script_value_type::jai_int_type);
-                                if (is_numeric_conversion) {
-                                    conversion_count++;
-                                } else {
-                                    all_convertible = false;
-                                }
-                            }
-                        }
-                    } else {
-                        // Parameter has no type (var/auto) - accepts anything
-                        all_typed = false;
-                        has_var = true;
-                    }
-                }
-
-                // Calculate score for this overload
-                int score;
-                if (!all_convertible && !has_var) {
-                    // Not viable - skip this overload entirely
-                    continue;
-                } else if (all_typed && all_exact) {
-                    // Best: all typed, all exact match
-                    score = 0;
-                } else if (all_typed && all_convertible) {
-                    // Good: all typed, but needs conversions (score 1-999 based on count)
-                    score = static_cast<int>(1 + conversion_count);
-                } else if (has_var) {
-                    // Fallback: has var/any parameters
-                    score = 1000;
-                } else {
-                    // Should not reach here
-                    continue;
-                }
-
-                // Update best if this is better (lower score, or same score with fewer conversions)
-                if (score < best_score || (score == best_score && conversion_count < best_conversion_count)) {
-                    best_ast = overload_ast;
-                    best_score = score;
-                    best_conversion_count = conversion_count;
-                }
-            }
-
-            if (!best_ast) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "No matching overload found", name_id);
-            }
-
-            // Only cache when there are multiple overloads AND exactly one matches this arity
-            // (if multiple overloads share the same arity, resolution depends on argument types)
-            if (overloads.size() > 1) {
-                size_t arity_match_count = 0;
-                for (const auto& o : overloads) {
-                    if (o->parameters.size() == method_args.size()) {
-                        ++arity_match_count;
-                    }
-                }
-                if (arity_match_count == 1) {
-                    typename class_definition::overload_cache_key cache_key{name_id, method_args.size()};
-                    class_def->overload_resolution_cache_[cache_key] = best_ast;
-                }
-            }
-
-            std::shared_ptr<function_decl> ast = best_ast;
-
-            // Create a method environment that provides implicit 'this' field access
-            // Use definition_env (captured at class definition time) as parent
-            auto method_env = interp->get_pooled_method_environment(
-                definition_env,
-                this_obj
-            );
-            method_env->define("this", this_obj);
-
-            // Call the interpreter method directly
-            auto result = interp->execute_method_ast(ast, method_env, method_args);
-
-            // Always release the method environment back to the pool (even on error!)
-            interp->release_environment(method_env, false);
-
-            return result;  // checked_result<script_value> propagates automatically
+            script_callable payload;
+            payload.kind = script_callable::kind_type::method;
+            payload.ast = std::move(resolved.value());
+            payload.cls = class_def;
+            payload.definition_env = definition_env;
+            payload.this_obj = args[0];
+            return backend->execute_callable(payload, method_args);
         },
-        get_engine()  // Pass engine reference for proper function value creation
+        eng
     ));
 }
 
-// Implementation of add_static_script_method (needs full interpreter definition)
-inline void class_definition::add_static_script_method(std::string_view name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
-    auto eng = get_engine();
+// Implementation of add_static_script_method. Same engine*+payload pattern; overloads
+// are resolved over static_method_overloads_ with the shared resolver, falling back to
+// the mint-time AST when nothing matches (preserving the old last-registered behavior).
+inline void class_definition::add_static_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env) {
+    engine* eng = get_engine();
     if (!eng) return;
 
     // Track if this is a property getter for fast-path optimization
@@ -427,29 +259,37 @@ inline void class_definition::add_static_script_method(std::string_view name, st
     // Capture shared_ptr to this class definition (C++ scope rules for static methods)
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
-    static_methods_.insert_or_assign(name_id, script_value::make_function(
-        [ast, interp, class_def, definition_env](const std::vector<script_value>& args) -> checked_result<script_value> {
-            // Create a static method environment (C++ scope rules for static members)
-            // This environment automatically resolves unqualified static member access
-            // Use definition_env (captured at class definition time) as parent
-            auto static_env = std::make_shared<environment>(
-                definition_env,
-                interp->get_string_symbolizer(),
-                class_def
-            );
-
-            // Call the interpreter method directly without 'this'
-            return interp->execute_method_ast(ast, static_env, args);
-        },
-        get_engine()  // Pass engine reference for proper function value creation
-    ));
-
-    // Also store in overloads map for arity-aware lookup
+    // Store in overloads map for arity-aware lookup
     uint64_t method_name_id = ast->name_id;
     if (method_name_id == UINT64_MAX) {
-        method_name_id = interp->get_string_symbolizer()->intern(name);
+        method_name_id = name_id;
     }
     static_method_overloads_[method_name_id].push_back(ast);
+
+    static_methods_.insert_or_assign(name_id, script_value::make_function(
+        [ast, class_def, definition_env, eng, method_name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+            execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+            if (!backend) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+            }
+
+            script_callable payload;
+            payload.kind = script_callable::kind_type::static_method;
+            payload.ast = ast;
+            payload.cls = class_def;
+            payload.definition_env = definition_env;
+
+            auto it = class_def->static_method_overloads_.find(method_name_id);
+            if (it != class_def->static_method_overloads_.end() && it->second.size() > 1) {
+                if (auto best = pick_best_overload(it->second, args)) {
+                    payload.ast = best;
+                }
+            }
+
+            return backend->execute_callable(payload, args);
+        },
+        eng
+    ));
 }
 
 // Implementation of has_static_method_with_arity (needs full function_decl definition)

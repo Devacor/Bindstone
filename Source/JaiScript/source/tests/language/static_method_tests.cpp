@@ -12,7 +12,7 @@ public:
     
     void forge_tests() override {
         test("basic_static_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class MathUtils {
@@ -32,7 +32,7 @@ public:
         });
         
         test("static_method_with_string", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class StringUtils {
@@ -55,7 +55,7 @@ public:
         });
         
         test("static_method_accessing_static_fields", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class Counter {
@@ -93,7 +93,7 @@ public:
         });
         
         test("static_method_with_inheritance", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Base {
@@ -129,7 +129,7 @@ public:
         });
         
         test("static_method_void_return", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class Logger {
@@ -163,7 +163,7 @@ public:
         });
         
         test("static_method_errors", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class TestClass {
@@ -194,7 +194,7 @@ public:
         });
         
         test("static_method_with_complex_types", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class ArrayUtils {
@@ -229,7 +229,7 @@ public:
         });
         
         test("static_method_mixed_with_instance", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class Calculator {
@@ -268,9 +268,23 @@ public:
             eng->execute("auto calc = Calculator(10); calc");
             check_eq(eng->execute("calc.getValue()").as<int>(), 10);
             check_eq(eng->execute("calc.add(5)").as<int>(), 15);
-            
+
             // Static methods don't affect instances and vice versa
             check_eq(eng->execute("Calculator::getMode()").as<std::string>(), "scientific");
+        });
+
+        test("static_method_overloads_dispatch_by_arity", [&]() {
+            auto eng = make_engine();
+
+            eng->execute(R"(
+                class Fmt {
+                    static function tag(string s) -> string { return "[" + s + "]"; }
+                    static function tag(string s, string wrap) -> string { return wrap + s + wrap; }
+                }
+            )");
+
+            check_eq(eng->execute("Fmt::tag(\"x\")").as<std::string>(), "[x]");
+            check_eq(eng->execute("Fmt::tag(\"x\", \"*\")").as<std::string>(), "*x*");
         });
     }
 };

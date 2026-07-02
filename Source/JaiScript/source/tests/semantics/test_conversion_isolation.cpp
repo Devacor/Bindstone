@@ -24,7 +24,7 @@ public:
     void forge_tests() override {
         test("test1_register_widget", [this]() {
             std::cout << "\n=== TEST 1: Register Widget ===" << std::endl;
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register Widget class
             dynamic_binder<SimpleWidget>(*engine, "SimpleWidget")
@@ -63,7 +63,7 @@ public:
         
         test("test2_register_widget_again", [this]() {
             std::cout << "\n=== TEST 2: Register Widget Again ===" << std::endl;
-            auto engine = engine::make();  // Fresh engine
+            auto engine = make_engine();  // Fresh engine
             
             // Register Widget class again
             dynamic_binder<SimpleWidget>(*engine, "SimpleWidget")

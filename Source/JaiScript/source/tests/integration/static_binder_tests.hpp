@@ -124,7 +124,7 @@ public:
 
     void forge_tests() override {
         test("property_owner_with_methods", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .auto_bind()
@@ -147,7 +147,7 @@ public:
         });
 
         test("property_owner_methods_mutate_properties", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .auto_bind()
@@ -174,7 +174,7 @@ public:
         });
 
         test("property_owner_kill_entity", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .auto_bind()
@@ -209,7 +209,7 @@ public:
             }
 
             // binary_archive_reader needs an engine
-            auto eng = engine::make();
+            auto eng = make_engine();
             Player p2;
             {
                 serialization::binary_archive_reader ar(buffer, eng.get());
@@ -227,7 +227,7 @@ public:
         });
 
         test("composable_methods_update_properties", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Player>(*eng, "Player")
                 .auto_bind()
@@ -264,7 +264,7 @@ public:
             }
 
             // binary_archive_reader needs an engine
-            auto eng = engine::make();
+            auto eng = make_engine();
             GameConfig cfg2;
             {
                 serialization::binary_archive_reader ar(buffer, eng.get());
@@ -314,7 +314,7 @@ public:
                 ar.end_object();
             }
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             Vector2D v2;
             {
                 serialization::binary_archive_reader ar(buffer, eng.get());
@@ -332,7 +332,7 @@ public:
         });
 
         test("shared_object_property_and_method_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .auto_bind()
@@ -362,7 +362,7 @@ public:
         });
 
         test("property_bidirectional_sync", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .auto_bind()
@@ -383,7 +383,7 @@ public:
         });
 
         test("multiple_types_same_engine", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .auto_bind()

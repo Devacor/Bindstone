@@ -33,25 +33,25 @@ public:
 	void forge_tests() override {
 		// ---- #20 typed-null: `int x;` must not crash or mis-compare ----
 		test("typed_null_equality_no_crash", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			check(e->execute("int a; int b; a == b;").as_bool());
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 		test("typed_null_equality_symmetric", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			check_false(e->execute("int a; a == 5;").as_bool());
 			check_false(e->execute("int a; 5 == a;").as_bool());
 			check(e->execute("int a; a != 5;").as_bool());
 		});
 		test("typed_null_string_compare_no_crash", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			check_false(e->execute("string s; \"hi\" == s;").as_bool());
 			check_false(e->execute("string s; s == \"hi\";").as_bool());
 		});
 
 		// ---- #10 env pool: static method call + block must not corrupt the pool ----
 		test("static_method_then_block_no_hang", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute(R"(
 				class S { static int get() { return 42; } }
 				int f() {
@@ -66,7 +66,7 @@ public:
 
 		// ---- #11 closures: outer local colliding with the lambda's own slot range ----
 		test("lambda_captures_colliding_outer_param_inline", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute(R"(
 				int make2(int base) {
 					auto g = [=](int x) { return x + base; };
@@ -77,7 +77,7 @@ public:
 			check_eq((int64_t)11, r.as_int());
 		});
 		test("lambda_captures_colliding_outer_param_escaping", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute(R"(
 				auto make_adder(int base) -> auto {
 					return [=](int x) { return x + base; };
@@ -91,7 +91,7 @@ public:
 
 		// ---- #12 statements after a top-level throw in a function body must not run ----
 		test("no_execution_after_throw_in_function_body", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute(R"(
 				var ran = 0;
 				int f() {
@@ -110,7 +110,7 @@ public:
 		// (declarations directly in a case body are a separate parser gap — finding #4 —
 		// so the case-local lives in a block; the dtor must still fire before `log` reads)
 		test("switch_case_scope_runs_destructors", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute(R"(
 				var log = "";
 				class D { ~D() { log += "x"; } }
@@ -125,7 +125,7 @@ public:
 			check_eq(std::string("bx"), r.as_string());
 		});
 		test("switch_in_loop_does_not_leak", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute(R"(
 				var total = 0;
 				for (int i = 0; i < 10000; ++i) {
@@ -142,33 +142,33 @@ public:
 
 		// ---- #15 compound assignment honours the checked-overflow policy ----
 		test("compound_add_overflow_raises", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			if (!e->throw_on_overflow()) { return; }  // wrap build: policy off by design
 			check_throws([&]() { e->execute("var x = 9223372036854775807; x += 1;"); });
 		});
 		test("compound_sub_overflow_raises", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			if (!e->throw_on_overflow()) { return; }
 			check_throws([&]() { e->execute("var x = -9223372036854775807 - 1; x -= 1;"); });
 		});
 		test("compound_mul_overflow_raises", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			if (!e->throw_on_overflow()) { return; }
 			check_throws([&]() { e->execute("var x = 9223372036854775807; x *= 2;"); });
 		});
 		test("compound_div_min_by_minus_one_no_crash", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			if (!e->throw_on_overflow()) { return; }
 			check_throws([&]() { e->execute("var y = -9223372036854775807 - 1; y /= -1;"); });
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 		test("compound_add_overflow_identifier_rhs", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			if (!e->throw_on_overflow()) { return; }
 			check_throws([&]() { e->execute("var x = 9223372036854775807; var one = 1; x += one;"); });
 		});
 		test("compound_ops_still_correct", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute("var a = 5; a += 2; a -= 1; a *= 3; a /= 2; a;");
 			check_eq((int64_t)9, r.as_int());
 		});
@@ -195,7 +195,7 @@ public:
 
 		// ---- #0/#14 parser depth guards cover statements and grouping parens ----
 		test("deep_if_nesting_no_crash", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			std::string src;
 			for (int i = 0; i < 5000; ++i) { src += "if (true) "; }
 			src += "1;";
@@ -203,13 +203,13 @@ public:
 			check_eq((int64_t)3, e->execute("1 + 2").as_int());
 		});
 		test("deep_block_nesting_no_crash", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			std::string src(5000, '{');
 			check_throws([&]() { e->execute(src); });
 			check_eq((int64_t)3, e->execute("1 + 2").as_int());
 		});
 		test("deep_paren_nesting_no_crash", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			std::string src(200, '(');
 			src += "1";
 			src += std::string(200, ')');
@@ -217,7 +217,7 @@ public:
 			check_eq((int64_t)3, e->execute("1 + 2").as_int());
 		});
 		test("modest_paren_nesting_still_works", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			std::string src(20, '(');
 			src += "1 + 2";
 			src += std::string(20, ')');
@@ -226,7 +226,7 @@ public:
 
 		// ---- scripted-entity glue: hook properties + signal connect + getVar/setVar ----
 		test("game_pattern_hooks_signals_vars", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			jai::bind_signal_type<void(int)>(*e, "SignalInt");
 			{
 				jai::dynamic_binder<scripted_thing> builder(*e, "ScriptedThing");
@@ -261,7 +261,7 @@ public:
 
 		// ---- port-scout G1: compound assignment through a map subscript ----
 		test("map_subscript_compound_assign", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute(R"(
 				var m = {"k": 10.0};
 				m["k"] -= 2.5;
@@ -273,7 +273,7 @@ public:
 
 		// ---- port-scout G2: subscript-inserted keys must carry the engine (clone poisoning) ----
 		test("map_subscript_insert_is_cloneable", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			auto r = e->execute(R"(
 				var m = {"v": 1};
 				m["f"] = [=]() { return 7; };
@@ -286,7 +286,7 @@ public:
 
 		// ---- #39 coroutine resume surfaces runtime errors instead of stale yields ----
 		test("coroutine_resume_propagates_runtime_error", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			check_throws([&]() {
 				e->execute(R"(
 					coroutine int co() {
@@ -305,7 +305,7 @@ public:
 
 		// ---- #40 nested execute() inside a running coroutine must not corrupt it ----
 		test("nested_execute_inside_coroutine_keeps_yield_machinery", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			engine* raw = e.get();
 			e->add_function("nested_exec", [raw]() -> script_int {
 				raw->execute("1 + 1");
@@ -328,7 +328,7 @@ public:
 
 		// ---- #1/#91 parse errors carry the parser's real diagnostic ----
 		test("parse_error_carries_location_detail", [this]() {
-			auto e = engine::make();
+			auto e = make_engine();
 			bool threw = false;
 			std::string msg;
 			try {

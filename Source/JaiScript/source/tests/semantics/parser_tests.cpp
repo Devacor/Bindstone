@@ -148,7 +148,7 @@ public:
 
 private:
     void check_parse_succeeds(const std::string& code) {
-        auto eng = engine::make();
+        auto eng = make_engine();
         auto* symbolizer = eng->get_symbolizer();
         lexer lex(code, symbolizer, "test.jai");
         auto tokens = lex.tokenize();
@@ -159,7 +159,7 @@ private:
     }
 
     void check_parse_fails(const std::string& code) {
-        auto eng = engine::make();
+        auto eng = make_engine();
         auto* symbolizer = eng->get_symbolizer();
         lexer lex(code, symbolizer, "test.jai");
         auto tokens = lex.tokenize();

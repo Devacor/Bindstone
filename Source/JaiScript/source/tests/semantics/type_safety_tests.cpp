@@ -76,7 +76,7 @@ public:
         // --- Issue 1: Equality vs Arithmetic Consistency (FIXED) ---
 
         test("numeric_equality_int_float_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // FIXED: Numeric equality now promotes int to float for comparison
             auto result = eng->execute("5 == 5.0");
@@ -92,7 +92,7 @@ public:
         });
 
         test("numeric_not_equal_int_float_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // FIXED: 5 != 5.0 returns false because they are equal numerically
             auto result = eng->execute("5 != 5.0");
@@ -104,7 +104,7 @@ public:
         });
 
         test("numeric_comparison_consistent", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // FIXED: Arithmetic and equality both handle type conversion consistently
             auto sum_works = eng->execute("5 + 5.0 == 10.0");
@@ -124,7 +124,7 @@ public:
         // --- Issue 2: Logical Operators Return Boolean (FIXED) ---
 
         test("logical_and_returns_boolean", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // FIXED: && now returns a boolean
             auto result = eng->execute("5 && 10");
@@ -133,7 +133,7 @@ public:
         });
 
         test("logical_or_returns_boolean", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // FIXED: || now returns a boolean
             auto result = eng->execute("0 || \"hello\"");
@@ -142,7 +142,7 @@ public:
         });
 
         test("logical_and_short_circuit_returns_false", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // FIXED: When left is falsy, && returns false (not left operand)
             auto result = eng->execute("0 && 10");
@@ -151,7 +151,7 @@ public:
         });
 
         test("logical_result_type_always_bool", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // FIXED: The type of logical operators is always bool
             auto result1 = eng->execute("true && 42");
@@ -167,7 +167,7 @@ public:
         // --- Issue 3: Empty Container Truthiness (FIXED) ---
 
         test("empty_array_is_falsy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto result = eng->execute(R"(
                 auto arr = [];
@@ -181,7 +181,7 @@ public:
         });
 
         test("empty_map_is_falsy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto result = eng->execute(R"(
                 auto m = {"a": 1};
@@ -196,7 +196,7 @@ public:
         });
 
         test("non_empty_containers_are_truthy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Non-empty array should be truthy
             auto arr_result = eng->execute(R"(
@@ -218,7 +218,7 @@ public:
         });
 
         test("empty_array_in_logical_or", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // FIXED: Empty array is falsy, so || returns the truthiness of "default"
             // Since || now returns boolean, this returns true (string is truthy)
@@ -235,7 +235,7 @@ public:
         // --- Issue 4: Object Equality (PARTIALLY FIXED) ---
 
         test("object_self_equality_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Thing { int value = 42; }
@@ -251,7 +251,7 @@ public:
         });
 
         test("object_reference_equality_different_instances", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Point {
@@ -274,7 +274,7 @@ public:
         });
 
         test("object_operator_equals_custom", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Define a class with operator== for custom equality
             eng->execute(R"(
@@ -307,7 +307,7 @@ public:
         });
 
         test("object_operator_equals_with_not_equal", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Define a class with operator==
             eng->execute(R"(
@@ -339,7 +339,7 @@ public:
         });
 
         test("script_class_comparison_operators", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Define a class with all comparison operators
             eng->execute(R"(
@@ -382,7 +382,7 @@ public:
         });
 
         test("script_class_arithmetic_operators", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Define a class with all arithmetic operators
             // Note: Use 'function operator+(...) -> Type' syntax for custom return types
@@ -433,7 +433,7 @@ public:
         });
 
         test("script_class_compound_assignment_operators", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Define a class with arithmetic operators
             eng->execute(R"(
@@ -515,7 +515,7 @@ public:
         });
 
         test("type_based_method_overloading", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Define a class with multiple overloads of the same method using different types
             eng->execute(R"(
@@ -580,7 +580,7 @@ public:
         });
 
         test("type_based_overloading_with_var_fallback", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test that untyped parameters (var) act as "any" fallback
             // Following C++ semantics: typed conversions are preferred over var/any
@@ -629,7 +629,7 @@ public:
         });
 
         test("type_based_overloading_multi_param", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test overloading with multiple parameters of different types
             eng->execute(R"(
@@ -671,7 +671,7 @@ public:
         });
 
         test("type_based_overloading_conversion_count", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test that overloads with fewer conversions are preferred
             eng->execute(R"(
@@ -706,7 +706,7 @@ public:
         });
 
         test("type_based_overloading_arity_difference", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test overloading by both type and arity
             eng->execute(R"(
@@ -730,7 +730,7 @@ public:
         });
 
         test("type_based_overloading_class_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test overloading with user-defined class types
             eng->execute(R"(
@@ -767,7 +767,7 @@ public:
         });
 
         test("type_based_overloading_numeric_preference", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Verify int exact match beats float conversion
             eng->execute(R"(
@@ -791,7 +791,7 @@ public:
         // --- Issue 5: Silent Truncation ---
 
         test("KNOWN_ISSUE_float_to_int_silent_truncation", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use auto which locks to int, then assign float
             auto result = eng->execute(R"(
@@ -807,7 +807,7 @@ public:
         });
 
         test("KNOWN_ISSUE_negative_float_truncation", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use auto which locks to int, then assign negative float
             auto result = eng->execute(R"(
@@ -824,7 +824,7 @@ public:
         // --- Issue 6: Typed Array Element Validation (FIXED) ---
 
         test("typed_array_rejects_wrong_element", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<int> should reject pushing a string
             bool caught = false;
@@ -844,7 +844,7 @@ public:
         });
 
         test("typed_array_allows_correct_element", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<int> should accept integers
             auto result = eng->execute(R"(
@@ -857,7 +857,7 @@ public:
         });
 
         test("typed_array_allows_numeric_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<float> should accept int (widening conversion)
             auto result = eng->execute(R"(
@@ -870,7 +870,7 @@ public:
         });
 
         test("untyped_array_allows_anything", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Untyped arrays should accept any element
             auto result = eng->execute(R"(
@@ -884,7 +884,7 @@ public:
         });
 
         test("typed_array_subscript_rejects_wrong_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<int>[i] = string should be rejected
             bool caught = false;
@@ -904,7 +904,7 @@ public:
         });
 
         test("typed_array_subscript_allows_correct_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<int>[i] = int should work
             auto result = eng->execute(R"(
@@ -919,7 +919,7 @@ public:
         // --- Nested Array/Map Type Validation ---
 
         test("nested_array_basic", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<array<int>> should work with nested int arrays
             auto result = eng->execute(R"(
@@ -931,7 +931,7 @@ public:
         });
 
         test("nested_array_push_correct_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Pushing an int array to array<array<int>> should work
             auto result = eng->execute(R"(
@@ -944,7 +944,7 @@ public:
         });
 
         test("LIMITATION_nested_array_inner_type_not_checked", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // LIMITATION: Pushing a string array to array<array<int>> doesn't fail
             // because array literals are untyped - they don't carry element type info
@@ -965,7 +965,7 @@ public:
         });
 
         test("array_of_maps", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<map<string, int>> basic usage
             auto result = eng->execute(R"(
@@ -977,7 +977,7 @@ public:
         });
 
         test("map_of_arrays", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // map<string, array<int>> basic usage
             auto result = eng->execute(R"(
@@ -991,7 +991,7 @@ public:
         // --- Homogeneous Array Validation (auto vs var) ---
 
         test("auto_array_requires_homogeneous_int", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // auto x = [1, 2, 3] - all ints, should work
             auto result = eng->execute(R"(
@@ -1003,7 +1003,7 @@ public:
         });
 
         test("auto_array_requires_homogeneous_string", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // auto x = ["a", "b"] - all strings, should work
             auto result = eng->execute(R"(
@@ -1015,7 +1015,7 @@ public:
         });
 
         test("auto_array_rejects_mixed_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // auto x = [1, "hello"] - mixed types, should fail
             bool caught = false;
@@ -1035,7 +1035,7 @@ public:
         });
 
         test("auto_array_rejects_int_float_mix", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // auto x = [5.0, 5] - float and int are different types
             bool caught = false;
@@ -1051,7 +1051,7 @@ public:
         });
 
         test("var_array_allows_mixed_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // var x = [1, "hello", 3.14] - should work with var
             auto result = eng->execute(R"(
@@ -1063,7 +1063,7 @@ public:
         });
 
         test("var_array_allows_int_float_mix", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // var x = [5.0, 5] - should work with var
             auto result = eng->execute(R"(
@@ -1075,7 +1075,7 @@ public:
         });
 
         test("array_auto_requires_homogeneous", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<auto> x = [1, "hello"] - should fail, auto requires same type
             bool caught = false;
@@ -1091,7 +1091,7 @@ public:
         });
 
         test("array_auto_allows_homogeneous", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<auto> x = [1, 2, 3] - should work, all same type
             auto result = eng->execute(R"(
@@ -1103,7 +1103,7 @@ public:
         });
 
         test("array_var_allows_heterogeneous", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // array<var> x = [1, "hello"] - should work, var allows any type
             auto result = eng->execute(R"(
@@ -1115,7 +1115,7 @@ public:
         });
 
         test("auto_empty_array_succeeds", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // auto x = [] - empty array is trivially homogeneous
             auto result = eng->execute(R"(
@@ -1127,7 +1127,7 @@ public:
         });
 
         test("auto_single_element_array_succeeds", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // auto x = [1] - single element is trivially homogeneous
             auto result = eng->execute(R"(
@@ -1141,7 +1141,7 @@ public:
         // --- Nested Container Homogeneity (up to 3 levels deep) ---
 
         test("nested_array_2_levels_homogeneous", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // [[1,2], [3,4]] - all inner arrays have ints, outer has arrays
             auto result = eng->execute(R"(
@@ -1153,7 +1153,7 @@ public:
         });
 
         test("nested_array_2_levels_heterogeneous_inner_fails", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // [[1, "a"], [2, "b"]] - inner arrays have mixed types
             bool caught = false;
@@ -1169,7 +1169,7 @@ public:
         });
 
         test("nested_array_3_levels_homogeneous", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // [[[1,2], [3,4]], [[5,6], [7,8]]] - 3 levels all homogeneous
             auto result = eng->execute(R"(
@@ -1181,7 +1181,7 @@ public:
         });
 
         test("nested_array_3_levels_heterogeneous_deepest_fails", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // [[[1, "x"]]] - deepest level is heterogeneous
             bool caught = false;
@@ -1197,7 +1197,7 @@ public:
         });
 
         test("nested_map_2_levels_homogeneous", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // {"a": {"x": 1, "y": 2}, "b": {"x": 3, "y": 4}} - all values are maps with ints
             auto result = eng->execute(R"(
@@ -1209,7 +1209,7 @@ public:
         });
 
         test("nested_map_2_levels_heterogeneous_inner_fails", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // {"a": {"x": 1, "y": "bad"}} - inner map has mixed values
             bool caught = false;
@@ -1225,7 +1225,7 @@ public:
         });
 
         test("mixed_array_map_3_levels_homogeneous", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // [[{"a": 1, "b": 2}], [{"c": 3, "d": 4}]] - arrays of arrays of homogeneous maps
             auto result = eng->execute(R"(
@@ -1237,7 +1237,7 @@ public:
         });
 
         test("mixed_map_array_3_levels_homogeneous", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // {"items": [[1, 2], [3, 4]]} - map with value being 2D int array
             auto result = eng->execute(R"(
@@ -1249,7 +1249,7 @@ public:
         });
 
         test("mixed_3_levels_heterogeneous_fails", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // {"items": [[1, "bad"]]} - deepest array has mixed types
             bool caught = false;
@@ -1265,7 +1265,7 @@ public:
         });
 
         test("var_allows_any_nesting", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // var bypasses all homogeneity checks at any depth
             auto result = eng->execute(R"(
@@ -1284,7 +1284,7 @@ public:
         // --- Primitive Type Enforcement ---
 
         test("int_variable_rejects_string", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute(R"(
@@ -1298,7 +1298,7 @@ public:
         });
 
         test("string_variable_rejects_uncoerced_int", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // String variables may accept int via to_string coercion
             // This tests the base behavior
             auto result = eng->execute(R"(
@@ -1310,7 +1310,7 @@ public:
         });
 
         test("bool_variable_accepts_assignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Test that bool variables can be assigned boolean values
             auto result = eng->execute(R"(
                 bool b = true;
@@ -1321,7 +1321,7 @@ public:
         });
 
         test("bool_rejects_incompatible_assignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute(R"(
@@ -1339,7 +1339,7 @@ public:
         // --- Numeric Conversion (Working as Designed) ---
 
         test("int_to_float_widening_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 float f = 3.14;
                 f = 5;  // int widens to float
@@ -1349,7 +1349,7 @@ public:
         });
 
         test("float_to_int_narrowing_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 int i = 5;
                 i = 3.7;  // float narrows to int (truncates)
@@ -1359,19 +1359,19 @@ public:
         });
 
         test("mixed_arithmetic_promotes_to_float", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("5 + 3.14");
             check_eq(result.as<double>(), 8.14);
         });
 
         test("integer_division_stays_integer", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("10 / 3");
             check_eq(result.as<int>(), 3);
         });
 
         test("float_division_preserves_precision", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("10.0 / 3");
             check(std::abs(result.as<double>() - 3.333333) < 0.001);
         });
@@ -1379,7 +1379,7 @@ public:
         // --- Auto Type Locking ---
 
         test("auto_locks_to_first_value_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 42;
                 x = 100;
@@ -1390,7 +1390,7 @@ public:
         });
 
         test("auto_rejects_incompatible_reassignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute(R"(
@@ -1404,7 +1404,7 @@ public:
         });
 
         test("auto_allows_numeric_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 3.14;
                 x = 5;  // int to float is OK
@@ -1416,7 +1416,7 @@ public:
         // --- Var Dynamic Typing ---
 
         test("var_accepts_any_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 var x = 42;
                 x = "hello";
@@ -1427,7 +1427,7 @@ public:
         });
 
         test("var_preserves_actual_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto r1 = eng->execute("var x = 42; x");
             check_eq(r1.type(), script_value_type::jai_int_type);
@@ -1439,7 +1439,7 @@ public:
         // --- Null Type Safety ---
 
         test("null_assignable_to_object_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Foo { int x = 0; }
             )");
@@ -1451,7 +1451,7 @@ public:
         });
 
         test("null_not_assignable_to_primitives", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute(R"(
@@ -1467,7 +1467,7 @@ public:
         // --- Function Parameter Type Enforcement ---
 
         test("function_param_type_enforced", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute(R"(
@@ -1481,7 +1481,7 @@ public:
         });
 
         test("function_param_numeric_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 function square(float x) -> float { return x * x; }
                 square(5)  // int converts to float
@@ -1490,7 +1490,7 @@ public:
         });
 
         test("function_return_type_enforced", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 function get_value() -> int { return 42; }
                 get_value()
@@ -1501,7 +1501,7 @@ public:
         // --- Class Type Safety ---
 
         test("class_field_types_enforced", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Test that class fields can be assigned valid types
             auto result = eng->execute(R"(
                 class Data { int value = 0; }
@@ -1516,7 +1516,7 @@ public:
         });
 
         test("class_inheritance_upcasting_allowed", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Animal { string name = ""; }
                 class Dog : Animal { Dog() { name = "dog"; } }
@@ -1530,7 +1530,7 @@ public:
         });
 
         test("class_inheritance_type_safety", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Animal { string name = ""; }
                 class Dog : Animal { Dog() { name = "dog"; } }
@@ -1550,7 +1550,7 @@ public:
         // --- Constructor Conversion ---
 
         test("constructor_enables_implicit_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Wrapper {
                     int value = 0;
@@ -1564,7 +1564,7 @@ public:
         });
 
         test("no_chained_constructor_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class A { int x = 0; }
                 class B { B(A a) { } }
@@ -1586,7 +1586,7 @@ public:
         // --- Reference Type Safety ---
 
         test("reference_preserves_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 function modify(int& ref) { ref = ref + 10; }
                 auto x = 5;
@@ -1599,7 +1599,7 @@ public:
         // --- shared_ptr Type Safety ---
 
         test("shared_ptr_type_preserved", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Node { int value = 0; }
             )");
@@ -1613,7 +1613,7 @@ public:
         });
 
         test("shared_ptr_parameter_matching", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Data { int x = 0; }
                 function process(shared_ptr<Data> d) -> int { return d.x; }
@@ -1630,7 +1630,7 @@ public:
         // --- Weak Pointer Type Safety ---
 
         test("weak_ptr_rejects_value_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute("class Obj { int x = 0; }");
 
             bool caught = false;
@@ -1649,7 +1649,7 @@ public:
         });
 
         test("weak_ptr_accepts_shared_ptr", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute("class Obj { int x = 0; }");
 
             auto result = eng->execute(R"(
@@ -1665,7 +1665,7 @@ public:
         // --- Bitwise Operator Type Safety ---
 
         test("bitwise_requires_integers", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // These should work
             check_eq(eng->execute("5 & 3").as<int>(), 1);
@@ -1676,7 +1676,7 @@ public:
         });
 
         test("bitwise_rejects_floats", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute("5.0 & 3");
@@ -1689,7 +1689,7 @@ public:
         // --- Comparison Type Safety ---
 
         test("same_type_equality_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_eq(eng->execute("5 == 5").as<bool>(), true);
             check_eq(eng->execute("5 == 6").as<bool>(), false);
             check_eq(eng->execute("3.14 == 3.14").as<bool>(), true);
@@ -1700,13 +1700,13 @@ public:
         });
 
         test("null_equality_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_eq(eng->execute("null == null").as<bool>(), true);
             check_eq(eng->execute("null != null").as<bool>(), false);
         });
 
         test("numeric_comparisons_work", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_eq(eng->execute("5 < 10").as<bool>(), true);
             check_eq(eng->execute("5 > 10").as<bool>(), false);
             check_eq(eng->execute("5 <= 5").as<bool>(), true);
@@ -1715,7 +1715,7 @@ public:
         });
 
         test("string_comparison_lexicographic", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_eq(eng->execute("\"apple\" < \"banana\"").as<bool>(), true);
             check_eq(eng->execute("\"zebra\" > \"apple\"").as<bool>(), true);
         });
@@ -1723,7 +1723,7 @@ public:
         // --- Truthiness (Documented Behavior) ---
 
         test("zero_is_falsy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto r = 99;
                 if (0) { r = 1; } else { r = 0; }
@@ -1733,7 +1733,7 @@ public:
         });
 
         test("nonzero_is_truthy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto r = 99;
                 if (42) { r = 1; } else { r = 0; }
@@ -1743,7 +1743,7 @@ public:
         });
 
         test("empty_string_is_falsy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto r = 99;
                 if ("") { r = 1; } else { r = 0; }
@@ -1753,7 +1753,7 @@ public:
         });
 
         test("nonempty_string_is_truthy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto r = 99;
                 if ("hello") { r = 1; } else { r = 0; }
@@ -1763,7 +1763,7 @@ public:
         });
 
         test("null_is_falsy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto r = 99;
                 if (null) { r = 1; } else { r = 0; }
@@ -1773,7 +1773,7 @@ public:
         });
 
         test("nonempty_array_is_truthy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto r = 99;
                 auto arr = [1, 2, 3];
@@ -1784,7 +1784,7 @@ public:
         });
 
         test("nonempty_map_is_truthy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto r = 99;
                 auto m = {"a": 1};
@@ -1797,19 +1797,19 @@ public:
         // --- Type Preservation Through Operations ---
 
         test("arithmetic_preserves_int_when_possible", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("5 + 3");
             check_eq(result.type(), script_value_type::jai_int_type);
         });
 
         test("arithmetic_promotes_to_float_when_needed", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("5 + 3.0");
             check_eq(result.type(), script_value_type::jai_float_type);
         });
 
         test("comparison_always_returns_bool", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_eq(eng->execute("5 < 10").type(), script_value_type::jai_bool_type);
             check_eq(eng->execute("5 == 5").type(), script_value_type::jai_bool_type);
             check_eq(eng->execute("5 != 5").type(), script_value_type::jai_bool_type);
@@ -1820,7 +1820,7 @@ public:
         // ============================================================
 
         test("cpp_int_to_script_preserves_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->add_global("cpp_value", script_value(42, eng.get()));
             auto result = eng->execute("cpp_value");
             check_eq(result.type(), script_value_type::jai_int_type);
@@ -1828,7 +1828,7 @@ public:
         });
 
         test("cpp_float_to_script_preserves_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->add_global("cpp_value", script_value(3.14, eng.get()));
             auto result = eng->execute("cpp_value");
             check_eq(result.type(), script_value_type::jai_float_type);
@@ -1836,7 +1836,7 @@ public:
         });
 
         test("cpp_string_to_script_preserves_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->add_global("cpp_value", script_value(std::string("hello"), eng.get()));
             auto result = eng->execute("cpp_value");
             check_eq(result.type(), script_value_type::jai_string_type);
@@ -1844,7 +1844,7 @@ public:
         });
 
         test("cpp_bool_to_script_preserves_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->add_global("cpp_value", script_value(true, eng.get()));
             auto result = eng->execute("cpp_value");
             check_eq(result.type(), script_value_type::jai_bool_type);
@@ -1852,21 +1852,21 @@ public:
         });
 
         test("script_int_to_cpp_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("42");
             check_eq(result.as<int>(), 42);
             // int64_t and long use same as<int> under the hood
         });
 
         test("script_float_to_cpp_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("3.14");
             check(std::abs(result.as<double>() - 3.14) < 0.001);
             check(std::abs(result.as<float>() - 3.14f) < 0.001f);
         });
 
         test("cpp_function_parameter_type_checking", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->add_function("typed_add", [](int a, int b) -> int {
                 return a + b;
             });
@@ -1876,7 +1876,7 @@ public:
         });
 
         test("cpp_function_returns_correct_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->add_function("make_string", []() -> std::string {
                 return "from_cpp";
             });
@@ -1891,7 +1891,7 @@ public:
         // ============================================================
 
         test("script_class_method_returns_correct_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Calculator {
                     int value = 0;
@@ -1909,7 +1909,7 @@ public:
         });
 
         test("script_class_inheritance_method_override", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Base {
                     function get_name() -> string { return "Base"; }
@@ -1927,7 +1927,7 @@ public:
         });
 
         test("script_class_polymorphic_call", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Animal {
                     function speak() -> string { return "..."; }
@@ -1956,7 +1956,7 @@ public:
         });
 
         test("script_class_field_type_inheritance", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Entity {
                     int id = 0;
@@ -1977,7 +1977,7 @@ public:
         });
 
         test("script_class_multi_level_inheritance", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class A { int a_val = 1; }
                 class B : A { int b_val = 2; }
@@ -1993,7 +1993,7 @@ public:
         });
 
         test("script_class_type_checking_in_function", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class TypeA { int x = 0; }
                 class TypeB { int y = 0; }
@@ -2019,7 +2019,7 @@ public:
         });
 
         test("script_class_return_type_enforcement", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Result { int value = 0; }
                 function make_result(int v) -> Result {
@@ -2038,7 +2038,7 @@ public:
         // ============================================================
 
         test("array_push_preserves_type_context", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto arr = [1, 2, 3];
                 arr.push(4);
@@ -2049,7 +2049,7 @@ public:
         });
 
         test("map_typed_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto m = {"a": 1, "b": 2, "c": 3};
                 m["a"] + m["b"] + m["c"]
@@ -2058,7 +2058,7 @@ public:
         });
 
         test("nested_container_type_safety", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto matrix = [[1, 2], [3, 4], [5, 6]];
                 matrix[0][0] + matrix[1][1] + matrix[2][0]
@@ -2067,7 +2067,7 @@ public:
         });
 
         test("map_of_arrays_type_safety", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto data = {"nums": [1, 2, 3], "more": [4, 5, 6]};
                 data["nums"].size() + data["more"].size()
@@ -2081,7 +2081,7 @@ public:
         // ============================================================
 
         test("script_inherits_cpp_basic_field_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register C++ Entity class
             dynamic_binder<Entity>(*eng, "Entity")
@@ -2111,7 +2111,7 @@ public:
         });
 
         test("script_inherits_cpp_base_method_call", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2133,7 +2133,7 @@ public:
         });
 
         test("script_inherits_cpp_override_method", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2157,7 +2157,7 @@ public:
         });
 
         test("script_inherits_cpp_super_call", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2181,7 +2181,7 @@ public:
         });
 
         test("script_inherits_cpp_script_specific_field", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2216,7 +2216,7 @@ public:
         });
 
         test("script_inherits_cpp_type_preserved_in_parameter", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2242,7 +2242,7 @@ public:
         });
 
         test("script_inherits_cpp_different_cpp_base_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register Vehicle
             dynamic_binder<Vehicle>(*eng, "Vehicle")
@@ -2293,7 +2293,7 @@ public:
         });
 
         test("script_inherits_cpp_type_mismatch_rejected", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Vehicle>(*eng, "Vehicle")
                 .constructor<int, std::string>()
@@ -2330,7 +2330,7 @@ public:
         });
 
         test("script_inherits_cpp_multi_level", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2362,7 +2362,7 @@ public:
         test("script_inherits_cpp_deep_multi_level", [this]() {
             // Test 4-level inheritance: Archmage : Mage : Character : Entity (script→script→script→C++)
             // This verifies the iterative solution handles arbitrary depth
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2400,7 +2400,7 @@ public:
         });
 
         test("script_inherits_cpp_cpp_method_mutation", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Vehicle>(*eng, "Vehicle")
                 .constructor<int, std::string>()
@@ -2423,7 +2423,7 @@ public:
         });
 
         test("script_inherits_cpp_script_overrides_cpp_field_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2450,7 +2450,7 @@ public:
         });
 
         test("script_inherits_cpp_shared_ptr_inheritance", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()
@@ -2471,7 +2471,7 @@ public:
         });
 
         test("script_inherits_cpp_return_derived_from_base_function", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Entity>(*eng, "Entity")
                 .constructor<std::string, int>()

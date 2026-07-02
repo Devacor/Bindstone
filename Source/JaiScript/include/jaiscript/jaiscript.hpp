@@ -49,12 +49,6 @@
 #include "detail/interpreter.hpp"
 #include "detail/interpreter_backend.hpp"
 
-// VM is being refactored - moved to LEGACY_VM
-// #include "jvm/bytecode.hpp"
-// #include "jvm/compiler.hpp"
-// #include "jvm/virtual_machine.hpp"
-// #include "jvm/vm_backend.hpp"
-
 #include "serialization/archive_impl.hpp"
 #include "serialization/convenience.hpp"
 

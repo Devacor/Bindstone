@@ -44,7 +44,7 @@ public:
     
     void forge_tests() override {
         test("auto_vector_registration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register Widget class - this should automatically register vector<Widget>
             dynamic_binder<Widget>(*engine, "Widget")
@@ -71,7 +71,7 @@ public:
         });
         
         test("auto_map_string_registration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register Widget class
             dynamic_binder<Widget>(*engine, "Widget")
@@ -99,7 +99,7 @@ public:
         });
         
         test("auto_map_int_registration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register Widget class
             dynamic_binder<Widget>(*engine, "Widget")
@@ -127,7 +127,7 @@ public:
         });
         
         test("nested_auto_registration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register Widget class
             dynamic_binder<Widget>(*engine, "Widget")
@@ -161,7 +161,7 @@ public:
         });
         
         test("non_default_constructible_type", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             struct NonDefaultWidget {
                 std::string name;
@@ -193,7 +193,7 @@ public:
         });
         
         test("complex_nested_containers", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register Widget class
             dynamic_binder<Widget>(*engine, "Widget")
@@ -230,7 +230,7 @@ public:
         });
         
         test("custom_type_with_custom_methods", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             struct Calculator {
                 double accumulator = 0.0;
@@ -280,7 +280,7 @@ public:
         });
         
         test("inheritance_and_containers", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Register base and derived classes (Animal, Dog, Cat defined at namespace scope)
             dynamic_binder<Animal>(*engine, "Animal")
@@ -353,7 +353,7 @@ public:
         });
 
         test("polymorphic_parameter_passing", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Register base and derived classes
             dynamic_binder<Animal>(*engine, "Animal")

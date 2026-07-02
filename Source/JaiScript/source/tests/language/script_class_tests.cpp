@@ -12,7 +12,7 @@ public:
     
     void forge_tests() override {
         test("basic_class_with_fields", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             
             const char* script = R"(
                 class Point {
@@ -32,7 +32,7 @@ public:
         });
         
         test("class_with_constructor", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             
             const char* script = R"(
                 class Point {
@@ -55,7 +55,7 @@ public:
         });
         
         test("class_with_methods", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             
             const char* script = R"(
                 class Rectangle {
@@ -86,7 +86,7 @@ public:
         });
         
         test("script_cpp_interop", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             
             js_engine->add_function("sqrt", [](double x) { return std::sqrt(x); });
 
@@ -129,7 +129,7 @@ public:
         });
         
         test("script_inherits_from_cpp", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             
             class Creature {
             public:
@@ -182,7 +182,7 @@ public:
         });
         
         test("class_destructor_basic", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             stdlib::register_all(*js_engine);
             
             int destructor_count = 0;
@@ -241,7 +241,7 @@ public:
         });
         
         test("class_destructor_polymorphic", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             stdlib::register_all(*js_engine);
 
             const char* script = R"JAI(
@@ -311,7 +311,7 @@ public:
         });
 
         test("class_destructor_nested_scopes", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             stdlib::register_all(*js_engine);
 
             std::string order_log;
@@ -381,7 +381,7 @@ public:
         });
 
         test("class_destructor_in_containers", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             stdlib::register_all(*js_engine);
 
             const char* script = R"JAI(
@@ -453,7 +453,7 @@ public:
         });
 
         test("multiple_inheritance_basic_fields", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 class A {
@@ -482,7 +482,7 @@ public:
         });
 
         test("multiple_inheritance_method_lookup", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 class A {
@@ -511,7 +511,7 @@ public:
         });
 
         test("multiple_inheritance_field_conflict_detected", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             // C++ semantics: ambiguous field access should error
             // If both parent classes have a field with the same name,
@@ -542,7 +542,7 @@ public:
         });
 
         test("multiple_inheritance_override_in_derived", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 class A {
@@ -567,7 +567,7 @@ public:
         });
 
         test("multiple_inheritance_constructors", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 class A {
@@ -605,7 +605,7 @@ public:
         });
 
         test("multiple_inheritance_destructors", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 auto log = "";
@@ -636,7 +636,7 @@ public:
         });
 
         test("multiple_inheritance_three_levels", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 class A {
@@ -670,7 +670,7 @@ public:
         });
 
         test("multiple_inheritance_mixed_fields", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 class A {
@@ -699,7 +699,7 @@ public:
         });
 
         test("static_members_not_inherited", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 class A {
@@ -729,7 +729,7 @@ public:
         });
 
         test("diamond_inheritance_should_fail", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
 
             const char* script = R"(
                 class Base {

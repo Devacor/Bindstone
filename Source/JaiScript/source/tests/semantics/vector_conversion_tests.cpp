@@ -113,7 +113,7 @@ public:
     
     void forge_tests() override {
         test("basic_vector_int_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_integers", &VectorProcessor::sum_integers);
             engine->add_function("double_integers", &VectorProcessor::double_integers);
@@ -149,7 +149,7 @@ public:
         });
         
         test("vector_double_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_doubles", &VectorProcessor::sum_doubles);
             
@@ -179,7 +179,7 @@ public:
         });
         
         test("vector_string_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("concatenate_strings", &VectorProcessor::concatenate_strings);
             
@@ -209,7 +209,7 @@ public:
         });
         
         test("vector_custom_object_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             dynamic_binder<Point>(*engine, "Point")
                 .constructor<>()
@@ -244,7 +244,7 @@ public:
         });
         
         test("nested_vector_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("create_matrix", &VectorProcessor::create_matrix);
             engine->add_function("sum_matrix", &VectorProcessor::sum_matrix);
@@ -284,7 +284,7 @@ public:
         });
         
         test("vector_edge_cases", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_integers", &VectorProcessor::sum_integers);
             engine->add_function("get_vector_size", &VectorProcessor::get_vector_size);
@@ -321,7 +321,7 @@ public:
         });
         
         test("vector_type_coercion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_integers", &VectorProcessor::sum_integers);
             engine->add_function("sum_doubles", &VectorProcessor::sum_doubles);
@@ -352,7 +352,7 @@ public:
         });
         
         test("vector_script_value_compatibility", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("process_mixed_vector", [](std::vector<script_value> values) -> int {
                 int count = 0;

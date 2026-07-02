@@ -12,7 +12,7 @@ public:
         // ===== AUTO KEYWORD TESTS =====
 
         test("auto_with_initializer_locks_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 5;
                 x = 10;  // OK: int to int
@@ -22,7 +22,7 @@ public:
         });
 
         test("auto_rejects_incompatible_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute(R"(
@@ -39,7 +39,7 @@ public:
         });
 
         test("auto_uninitialized_locks_on_first_assignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x;
                 x = 5;      // Locks to int
@@ -50,7 +50,7 @@ public:
         });
 
         test("auto_uninitialized_rejects_after_lock", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute(R"(
@@ -65,7 +65,7 @@ public:
         });
 
         test("auto_float_allows_int_widening", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 3.14;
                 x = 5;  // OK: int widens to float
@@ -75,7 +75,7 @@ public:
         });
 
         test("auto_int_truncates_float", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 5;
                 x = 3.9;  // Truncates to 3
@@ -87,7 +87,7 @@ public:
         // ===== VAR KEYWORD TESTS =====
 
         test("var_allows_any_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var x = 5;
                 x = "hello";
@@ -99,7 +99,7 @@ public:
         });
 
         test("var_uninitialized_allows_any", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var x;
                 x = "first";
@@ -111,7 +111,7 @@ public:
         });
 
         test("var_array_methods_work", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [1, 2, 3, 4, 5];
                 arr.index_of(3)
@@ -120,7 +120,7 @@ public:
         });
 
         test("var_map_methods_work", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var m = {"a": 1, "b": 2};
                 m.has("a")
@@ -129,7 +129,7 @@ public:
         });
 
         test("var_can_change_to_different_container", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var x = [1, 2, 3];
                 x = {"key": "value"};
@@ -141,7 +141,7 @@ public:
         // ===== EXPLICIT TYPE TESTS =====
 
         test("int_type_enforced", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             try {
                 eng->execute(R"(
@@ -155,7 +155,7 @@ public:
         });
 
         test("float_type_accepts_int", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 float x = 3.14;
                 x = 10;  // int widens to float
@@ -166,7 +166,7 @@ public:
 
         // JaiScript allows auto-coercion to string (consistent with "hello" + 42)
         test("string_type_accepts_int_coercion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 string s = "hello";
                 s = 42;  // Auto-converts int to string
@@ -176,7 +176,7 @@ public:
         });
 
         test("bool_converts_truthy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 bool b = true;
                 b = 0;  // 0 is falsy
@@ -188,7 +188,7 @@ public:
         // ===== NESTED CONTAINER TESTS =====
 
         test("auto_nested_array_in_array", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto arr = [[1, 2], [3, 4], [5, 6]];
                 arr[1][0]
@@ -197,7 +197,7 @@ public:
         });
 
         test("auto_nested_map_in_array", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto arr = [{"a": 1}, {"b": 2}];
                 arr[0]["a"]
@@ -206,7 +206,7 @@ public:
         });
 
         test("auto_nested_array_in_map", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto m = {"nums": [10, 20, 30]};
                 m["nums"][1]
@@ -215,7 +215,7 @@ public:
         });
 
         test("var_nested_containers_reassignable", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var x = [[1, 2], [3, 4]];
                 x = {"key": [5, 6, 7]};
@@ -227,7 +227,7 @@ public:
         // ===== ARRAY/MAP METHOD COMPATIBILITY =====
 
         test("auto_array_push_preserves_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto arr = [1, 2, 3];
                 arr.push(4);
@@ -238,7 +238,7 @@ public:
         });
 
         test("auto_array_filter_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto arr = [1, 2, 3, 4, 5, 6];
                 auto evens = arr.filter([](x) { return x % 2 == 0; });
@@ -248,7 +248,7 @@ public:
         });
 
         test("auto_array_sort_works", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto arr = [5, 2, 8, 1, 9];
                 arr.sort();
@@ -258,7 +258,7 @@ public:
         });
 
         test("auto_map_keys_values_work", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto m = {"a": 1, "b": 2, "c": 3};
                 m.keys().size()
@@ -269,7 +269,7 @@ public:
         // ===== POINTER TYPE TESTS =====
 
         test("shared_ptr_null_assignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class TestClass {
                     int value = 42;
@@ -284,7 +284,7 @@ public:
         });
 
         test("weak_ptr_null_assignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class TestClass {
                     int value = 42;
@@ -300,7 +300,7 @@ public:
         });
 
         test("auto_locks_to_object_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Cat { string name = ""; }
                 class Dog { string name = ""; }
@@ -317,7 +317,7 @@ public:
         // ===== FUNCTION PARAMETER TESTS =====
 
         test("function_with_typed_params", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 function add(int a, int b) -> int {
                     return a + b;
@@ -328,7 +328,7 @@ public:
         });
 
         test("function_param_type_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 function double_it(float x) -> float {
                     return x * 2;
@@ -339,7 +339,7 @@ public:
         });
 
         test("function_returns_to_typed_var", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 function get_number() -> int {
                     return 42;
@@ -352,7 +352,7 @@ public:
         });
 
         test("function_with_var_param_accepts_any", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(*eng);  // for to_string
             auto result = eng->execute(R"(
                 function stringify(var x) -> string {
@@ -366,7 +366,7 @@ public:
         // ===== LOOP TESTS =====
 
         test("for_loop_int_counter", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto sum = 0;
                 for (int i = 0; i < 5; i = i + 1) {
@@ -378,7 +378,7 @@ public:
         });
 
         test("for_loop_auto_counter_locks", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto sum = 0;
                 for (auto i = 0; i < 5; i = i + 1) {
@@ -390,7 +390,7 @@ public:
         });
 
         test("for_loop_var_counter_flexible", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(*eng);  // for to_string
             // var counter can be reassigned to different types (unusual but valid)
             auto result = eng->execute(R"(
@@ -405,12 +405,9 @@ public:
 
         // Test that fast path gracefully falls back to slow path when type changes
         test("for_loop_fast_path_fallthrough", [this]() {
-            auto eng = engine::make();
-            // This triggers the fast path -> slow path fallthrough:
-            // 1. Loop starts with int counter (fast path)
-            // 2. Counter type changes to float mid-loop
-            // 3. Fast path detects type change, falls through to slow path
-            // 4. Slow path continues the loop correctly for remaining iterations
+            auto eng = make_engine();
+            // Fast path -> slow path fallthrough on mid-loop type change must not skip the
+            // pending update: iteration count matches the general path (and the vm backend)
             auto result = eng->execute(R"(
                 var iterations = 0;
                 for (var i = 0; i < 5; ++i) {
@@ -421,14 +418,12 @@ public:
                 }
                 iterations
             )");
-            // Fast path: i=0 (iter 1), i=1 (iter 2), i=2 (iter 3, then i=2.5)
-            // Fast path detects type change, falls through
-            // Slow path: i=2.5 < 5 (iter 4), ++i=3.5 < 5 (iter 5), ++i=4.5 < 5 (iter 6), ++i=5.5 >= 5, exit
-            check_eq(result.as<int>(), 6);
+            // i=0,1,2 (iters 1-3; body sets i=2.5), ++ -> 3.5 (iter 4), 4.5 (iter 5), 5.5 exits
+            check_eq(result.as<int>(), 5);
         });
 
         test("range_for_auto_element", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto arr = [1, 2, 3, 4, 5];
                 auto sum = 0;
@@ -441,7 +436,7 @@ public:
         });
 
         test("range_for_var_element", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [1, 2, 3];
                 var sum = 0;
@@ -456,7 +451,7 @@ public:
         // ===== C++ INTEROP TESTS =====
 
         test("cpp_bound_int_to_script_auto", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             int cpp_value = 42;
             eng->add_global_ref("cpp_int", cpp_value);
 
@@ -469,7 +464,7 @@ public:
         });
 
         test("cpp_bound_string_to_script_auto", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             std::string cpp_str = "hello";
             eng->add_global_ref("cpp_str", cpp_str);
 
@@ -482,7 +477,7 @@ public:
         });
 
         test("script_var_to_cpp_function", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->add_function("sum_ints", [](int a, int b) { return a + b; });
 
             auto result = eng->execute(R"(
@@ -496,7 +491,7 @@ public:
         // ===== COMPOUND ASSIGNMENT TESTS =====
 
         test("auto_compound_assignment_int", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 10;
                 x += 5;
@@ -508,7 +503,7 @@ public:
         });
 
         test("auto_compound_assignment_float", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 10.0;
                 x += 2.5;
@@ -518,7 +513,7 @@ public:
         });
 
         test("auto_compound_string_concat", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto s = "hello";
                 s += " ";
@@ -531,7 +526,7 @@ public:
         // ===== CLASS FIELD TYPE TESTS =====
 
         test("class_int_field_enforced", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 class Counter {
                     int count = 0;
@@ -555,7 +550,7 @@ public:
         });
 
         test("class_var_field_flexible", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(*eng);  // for to_string
             auto result = eng->execute(R"(
                 class Container {
@@ -583,7 +578,7 @@ public:
         // ===== TYPE INFERENCE IN EXPRESSIONS =====
 
         test("auto_infers_from_arithmetic", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 5 + 3;      // int
                 auto y = 5.0 + 3;    // float
@@ -594,7 +589,7 @@ public:
         });
 
         test("auto_infers_from_comparison", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto b = 5 > 3;  // bool
                 b
@@ -603,7 +598,7 @@ public:
         });
 
         test("auto_infers_from_ternary", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = true ? 42 : 0;
                 x = x + 8;  // Should work since x is int
@@ -615,7 +610,7 @@ public:
         // ===== LAMBDA CAPTURE TYPE TESTS =====
 
         test("lambda_captures_typed_var", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 10;
                 auto fn = [=]() { return x * 2; };
@@ -625,7 +620,7 @@ public:
         });
 
         test("lambda_modifies_var_capture", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var total = 0;
                 auto arr = [1, 2, 3, 4, 5];
@@ -640,7 +635,7 @@ public:
         // ===== NULL HANDLING =====
 
         test("null_to_auto_object", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute("class TestObj { int x = 1; }");
             // Verify null can be assigned to typed object variable
             // and the variable can be reassigned to a valid object
@@ -654,7 +649,7 @@ public:
         });
 
         test("null_preserves_type_for_reassignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute("class TestObj { int x = 1; }");
             auto result = eng->execute(R"(
                 auto obj = TestObj();
@@ -668,7 +663,7 @@ public:
         // ===== ARRAY TYPE COMPATIBILITY =====
 
         test("auto_array_iteration_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto numbers = [1, 2, 3, 4, 5];
                 auto doubled = [];
@@ -681,7 +676,7 @@ public:
         });
 
         test("var_array_mixed_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [];
                 arr.push(1);
@@ -696,7 +691,7 @@ public:
         // ===== ERROR MESSAGES =====
 
         test("type_error_message_is_descriptive", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             bool caught = false;
             std::string error_msg;
             try {
@@ -720,7 +715,7 @@ public:
         // ===== SPECIAL CASES =====
 
         test("bool_to_int_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 int x = 0;
                 x = true;   // bool converts to 1
@@ -732,7 +727,7 @@ public:
         });
 
         test("multiple_auto_declarations_independent", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             jai::stdlib::register_all(*eng);  // for to_string
             auto result = eng->execute(R"(
                 auto a = 5;
@@ -752,7 +747,7 @@ public:
         });
 
         test("nested_scope_same_name_different_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto x = 5;  // outer x is int
                 {
@@ -769,7 +764,7 @@ public:
         // These tests verify that the type system correctly handles script class types
 
         test("class_type_same_class_allowed", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Assigning same class type should always work
             auto result = eng->execute(R"(
                 class Dog { var name = "Fido"; }
@@ -781,7 +776,7 @@ public:
         });
 
         test("class_type_different_class_rejected", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Different class types should NOT be assignable with 'auto'
             bool threw = false;
             try {
@@ -804,7 +799,7 @@ public:
         });
 
         test("class_type_var_allows_any_class", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // 'var' should allow any class type
             auto result = eng->execute(R"(
                 class Dog { var name = "Fido"; }
@@ -817,7 +812,7 @@ public:
         });
 
         test("class_inheritance_child_to_parent_allowed", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Assigning derived class to base class variable should work (Liskov)
             auto result = eng->execute(R"(
                 class Animal { var species = "unknown"; }
@@ -830,7 +825,7 @@ public:
         });
 
         test("class_inheritance_parent_to_child_rejected", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Assigning base class to derived class variable should FAIL
             bool threw = false;
             try {
@@ -847,7 +842,7 @@ public:
         });
 
         test("class_type_null_preserves_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // After assigning null, should still enforce original type
             bool threw = false;
             try {
@@ -865,7 +860,7 @@ public:
         });
 
         test("class_type_reassign_after_null_same_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // After null, can reassign same type
             auto result = eng->execute(R"(
                 class Dog { var name = "Fido"; }
@@ -878,7 +873,7 @@ public:
         });
 
         test("class_type_unrelated_classes_with_same_fields_rejected", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Classes with identical structure are still different types
             bool threw = false;
             try {
@@ -895,7 +890,7 @@ public:
         });
 
         test("class_type_sibling_classes_rejected", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Sibling classes (same parent) are not assignable to each other
             bool threw = false;
             try {
@@ -913,7 +908,7 @@ public:
         });
 
         test("class_type_deep_inheritance_allowed", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Multi-level inheritance should work
             auto result = eng->execute(R"(
                 class Entity { var id = 0; }
@@ -935,7 +930,7 @@ public:
         // test("script_class_assignment_operator_conversion") - needs parser update for operator=(Type)
 
         test("script_class_constructor_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Script class with constructor that accepts a different type
             auto result = eng->execute(R"(
                 class Celsius {
@@ -963,7 +958,7 @@ public:
         });
 
         test("script_class_multiple_assignment_operators", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Test operator= with var parameter accepting different types
             auto result = eng->execute(R"(
                 class Distance {
@@ -994,7 +989,7 @@ public:
         // test("cpp_class_assignment_from_script_class") - needs dynamic_binder::assignment_from_script
 
         test("assignment_operator_not_found_rejected", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // When no valid assignment operator exists, should fail
             bool threw = false;
             try {
@@ -1013,7 +1008,7 @@ public:
         });
 
         test("script_class_implicit_conversion_via_constructor", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Test that a constructor accepting another type enables implicit conversion
             auto result = eng->execute(R"(
                 class Wrapper {

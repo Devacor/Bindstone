@@ -99,7 +99,7 @@ public:
     void forge_tests() override {
         /* Temporarily disabled - crashes in full suite
         test("weak_ptr_basic_syntax", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
             
             // Test basic weak_ptr declaration and assignment
@@ -119,7 +119,7 @@ public:
         */
         
         test("weak_ptr_null_checking", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
             
             // Test null weak_ptr using expired()
@@ -140,7 +140,7 @@ public:
         });
         
         test("weak_ptr_lock_valid", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Test locking a valid weak_ptr (must use shared_ptr for reference semantics)
@@ -155,7 +155,7 @@ public:
         });
         
         test("weak_ptr_becomes_invalid", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Test weak_ptr becoming invalid when object is destroyed
@@ -186,7 +186,7 @@ public:
         });
         
         test("weak_ptr_tree_structure", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_tree_node(*eng);
             
             auto result = eng->execute(R"(
@@ -207,7 +207,7 @@ public:
         });
         
         test("weak_ptr_reassignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             auto result = eng->execute(R"(
@@ -229,7 +229,7 @@ public:
         });
         
         test("weak_ptr_in_containers", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             auto result = eng->execute(R"(
@@ -260,7 +260,7 @@ public:
         });
         
         test("weak_ptr_expired_method", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             auto result = eng->execute(R"(
@@ -284,7 +284,7 @@ public:
         });
         
         test("weak_ptr_script_class_simplified", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
             
             // Define a script class - objects are internally shared_ptr in JaiScript
@@ -375,7 +375,7 @@ public:
         });
 
         test("weak_ptr_assignment_debug", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Use C++ bound class instead of script class to isolate the issue
@@ -394,7 +394,7 @@ public:
         });
 
         test("weak_ptr_script_class_lifetime", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             // Register the C++ static counter as a global
@@ -505,7 +505,7 @@ public:
         });
         
         test("weak_ptr_circular_reference_script", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             // Define a doubly-linked node class
@@ -572,7 +572,7 @@ public:
 
         // Error handling tests - verify helpful error messages
         test("weak_ptr_rejects_value_constructor", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Test that weak_ptr constructor rejects value-semantic objects with helpful error
@@ -603,7 +603,7 @@ public:
         });
 
         test("weak_ptr_rejects_value_initialization", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Test that weak_ptr variable initialization rejects value-semantic objects
@@ -631,7 +631,7 @@ public:
         });
 
         test("weak_ptr_rejects_value_assignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Test that weak_ptr assignment rejects value-semantic objects
@@ -660,7 +660,7 @@ public:
         });
 
         test("weak_ptr_accepts_shared_ptr", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Test that weak_ptr DOES accept shared_ptr<T> (positive case)
@@ -679,7 +679,7 @@ public:
         // Test valid and invalid ways to create shared_ptr
 
         test("shared_ptr_from_constructor_call", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // shared_ptr<T>(args...) - args forwarded to T's constructor (like make_shared)
@@ -694,7 +694,7 @@ public:
         });
 
         test("value_semantics_default", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Direct construction has value semantics (deep copy on assignment)
@@ -709,7 +709,7 @@ public:
         });
 
         test("shared_ptr_vs_value_semantics", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Compare: direct construction (value) vs shared_ptr (reference)
@@ -733,7 +733,7 @@ public:
         });
 
         test("shared_ptr_wrapping_variable_should_fail", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // shared_ptr<T>(args...) forwards args to T's constructor
@@ -758,7 +758,7 @@ public:
         });
 
         test("shared_ptr_default_constructor", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // shared_ptr<T>() with no args calls T's default constructor
@@ -775,7 +775,7 @@ public:
         // assignment to the underlying object's operator= when RHS is value-like
 
         test("shared_ptr_operator_equals_auto_unwrap", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             // Define a class with operator=
@@ -806,7 +806,7 @@ public:
         });
 
         test("shared_ptr_same_type_copies_contents", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             // Test: assigning same type to shared_ptr should copy contents, not reassign pointer
@@ -832,7 +832,7 @@ public:
         });
 
         test("shared_ptr_null_reassigns_pointer", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Test: assigning null to shared_ptr should nullify it
@@ -850,7 +850,7 @@ public:
         });
 
         test("shared_ptr_polymorphic_assignment", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             // Test: shared_ptr<Derived> can be assigned to shared_ptr<Base>
@@ -876,7 +876,7 @@ public:
         });
 
         test("shared_ptr_reassign_same_shared_ptr_type", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // Test: assigning shared_ptr<T> to shared_ptr<T> should reassign pointer
@@ -895,7 +895,7 @@ public:
         });
 
         test("shared_ptr_no_operator_equals_error", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             // Test: assigning incompatible type without operator= should error
@@ -927,7 +927,7 @@ public:
         });
 
         test("shared_ptr_box_pattern", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             // Test: Box<T> pattern for shared primitives
@@ -957,7 +957,7 @@ public:
         });
 
         test("shared_ptr_chained_mutations", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             // Test: multiple mutations through shared references
@@ -990,7 +990,7 @@ public:
 
         // Test C++ bound types with auto-unwrap operator=
         test("shared_ptr_cpp_bound_type_auto_unwrap", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng, true);  // Register with assignment_from<int>
 
             // Create shared_ptr and verify auto-unwrap assignment works
@@ -1019,7 +1019,7 @@ public:
 
         // Test that C++ bound types WITHOUT operator= give proper error
         test("shared_ptr_cpp_bound_type_no_operator_error", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng, false);  // No assignment_from registered
 
             eng->execute(R"(
@@ -1043,7 +1043,7 @@ public:
 
         // Test same_as() for shared_ptr - pointer identity comparison
         test("shared_ptr_same_as", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             // same_as returns true for same underlying object
@@ -1062,7 +1062,7 @@ public:
 
         // Test same_as() for weak_ptr
         test("weak_ptr_same_as", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             auto result = eng->execute(R"(
@@ -1086,7 +1086,7 @@ public:
 
         // Test same_as() for regular objects (value semantics)
         test("object_same_as", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto result = eng->execute(R"(
                 class Obj {
@@ -1108,7 +1108,7 @@ public:
 
         // Test same_as() comparing shared_ptr with weak_ptr
         test("shared_weak_same_as", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_lifetime_tracker(*eng);
 
             auto result = eng->execute(R"(

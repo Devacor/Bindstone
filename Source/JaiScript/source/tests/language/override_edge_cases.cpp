@@ -10,7 +10,7 @@ public:
     
     void forge_tests() override {
         test("override_on_multiple_inheritance_levels", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Deep inheritance hierarchy
             engine->execute(R"(
@@ -43,7 +43,7 @@ public:
         });
         
         test("override_with_different_return_types", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Override should work with compatible return types
             engine->execute(R"(
@@ -62,7 +62,7 @@ public:
         });
         
         test("override_with_multiple_base_methods", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Class with multiple methods, only some overridden
             engine->execute(R"(
@@ -90,7 +90,7 @@ public:
         });
         
         test("override_in_diamond_inheritance", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Diamond inheritance pattern (single inheritance in JaiScript)
             engine->execute(R"(
@@ -118,7 +118,7 @@ public:
         });
         
         test("override_method_calling_super", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Override that calls parent implementation
             engine->execute(R"(
@@ -142,7 +142,7 @@ public:
         });
         
         test("override_with_private_base_method", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Private methods shouldn't be overrideable (when we add private support)
             // For now, test that methods work as expected
@@ -165,7 +165,7 @@ public:
         });
 
         test("shadowing_without_override_fails", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Attempting to shadow a base class method without 'override' keyword should fail
             check_throws([&]() {
@@ -197,7 +197,7 @@ public:
         });
 
         test("constructor_with_override_in_same_class", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(*engine);  // Register stdlib including to_string
 
             // Class with both constructor and override methods
@@ -228,7 +228,7 @@ public:
         });
         
         test("override_chain_with_skip", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // A->B->C where B doesn't override but C does
             engine->execute(R"(
@@ -255,7 +255,7 @@ public:
         });
         
         test("override_with_field_access", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Override methods that access fields
             engine->execute(R"(
@@ -284,7 +284,7 @@ public:
         });
         
         test("multiple_override_errors_in_one_class", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->execute(R"(
                 class Base {
@@ -313,7 +313,7 @@ public:
         });
         
         test("override_static_vs_instance_methods", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // When we add static method support, test that static methods
             // cannot override instance methods and vice versa
@@ -333,7 +333,7 @@ public:
         });
 
         test("static_method_cannot_use_override", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Static methods cannot use 'override' keyword - they're not virtual
             check_throws([&]() {
@@ -350,7 +350,7 @@ public:
         });
 
         test("instance_method_cannot_override_static", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Attempting to override static method with instance should fail
             check_throws([&]() {
@@ -367,7 +367,7 @@ public:
         });
 
         test("static_in_base_static_in_derived_same_name", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Both base and derived have static method with same name
             // Static methods don't need override - they're fully qualified
@@ -401,7 +401,7 @@ public:
         });
 
         test("instance_in_base_static_in_derived_same_name", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Base has instance method, derived adds static with same name
             // Different namespaces - both should work
@@ -435,7 +435,7 @@ public:
         });
 
         test("static_in_base_instance_in_derived_same_name", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Base has static method, derived adds instance with same name
             // Different namespaces - both should work
@@ -472,7 +472,7 @@ public:
         });
 
         test("instance_in_base_instance_in_derived_same_name", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Both have instance methods - must use override
             engine->execute(R"(
@@ -510,7 +510,7 @@ public:
         });
 
         test("static_methods_no_virtual_dispatch", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // Static methods are resolved at compile-time via Class::
             engine->execute(R"(
@@ -537,7 +537,7 @@ public:
         });
 
         test("mixed_static_instance_same_name", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
 
             // A class can have both static and instance methods with same name
             // They're in different namespaces (Class::method vs obj.method)

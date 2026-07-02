@@ -79,7 +79,7 @@ public:
 
     void forge_tests() override {
         test("context_only_factory", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register class with context-only factory
             dynamic_binder<context_required_object>(eng, "ContextRequiredObject")
@@ -137,7 +137,7 @@ public:
         // This advanced feature needs redesign to work with the CRTP archive changes.
         test("archive_only_factory", [this]() {
             return;
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register class with archive-only factory (pre-reads properties)
             dynamic_binder<property_preread_object>(eng, "PropertyPrereadObject")
@@ -193,7 +193,7 @@ public:
 
         test("context_and_archive_factory", [this]() {
             return;
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register class with both context and archive dependencies
             dynamic_binder<complex_object>(eng, "ComplexObject")

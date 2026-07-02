@@ -2,10 +2,27 @@
 // Auto-discovers and runs all registered Foundry test suites
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/core/engine.hpp>
 #include <iostream>
 #include <string>
 #include <chrono>
 #include <sstream>
+
+namespace jai::foundry {
+
+namespace {
+    jai::backend_type g_test_backend = jai::backend_type::interpreter;
+}
+
+std::shared_ptr<jai::engine> make_engine() {
+    auto eng = jai::engine::make();
+    if (g_test_backend != jai::backend_type::interpreter) {
+        eng->set_backend(g_test_backend);
+    }
+    return eng;
+}
+
+} // namespace jai::foundry
 
 // Parse filter from command line arguments
 // Supports:
@@ -125,6 +142,18 @@ int main(int argc, char** argv) {
         else if (arg.rfind("--filter=", 0) == 0) {
             filter = test_filter_config::parse(arg.substr(9));
         }
+        // backend selection: --backend=interpreter|vm
+        else if (arg.rfind("--backend=", 0) == 0) {
+            std::string backend_name = arg.substr(10);
+            if (backend_name == "interpreter") {
+                g_test_backend = jai::backend_type::interpreter;
+            } else if (backend_name == "vm") {
+                g_test_backend = jai::backend_type::vm;
+            } else {
+                std::cout << "Unknown backend: \"" << backend_name << "\" (expected interpreter or vm)\n";
+                return 1;
+            }
+        }
         // positional argument (filter)
         else if (arg[0] != '-') {
             filter = test_filter_config::parse(arg);
@@ -137,6 +166,7 @@ int main(int argc, char** argv) {
     std::cout << "/*----------------------------*\\\n";
     std::cout << "| JaiScript Foundry Test Suite |\n";
     std::cout << "\\*----------------------------*/\n";
+    std::cout << "Backend: " << (g_test_backend == jai::backend_type::vm ? "vm" : "interpreter") << "\n";
 
     if (!verbose) {
         std::cout << "Performing Tests, One Moment ..." << std::flush;

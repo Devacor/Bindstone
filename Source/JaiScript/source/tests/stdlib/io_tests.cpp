@@ -17,7 +17,7 @@ public:
         // ============================================================
 
         test("output_capture_basic", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             // Create capture buffer
@@ -33,7 +33,7 @@ public:
         });
 
         test("output_capture_format_string", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto capture = std::make_shared<std::ostringstream>();
@@ -46,7 +46,7 @@ public:
         });
 
         test("output_capture_multiple_args", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto capture = std::make_shared<std::ostringstream>();
@@ -59,7 +59,7 @@ public:
         });
 
         test("output_capture_multiple_prints", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto capture = std::make_shared<std::ostringstream>();
@@ -76,7 +76,7 @@ public:
         });
 
         test("output_capture_reset_to_stdout", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto capture = std::make_shared<std::ostringstream>();
@@ -93,7 +93,7 @@ public:
         });
 
         test("output_capture_skip_newline", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto capture = std::make_shared<std::ostringstream>();
@@ -112,7 +112,7 @@ public:
         // ============================================================
 
         test("format_basic", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto result = engine->execute("format(\"Hello, {}!\", \"World\");");
@@ -120,7 +120,7 @@ public:
         });
 
         test("format_multiple_placeholders", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto result = engine->execute("format(\"{} + {} = {}\", 2, 3, 5);");
@@ -128,7 +128,7 @@ public:
         });
 
         test("format_concatenation", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto result = engine->execute("format(\"a\", \"b\", \"c\");");
@@ -136,7 +136,7 @@ public:
         });
 
         test("format_single_value", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             auto result = engine->execute("format(42);");

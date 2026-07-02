@@ -26,7 +26,7 @@ public:
     
     void forge_tests() override {
         test("constructor_with_ints", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             std::cout << "Registering TestPoint class...\n";
             dynamic_binder<TestPoint>(*eng, "TestPoint")
@@ -49,7 +49,7 @@ public:
         });
         
         test("direct_value_conversion", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Test the script_value conversion directly
             script_value intVal(script_int(3), eng.get());
             std::cout << "intVal type: " << static_cast<int>(intVal.type()) << " (should be 1 for int)\n";

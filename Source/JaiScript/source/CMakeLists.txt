@@ -6,6 +6,7 @@ set(JAISCRIPT_SOURCES
     implementation/conversion_registry.cpp
     implementation/coroutine.cpp
     implementation/engine.cpp
+    implementation/environment.cpp
     implementation/interpreter.cpp
     implementation/interpreter_dispatch.cpp
     implementation/lexer.cpp
@@ -15,7 +16,9 @@ set(JAISCRIPT_SOURCES
     implementation/type_info.cpp
     implementation/types.cpp
     implementation/value.cpp
-    implementation/vm_backend_stub.cpp
+    implementation/vm/disassembler.cpp
+    implementation/vm/vm_backend.cpp
+    implementation/vm/vm_compiler.cpp
 )
 
 # Create the library

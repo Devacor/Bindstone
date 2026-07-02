@@ -211,7 +211,7 @@ public:
         });
 
         test("signal_script_callback", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
 
             int result = 0;
             eng->add_global_ref("result", result);

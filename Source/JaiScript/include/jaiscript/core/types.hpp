@@ -66,6 +66,13 @@ namespace jai {
         }
     };
     
+    // One frame of a captured script stack trace (innermost first)
+    struct stack_frame {
+        std::string function;
+        std::string file;
+        size_t line = 0;
+    };
+
     // Base exception class with source location tracking
     // Uses std::string for nice formatted messages (cold path, user-facing)
     class exception : public std::runtime_error {

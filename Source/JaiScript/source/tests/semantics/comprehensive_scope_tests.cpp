@@ -77,7 +77,7 @@ public:
 
     void forge_tests() override {
         test("block_scope_destruction", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
 
@@ -115,7 +115,7 @@ public:
         });
 
         test("if_statement_scope", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
 
@@ -147,7 +147,7 @@ public:
         });
 
         test("for_loop_scope", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
 
@@ -182,7 +182,7 @@ public:
         });
 
         test("function_scope", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
 
@@ -218,7 +218,7 @@ public:
         });
 
         test("lambda_scope", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
 
@@ -244,7 +244,7 @@ public:
         });
 
         test("script_class_with_destructor", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
 
@@ -292,7 +292,7 @@ public:
         });
 
         test("mixed_scopes_comprehensive", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);  // Register stdlib to get print()
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
@@ -382,7 +382,7 @@ public:
         });
 
         test("early_return_scope_cleanup", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
 
@@ -416,7 +416,7 @@ public:
         });
 
         test("exception_scope_cleanup", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             register_cpp_bound_object(*eng);
             CppBoundObject::reset();
 

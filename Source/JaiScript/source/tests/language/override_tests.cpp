@@ -9,7 +9,7 @@ public:
     
     void forge_tests() override {
         test("override_promotes_to_virtual", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Base class with non-virtual method
             engine->execute(R"(
@@ -35,7 +35,7 @@ public:
         });
         
         test("override_keyword_required_for_virtual_methods", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Base class with method that becomes virtual
             engine->execute(R"(
@@ -63,7 +63,7 @@ public:
         });
         
         test("override_without_base_method_throws", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->execute(R"(
                 class Base {
@@ -85,7 +85,7 @@ public:
         });
         
         test("shadowing_without_override_throws", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->execute(R"(
                 class Base {
@@ -107,7 +107,7 @@ public:
         });
         
         test("multi_level_virtual_promotion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Three levels of inheritance
             engine->execute(R"(
@@ -136,7 +136,7 @@ public:
         });
         
         test("constructor_not_affected_by_override", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Constructors shouldn't be virtual/override
             engine->execute(R"(

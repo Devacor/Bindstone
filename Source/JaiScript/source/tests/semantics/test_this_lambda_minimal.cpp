@@ -14,7 +14,7 @@ public:
 
     void forge_tests() override {
         test("minimal_this_capture_in_method", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             try {
@@ -59,7 +59,7 @@ public:
         });
 
         test("void_method_with_lambda", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             try {

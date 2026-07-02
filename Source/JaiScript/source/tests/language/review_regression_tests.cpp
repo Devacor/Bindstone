@@ -21,33 +21,33 @@ public:
     void forge_tests() override {
         // ---- #5 lexer: template (backtick) string at end-of-source ----
         test("tmpl_string_at_eof", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             check_eq(std::string("hello world"), e->execute("`hello world`").as_string());
         });
         test("tmpl_string_interp_at_eof", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             check_eq(std::string("val=7"), e->execute("auto y = 7; `val=${y}`").as_string());
         });
 
         // ---- #6 lexer: malformed octal must error, valid octal still works ----
         test("octal_valid", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             check_eq((int64_t)8, e->execute("010").as_int());   // C-style octal
         });
         test("octal_malformed_throws", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             check_throws([&]() { e->execute("auto x = 08; x"); });
         });
 
         // ---- #7 parser: deep prefix-operator chain must not crash ----
         test("deep_unary_chain_modest", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             std::string src(100, '!');  // even count of '!' applied to true => true; well under the guard
             src += "true";
             check(e->execute(src).as_bool());
         });
         test("deep_unary_chain_guard_no_crash", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             std::string src(400, '!');  // > MAX_PARSE_DEPTH
             src += "true";
             // The depth guard makes the parser fail gracefully (no stack overflow):
@@ -59,7 +59,7 @@ public:
 
         // ---- #19 range-for inside a function ----
         test("range_for_in_function", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto sum(auto arr) -> auto {
                     auto total = 0;
@@ -71,7 +71,7 @@ public:
             check_eq((int64_t)6, r.as_int());
         });
         test("range_for_ref_in_function", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto doubleAll(auto arr) -> auto {
                     for (auto& x : arr) { x = x * 2; }
@@ -84,7 +84,7 @@ public:
 
         // ---- #8 set_local gap after a skipped block (agent-applied; lock it in) ----
         test("local_after_untaken_block", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto f() -> auto {
                     auto a = 1;
@@ -99,7 +99,7 @@ public:
 
         // ---- #15 throw inside a while loop must not hang ----
         test("throw_in_while_no_hang", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto count = 0;
                 try {
@@ -111,7 +111,7 @@ public:
             check_eq((int64_t)1, r.as_int());
         });
         test("throw_in_for_no_hang", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto count = 0;
                 try {
@@ -124,7 +124,7 @@ public:
 
         // ---- #16 shrinking an array during value range-for must not OOB ----
         test("range_for_shrink_no_oob", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto a = [1, 2, 3, 4, 5];
                 auto seen = 0;
@@ -137,7 +137,7 @@ public:
 
         // ---- #17 continue inside a switch case stops the case body & continues loop ----
         test("switch_continue_in_loop", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto total = 0;
                 for (var i = 0; i < 4; i = i + 1) {
@@ -154,7 +154,7 @@ public:
             check_eq((int64_t)3, r.as_int());
         });
         test("switch_break_does_not_break_loop", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto total = 0;
                 for (var i = 0; i < 3; i = i + 1) {
@@ -170,7 +170,7 @@ public:
 
         // ---- #32 reading a missing map key must NOT insert it ----
         test("map_read_missing_no_insert", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 var m = {"a": 1, "b": 2};
                 var x = m["zzz"];
@@ -180,7 +180,7 @@ public:
             check_eq((int64_t)2, r.as_int());
         });
         test("map_assign_still_inserts", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 var m = {"a": 1};
                 m["new"] = 5;
@@ -191,14 +191,14 @@ public:
 
         // ---- #28 cpp-bound 4-byte float must be read as a float, not 8 bytes ----
         test("cpp_bound_float_read", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             float hp = 12.5f;
             e->add_global_ref("hp", hp);
             check_near(12.5, e->execute("hp").as_float(), 0.0001);
         });
         // ---- #29 cpp-bound int64 -> float must keep all 64 bits ----
         test("cpp_bound_int64_to_float", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             int64_t big = 5000000000LL;  // > INT32_MAX
             e->add_global_ref("big", big);
             check_near(5000000000.0, e->execute("big * 1.0").as_float(), 1.0);
@@ -206,7 +206,7 @@ public:
 
         // ---- #26/#27 complex-typed & float map keys keep std::map intact ----
         test("array_map_keys_stable", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 var m = {};
                 m[[1, 2]] = "a";
@@ -220,7 +220,7 @@ public:
         // Variables are used so the parser's constant-folder doesn't pre-evaluate these.
         // Behavior depends on the build: throw_on_overflow() true => raises; false => wraps.
         test("int_overflow_add", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             const char* src = "auto x = 9223372036854775807; x + 1";  // INT64_MAX + 1
             if (e->throw_on_overflow()) {
                 check_throws([&]() { e->execute(src); });
@@ -229,7 +229,7 @@ public:
             }
         });
         test("int_overflow_mul", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             const char* src = "auto x = 9223372036854775807; x * 2";  // INT64_MAX * 2
             if (e->throw_on_overflow()) {
                 check_throws([&]() { e->execute(src); });
@@ -238,7 +238,7 @@ public:
             }
         });
         test("int_min_div_neg1", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             const char* src = "auto x = -9223372036854775807 - 1; auto d = -1; x / d";  // INT64_MIN / -1
             if (e->throw_on_overflow()) {
                 check_throws([&]() { e->execute(src); });
@@ -247,23 +247,23 @@ public:
             }
         });
         test("int_no_false_overflow", [this]() {  // policy-independent: 2e9*2 = 4e9 fits int64
-            auto e = engine::make();
+            auto e = make_engine();
             check_eq((int64_t)4000000000LL, e->execute("auto x = 2000000000; x * 2").as_int());
         });
         test("int_mod_neg1_is_zero", [this]() {   // policy-independent: a % -1 == 0, no trap
-            auto e = engine::make();
+            auto e = make_engine();
             check_eq((int64_t)0, e->execute("auto x = -9223372036854775807 - 1; auto d = -1; x % d").as_int());
         });
 
         // ---- #35 JSON float serialization round-trips at full precision ----
         test("json_float_roundtrip", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             jai::stdlib::register_all(*e);
             check(e->execute("var x = 0.1 + 0.2; from_json(to_json(x)) == x").as_bool());
         });
         // ---- #34 deeply nested JSON raises a catchable error (no stack overflow) ----
         test("json_deep_nesting_throws", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             jai::stdlib::register_all(*e);
             std::string s(300, '[');   // 300 > JAI_MAX_JSON_PARSE_DEPTH (128)
             s.append(300, ']');
@@ -273,7 +273,7 @@ public:
 
         // ---- #23 field initializers run in DECLARATION order (not intern order) ----
         test("field_init_declaration_order", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             // 'total' is interned first (global) -> smaller name_id than 'base'; the old
             // map-ordered init ran total's initializer before base's -> base unset.
             auto r = e->execute(R"(
@@ -287,7 +287,7 @@ public:
 
         // ---- #24 this() delegation: target's assignment wins, other defaults kept ----
         test("this_delegation_no_clobber", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 class C {
                     int x = 999;
@@ -303,7 +303,7 @@ public:
 
         // ---- #31 array callbacks that mutate the same array must not crash ----
         test("remove_if_callback_mutation", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 var arr = [1, 2, 3, 4, 5, 6, 7, 8];
                 arr.remove_if([](auto x) -> auto { if (x == 2) { arr.push(99); } return x % 2 == 0; });
@@ -312,7 +312,7 @@ public:
             check_eq((int64_t)4, r.as_int());  // survivors [1,3,5,7]; the push is discarded
         });
         test("sort_mixed_numeric_no_ub", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 var a = [3.5, 1, 2.5, 2];
                 a.sort();
@@ -326,7 +326,7 @@ public:
         test("closure_capture_local_auto_no_capture", [this]() {
             // [] lambda (no explicit capture) must still see enclosing locals
             // via the automatic-local-capture feature.
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto make() -> auto {
                     auto local = 7;
@@ -339,7 +339,7 @@ public:
         });
         test("closure_capture_local_eq", [this]() {
             // [=] captures local by value — snapshot at capture time
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto make() -> auto {
                     auto local = 10;
@@ -351,7 +351,7 @@ public:
         });
         test("closure_capture_local_inline", [this]() {
             // Inline (non-escaping) closure also works
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto result = 0;
                 auto x = 5;
@@ -363,7 +363,7 @@ public:
         });
         test("closure_capture_local_snapshot", [this]() {
             // Captured value is a snapshot — mutation of outer var doesn't affect closure
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto x = 10;
                 auto f = [=]() -> auto { return x; };
@@ -374,7 +374,7 @@ public:
         });
         test("closure_capture_local_explicit", [this]() {
             // Explicit [local] capture of a function local
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto make(auto n) -> auto {
                     auto doubled = n * 2;
@@ -386,7 +386,7 @@ public:
         });
         test("closure_capture_multiple_locals", [this]() {
             // Multiple locals captured (auto + different types)
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto make() -> auto {
                     auto a = 3;
@@ -399,7 +399,7 @@ public:
         });
 
         test("range_for_ref_realloc_no_corruption", [this]() {
-            auto e = engine::make();
+            auto e = make_engine();
             auto r = e->execute(R"(
                 auto arr = [10, 20, 30];
                 for (auto& x : arr) {

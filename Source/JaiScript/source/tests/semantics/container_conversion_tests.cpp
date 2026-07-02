@@ -18,7 +18,7 @@ public:
     
     void forge_tests() override {
         test("large_vector_performance", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_large", [](std::vector<int> nums) -> int64_t {
                 int64_t sum = 0;
@@ -40,7 +40,7 @@ public:
         });
         
         test("vector_int_basic", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_ints", [](std::vector<int> nums) -> int {
                 return std::accumulate(nums.begin(), nums.end(), 0);
@@ -51,7 +51,7 @@ public:
         });
         
         test("vector_double_conversion", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test automatic int->double conversion in vectors
             engine->add_function("avg_doubles", [](std::vector<double> nums) -> double {
@@ -65,7 +65,7 @@ public:
         });
         
         test("vector_string_operations", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("join_strings", [](std::vector<std::string> strs, const std::string& sep) -> std::string {
                 std::string result;
@@ -81,7 +81,7 @@ public:
         });
         
         test("vector_return_values", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("range", [](int start, int end) -> std::vector<int> {
                 std::vector<int> result;
@@ -100,7 +100,7 @@ public:
         });
         
         test("nested_vectors", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_matrix", [](std::vector<std::vector<int>> matrix) -> int {
                 int sum = 0;
@@ -117,7 +117,7 @@ public:
         });
         
         test("map_string_int_basic", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("get_score", [](std::map<std::string, int> scores, const std::string& name) -> int {
                 auto it = scores.find(name);
@@ -129,7 +129,7 @@ public:
         });
         
         test("map_return_values", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("create_scores", []() -> std::map<std::string, int> {
                 return {{"Alice", 95}, {"Bob", 87}, {"Charlie", 92}};
@@ -146,7 +146,7 @@ public:
         });
         
         test("map_int_string", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("number_names", [](std::map<int, std::string> nums) -> std::string {
                 std::string result;
@@ -167,7 +167,7 @@ public:
         });
         
         test("empty_containers", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("is_empty_vec", [](std::vector<int> v) -> bool {
                 return v.empty();
@@ -184,7 +184,7 @@ public:
         });
         
         test("large_vector_performance", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("print", [](const std::string& str) { std::cout << str << std::endl; });
             engine->add_function("to_string", [](int val) -> std::string { return std::to_string(val); });
@@ -254,7 +254,7 @@ public:
         });
         
         test("type_mismatch_errors", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("needs_int_vec", [](std::vector<int>) {});
             
@@ -264,7 +264,7 @@ public:
         });
         
         test("vector_of_maps", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("count_total_items", [](std::vector<std::map<std::string, int>> data) -> int {
                 int count = 0;
@@ -279,7 +279,7 @@ public:
         });
         
         test("map_of_vectors", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_function("sum_all_groups", [](std::map<std::string, std::vector<int>> groups) -> int {
                 int total = 0;
@@ -296,7 +296,7 @@ public:
         });
         
         test("custom_type_vectors", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             struct Point { double x, y; };
             
@@ -327,7 +327,7 @@ public:
         });
         
         test("performance_comparison", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             engine->add_variadic_function("sum_variadic", [engine](std::vector<script_value> args) -> script_value {
                 if (args.size() != 1 || !args[0].is_array()) {

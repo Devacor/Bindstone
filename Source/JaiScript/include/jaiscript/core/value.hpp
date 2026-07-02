@@ -31,6 +31,12 @@ namespace jai {
 
     // Forward declarations for helper functions
     std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng);
+
+    // as<T&> bridges (defined in engine.cpp): validate an object holder's registered type
+    // against a requested C++ type, and extract the C++ payload behind a class_instance
+    // wrapper (nullptr when the wrapper carries none, e.g. a pure script-class object).
+    bool engine_holder_matches_type(engine* eng, const std::string& holder_type_name, const std::type_info& requested);
+    std::shared_ptr<void> engine_extract_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data);
     
     // Forward declaration for friend access
     namespace detail {
@@ -185,7 +191,11 @@ namespace jai {
         static script_value make_element_reference(const strong_ptr<std::vector<script_value>>& container, size_t index,
                                                    const std::shared_ptr<environment>& env, engine* eng, type_info_ptr element_type);
         static script_value make_function(const script_function& func, engine* eng);
-        
+
+        // Mints an unregistered object holder wrapping a coroutine_handle; bypasses the
+        // class-registry check the other make_object factories enforce (handles have no class).
+        static script_value make_coroutine_handle(uint64_t type_id, std::shared_ptr<void> handle, engine* eng);
+
         // Factory method for C++ bound values
         // NOTE: Implementation is in value_impl.hpp (include after engine.hpp)
         template<typename T>
@@ -572,12 +582,32 @@ namespace jai {
                     } else {
                         // For user-defined types stored as objects
                         if (type_info_ && type_info_->is_object()) {
-                            auto holder = std::get<strong_ptr<object_holder>>(storage_);
-                            // Get the void* from the holder
-                            auto objectPtr = holder->data;
-                            // Try to cast to the requested type
-                            if (auto typedPtr = std::static_pointer_cast<base_type>(objectPtr)) {
-                                return *typedPtr;
+                            // Non-owning C++ reference (cpp_bound): the pointer IS the object.
+                            // Verify the holder's registered type before reinterpreting.
+                            if (cpp_bound_ptr_) {
+                                auto* boundHolder = std::get_if<strong_ptr<object_holder>>(&storage_);
+                                if (boundHolder && *boundHolder &&
+                                    !engine_holder_matches_type(engine_, (*boundHolder)->type_name, typeid(base_type))) {
+                                    throw runtime_error("Object type mismatch");
+                                }
+                                return *static_cast<base_type*>(cpp_bound_ptr_);
+                            }
+                            if (auto* holderPtr = std::get_if<strong_ptr<object_holder>>(&storage_); holderPtr && *holderPtr) {
+                                if (!engine_holder_matches_type(engine_, (*holderPtr)->type_name, typeid(base_type))) {
+                                    throw runtime_error("Object type mismatch");
+                                }
+                                auto objectPtr = (*holderPtr)->data;
+                                // class_instance wrappers keep the C++ object in _cpp_object; a wrapper
+                                // with no C++ payload (pure script object) must error here - it can
+                                // never be reinterpreted as T
+                                if ((*holderPtr)->is_class_instance_wrapper) {
+                                    objectPtr = engine_extract_instance_cpp_object(engine_, objectPtr);
+                                }
+                                if (objectPtr) {
+                                    if (auto typedPtr = std::static_pointer_cast<base_type>(objectPtr)) {
+                                        return *typedPtr;
+                                    }
+                                }
                             }
                             throw runtime_error("Object type mismatch");
                         }

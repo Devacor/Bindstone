@@ -13,7 +13,7 @@ public:
     
     void forge_tests() override {
         test("basic_integer_switch", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 auto x = 2;
@@ -34,7 +34,7 @@ public:
         });
         
         test("switch_with_fallthrough", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             auto result = engine->execute(R"(
                 auto x = 2;
                 auto result = "";
@@ -57,7 +57,7 @@ public:
         });
         
         test("switch_with_explicit_break", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             auto result = engine->execute(R"(
                 auto x = 2;
                 auto result = "";
@@ -80,7 +80,7 @@ public:
         });
         
         test("switch_with_strings", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             auto result = engine->execute(R"(
                 auto name = "Bob";
                 auto greeting = "";
@@ -100,7 +100,7 @@ public:
         });
         
         test("switch_no_match_default_case", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             auto result = engine->execute(R"(
                 auto x = 99;
                 auto result = "";
@@ -118,7 +118,7 @@ public:
         });
         
         test("switch_no_default", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             auto result = engine->execute(R"(
                 auto x = 99;
                 auto result = "unchanged";
@@ -134,7 +134,7 @@ public:
         });
         
         test("switch_with_expressions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             auto result = engine->execute(R"(
                 auto x = 5;
                 auto result = 0;
@@ -154,7 +154,7 @@ public:
         });
         
         test("nested_switch", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             auto result = engine->execute(R"(
                 auto x = 1;
                 auto y = 2;
@@ -180,7 +180,7 @@ public:
         });
         
         test("switch_with_return", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             auto result = engine->execute(R"(
                 auto get_name = [](int x) {
                     switch (x) {
@@ -200,7 +200,7 @@ public:
         });
         
         test("fallthrough_only_in_switch", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             // This should fail to parse - fallthrough outside switch
             check_throws<parse_error>([&]() {
                 engine->execute(R"(

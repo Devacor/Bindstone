@@ -14,7 +14,7 @@ public:
 
     void forge_tests() override {
         test("simple this capture in method", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             try {

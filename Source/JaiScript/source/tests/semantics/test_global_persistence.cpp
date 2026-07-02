@@ -9,7 +9,7 @@ public:
     
     void forge_tests() override {
         test("top_level_variable_persistence", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Define a variable at top level
             eng->execute("auto x = 42;");
@@ -25,7 +25,7 @@ public:
         });
         
         test("top_level_multiple_variables", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Define multiple variables
             eng->execute(R"(
@@ -46,7 +46,7 @@ public:
         });
         
         test("top_level_object_persistence", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Define a map at top level
             eng->execute(R"(
@@ -66,7 +66,7 @@ public:
         });
         
         test("top_level_function_persistence", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Define a function at top level
             eng->execute(R"(
@@ -85,7 +85,7 @@ public:
         });
         
         test("top_level_class_persistence", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Define a class at top level
             eng->execute(R"(
@@ -118,7 +118,7 @@ public:
         });
         
         test("explicit_global_vs_top_level", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Add an explicit global
             eng->add_global("explicit_var", 100);

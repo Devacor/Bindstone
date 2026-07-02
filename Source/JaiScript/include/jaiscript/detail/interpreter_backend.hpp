@@ -23,6 +23,10 @@ public:
     void prepare_for_execution() override {
         interpreter_->prepare_for_execution();
     }
+
+    checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override {
+        return interpreter_->execute_callable(payload, args);
+    }
     
     // Variable access
     script_value get_variable(const std::string& name) const override {
@@ -74,6 +78,26 @@ public:
 
     const script_exception& get_current_exception() const override {
         return interpreter_->get_current_exception();
+    }
+
+    std::vector<stack_frame> last_stack_trace() const override {
+        return interpreter_->last_stack_trace();
+    }
+
+    std::string format_stack_trace() const override {
+        return interpreter_->format_stack_trace();
+    }
+
+    void push_external_call_scope() override {
+        interpreter_->push_external_call_scope();
+    }
+
+    void pop_external_call_scope() override {
+        interpreter_->pop_external_call_scope();
+    }
+
+    checked_result<script_value> resume_coroutine(coroutine_handle& handle) override {
+        return interpreter_->resume_coroutine(handle);
     }
 
     std::string get_backend_name() const override {

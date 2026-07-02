@@ -11,7 +11,7 @@ state (every `script_value` carries an engine reference → multi-engine + threa
 
 ## Build & Test
 
-CMake + Ninja, opened as a folder in Visual Studio 2022. Build dirs live under
+CMake + Ninja, opened as a folder in Visual Studio (VS 18). Build dirs live under
 `out/build/<config>/`; the test exe is `bin/jaiscript_tests.exe`.
 
 ### Fast iteration: use the **Debug** build
@@ -26,7 +26,7 @@ Build the test target (`--target jaiscript_tests`). (The redundant standalone te
 
 ```bash
 # Configure Debug once (Ninja) if out/build/x64-Debug/CMakeCache.txt is missing:
-powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake -S . -B out/build/x64-Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=cl 2>&1'"
+powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake -S . -B out/build/x64-Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=cl 2>&1'"
 
 # Build the test target (Debug)
 powershell.exe -Command "& cmd /c '\"...\VsDevCmd.bat\" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake --build out/build/x64-Debug --target jaiscript_tests 2>&1'"
@@ -85,15 +85,23 @@ include/jaiscript/      Headers
   properties/ observable_property, property_manager
   stdlib/    print/to_string/type_of/to_json/from_json, math, containers
   testing/   foundry.hpp (test framework)
-source/implementation/  lexer.cpp parser.cpp interpreter.cpp(+_dispatch) engine.cpp value.cpp ...
-source/tests/           Foundry suites (language/ semantics/ containers/ stdlib/ ...)
-LEGACY_VM/, squirrel/   NOT built — ignore (the bytecode VM is unfinished/legacy)
+  vm/        opcode, chunk, vm_compiler, vm_backend, disassembler (bytecode backend)
+source/implementation/  lexer.cpp parser.cpp interpreter.cpp(+_dispatch) engine.cpp value.cpp vm/ ...
+source/tests/           Foundry suites (language/ semantics/ containers/ stdlib/ vm/ ...)
+squirrel/               NOT built — benchmark comparison source only
 ```
 
-**Pipeline:** `lexer` → `parser` (recursive descent, builds AST) → `interpreter`
-(tree-walker — the only backend). `interpreter.cpp` is ~11k lines; arithmetic & comparison are
-inlined in `visit_binary` fast paths AND in `interpreter_dispatch.cpp` handlers (both must stay
-in sync — see integer overflow below).
+**Pipeline:** `lexer` → `parser` (recursive descent, builds AST) → one of TWO swappable
+`execution_backend`s: the tree-walking `interpreter` (default) or the bytecode `vm`
+(`jai::vm`, environment-backed frames, full Foundry parity). Select per engine with
+`engine->set_backend(backend_type::vm)` BEFORE the first execute (forbidden after), or run the
+whole test suite with `jaiscript_tests.exe --backend=vm`. Script callables execute through
+`execution_backend::execute_callable` (thunks capture engine* + `script_callable` payload — never
+a backend pointer). `interpreter.cpp` is ~11k lines; arithmetic & comparison are inlined in
+`visit_binary` fast paths AND in `interpreter_dispatch.cpp` handlers; the vm's `op_binary` shape
+operands mirror the same semantics (all three must stay in sync — see integer overflow below).
+Builtin container/string methods live in ONE registry both backends share
+(`detail/builtin_methods.hpp`, `init_builtin_method_registries`).
 
 **`script_value`** (`core/value.hpp`): type-erased `std::variant` (null/int64/double/string/
 char/bool/array/map/object/function/reference/shared_ptr/weak_ptr). Heavy types are wrapped in
@@ -259,9 +267,11 @@ for (auto kv : scores) { print(kv.first + ": " + to_string(kv.second)); }
 
 ## Status
 
-Production-ready: complete lexer/parser/interpreter, script classes, hot reload, C++ integration,
-JSON, coroutines. **Exception handling and overflow checks work in the interpreter** (the
-bytecode VM under `LEGACY_VM/` is unfinished and not built).
+Production-ready: complete lexer/parser + TWO backends at full Foundry parity (tree-walking
+interpreter + bytecode VM), script classes, hot reload, C++ integration, JSON, coroutines
+(interpreter: continuation replay; vm: fibers). The old `LEGACY_VM/` attempt was deleted 2026-07;
+`include/jaiscript/vm/` is the real one. Run the whole suite on the VM with
+`jaiscript_tests.exe --backend=vm` (both backends must stay green).
 
 A 2026-05 deep audit fixed: loop-`throw` infinite hang, range-`for` slot allocation & OOB on
 shrink, `switch` continue/break leakage, map-read auto-insert, `<=>`/NaN map-key ordering,

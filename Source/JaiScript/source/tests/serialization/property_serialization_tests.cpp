@@ -9,6 +9,7 @@
 #include <jaiscript/serialization/serialization_metadata.hpp>  // For any_archive_reader
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/dynamic_binder_serialization.hpp>
+#include <jaiscript/signals/signal_binding.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai;
@@ -189,6 +190,87 @@ public:
     }
 };
 
+// The interface page-hook pattern: a script lambda assigned to a std::function<void(Self&)> member.
+class callback_host {
+public:
+    std::function<void(callback_host&)> initialize;
+    int ran = 0;
+    int marked = 0;
+    void mark() { marked = 1; }
+    void fire() { if (initialize) { initialize(*this); } }
+    static void jai_auto_bind(dynamic_binder<callback_host>& b) {
+        b.constructor<>();
+        b.property("initialize", &callback_host::initialize);
+        b.property("ran", &callback_host::ran);
+        b.method("mark", &callback_host::mark);
+        b.method("fireWith", [](callback_host& a_self, script_value) { a_self.fire(); });
+    }
+};
+
+// The Scene::Node pattern: schema property_owner with a self-referential vector property.
+class tree_object : public property_owner<tree_object> {
+public:
+    JAI_PROPERTY((std::vector<std::shared_ptr<tree_object>>), children);
+    JAI_PROPERTY((std::string), name, "");
+    tree_object() = default;
+};
+
+// Duality regressions: cpp_bound references (T& returns, class-type property reads) must flow
+// through the same member/operator/type-check paths as class_instance wrappers.
+class pair_value {
+public:
+    double x = 0.0;
+    double y = 0.0;
+    static void jai_auto_bind(dynamic_binder<pair_value>& b) {
+        b.property("x", &pair_value::x);
+        b.property("y", &pair_value::y);
+        b.method("==", [](pair_value& a_self, pair_value& a_other) {
+            return a_self.x == a_other.x && a_self.y == a_other.y;
+        });
+        b.method("to_bool", [](pair_value& a_self) { return a_self.x != 0.0; });
+    }
+};
+
+class base_thing {
+public:
+    int tag = 1;
+    static void jai_auto_bind(dynamic_binder<base_thing>& b) {
+        b.property("tag", &base_thing::tag);
+    }
+};
+
+class derived_thing : public base_thing {
+};
+
+class pair_host {
+public:
+    pair_value a;
+    pair_value b;
+    static void jai_auto_bind(dynamic_binder<pair_host>& b) {
+        b.property("a", &pair_host::a);
+        b.property("b", &pair_host::b);
+    }
+};
+
+class thing_host {
+public:
+    derived_thing d;
+    static void jai_auto_bind(dynamic_binder<thing_host>& b) {
+        b.property("d", &thing_host::d);
+    }
+};
+
+// The StandardMessages pattern: a non-copyable signal_emitter member exposed as a property.
+class emitter_host {
+public:
+    signal_emitter<void(const std::string&)> onNotice;
+    std::string received;
+    static void jai_auto_bind(dynamic_binder<emitter_host>& b) {
+        b.property("onNotice", &emitter_host::onNotice);
+        b.property("received", &emitter_host::received);
+    }
+};
+
 // A JAI_SIGNAL_PROPERTY rides property_mgr serialization: its owned script receivers persist.
 class signal_test_object : public property_owner<signal_test_object> {
 public:
@@ -231,7 +313,7 @@ public:
             json_writer.end_object();
             std::string json = json_writer.str();
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader json_reader(json, eng.get());
             std::string type_name; uint32_t version;
             json_reader.begin_object(type_name, version);
@@ -256,6 +338,275 @@ public:
             binary_reader.end_object();
 
             check_true(bin_restored.hasOwned("ping1"));
+        });
+
+        test("function_property_lambda_assign", [&]() {
+            // auto_bind() must reach jai_auto_bind (regression: shadowed fwd-decl falsified has_jai_auto_bind).
+            auto eng = make_engine();
+            dynamic_binder<callback_host> b(*eng, "callback_host");
+            b.auto_bind();
+            b.build();
+            auto host = std::make_shared<callback_host>();
+            eng->add_global("self", eng->make_object(host));
+            eng->execute("self.ran = 5;");
+            check_eq(5, host->ran);
+            eng->execute("self.initialize = [=](var& self) -> void { self.mark(); self.ran = 1; self.ran += 2; };");
+            check_true((bool)host->initialize);
+            host->initialize(*host);
+            check_eq(1, host->marked);
+            check_eq(3, host->ran);
+        });
+
+        test("script_class_external_member_assign", [&]() {
+            auto eng = make_engine();
+            auto r = eng->execute("class P { auto v = 1; } var p = P(); p.v = 7; p.v += 3; p.v");
+            check_eq((int64_t)10, r.as_int());
+        });
+
+        test("nonexistent_member_assign_is_catchable", [&]() {
+            // Missing setter used to leak a raw C++ throw (as_function() on an invalid
+            // lookup) through the interpreter; must be a catchable script exception.
+            auto eng = make_engine();
+            auto r = eng->execute(R"(
+                class P { auto v = 1; }
+                var p = P();
+                var caught = false;
+                try { p.nope = 1; } catch (e) { caught = true; }
+                caught
+            )");
+            check_true(r.as<bool>());
+        });
+
+        test("cpp_bound_custom_equality_operator", [&]() {
+            // == on cpp_bound receivers must find the bound "==" method, not silently
+            // fall back to holder identity (which is always false for two T& reads).
+            auto eng = make_engine();
+            dynamic_binder<pair_value> pv(*eng, "pair_value");
+            pv.auto_bind();
+            pv.build();
+            dynamic_binder<pair_host> dh(*eng, "pair_host");
+            dh.auto_bind();
+            dh.build();
+            auto host = std::make_shared<pair_host>();
+            host->a.x = 1.0; host->a.y = 2.0;
+            host->b.x = 1.0; host->b.y = 2.0;
+            eng->add_global("host", eng->make_object(host));
+            check_eq((int64_t)1, eng->execute("host.a == host.b ? 1 : 0").as_int());
+            eng->execute("host.b.x = 9.0;");
+            check_eq((int64_t)0, eng->execute("host.a == host.b ? 1 : 0").as_int());
+        });
+
+        test("cpp_bound_to_bool_method", [&]() {
+            // Truthiness of a cpp_bound object must consult its bound to_bool method.
+            auto eng = make_engine();
+            dynamic_binder<pair_value> pv(*eng, "pair_value");
+            pv.auto_bind();
+            pv.build();
+            dynamic_binder<pair_host> dh(*eng, "pair_host");
+            dh.auto_bind();
+            dh.build();
+            auto host = std::make_shared<pair_host>();
+            eng->add_global("host", eng->make_object(host));
+            check_eq((int64_t)2, eng->execute("host.a ? 1 : 2").as_int());
+            host->a.x = 3.0;
+            check_eq((int64_t)1, eng->execute("host.a ? 1 : 2").as_int());
+        });
+
+        test("cpp_bound_member_outlives_temporary_receiver", [&]() {
+            // A registered-class member read off a TEMPORARY receiver returns a non-owning
+            // cpp_bound reference - the getter path must pin the receiver's owning data
+            // (keep_alive) like chained method calls do, or the member read dangles.
+            auto eng = make_engine();
+            dynamic_binder<pair_value> pv(*eng, "pair_value");
+            pv.auto_bind();
+            pv.build();
+            dynamic_binder<pair_host> dh(*eng, "pair_host");
+            dh.auto_bind();
+            dh.build();
+            eng->add_function("makePair", [engPtr = eng.get()]() {
+                auto fresh = std::make_shared<pair_host>();
+                fresh->a.x = 5.0;
+                return engPtr->make_object(fresh);
+            });
+            check_eq(5.0, eng->execute("makePair().a.x").as<double>());
+            check_eq(5.0, eng->execute("var m = makePair().a; m.x").as<double>());
+        });
+
+        test("wrong_typed_object_to_ref_param_is_catchable", [&]() {
+            // A wrong-typed argument reaching a T&/const T& parameter must raise a catchable
+            // script error - never silently reinterpret the object (or a script-class
+            // instance's field map) as T.
+            auto eng = make_engine();
+            dynamic_binder<pair_value> pv(*eng, "pair_value");
+            pv.auto_bind();
+            pv.build();
+            dynamic_binder<base_thing> bt(*eng, "base_thing");
+            bt.auto_bind();
+            bt.build();
+            dynamic_binder<derived_thing> dt(*eng, "derived_thing");
+            dt.base_class<base_thing>();
+            dt.build();
+            dynamic_binder<thing_host> th(*eng, "thing_host");
+            th.auto_bind();
+            th.build();
+            dynamic_binder<pair_host> dh(*eng, "pair_host");
+            dh.auto_bind();
+            dh.method("takeRef", [](pair_host&, const pair_value& a_v) { return a_v.x; });
+            dh.build();
+            auto host = std::make_shared<pair_host>();
+            host->a.x = 9.0;
+            eng->add_global("host", eng->make_object(host));
+            eng->add_global("things", eng->make_object(std::make_shared<thing_host>()));
+            check_eq(9.0, eng->execute("host.takeRef(host.a)").as<double>());
+            auto r1 = eng->execute(R"(
+                class NotPair { auto v = 1; }
+                var caught = false;
+                try { host.takeRef(NotPair()); } catch (e) { caught = true; }
+                caught
+            )");
+            check_true(r1.as<bool>());
+            auto r2 = eng->execute(R"(
+                var caught2 = false;
+                try { host.takeRef(things.d); } catch (e) { caught2 = true; }
+                caught2
+            )");
+            check_true(r2.as<bool>());
+        });
+
+        test("cpp_bound_arg_overload_dispatch", [&]() {
+            // Overload scoring must resolve cpp_bound/raw-holder args by the holder's
+            // registered class, not reject them for lacking a class_instance.
+            auto eng = make_engine();
+            dynamic_binder<pair_value> pv(*eng, "pair_value");
+            pv.auto_bind();
+            pv.build();
+            dynamic_binder<pair_host> dh(*eng, "pair_host");
+            dh.auto_bind();
+            dh.method("measure", [](pair_host&, const pair_value&) { return script_int(1); });
+            dh.method("measure", [](pair_host&, script_int) { return script_int(2); });
+            dh.build();
+            eng->add_function("flen", [](const pair_value&) { return script_int(1); });
+            eng->add_function("flen", [](script_int) { return script_int(2); });
+            auto host = std::make_shared<pair_host>();
+            eng->add_global("host", eng->make_object(host));
+            check_eq((int64_t)1, eng->execute("host.measure(host.a)").as_int());
+            check_eq((int64_t)2, eng->execute("host.measure(3)").as_int());
+            check_eq((int64_t)1, eng->execute("flen(host.b)").as_int());
+            check_eq((int64_t)2, eng->execute("flen(4)").as_int());
+        });
+
+        test("cpp_bound_typed_param_inheritance", [&]() {
+            // A cpp_bound derived reference must satisfy a base-typed script parameter
+            // (is_subtype_of via the resolved class_def). By-value object params copy
+            // (C++ value semantics, same as class_instance args - clone() must deep copy
+            // from the live pointer, not crash on the null data of a non-owning holder);
+            // mutation of the live object goes through direct member writes.
+            auto eng = make_engine();
+            dynamic_binder<base_thing> bt(*eng, "base_thing");
+            bt.auto_bind();
+            bt.build();
+            dynamic_binder<derived_thing> dt(*eng, "derived_thing");
+            dt.base_class<base_thing>();
+            dt.build();
+            dynamic_binder<thing_host> dh(*eng, "thing_host");
+            dh.auto_bind();
+            dh.build();
+            auto host = std::make_shared<thing_host>();
+            eng->add_global("host", eng->make_object(host));
+            eng->execute("void probe(base_thing b) { b.tag = 5; } probe(host.d);");
+            check_eq(1, host->d.tag);
+            eng->execute("host.d.tag = 7;");
+            check_eq(7, host->d.tag);
+        });
+
+        test("make_object_schema_property_owner", [&]() {
+            // A property_owner (schema-bound) class materialized via make_object and read from script.
+            auto eng = make_engine();
+            dynamic_binder<test_object> b(*eng, "test_object");
+            b.auto_bind();
+            b.build();
+            auto obj = std::make_shared<test_object>();
+            eng->add_global("obj", eng->make_object(obj));
+            check_eq((int64_t)100, eng->execute("obj.health").as_int());
+            eng->execute("obj.health = 55;");
+            check_eq(55, obj->health.get());
+        });
+
+        test("make_object_self_referential_schema", [&]() {
+            // Node-shaped: self-referential vector property + double auto_bind (registrar's
+            // implicit call plus the configure lambda's explicit one).
+            auto eng = make_engine();
+            dynamic_binder<tree_object> b(*eng, "tree_object");
+            b.auto_bind();
+            b.auto_bind();
+            b.build();
+            auto obj = std::make_shared<tree_object>();
+            obj->name = "root";
+            eng->add_global("obj", eng->make_object(obj));
+            check_eq(std::string("root"), eng->execute("obj.name").as_string());
+        });
+
+        test("nested_eval_and_hook_during_script_call", [&]() {
+            // The interface-manager pattern: a hook invoked from C++ calls a C++ method that
+            // itself evals a nested script (assigning another hook) and invokes it, then the
+            // outer hook keeps running and chains a call on the returned object.
+            auto eng = make_engine();
+            dynamic_binder<callback_host> b(*eng, "callback_host");
+            b.auto_bind();
+            b.build();
+            auto outer = std::make_shared<callback_host>();
+            auto inner = std::make_shared<callback_host>();
+            eng->add_function("makePage", [engPtr = eng.get(), inner]() {
+                engPtr->add_global("page", engPtr->make_object(inner));
+                engPtr->execute("page.initialize = [=](var& self) -> void { self.mark(); self.ran = 7; };");
+                if (inner->initialize) { inner->initialize(*inner); }
+                return engPtr->make_object(inner);
+            });
+            eng->add_global("self", eng->make_object(outer));
+            eng->execute("self.initialize = [=](var& self) -> void { self.mark(); makePage().fireWith(1); self.ran = 3; };");
+            outer->initialize(*outer);
+            check_eq(1, outer->marked);
+            check_eq(3, outer->ran);
+            check_eq(1, inner->marked);
+            check_eq(7, inner->ran);
+        });
+
+        test("callback_fired_during_script_call", [&]() {
+            // A C++ method invoked FROM SCRIPT fires the converted callback synchronously.
+            // The outer call's argument metadata must not leak into the callback's
+            // reference-param binding (literal -> spurious error, identifier -> hijacked var).
+            auto eng = make_engine();
+            dynamic_binder<callback_host> b(*eng, "callback_host");
+            b.auto_bind();
+            b.build();
+            auto host = std::make_shared<callback_host>();
+            eng->add_global("self", eng->make_object(host));
+            eng->execute("self.initialize = [=](var& self) -> void { self.ran = 1; };");
+            eng->execute("self.fireWith(42);");
+            check_eq(1, host->ran);
+            host->ran = 0;
+            eng->execute("var decoy = callback_host(); self.fireWith(decoy);");
+            check_eq(1, host->ran);
+        });
+
+        test("signal_emitter_property_connect", [&]() {
+            // A property read of a registered class member must alias the live member
+            // (cpp_bound), not copy - receivers connected from script must fire on C++ emit.
+            auto eng = make_engine();
+            bind_signal_type<void(const std::string&)>(*eng, "SignalString");
+            dynamic_binder<emitter_host> b(*eng, "emitter_host");
+            b.auto_bind();
+            b.build();
+            auto host = std::make_shared<emitter_host>();
+            eng->add_global("messages", eng->make_object(host));
+            eng->execute("messages.onNotice.connect(\"greet\", [=](string message) -> void {"
+                         "    messages.received = message;"
+                         "});");
+            check_true(host->onNotice.connected("greet"));
+            host->onNotice("hello");
+            check_eq(std::string("hello"), host->received);
+            eng->execute("messages.onNotice.disconnect(\"greet\");");
+            check_false(host->onNotice.connected("greet"));
         });
 
         test("property_transparent_conversion", [&]() {
@@ -319,7 +670,7 @@ public:
             std::cout << "json_round_trip_basic JSON: " << json << std::endl;
 
             // Deserialize from JSON (need engine for json_archive_reader internal script_value usage)
-            auto eng = engine::make();
+            auto eng = make_engine();
             test_object loaded;
             serialization::json_archive_reader reader(json, eng.get());
 
@@ -357,7 +708,7 @@ public:
             std::string json = writer.str();
 
             // Deserialize (need engine for json_archive_reader internal script_value usage)
-            auto eng = engine::make();
+            auto eng = make_engine();
             container_object loaded;
             serialization::json_archive_reader reader(json, eng.get());
 
@@ -420,7 +771,7 @@ public:
             writer.end_object();
 
             // Deserialize from binary (need engine for binary_archive_reader internal script_value usage)
-            auto eng = engine::make();
+            auto eng = make_engine();
             test_object loaded;
             serialization::binary_archive_reader reader(buffer, eng.get());
 
@@ -451,7 +802,7 @@ public:
             writer.end_object();
 
             // Deserialize (need engine for binary_archive_reader internal script_value usage)
-            auto eng = engine::make();
+            auto eng = make_engine();
             container_object loaded;
             serialization::binary_archive_reader reader(buffer, eng.get());
 
@@ -526,7 +877,7 @@ public:
             versioned_object_v2 v2;
             v2.z = 999;  // Set to non-default to check it stays
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
@@ -565,7 +916,7 @@ public:
             versioned_object_v3 v3;
             v3.description = "default_description";  // Set a default value
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
@@ -606,7 +957,7 @@ public:
             // With the new design, unknown properties are automatically skipped
             // No need for explicit deleted_property declarations
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(old_json, eng.get());
 
             std::string type_name;
@@ -662,7 +1013,7 @@ public:
             test_object obj;
             obj.health = 999;  // Set to different value
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json_with_extra_field, eng.get());
 
             std::string type_name;
@@ -701,7 +1052,7 @@ public:
             test_object loaded;
             loaded.health = 999;  // Set to different value
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
@@ -735,7 +1086,7 @@ public:
 
             // Load from JSON
             test_object intermediate;
-            auto eng2 = engine::make();
+            auto eng2 = make_engine();
             serialization::json_archive_reader json_reader(json, eng2.get());
 
             std::string type_name;
@@ -797,7 +1148,7 @@ public:
 
             // Load from manually created JSON with different order
             test_object loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json_different_order, eng.get());
 
             std::string type_name;
@@ -832,7 +1183,7 @@ public:
 
             // Load into new object (property_manager will read properties in whatever order they appear)
             test_object loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
@@ -861,7 +1212,7 @@ public:
             loaded.speed = 9.9f;  // Set defaults for missing fields
             loaded.active = true;
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json_partial, eng.get());
 
             std::string type_name;
@@ -904,7 +1255,7 @@ public:
             loaded.speed = 7.7f;
             loaded.active = false;
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
@@ -941,7 +1292,7 @@ public:
 
             // Load using the hook method
             computed_object loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
@@ -973,7 +1324,7 @@ public:
 
             // Load using the hook method
             computed_object loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
@@ -1000,7 +1351,7 @@ public:
             })";
 
             validated_object loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
@@ -1029,7 +1380,7 @@ public:
             writer.end_object();
 
             validated_object loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
@@ -1055,7 +1406,7 @@ public:
             })";
 
             migrated_object_v2 loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
@@ -1089,7 +1440,7 @@ public:
             writer.end_object();
 
             migrated_object_v2 loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::binary_archive_reader reader(binary_buffer, eng.get());
 
             std::string type_name;
@@ -1115,7 +1466,7 @@ public:
             })";
 
             computed_object loaded;
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader(json, eng.get());
 
             std::string type_name;
@@ -1134,7 +1485,7 @@ public:
 
         test("dynamic_binder_post_load_with_version", [&]() {
             // Test that dynamic_binder registered classes can use post_load hook with version
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Define a simple C++ class
             struct Rectangle {
@@ -1183,7 +1534,7 @@ public:
 
         test("script_class_post_load_json", [&]() {
             // Test that script-defined classes can use post_load hook
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register JSON stdlib functions (needed for from_json)
             stdlib::register_json_functions(*eng);
@@ -1281,7 +1632,7 @@ public:
 
         test("script_class_post_load_binary", [&]() {
             // Test script class post_load with binary format
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register JSON stdlib functions (needed for to_binary/from_binary)
             stdlib::register_json_functions(*eng);
@@ -1324,7 +1675,7 @@ public:
 
         test("script_class_post_load_no_hook", [&]() {
             // Test that classes without post_load still work
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Register JSON stdlib functions (needed for to_json/from_json)
             stdlib::register_json_functions(*eng);
@@ -1350,7 +1701,7 @@ public:
         // ===== CUSTOM CONSTRUCTION TESTS =====
 
         test("custom_construction_with_context", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Create a resource manager for dependency injection
             resource_manager mgr("assets/data", 42);
@@ -1401,7 +1752,7 @@ public:
         });
 
         test("custom_construction_with_archive", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Create resource manager
             resource_manager mgr("assets/complex", 50);
@@ -1442,7 +1793,7 @@ public:
         });
 
         test("context_extraction_from_archive", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test that user context can be retrieved from archive
             resource_manager mgr("test_path", 100);

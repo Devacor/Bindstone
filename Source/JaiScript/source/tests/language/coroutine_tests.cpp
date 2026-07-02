@@ -14,7 +14,7 @@ public:
     void forge_tests() override {
 
         test("basic_yield_with_value", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int counter() {
@@ -34,7 +34,7 @@ public:
         });
 
         test("coroutine_done_check", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int gen() {
@@ -57,7 +57,7 @@ public:
         });
 
         test("yield_inside_for_loop", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int range_gen() {
@@ -77,7 +77,7 @@ public:
         });
 
         test("yield_inside_while_loop", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int while_gen() {
@@ -99,7 +99,7 @@ public:
         });
 
         test("yield_inside_if_else", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int branch_gen(int x) {
@@ -120,7 +120,7 @@ public:
         });
 
         test("multiple_yields_in_sequence", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int seq() {
@@ -145,7 +145,7 @@ public:
         });
 
         test("multiple_concurrent_coroutines", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int gen_a() {
@@ -172,7 +172,7 @@ public:
         });
 
         test("coroutine_with_parameters", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int multiply_gen(int start, int factor) {
@@ -193,7 +193,7 @@ public:
         });
 
         test("yield_string_values", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine string greet() {
@@ -213,7 +213,7 @@ public:
         });
 
         test("nested_loops_with_yield", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine int matrix_gen() {
@@ -235,7 +235,7 @@ public:
         });
 
         test("coroutine_void_yield", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 coroutine void stepper() {
@@ -257,7 +257,7 @@ public:
         });
 
         test("yield_no_duplicate_side_effects", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
                 auto count = 0;
@@ -277,7 +277,7 @@ public:
         });
 
         test("range_for_over_generator", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
                 coroutine int fibonacci() {
@@ -303,7 +303,7 @@ public:
         });
 
         test("range_for_over_finite_generator", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
                 coroutine int range(int n) {
@@ -320,7 +320,7 @@ public:
         });
 
         test("for_loop_yield_step_by_step", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
                 coroutine int gen() {

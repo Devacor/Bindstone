@@ -50,7 +50,7 @@ public:
     
     void forge_tests() override {
         test("bound_array_reference_semantics", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
@@ -68,7 +68,7 @@ public:
         });
         
         test("bound_array_value_semantics", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
@@ -85,7 +85,7 @@ public:
         });
         
         test("bound_array_copy_constructor", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
@@ -103,7 +103,7 @@ public:
         });
         
         test("bound_array_function_parameters", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
@@ -147,7 +147,7 @@ public:
         });
         
         test("bound_array_element_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
@@ -165,7 +165,7 @@ public:
         });
         
         test("bound_array_iteration", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
@@ -188,7 +188,7 @@ public:
         });
         
         test("bound_array_custom_objects", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<TestWidget>(*eng, "TestWidget")
                 .constructor<std::string, int>()
@@ -220,7 +220,7 @@ public:
         });
         
         test("bound_map_reference_semantics", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             script_value map_val = eng->make_map();
             auto& map = map_val.as_map();
@@ -237,7 +237,7 @@ public:
         });
         
         test("bound_map_value_semantics", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             script_value map_val = eng->make_map();
             auto& jmap = map_val.as_map();
@@ -254,7 +254,7 @@ public:
         });
         
         test("bound_map_element_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             script_value map_val = eng->make_map();
             auto& jmap = map_val.as_map();
@@ -277,7 +277,7 @@ public:
         });
         
         test("bound_map_iteration", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             script_value map_val = eng->make_map();
             auto& jmap = map_val.as_map();
@@ -298,7 +298,7 @@ public:
         
         /*
         test("reject_vector_reference_bindings", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // These should compile and work
             eng->add_function("take_vector_by_value", 
@@ -321,7 +321,7 @@ public:
         });
         
         test("reject_map_reference_bindings", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // These should compile and work
             eng->add_function("take_map_by_value", 
@@ -342,7 +342,7 @@ public:
         */
         
         test("bound_array_zero_copy_performance", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();

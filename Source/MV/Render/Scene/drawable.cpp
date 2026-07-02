@@ -522,7 +522,13 @@ namespace MV {
 		void Anchors::postLoadInitialize() {
 			if (!parentIdLoaded.empty()) {
 				auto found = selfReference->owner()->componentInParents(parentIdLoaded, false, true);
-				require<ResourceException>(found, "Failed to find Anchor Component Id: [", parentIdLoaded, "] when loading node [", selfReference->owner()->id(), "].[", selfReference->id(), "]");
+				if (!found) {
+					// Environment without the project-level anchor target (the standalone
+					// editor has no ScreenScaler in the loaded scene's ancestry): keep the
+					// id so a re-save preserves the anchor, and skip anchoring here.
+					warning("Anchor parent [", parentIdLoaded, "] not found for [", selfReference->owner()->id(), "].[", selfReference->id(), "] - anchor left unresolved");
+					return;
+				}
 				parentReference = found.cast<Drawable>().get();
 				parentIdLoaded.clear();
 			}

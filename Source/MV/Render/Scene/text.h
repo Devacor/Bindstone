@@ -203,15 +203,16 @@ namespace MV {
 
 			template<class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {
+				// formattedText is a property_mgr property - an extra explicit nvp here wrote
+				// the SAME key twice ({payload} then {$id-only}); the map-based JSON DOM keeps
+				// the last, so loads saw the empty stub and every Text lost its string.
 				property_mgr.save(archive);
-				archive(jai::serialization::make_nvp("formattedText", formattedText.get()));
 				Drawable::save(archive, 0);
 			}
 
 			template<class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
 				property_mgr.load(archive);
-				archive(jai::serialization::make_nvp("formattedText", formattedText.get()));
 				Drawable::load(archive, 0);
 			}
 

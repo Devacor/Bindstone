@@ -410,7 +410,8 @@ namespace MV {
 		template<typename Archive>
 		void save(Archive& ar, const Anchors& anchors) requires jai::serialization::jai_archive<Archive> {
 			// Anchor parents resolve by component id at postLoadInitialize; a parent outside the saved subtree must carry an id to survive.
-			std::string parentId;
+			// An id left unresolved at load (environment without the target, e.g. the editor) persists as-is.
+			std::string parentId = anchors.parentIdLoaded;
 			if (auto lockedParent = anchors.parentReference.lock()) {
 				parentId = lockedParent->id();
 			}

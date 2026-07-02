@@ -7,13 +7,12 @@
 #include <jaiscript/signals/signal_binding.hpp>
 
 static jai::registrar<BattleEffectNetworkState, MV::Services> _hookBattleEffectNetworkState("BattleEffectNetworkState",
-	[](jai::dynamic_binder<BattleEffectNetworkState>& builder, const MV::Services& a_services) {
-	if (auto* eng = a_services.get<jai::engine>(false)) {
-		// TargetType constants: enums travel as ints through script
-		eng->add_global("TargetType_NONE", eng->make_value(static_cast<int64_t>(TargetType::NONE)));
-		eng->add_global("TargetType_CREATURE", eng->make_value(static_cast<int64_t>(TargetType::CREATURE)));
-		eng->add_global("TargetType_GROUND", eng->make_value(static_cast<int64_t>(TargetType::GROUND)));
-	}
+	[](jai::dynamic_binder<BattleEffectNetworkState>& builder, const MV::Services&) {
+	auto& eng = builder.bound_engine();
+	// TargetType constants: enums travel as ints through script
+	eng.add_global("TargetType_NONE", eng.make_value(static_cast<int64_t>(TargetType::NONE)));
+	eng.add_global("TargetType_CREATURE", eng.make_value(static_cast<int64_t>(TargetType::CREATURE)));
+	eng.add_global("TargetType_GROUND", eng.make_value(static_cast<int64_t>(TargetType::GROUND)));
 	builder.constructor<GameInstance&, const std::string&, int64_t>();
 	builder.property("dying", &BattleEffectNetworkState::dying);
 	builder.property("buildingSlot", &BattleEffectNetworkState::buildingSlot);
@@ -54,10 +53,8 @@ static jai::registrar<BattleEffectData, MV::Services> _hookBattleEffectData("Bat
 });
 
 static jai::registrar<BattleEffect, MV::Services> _hookBattleEffect("BattleEffect",
-	[](jai::dynamic_binder<BattleEffect>& builder, const MV::Services& a_services) {
-	if (auto* eng = a_services.get<jai::engine>(false)) {
-		jai::bind_signal_type<BattleEffect::CallbackSignature>(*eng, "SignalBattleEffect");
-	}
+	[](jai::dynamic_binder<BattleEffect>& builder, const MV::Services&) {
+	jai::bind_signal_type<BattleEffect::CallbackSignature>(builder.bound_engine(), "SignalBattleEffect");
 	builder.method("game", &BattleEffect::game);
 	builder.method("alive", &BattleEffect::alive);
 	builder.method("networkId", &BattleEffect::netId);

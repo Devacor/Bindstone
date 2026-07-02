@@ -37,10 +37,8 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
 }
 
 static jai::registrar<Building, MV::Services> _hookBuilding("Building",
-	[](jai::dynamic_binder<Building>& builder, const MV::Services& a_services) {
-	if (auto* eng = a_services.get<jai::engine>(false)) {
-		jai::bind_signal_type<void(std::shared_ptr<Building>)>(*eng, "SignalBuilding");
-	}
+	[](jai::dynamic_binder<Building>& builder, const MV::Services&) {
+	jai::bind_signal_type<void(std::shared_ptr<Building>)>(builder.bound_engine(), "SignalBuilding");
 	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });
 	builder.method("upgrade", &Building::upgrade);
 	builder.method("player", &Building::player);

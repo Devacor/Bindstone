@@ -68,11 +68,10 @@ void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
 }
 
 static jai::registrar<Creature, MV::Services> _hookCreature("Creature",
-	[](jai::dynamic_binder<Creature>& builder, const MV::Services& a_services) {
-	if (auto* eng = a_services.get<jai::engine>(false)) {
-		jai::bind_signal_type<Creature::CallbackSignature>(*eng, "SignalCreature");
-		jai::bind_signal_type<void(std::shared_ptr<Creature>, int)>(*eng, "SignalCreatureHealth");
-	}
+	[](jai::dynamic_binder<Creature>& builder, const MV::Services&) {
+	auto& eng = builder.bound_engine();
+	jai::bind_signal_type<Creature::CallbackSignature>(eng, "SignalCreature");
+	jai::bind_signal_type<void(std::shared_ptr<Creature>, int)>(eng, "SignalCreatureHealth");
 	builder.method("spine", &Creature::spine);
 	builder.method("alive", &Creature::alive);
 	builder.method("networkId", &Creature::netId);

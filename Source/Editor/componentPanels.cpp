@@ -1707,11 +1707,12 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 
 	loadButton->onAccept.connect("load", [&](std::shared_ptr<MV::Scene::Clickable>){
 		auto t0 = std::chrono::steady_clock::now();
-		// doPostLoad=true: load_complete() fires on the root node automatically via
-		// post_load depth tracking, calling postLoadStep() for the full tree.
-		auto newRoot = MV::Scene::Node::load(fileName->text(), panel.services(), true);
+		// Parent BEFORE postLoadStep (the loadChild pattern) so project-level anchor
+		// targets above the edited root (visor's ScreenScaler) resolve.
+		auto newRoot = MV::Scene::Node::load(fileName->text(), panel.services(), false);
 		auto t1 = std::chrono::steady_clock::now();
 		panel.root(newRoot);
+		newRoot->postLoadStep();
 		newRoot->camera().position(MV::point(0.0f, 0.0f));
 		auto loadMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 		std::cout << "\n____\n";

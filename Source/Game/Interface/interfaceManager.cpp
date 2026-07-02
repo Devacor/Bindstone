@@ -19,8 +19,6 @@ namespace {
 
 static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
 	[](jai::dynamic_binder<MV::Interface>& builder, const MV::Services&) {
-	builder.auto_bind();
-
 	builder.method("show", &MV::Interface::show);
 	builder.method("hide", &MV::Interface::hide);
 	builder.method("visible", &MV::Interface::visible);
@@ -32,12 +30,14 @@ static jai::registrar<MV::Interface, MV::Services> _hookInterface("Interface",
 
 static jai::registrar<MV::InterfaceManager, MV::Services> _hookInterfaceManager("InterfaceManager",
 	[](jai::dynamic_binder<MV::InterfaceManager>& builder, const MV::Services&) {
-	builder.auto_bind();
-
-	// Note: make() and page() return Interface& which is non-copyable (has reference member)
-	// value_converter fallback tries to copy, which fails. These need proper registration or
-	// should return shared_ptr instead.
 	builder.method("root", &MV::InterfaceManager::root);
+	// make()/page() return a non-copyable Interface& — expose as a non-owning shared_ptr
+	builder.method("make", [](MV::InterfaceManager& a_self, const std::string& a_pageId) {
+		return std::shared_ptr<MV::Interface>(&a_self.make(a_pageId), [](MV::Interface*) {});
+	});
+	builder.method("page", [](MV::InterfaceManager& a_self, const std::string& a_pageId) {
+		return std::shared_ptr<MV::Interface>(&a_self.page(a_pageId), [](MV::Interface*) {});
+	});
 });
 
 namespace MV {

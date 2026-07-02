@@ -1,10 +1,9 @@
 self.initialize = [=](var& self) -> void {
-	auto test = self.make("Login");
+	auto login = self.make("Login");
 	self.make("Main");
-	test.show();
+	login.show();
 };
 
-print("TEST");
 messages.lobbyDisconnect.connect("LoginScreen", [=](string message) -> void {
 	print("Disconnected From Lobby: " + message);
 	game.gui().page("Login").show();

@@ -164,6 +164,12 @@ namespace MV {
 	}
 
 	std::shared_ptr<TexturePack> SharedTextures::assemblePack(const std::string &a_packPath, Draw2D* a_renderer) {
+		// Boot and the editor may both assemble the same folders; add() appends blindly,
+		// so re-assembly would duplicate every shape - return the assembled pack instead.
+		if (auto existing = pack(path(a_packPath).filename().string()); existing && existing->size() > 0) {
+			return existing;
+		}
+
 		Stopwatch timer;
 		timer.start();
 

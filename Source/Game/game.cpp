@@ -9,13 +9,11 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 
 static jai::registrar<StandardMessages, MV::Services> _hookStandardMessages("StandardMessages",
-	[](jai::dynamic_binder<StandardMessages>& builder, const MV::Services& a_services) {
-	if (auto* eng = a_services.get<jai::engine>(false)) {
-		jai::bind_signal_type<void()>(*eng, "SignalVoid");
-		jai::bind_signal_type<void(const std::string&)>(*eng, "SignalString");
-		jai::bind_signal_type<void(bool, const std::string&)>(*eng, "SignalBoolString");
-	}
-	builder.auto_bind();
+	[](jai::dynamic_binder<StandardMessages>& builder, const MV::Services&) {
+	auto& eng = builder.bound_engine();
+	jai::bind_signal_type<void()>(eng, "SignalVoid");
+	jai::bind_signal_type<void(const std::string&)>(eng, "SignalString");
+	jai::bind_signal_type<void(bool, const std::string&)>(eng, "SignalBoolString");
 	builder.property("lobbyConnected", &StandardMessages::lobbyConnected);
 	builder.property("lobbyDisconnect", &StandardMessages::lobbyDisconnect);
 	builder.property("lobbyAuthenticated", &StandardMessages::lobbyAuthenticated);
@@ -29,7 +27,6 @@ void Game::jai_auto_bind(jai::dynamic_binder<Game>& builder) {
 
 static jai::registrar<Game, MV::Services> _hookGame("Game",
 	[](jai::dynamic_binder<Game>& builder, const MV::Services&) {
-	builder.auto_bind();
 	builder.method("gui", &Game::gui);
 	builder.method("instance", [](Game& a_self) {
 		return std::shared_ptr<GameInstance>(a_self.instance(), [](GameInstance*) {});
@@ -50,6 +47,9 @@ Game::Game(Managers& a_managers) :
 	jaiEngine_(jai::engine::make()) {
 
 	jai::stdlib::register_all(*jaiEngine_);
+	jaiEngine_->set_script_error_handler([](const std::string& a_message) {
+		MV::error("Script callback failed: ", a_message);
+	});
 	jai::bind_registrar<MV::Services>(*jaiEngine_, a_managers.services);
 
 	// Script globals (non-owning: this/messages outlive the engine)
@@ -151,7 +151,9 @@ void Game::initializeWindow(){
 	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Fonts/Verdana.ttf", 9);
 	MV::FontDefinition::make(gameData.managers().textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 	if (!gameData.managers().renderer.headless()) {
-		//gameData.managers().textures.assemblePacks("Assets/Atlases", &gameData.managers().renderer);
+		// Interface scenes reference atlas art by packId - the packs must be assembled
+		// before InterfaceManager loads the pages or handles resolve to empty bounds.
+		gameData.managers().textures.assemblePacks("Assets/Atlases", &gameData.managers().renderer);
 		//gameData.managers().textures.files("Map");
 		//gameData.managers().textures.files("Images");
 	}

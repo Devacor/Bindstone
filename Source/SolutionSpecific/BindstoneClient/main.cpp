@@ -305,6 +305,121 @@ static void RunButtonWiring() {
 	}
 }
 
+// One-time repair of the Login page art the Cereal->jai asset conversion dropped: every
+// UI-pack texture handle (button.png on EmailBackground/PasswordBackground and the
+// LoginButton state views) was lost because PackedTextureDefinition serialization didn't
+// exist yet when the assets were converted. Reassigns handles from the assembled UI atlas
+// and re-saves. Run: BindstoneClient.exe -fixloginui (saveJai writes via the %APPDATA%
+// redirect - copy the result back to the repo Assets).
+static void RunLoginUiRepair() {
+	Managers managers({ "", "" });
+	auto jaiEngine = jai::engine::make();
+	jai::stdlib::register_all(*jaiEngine);
+	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	managers.services.connect<jai::engine>(jaiEngine.get());
+	static MV::TapDevice repairMouse;
+	managers.services.connect(&repairMouse);
+	// Real GL (not headless): texture sizes must be loaded for slice geometry and UV
+	// baking - headless leaves size()==0 and the 9-slice mesh degenerates.
+	if (!managers.renderer.initialize(MV::Size<int>(1280, 720))) {
+		std::cout << "[fixlogin] renderer init failed\n";
+		return;
+	}
+	MV::FontDefinition::make(managers.textLibrary, "default", "Fonts/Verdana.ttf", 14);
+	MV::FontDefinition::make(managers.textLibrary, "small", "Fonts/Verdana.ttf", 9);
+	MV::FontDefinition::make(managers.textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	MV::initializeSpineBindings();
+
+	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
+	auto uiPack = managers.textures.pack("UI");
+	if (!uiPack) {
+		std::cout << "[fixlogin] UI texture pack not found\n";
+		return;
+	}
+
+	auto fakeRoot = MV::Scene::Node::make(managers.renderer);
+	fakeRoot->attach<MV::Scene::Sprite>()->hide()->id("ScreenScaler");
+
+	auto retexture = [&](const std::shared_ptr<MV::Scene::Node>& a_node, const char* a_textureName) {
+		auto sprite = a_node->component<MV::Scene::Sprite>().self();
+		sprite->texture(uiPack->handle(a_textureName));
+		std::cout << "[fixlogin] " << a_node->id() << " -> " << a_textureName << std::endl;
+	};
+	// Baked glyph containers from the conversion era load as plain serializable nodes with
+	// dead SurfaceTextureDefinitions; the live Text regenerates its own (now non-serializable)
+	// containers, so anything serializable with these prefixes is stale.
+	std::function<void(const std::shared_ptr<MV::Scene::Node>&, std::vector<std::shared_ptr<MV::Scene::Node>>&)> collectStaleGlyphNodes =
+		[&](const std::shared_ptr<MV::Scene::Node>& a_node, std::vector<std::shared_ptr<MV::Scene::Node>>& a_out) {
+			for (auto&& child : *a_node) {
+				collectStaleGlyphNodes(child, a_out);
+			}
+			const auto& nodeId = a_node->id();
+			if (a_node->serializable() && (nodeId.rfind("TEXT_", 0) == 0 || nodeId.rfind("CURSOR_", 0) == 0)) {
+				a_out.push_back(a_node);
+			}
+		};
+	// Restores bounds the conversion zeroed (Clickable hit areas, Button state views) then
+	// re-slices by assigning the pack texture AFTER geometry so the 9-slice mesh rebuilds
+	// on real bounds. Values recovered from the pre-conversion Cereal files.
+	auto retextureViews = [&](const std::shared_ptr<MV::Scene::Button>& a_button, const MV::BoxAABB<>& a_viewBox) {
+		for (auto& viewNode : { a_button->activeNode(), a_button->idleNode(), a_button->disabledNode() }) {
+			viewNode->component<MV::Scene::Sprite>().self()->bounds(a_viewBox);
+			viewNode->component<MV::Scene::Text>().self()->bounds(a_viewBox);
+			retexture(viewNode, "button.png");
+		}
+	};
+	using SceneFixup = std::function<void(const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>&)>;
+	auto repairScene = [&](const char* a_path, const SceneFixup& a_fixup) {
+		try {
+			auto root = MV::Scene::Node::load(a_path, managers.services, false);
+			fakeRoot->add(root);
+			root->postLoadStep();
+			auto button = root->componentInChildren<MV::Scene::Button>(false, false, true).self();
+			std::vector<std::shared_ptr<MV::Scene::Node>> stale;
+			collectStaleGlyphNodes(root, stale);
+			if (button) {
+				// Button state views are component-held nodes, not scene children - walk them too
+				for (auto& viewNode : { button->activeNode(), button->idleNode(), button->disabledNode() }) {
+					if (viewNode) {
+						collectStaleGlyphNodes(viewNode, stale);
+					}
+				}
+			}
+			for (auto& staleNode : stale) {
+				std::cout << "[fixlogin] removing stale glyph node " << staleNode->id() << std::endl;
+				staleNode->removeFromParent();
+			}
+			if (a_fixup) {
+				a_fixup(root, button);
+			}
+			root->saveJai(a_path, managers.services, false);
+			std::cout << "[fixlogin] saved " << a_path << std::endl;
+			root->removeFromParent();
+		} catch (std::exception& e) {
+			std::cout << "[fixlogin] FAILED " << a_path << ": " << e.what() << std::endl;
+		}
+	};
+	repairScene("Assets/Interface/Login/view.scene", [&](const std::shared_ptr<MV::Scene::Node>& root, const std::shared_ptr<MV::Scene::Button>& button) {
+		MV::BoxAABB<> inputBox(MV::point(99.0f, 9.0f), MV::point(299.0f, 44.0f));
+		for (auto& inputId : { "EmailBackground", "PasswordBackground" }) {
+			auto clickable = root->get(inputId)->component<MV::Scene::Clickable>().self();
+			clickable->bounds(inputBox);
+			// The conversion also dropped the focus-on-click receivers (legacy audit)
+			clickable->onAccept.connect("script", "auto pageId = \"Login\"; eval_file(\"Shared/selectText.script\");");
+			retexture(root->get(inputId), "button.png");
+		}
+		retextureViews(button, MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(104.0f, 36.0f)));
+	});
+	repairScene("Assets/Prefabs/Button.prefab", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
+		retextureViews(button, MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(104.0f, 47.0f)));
+	});
+	repairScene("Assets/Prefabs/SimpleButton.prefab", [&](const std::shared_ptr<MV::Scene::Node>&, const std::shared_ptr<MV::Scene::Button>& button) {
+		button->bounds(MV::BoxAABB<>(MV::point(0.0f, 0.0f), MV::point(100.0f, 30.0f)));
+	});
+	repairScene("Assets/Interface/Main/view.scene", nullptr);
+	repairScene("Assets/Prefabs/LoginName.prefab", nullptr);
+}
+
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
 // jai asset format end to end. Run: BindstoneClient.exe -verifyassets
 static void RunAssetVerification() {
@@ -454,7 +569,42 @@ static void RunEmitterBenchmark() {
 	}
 }
 
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+static void InstallTerminateTracer() {
+	std::set_terminate([] {
+		fprintf(stderr, "[terminate] std::terminate reached\n");
+		if (auto ex = std::current_exception()) {
+			try { std::rethrow_exception(ex); }
+			catch (std::exception& e) { fprintf(stderr, "[terminate] active exception: %s\n", e.what()); }
+			catch (...) { fprintf(stderr, "[terminate] active non-std exception\n"); }
+		} else {
+			fprintf(stderr, "[terminate] no active exception\n");
+		}
+		void* frames[62];
+		USHORT count = CaptureStackBackTrace(0, 62, frames, nullptr);
+		HANDLE proc = GetCurrentProcess();
+		SymInitialize(proc, nullptr, TRUE);
+		char buf[sizeof(SYMBOL_INFO) + 256] = {};
+		for (USHORT i = 0; i < count; ++i) {
+			auto* sym = reinterpret_cast<SYMBOL_INFO*>(buf);
+			sym->MaxNameLen = 255;
+			sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+			DWORD64 disp = 0;
+			if (SymFromAddr(proc, reinterpret_cast<DWORD64>(frames[i]), &disp, sym)) {
+				fprintf(stderr, "  %02d %s +0x%llx\n", i, sym->Name, static_cast<unsigned long long>(disp));
+			} else {
+				fprintf(stderr, "  %02d %p\n", i, frames[i]);
+			}
+		}
+		fflush(stderr);
+		abort();
+	});
+}
+
 int main(int argc, char *argv[]) {
+	InstallTerminateTracer();
 	MV::info("Hello world!");
 	MV::debug(":D :D :D");
 	MV::warning(":C :C :C");
@@ -524,6 +674,10 @@ int main(int argc, char *argv[]) {
 		}
 		if (strcmp(argv[i], "-wirebuttons") == 0) {
 			RunButtonWiring();
+			return 0;
+		}
+		if (strcmp(argv[i], "-fixloginui") == 0) {
+			RunLoginUiRepair();
 			return 0;
 		}
 		if (strcmp(argv[i], "-emitterbench") == 0) {

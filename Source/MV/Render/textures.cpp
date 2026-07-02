@@ -480,9 +480,12 @@ namespace MV {
 		if (handles.empty()) {
 			load();
 		}
+		// The ctor stores a_bounds as the percent directly; calling bounds(a_bounds) here
+		// re-interpreted the percent box as PIXELS (x contentSize / size) - double-applying
+		// the half-texel inset, and corrupting handlePercent to +/-INF when the texture
+		// size isn't loaded yet (headless tools).
 		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this(), a_bounds));
 		handles.push_back(handle);
-		handle->bounds(a_bounds);
 		return handle;
 	}
 
@@ -600,6 +603,9 @@ namespace MV {
 	\********************************/
 
 	void SurfaceTextureDefinition::reloadImplementation() {
+		if (!surfaceGenerator) {
+			return; // deserialized without an owner reattaching via setSurfaceGenerator (stale asset glyphs)
+		}
 		auto newSurface = surfaceGenerator();
 		require<PointerException>(newSurface != nullptr && newSurface->get() != nullptr, "SurfaceTextureDefinition::reloadImplementation was passed a null SDL_Surface pointer.");
 

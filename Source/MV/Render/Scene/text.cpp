@@ -6,13 +6,11 @@
 #include "MV/Utility/services.hpp"
 
 static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
-	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services& a_services) {
+	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 
-	if (auto* eng = a_services.get<jai::engine>(false)) {
-		jai::bind_signal_type<MV::Scene::Text::TextSignalSignature>(*eng, "SignalText");
-	}
+	jai::bind_signal_type<MV::Scene::Text::TextSignalSignature>(builder.bound_engine(), "SignalText");
 	builder.property("onEnter", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onEnter; }, nullptr);
 	builder.property("onChange", [](MV::Scene::Text& a_self) -> jai::signal<MV::Scene::Text::TextSignalSignature>& { return a_self.onChange; }, nullptr);
 
@@ -80,7 +78,10 @@ namespace MV{
 			Drawable::initialize();
 			if (ownerIsAlive()) {
 				auto silenceSelf = owner()->silence();
-				formattedText->scene()->id(guid("TEXT_"))->position(points[0]);
+				// Runtime-generated glyph container: never serialize it (the persistent data is
+				// the string on formattedText; baked glyph sprites reload with dead
+				// SurfaceTextureDefinitions and render garbage).
+				formattedText->scene()->id(guid("TEXT_"))->serializable(false)->position(points[0]);
 				owner()->add(formattedText->scene());
 
 				cursorSprite = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->bounds(size(2.0f, 5.0f));

@@ -13,6 +13,8 @@
 #include "MV/Utility/services.hpp"
 #include "MV/Utility/threadPool.hpp"
 #include "MV/Render/sharedTextures.h"
+#include "text.h"
+#include "clickable.h"
 
 #include "MV/Serialization/serialize.h"
 #include <jaiscript/properties/property_serialization.hpp>
@@ -32,6 +34,15 @@ static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 	builder.method("size", &MV::Scene::Node::size);
 	builder.method("empty", &MV::Scene::Node::empty);
 	builder.method("task", &MV::Scene::Node::task);
+
+	// Interface-script helpers: descendant-by-id lookup + typed component fetch.
+	builder.method("get", [](MV::Scene::Node& a_self, const std::string& a_id) { return a_self.get(a_id); });
+	builder.method("componentText", [](MV::Scene::Node& a_self) {
+		return a_self.componentInChildren<MV::Scene::Text>(false, true, true).self();
+	});
+	builder.method("componentButton", [](MV::Scene::Node& a_self) {
+		return a_self.componentInChildren<MV::Scene::Clickable>(false, true, true).self();
+	});
 
 	builder.method("id", static_cast<std::string(MV::Scene::Node::*)() const>(&MV::Scene::Node::id));
 	builder.method("id", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::id));

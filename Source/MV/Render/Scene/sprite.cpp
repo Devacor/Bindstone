@@ -192,10 +192,13 @@ namespace MV {
 			if (a_textureId == 0) {
 				dirtyVertexBuffer = true;
 				updateSlice();
-				//If we didn't have a slice, then we need to manually apply. Otherwise this was handled already.
 				if (!hasSlice()) {
 					ourTextures[a_textureId]->apply(*points);
 					updateSubdivisionTexture();
+				} else if (points->size() == 16) {
+					// updateSlice only repositions an existing slice mesh; a (re)assigned
+					// texture must also rewrite UVs or stale coordinates persist.
+					ourTextures[a_textureId]->apply(*points);
 				}
 				notifyParentOfComponentChange();
 			}

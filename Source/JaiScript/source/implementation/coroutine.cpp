@@ -1,10 +1,15 @@
 #include "../../include/jaiscript/core/coroutine.hpp"
 #include "../../include/jaiscript/core/engine.hpp"
-#include "../../include/jaiscript/detail/interpreter.hpp"
-#include "../../include/jaiscript/detail/interpreter_backend.hpp"
-#include "../../include/jaiscript/detail/ast.hpp"
+#include "../../include/jaiscript/core/execution_backend.hpp"
 
 namespace jai {
+
+checked_result<script_value> execution_backend::resume_coroutine(coroutine_handle& handle) {
+    handle.set_status(coroutine_handle::status::failed);
+    return checked_result<script_value>(
+        make_error_code(runtime_error_code::evaluation_failed),
+        "Coroutines are not supported by this backend");
+}
 
 coroutine_handle::coroutine_handle(engine* eng)
     : engine_(eng)
@@ -24,24 +29,6 @@ void coroutine_handle::do_yield(script_value value) {
     status_ = status::suspended;
 }
 
-void coroutine_handle::push_continuation(ast_node* node, size_t index,
-                                          std::shared_ptr<environment> env) {
-    continuations_.push_back({node, index, std::move(env)});
-}
-
-coroutine_handle::continuation_point* coroutine_handle::peek_continuation(ast_node* node) {
-    if (!continuations_.empty() && continuations_.back().node == node) {
-        return &continuations_.back();
-    }
-    return nullptr;
-}
-
-void coroutine_handle::pop_continuation() {
-    if (!continuations_.empty()) {
-        continuations_.pop_back();
-    }
-}
-
 checked_result<script_value> coroutine_handle::resume(engine* eng) {
     if (done()) {
         return checked_result<script_value>(
@@ -54,146 +41,7 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
             "Coroutine is already running");
     }
 
-    interpreter_backend* backend = dynamic_cast<interpreter_backend*>(
-        eng->get_execution_backend());
-    if (!backend) {
-        status_ = status::failed;
-        return checked_result<script_value>(
-            make_error_code(runtime_error_code::evaluation_failed),
-            "Coroutines require the interpreter backend");
-    }
-    interpreter* interp = backend->get_interpreter();
-
-    // Host-level resume is its own budgeted entry; a resume nested inside an
-    // executing script keeps the outer deadline.
-    if (interp->current_call_depth_ == 0) {
-        interp->arm_execution_deadline();
-    }
-
-    coroutine_handle* prev_coroutine = interp->active_coroutine_;
-    bool prev_yield_request = interp->hasYieldRequest_;
-    interp->active_coroutine_ = this;
-    interp->hasYieldRequest_ = false;
-
-    auto prev_status = status_;
-    status_ = status::running;
-
-    // A runtime error in the (re)started segment must reach the caller as an error;
-    // falling through to `return yield_value_` would hand back the PREVIOUS yield
-    // as a bogus success and silently swallow the failure.
-    std::optional<checked_result<script_value>> error_result;
-
-    if (prev_status == status::created) {
-        // On yield, call_function saves environment/call_stack into this coroutine
-        // (via active_coroutine_) and returns the yield value WITHOUT running cleanup;
-        // on normal return it cleans up and returns the result.
-        interpreter::script_defined_function scriptFunc(
-            function_->name,
-            function_->parameters,
-            function_->return_type,
-            function_->body,
-            closure_env_,
-            function_->local_count
-        );
-
-        auto call_result = interp->call_function(scriptFunc, initial_args_);
-
-        if (interp->hasYieldRequest_) {
-            // call_function already saved state into this coroutine
-            // (saved_environment_, saved_call_stack_, etc.)
-            status_ = status::suspended;
-        } else if (!call_result) {
-            status_ = status::failed;
-            error_result.emplace(std::move(call_result));
-        } else {
-            status_ = status::completed;
-            yield_value_ = std::move(call_result.value());
-        }
-
-    } else {
-        auto caller_env = interp->environment_;
-        auto caller_call_stack = std::move(interp->call_stack_);
-        auto caller_return_value = std::move(interp->returnValue_);
-        bool caller_has_return = interp->hasReturnValue_;
-
-        interp->environment_ = saved_environment_;
-        interp->call_stack_ = std::move(saved_call_stack_);
-        interp->returnValue_ = std::move(saved_return_value_);
-        interp->hasReturnValue_ = saved_has_return_;
-
-        // The continuations are consumed LIFO (outermost first).
-        // The outermost continuation is for the function body (call_function's loop).
-        // Pop it to get the statement index where yield occurred.
-        auto* body_cont = peek_continuation(function_->body.get());
-        size_t start_index = 0;
-        if (body_cont) {
-            start_index = body_cont->index;
-            pop_continuation();
-        }
-        bool had_error = false;
-        size_t last_body_idx = start_index;
-
-        for (size_t i = start_index; i < function_->body->declarations.size(); ++i) {
-            last_body_idx = i;
-            // For the first statement (start_index), the inner continuations
-            // are still on the stack and will be consumed by visit_block_stmt,
-            // visit_if_stmt, visit_while_stmt, etc. to fast-forward to the
-            // exact point where yield occurred.
-            checked_result<void> decl_result = interp->dispatch_decl(function_->body->declarations[i].get());
-
-            if (!decl_result) {
-                if (decl_result.error() != std::error_code()) {
-                    status_ = status::failed;
-                    had_error = true;
-                    error_result.emplace(decl_result.error_value());
-                    break;
-                }
-            }
-
-            if (interp->hasReturnValue_ || interp->hasYieldRequest_) {
-                break;
-            }
-        }
-
-        if (!had_error) {
-            if (interp->hasYieldRequest_) {
-                // Record where to resume in the function body.
-                // If inner constructs pushed continuations, re-enter this statement.
-                // If no inner continuations, the yield was a direct child, skip it.
-                size_t resume_idx = has_continuations() ? last_body_idx : last_body_idx + 1;
-                push_continuation(function_->body.get(), resume_idx);
-                saved_environment_ = interp->environment_;
-                saved_call_stack_ = std::move(interp->call_stack_);
-                saved_return_value_ = std::move(interp->returnValue_);
-                saved_has_return_ = interp->hasReturnValue_;
-                status_ = status::suspended;
-            } else if (interp->hasReturnValue_) {
-                status_ = status::completed;
-                if (interp->returnValue_) {
-                    yield_value_ = std::move(interp->returnValue_.value());
-                }
-                saved_environment_.reset();
-                saved_call_stack_.clear();
-            } else {
-                status_ = status::completed;
-                saved_environment_.reset();
-                saved_call_stack_.clear();
-            }
-        }
-
-        interp->environment_ = caller_env;
-        interp->call_stack_ = std::move(caller_call_stack);
-        interp->returnValue_ = std::move(caller_return_value);
-        interp->hasReturnValue_ = caller_has_return;
-    }
-
-    interp->active_coroutine_ = prev_coroutine;
-    interp->hasYieldRequest_ = prev_yield_request;
-
-    if (error_result) {
-        return std::move(*error_result);
-    }
-    return yield_value_;
+    return eng->get_execution_backend()->resume_coroutine(*this);
 }
 
 } // namespace jai

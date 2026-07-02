@@ -44,7 +44,7 @@ public:
     
     void forge_tests() override {
         test("basic object deep copy", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
@@ -78,7 +78,7 @@ public:
         });
         
         test("object deep copy with inheritance", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
@@ -124,7 +124,7 @@ public:
         });
         
         test("object deep copy in containers", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             dynamic_binder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()

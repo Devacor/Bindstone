@@ -17,7 +17,7 @@ public:
         // ============================================================
 
         test("abs_positive", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("abs(5.5);");
@@ -25,7 +25,7 @@ public:
         });
 
         test("abs_negative", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("abs(-5.5);");
@@ -33,7 +33,7 @@ public:
         });
 
         test("sign_positive", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("sign(42.0);");
@@ -41,7 +41,7 @@ public:
         });
 
         test("sign_negative", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("sign(-42.0);");
@@ -49,7 +49,7 @@ public:
         });
 
         test("sign_zero", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("sign(0.0);");
@@ -57,7 +57,7 @@ public:
         });
 
         test("min_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("min(3.0, 7.0);");
@@ -65,7 +65,7 @@ public:
         });
 
         test("max_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("max(3.0, 7.0);");
@@ -73,7 +73,7 @@ public:
         });
 
         test("clamp_in_range", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("clamp(5.0, 0.0, 10.0);");
@@ -81,7 +81,7 @@ public:
         });
 
         test("clamp_below", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("clamp(-5.0, 0.0, 10.0);");
@@ -89,7 +89,7 @@ public:
         });
 
         test("clamp_above", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("clamp(15.0, 0.0, 10.0);");
@@ -101,7 +101,7 @@ public:
         // ============================================================
 
         test("floor_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("floor(3.7);");
@@ -109,7 +109,7 @@ public:
         });
 
         test("ceil_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("ceil(3.2);");
@@ -117,7 +117,7 @@ public:
         });
 
         test("round_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("round(3.5);");
@@ -125,7 +125,7 @@ public:
         });
 
         test("trunc_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("trunc(-3.7);");
@@ -137,7 +137,7 @@ public:
         // ============================================================
 
         test("sqrt_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("sqrt(16.0);");
@@ -145,7 +145,7 @@ public:
         });
 
         test("pow_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("pow(2.0, 3.0);");
@@ -153,7 +153,7 @@ public:
         });
 
         test("exp_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("exp(1.0);");
@@ -161,7 +161,7 @@ public:
         });
 
         test("log_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("log(E);");
@@ -173,7 +173,7 @@ public:
         // ============================================================
 
         test("sin_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("sin(0.0);");
@@ -181,7 +181,7 @@ public:
         });
 
         test("cos_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("cos(0.0);");
@@ -189,7 +189,7 @@ public:
         });
 
         test("sin_pi_half", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("sin(PI / 2.0);");
@@ -201,7 +201,7 @@ public:
         // ============================================================
 
         test("mix_basic", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             // mix(0, 100, 0.5) should return 50
@@ -210,7 +210,7 @@ public:
         });
 
         test("mix_at_start", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("mix(10.0, 20.0, 0.0);");
@@ -218,7 +218,7 @@ public:
         });
 
         test("mix_at_end", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("mix(10.0, 20.0, 1.0);");
@@ -226,7 +226,7 @@ public:
         });
 
         test("unmix_basic", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             // unmix(0, 100, 50) should return 0.5
@@ -235,7 +235,7 @@ public:
         });
 
         test("unmix_at_start", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("unmix(10.0, 20.0, 10.0);");
@@ -243,7 +243,7 @@ public:
         });
 
         test("unmix_at_end", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("unmix(10.0, 20.0, 20.0);");
@@ -251,7 +251,7 @@ public:
         });
 
         test("mix_in_ease", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             // mix_in with strength 2 at t=0.5: pow(0.5, 2) = 0.25, result = 25
@@ -260,7 +260,7 @@ public:
         });
 
         test("mix_out_ease", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             // mix_out with strength 2 at t=0.5: 1 - pow(0.5, 2) = 0.75, result = 75
@@ -273,7 +273,7 @@ public:
         // ============================================================
 
         test("saturate_clamps_to_unit", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             check_eq(engine->execute("saturate(0.5);").as<double>(), 0.5);
@@ -282,7 +282,7 @@ public:
         });
 
         test("wrap_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             // wrap(0, 360, 450) should return 90
@@ -291,7 +291,7 @@ public:
         });
 
         test("remap_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             // remap(5, 0, 10, 0, 100) should return 50
@@ -300,7 +300,7 @@ public:
         });
 
         test("hypot_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             // hypot(3, 4) = 5 (3-4-5 triangle)
@@ -309,7 +309,7 @@ public:
         });
 
         test("lerp_function", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("lerp(0.0, 100.0, 0.25);");
@@ -321,7 +321,7 @@ public:
         // ============================================================
 
         test("pi_constant", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("PI;");
@@ -329,7 +329,7 @@ public:
         });
 
         test("e_constant", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("E;");
@@ -337,7 +337,7 @@ public:
         });
 
         test("tau_constant", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("TAU;");
@@ -349,7 +349,7 @@ public:
         // ============================================================
 
         test("random_in_unit_range", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("random();");
@@ -358,7 +358,7 @@ public:
         });
 
         test("random_int_in_range", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("random_int(1, 10);");
@@ -367,7 +367,7 @@ public:
         });
 
         test("random_range_in_bounds", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
 
             script_value result = engine->execute("random_range(5.0, 10.0);");

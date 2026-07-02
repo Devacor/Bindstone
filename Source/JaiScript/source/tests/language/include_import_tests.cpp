@@ -31,7 +31,7 @@ public:
         };
         
         test("basic_include", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create a temporary file to include
             auto math_file = create_temp_file("math_lib.jai", R"(
@@ -55,7 +55,7 @@ public:
         });
         
         test("include_with_angle_brackets", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create a temporary file
             auto lib_file = create_temp_file("stdlib.jai", R"(
@@ -77,7 +77,7 @@ public:
         });
         
         test("multiple_includes_execute_multiple_times", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create a file with side effects
             auto counter_file = create_temp_file("counter.jai", R"(
@@ -110,7 +110,7 @@ public:
         });
         
         test("basic_import_once_behavior", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create a file with side effects
             auto module_file = create_temp_file("module.jai", R"(
@@ -138,7 +138,7 @@ public:
         });
         
         test("import_file_timestamp_behavior", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create initial file
             auto test_file = create_temp_file("timestamp_test.jai", R"(
@@ -170,7 +170,7 @@ public:
         });
         
         test("import_always_behavior", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create a file with counter
             auto always_file = create_temp_file("always_import.jai", R"(
@@ -203,7 +203,7 @@ public:
         });
         
         test("include_path_resolution", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create files in different directories
             auto temp_dir = std::filesystem::temp_directory_path();
@@ -236,7 +236,7 @@ public:
         });
         
         test("import_tracking_api", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create test files
             auto file1 = create_temp_file("tracked1.jai", "auto file1_loaded = true;");
@@ -274,7 +274,7 @@ public:
         });
         
         test("hash_prefix_ignored", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create a test file
             auto hash_file = create_temp_file("hash_test.jai", R"(
@@ -294,7 +294,7 @@ public:
         });
         
         test("file_not_found_error", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Try to include non-existent file
             check_throws([&]() {
@@ -307,7 +307,7 @@ public:
         });
         
         test("nested_includes", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create nested include files
             auto inner_file = create_temp_file("inner.jai", R"(
@@ -332,7 +332,7 @@ public:
         });
         
         test("dynamic_include_with_variable", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create a test file
             auto dynamic_file = create_temp_file("dynamic_content.jai", R"(
@@ -358,7 +358,7 @@ public:
         });
         
         test("dynamic_import_with_expression", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Create test files
             auto moduleA = create_temp_file("moduleA.jai", R"(

@@ -12,7 +12,7 @@ public:
     
     void forge_tests() override {
         test("basic_static_field", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class Math {
@@ -27,7 +27,7 @@ public:
         });
         
         test("static_field_modification", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class Counter {
@@ -54,7 +54,7 @@ public:
         });
         
         test("implicit_static_access_in_methods", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class Settings {
@@ -95,7 +95,7 @@ public:
         });
         
         test("static_fields_with_inheritance", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Base {
@@ -124,7 +124,7 @@ public:
         });
         
         test("static_field_errors", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class TestClass {
@@ -150,7 +150,7 @@ public:
         });
         
         test("static_fields_with_complex_types", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class Config {
@@ -196,7 +196,7 @@ public:
         
         
         test("static_fields_shared_across_instances", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             eng->execute(R"(
                 class SharedStatic {

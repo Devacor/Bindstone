@@ -46,7 +46,7 @@ public:
     void forge_tests() override {
 
         test("inherited_property_survives_json", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto derived = std::make_shared<InhDerived>();
             derived->baseVal = 42;
             derived->derivedTag = "kept";
@@ -60,7 +60,7 @@ public:
         });
 
         test("inherited_property_survives_binary", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto derived = std::make_shared<InhDerived>();
             derived->baseVal = 99;
             derived->derivedTag = "bin";
@@ -74,7 +74,7 @@ public:
         });
 
         test("deep_inheritance_chain_json", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto leaf = std::make_shared<InhLeaf>();
             leaf->baseVal = 10;
             leaf->midVal = 20;
@@ -90,7 +90,7 @@ public:
         });
 
         test("deep_inheritance_chain_binary", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto leaf = std::make_shared<InhLeaf>();
             leaf->baseVal = 11;
             leaf->midVal = 22;

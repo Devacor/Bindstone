@@ -13,7 +13,7 @@ public:
 
     void forge_tests() override {
         test("map_literal_basic", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for maps with heterogeneous values (string and int)
             eng->execute(R"(
@@ -29,7 +29,7 @@ public:
         });
 
         test("map_literal_mixed_types", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for heterogeneous map values
             // 'auto' requires homogeneous values
@@ -49,7 +49,7 @@ public:
         });
 
         test("map_literal_empty", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute("auto empty = {};");
 
@@ -59,7 +59,7 @@ public:
         });
 
         test("map_access_read", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
@@ -71,7 +71,7 @@ public:
         });
 
         test("map_access_write", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
@@ -86,7 +86,7 @@ public:
 
         // TODO: Implement map.has() method
         // test("map_has_key_method", [&]() {
-        //     auto eng = engine::make();
+        //     auto eng = make_engine();
 
         //     eng->execute(R"(
         //         auto m = {"key1": "value1", "key2": "value2"};
@@ -99,7 +99,7 @@ public:
         // });
 
         test("map_size_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto m = {"a": 1, "b": 2, "c": 3};
@@ -112,7 +112,7 @@ public:
         });
 
         test("map_empty_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto m = {};
@@ -125,7 +125,7 @@ public:
         });
 
         test("map_clear_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto m = {"a": 1, "b": 2, "c": 3};
@@ -138,7 +138,7 @@ public:
 
         // TODO: Implement map.erase() method
         // test("map_erase_key", [&]() {
-        //     auto eng = engine::make();
+        //     auto eng = make_engine();
 
         //     eng->execute(R"(
         //         auto m = {"a": 1, "b": 2, "c": 3};
@@ -152,7 +152,7 @@ public:
         // });
 
         test("map_keys_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
@@ -176,7 +176,7 @@ public:
         });
 
         test("map_values_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto m = {"a": 1, "b": 2, "c": 3};
@@ -189,7 +189,7 @@ public:
         });
 
         test("map_nested_in_map", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
@@ -210,7 +210,7 @@ public:
         });
 
         test("map_nested_modification", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for maps with heterogeneous values
             eng->execute(R"(
@@ -229,7 +229,7 @@ public:
         });
 
         test("map_deeply_nested", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto deep = {
@@ -247,7 +247,7 @@ public:
         });
 
         test("map_with_array_values", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Arrays have homogeneous elements, but the map values are heterogeneous (array types differ)
             eng->execute(R"(
@@ -264,7 +264,7 @@ public:
         });
 
         test("array_with_map_elements", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for arrays containing heterogeneous maps
             eng->execute(R"(
@@ -282,7 +282,7 @@ public:
         });
 
         test("map_complex_nested_structure", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for deeply nested heterogeneous structures
             eng->execute(R"(
@@ -313,7 +313,7 @@ public:
         });
 
         test("map_iteration_keys", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto m = {"a": 1, "b": 2, "c": 3};
@@ -328,7 +328,7 @@ public:
         });
 
         test("map_missing_key_behavior", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto m = {"key1": "value1"};
@@ -344,7 +344,7 @@ public:
         });
 
         test("map_in_function_parameter", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 function getProperty(var obj, string key) -> var {
@@ -361,7 +361,7 @@ public:
 
         // TODO: Fix - crashes when indexing directly into function return value
         // test("map_as_return_value", [&]() {
-        //     auto eng = engine::make();
+        //     auto eng = make_engine();
 
         //     eng->execute(R"(
         //         function makeConfig() -> auto {
@@ -375,7 +375,7 @@ public:
 
         // TODO: Implement map merge operator
         // test("map_merge_operation", [&]() {
-        //     auto eng = engine::make();
+        //     auto eng = make_engine();
 
         //     eng->execute(R"(
         //         auto map1 = {"a": 1, "b": 2};
@@ -392,7 +392,7 @@ public:
 
         // TODO: Implement map + operator for merging
         // test("map_override_on_merge", [&]() {
-        //     auto eng = engine::make();
+        //     auto eng = make_engine();
 
         //     eng->execute(R"(
         //         auto map1 = {"key": "value1", "other": "data"};
@@ -406,7 +406,7 @@ public:
         // });
 
         test("map_merge_function", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(eng);
 
             eng->execute(R"(
@@ -421,7 +421,7 @@ public:
         });
 
         test("map_with_numeric_string_keys", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto m = {"0": "zero", "1": "one", "2": "two"};

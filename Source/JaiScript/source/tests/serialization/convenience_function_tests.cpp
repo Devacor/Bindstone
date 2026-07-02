@@ -201,7 +201,7 @@ public:
 
     void forge_tests() override {
         test("private_serialize_friend_jai_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             private_serialize_friend_jai_access obj;
             obj.set(42);
             jai::serialization::json_archive_writer writer(0, eng.get());
@@ -221,7 +221,7 @@ public:
         test("root_object_member_serialize_read", [this]() {
             // Reading a foreign root object {"data": [...]} into a member-serialize type:
             // ar(obj) is inline by design, so the caller enters the document root explicitly.
-            auto eng = engine::make();
+            auto eng = make_engine();
             std::string text = "{\"data\": [1, 2, 3]}";
             jai::serialization::json_archive_reader ar(text, eng.get());
             catalog_like_root_obj loaded;
@@ -258,7 +258,7 @@ public:
         });
 
         test("json_basic_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             std::string json_int = to_json(*eng, 42);
             check(json_int.find("42") != std::string::npos, "Int serialized");
@@ -278,7 +278,7 @@ public:
         });
 
         test("binary_basic_types", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             std::string bin_int = to_binary_string(*eng, 12345);
             int i = from_binary_string<int>(*eng, bin_int);
@@ -294,7 +294,7 @@ public:
         });
 
         test("base64_serialization_basic", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             std::string base64 = to_base64(*eng, 9999);
 
@@ -309,7 +309,7 @@ public:
         });
 
         test("property_owner_json_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             dynamic_binder<conv_player>(eng, "ConvPlayer")
@@ -344,7 +344,7 @@ public:
         });
 
         test("property_owner_binary_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             dynamic_binder<conv_player>(eng, "ConvPlayer").build();
@@ -373,7 +373,7 @@ public:
         });
 
         test("property_owner_containers", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             dynamic_binder<conv_inventory>(eng, "ConvInventory").build();
@@ -402,7 +402,7 @@ public:
         });
 
         test("explicit_save_load_json", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             explicit_save_load_obj original;
             original.x = 10;
@@ -433,7 +433,7 @@ public:
         });
 
         test("explicit_save_load_binary", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             explicit_save_load_obj original;
             original.x = 100;
@@ -460,7 +460,7 @@ public:
         });
 
         test("member_serialize_json", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             member_serialize_obj original;
             original.value = 3.14159;
@@ -488,7 +488,7 @@ public:
         });
 
         test("member_serialize_binary", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             member_serialize_obj original;
             original.value = 2.71828;
@@ -513,7 +513,7 @@ public:
         });
 
         test("blended_property_owner_json", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             dynamic_binder<blended_object>(eng, "BlendedObject").build();
@@ -551,7 +551,7 @@ public:
         });
 
         test("blended_binary_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             dynamic_binder<blended_object>(eng, "BlendedObject").build();
@@ -582,7 +582,7 @@ public:
         });
 
         test("property_owner_auto_dispatch", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             dynamic_binder<conv_player>(eng, "ConvPlayer").build();
@@ -612,7 +612,7 @@ public:
         });
 
         test("json_with_user_context", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(*eng);
 
             dynamic_binder<conv_player>(eng, "ConvPlayer").build();
@@ -646,7 +646,7 @@ public:
         });
 
         test("binary_little_endian_portable", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             int32_t value = 0x12345678;
             std::string binary = to_binary_string(*eng, value);
@@ -661,7 +661,7 @@ public:
         });
 
         test("shared_ptr_json_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto ptr1 = std::make_shared<sp_inner_data>();
             ptr1->x = 42;
@@ -703,7 +703,7 @@ public:
         });
 
         test("shared_ptr_binary_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto ptr1 = std::make_shared<sp_inner_data>();
             ptr1->x = 99;
@@ -740,7 +740,7 @@ public:
         });
 
         test("unique_ptr_json_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto uptr = std::make_unique<sp_simple_data>();
             uptr->value = 123;
@@ -771,7 +771,7 @@ public:
         });
 
         test("weak_ptr_json_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto shared = std::make_shared<sp_simple_data>();
             shared->value = 77;
@@ -811,7 +811,7 @@ public:
         });
 
         test("vector_of_shared_ptr_json_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto a = std::make_shared<sp_id_data>();
             a->id = 1;
@@ -846,7 +846,7 @@ public:
 
         test("shared_ptr_property_json_roundtrip", [this]() {
             // Test shared_ptr as a JAI_PROPERTY inside a property_owner
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             sp_ptr_holder original;
             original.data = std::make_shared<sp_simple_data>();
@@ -874,7 +874,7 @@ public:
         });
 
         test("convenience_owning_ptr_polymorphic_json", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto derived = std::make_shared<conv_poly_derived>();
             derived->baseVal = 7;          // inherited from conv_poly_base
@@ -894,7 +894,7 @@ public:
         });
 
         test("convenience_owning_ptr_polymorphic_binary", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto derived = std::make_shared<conv_poly_derived>();
             derived->baseVal = 11;
@@ -910,7 +910,7 @@ public:
         });
 
         test("convenience_owning_ptr_polymorphic_base64", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto derived = std::make_shared<conv_poly_derived>();
             derived->baseVal = 13;
@@ -926,7 +926,7 @@ public:
         });
 
         test("convenience_owning_ptr_nonpolymorphic_json", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto ptr = std::make_shared<sp_simple_data>();
             ptr->value = 321;
 
@@ -956,40 +956,40 @@ public:
         };
 
         test("json_reader_rejects_trailing_garbage", [this, parseOutcome]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_eq(parseOutcome(eng.get(), "42 garbage"), 1, "trailing garbage -> serialization_error");
             check_eq(parseOutcome(eng.get(), "{} []"), 1, "two top-level values -> serialization_error");
             check_eq(parseOutcome(eng.get(), "  123  "), 0, "leading/trailing whitespace is fine");
         });
 
         test("json_reader_bare_minus_is_serialization_error", [this, parseOutcome]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_eq(parseOutcome(eng.get(), "-"), 1, "bare '-' -> serialization_error");
             check_eq(parseOutcome(eng.get(), "1.2.3"), 1, "malformed number -> serialization_error");
         });
 
         test("json_reader_huge_int_degrades_to_double", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::json_archive_reader reader("99999999999999999999", eng.get());
             double v = reader.read_value().as<double>();
             check(v > 9.9e19 && v < 1.1e20, "out-of-range integer parses as double");
         });
 
         test("json_reader_non_ascii_value_byte_no_ub", [this, parseOutcome]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // std::isdigit(signed char) on a non-ASCII byte is UB / debug-CRT abort. Must be a clean throw.
             std::string bad = "\xC3\xA9";   // 'é' bytes, not a valid value start
             check_eq(parseOutcome(eng.get(), bad), 1, "non-ASCII value byte -> serialization_error, no UB");
         });
 
         test("json_reader_invalid_unicode_escape_is_serialization_error", [this, parseOutcome]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_eq(parseOutcome(eng.get(), "\"\\uZZZZ\""), 1, "non-hex \\u -> serialization_error");
             check_eq(parseOutcome(eng.get(), "\"\\uD8\""), 1, "truncated \\u -> serialization_error");
         });
 
         test("json_reader_lone_surrogate_becomes_replacement_char", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Lone high surrogate must become U+FFFD (valid UTF-8), not WTF-8.
             serialization::json_archive_reader reader("\"\\uD800\"", eng.get());
             std::string s = reader.read_value().as<std::string>();
@@ -997,7 +997,7 @@ public:
         });
 
         test("json_reader_valid_surrogate_pair", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // U+1F600 (grinning face) as a UTF-16 surrogate pair -> 4-byte UTF-8.
             serialization::json_archive_reader reader("\"\\uD83D\\uDE00\"", eng.get());
             std::string s = reader.read_value().as<std::string>();
@@ -1005,7 +1005,7 @@ public:
         });
 
         test("json_string_escapes_and_utf8_roundtrip", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Covers string escapes (quotes, backslash, control chars) and multi-byte UTF-8 roundtrip.
             std::string original = "a\"b\\c\nd\te\xC3\xA9z";
             std::string json = to_json(*eng, original);
@@ -1014,7 +1014,7 @@ public:
         });
 
         test("json_infinity_roundtrips", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Writer emits 1e999 as the infinity sentinel; reader treats from_chars result_out_of_range as inf.
             double inf = std::numeric_limits<double>::infinity();
             std::string json = to_json(*eng, inf);
@@ -1024,7 +1024,7 @@ public:
 
         // weak_ptr serialized before its shared_ptr owner must round-trip (forward ref).
         test("weak_ptr_forward_reference_json", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto shared = std::make_shared<sp_simple_data>();
             shared->value = 77;
             std::weak_ptr<sp_simple_data> weak = shared;
@@ -1052,7 +1052,7 @@ public:
         });
 
         test("weak_ptr_forward_reference_binary", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto shared = std::make_shared<sp_simple_data>();
             shared->value = 88;
             std::weak_ptr<sp_simple_data> weak = shared;

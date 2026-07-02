@@ -14,7 +14,7 @@ public:
     
     void forge_tests() override {
         test("check_function_registration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register standard conversions
             engine->add_standard_conversions();
@@ -48,7 +48,7 @@ public:
         // element with a wild (uninitialized) engine pointer. Observable in reference mode by
         // the engine the pushed element ends up carrying.
         test("move_preserves_engine_ref", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             script_value holder = script_value::make_array(nullptr, eng.get());
             auto& backing = const_cast<script_array&>(holder.as_array());
 

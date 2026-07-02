@@ -10,13 +10,13 @@ public:
     
     void forge_tests() override {
         test("no_capture_lambda", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("[](auto x) -> auto { return x + 1; }(5)");
             check_eq(result.as<int>(), 6);
         });
         
         test("empty_default_capture", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             try {
                 auto result = eng->execute("[=](auto x) -> auto { return x + 1; }(5)");
                 check_eq(result.as<int>(), 6);
@@ -26,7 +26,7 @@ public:
         });
 
         test("capture_all_by_value", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             std::string script = R"(
                 auto x = 10;
@@ -49,7 +49,7 @@ public:
         });
 
         test("capture_all_by_reference", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             std::string script = R"(
                 auto a = 1;
@@ -72,7 +72,7 @@ public:
         });
 
         test("mixed_capture_value_default_with_ref", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             std::string script = R"(
                 auto x = 10;
@@ -98,7 +98,7 @@ public:
         });
 
         test("explicit_captures", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             std::string script = R"(
                 auto x = 10;
@@ -119,7 +119,7 @@ public:
         });
 
         test("reference_capture_modifies_original", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             std::string script = R"(
                 auto counter = 0;
@@ -139,7 +139,7 @@ public:
 
         // Debug test - simple case
         test("debug_simple_default_capture", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // This is the simplest possible test of [=]
             auto result = eng->execute(R"(
@@ -151,7 +151,7 @@ public:
 
         // Debug test - parameter only
         test("debug_parameter_with_default_capture", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             
             // Test [=] with only parameter usage
             try {

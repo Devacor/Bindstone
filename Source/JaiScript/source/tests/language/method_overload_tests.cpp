@@ -16,7 +16,7 @@ public:
     void forge_tests() override {
 
         test("overload_by_arity", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Calc {
                     int add(int a) { return a + 100; }
@@ -29,7 +29,7 @@ public:
         });
 
         test("overload_by_type", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Printer {
                     string render(int x) { return "int"; }
@@ -43,7 +43,7 @@ public:
 
         // Overload sets must survive a reload (rebuild, not collapse to last-declared).
         test("overload_set_survives_reload", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             const char* def = R"(
                 class Calc {
                     int add(int a) { return a + 100; }

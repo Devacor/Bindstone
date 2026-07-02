@@ -2,6 +2,7 @@
 #include <jaiscript/stdlib/containers.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/class_registry.hpp>
+#include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <stdexcept>
 #include <sstream>
@@ -23,6 +24,18 @@ namespace {
     }
     inline checked_result<script_value> int_overflow_sv(const char* msg) {
         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
+    }
+
+    // A handle's backend_state is always interpreter-owned here: an engine's backend
+    // is fixed before its first execute, so no other backend can have populated it.
+    interpreter_coroutine_state& coroutine_state(coroutine_handle& handle) {
+        auto* state = static_cast<interpreter_coroutine_state*>(handle.backend_state());
+        if (!state) {
+            auto owned = std::make_unique<interpreter_coroutine_state>();
+            state = owned.get();
+            handle.set_backend_state(std::move(owned));
+        }
+        return *state;
     }
 }
 
@@ -121,7 +134,7 @@ static bool is_element_type_compatible(
 
 // Helper to convert element if needed (e.g., int -> float for array<float>)
 static script_value convert_array_element(
-    interpreter* interp,
+    engine* eng,
     const script_value& element,
     type_info_ptr element_type
 ) {
@@ -144,24 +157,14 @@ static script_value convert_array_element(
     // Numeric conversions
     if (target_type == script_value_type::jai_int_type &&
         elem_type == script_value_type::jai_float_type) {
-        return interp->make_value(static_cast<script_int>(actual_element.unchecked_as_float()));
+        return script_value(static_cast<script_int>(actual_element.unchecked_as_float()), eng);
     }
     if (target_type == script_value_type::jai_float_type &&
         elem_type == script_value_type::jai_int_type) {
-        return interp->make_value(static_cast<script_float>(actual_element.unchecked_as_int()));
+        return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
     }
 
     return actual_element.clone();
-}
-
-// Helper to clone a value for field assignment - respects shared_ptr reference semantics
-static script_value clone_for_assignment(const script_value& value) {
-    // shared_ptr types should NOT be cloned - they have reference semantics
-    auto type_info = value.get_type_info();
-    if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
-        return value;  // Share reference, don't clone
-    }
-    return value.clone();
 }
 
 // Capture semantics: C++-backed objects (make_object wrappers, raw cpp holders) are
@@ -382,17 +385,17 @@ static checked_result<void> validate_container_homogeneous(const script_value& c
 }
 
 // Initialize built-in method registries with interned method names for O(1) lookup
-void interpreter::init_builtin_methods() {
+void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_method_registries& out) {
     // Array methods
-    array_methods_ = {
-        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+    out.array_methods = {
+        {symbolizer->intern("size"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.unchecked_as_array().size()));
+        return ctx.make_value(static_cast<script_int>(self.unchecked_as_array().size()));
     }},
 
-        {string_symbolizer_->intern("push"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("push"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "push() takes exactly one argument");
         }
@@ -407,8 +410,8 @@ void interpreter::init_builtin_methods() {
             std::string value_type = get_value_type_name(args[0]);
             std::string expected_type = get_type_info_name(element_type);
             // Intern the type names for the error message
-            uint64_t value_type_id = interp->get_string_symbolizer()->intern(value_type);
-            uint64_t expected_type_id = interp->get_string_symbolizer()->intern(expected_type);
+            uint64_t value_type_id = ctx.get_string_symbolizer()->intern(value_type);
+            uint64_t expected_type_id = ctx.get_string_symbolizer()->intern(expected_type);
             return checked_result<script_value>(
                 make_error_code(runtime_error_code::array_element_type_mismatch),
                 "Cannot push '{0}' to array<{1}>",
@@ -416,14 +419,14 @@ void interpreter::init_builtin_methods() {
         }
 
         // Convert element if needed (e.g., int -> float for array<float>)
-        script_value converted = convert_array_element(interp, args[0], element_type);
+        script_value converted = convert_array_element(ctx.get_engine(), args[0], element_type);
 
         auto& arrayPtr = self.unchecked_get_array_storage();
         arrayPtr->push_back(std::move(converted));
-        return interp->make_value();
+        return ctx.make_value();
     }},
 
-        {string_symbolizer_->intern("pop"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("pop"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pop() takes no arguments");
         }
@@ -436,23 +439,23 @@ void interpreter::init_builtin_methods() {
         return last;
     }},
 
-        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("empty"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
         }
-        return interp->make_value(self.unchecked_as_array().empty());
+        return ctx.make_value(self.unchecked_as_array().empty());
     }},
 
-        {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("clear"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
         auto& arrayPtr = self.unchecked_get_array_storage();
         arrayPtr->clear();
-        return interp->make_value();
+        return ctx.make_value();
     }},
 
-        {string_symbolizer_->intern("front"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("front"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "front() takes no arguments");
         }
@@ -463,7 +466,7 @@ void interpreter::init_builtin_methods() {
         return arr.front();
     }},
 
-        {string_symbolizer_->intern("back"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("back"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "back() takes no arguments");
         }
@@ -474,46 +477,46 @@ void interpreter::init_builtin_methods() {
         return arr.back();
     }},
 
-        {string_symbolizer_->intern("index_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("index_of"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "index_of() takes exactly one argument");
         }
         const auto& arr = self.unchecked_as_array();
         for (size_t i = 0; i < arr.size(); ++i) {
             if (arr[i] == args[0]) {
-                return interp->make_value(static_cast<script_int>(i));
+                return ctx.make_value(static_cast<script_int>(i));
             }
         }
-        return interp->make_value(static_cast<script_int>(-1));
+        return ctx.make_value(static_cast<script_int>(-1));
     }},
 
-        {string_symbolizer_->intern("has"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("has"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "has() takes exactly one argument");
         }
         const auto& arr = self.unchecked_as_array();
         for (const auto& elem : arr) {
             if (elem == args[0]) {
-                return interp->make_value(true);
+                return ctx.make_value(true);
             }
         }
-        return interp->make_value(false);
+        return ctx.make_value(false);
     }},
 
-        {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("contains"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
         }
         const auto& arr = self.unchecked_as_array();
         for (const auto& elem : arr) {
             if (elem == args[0]) {
-                return interp->make_value(true);
+                return ctx.make_value(true);
             }
         }
-        return interp->make_value(false);
+        return ctx.make_value(false);
     }},
 
-        {string_symbolizer_->intern("first"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("first"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "first() takes no arguments");
         }
@@ -524,7 +527,7 @@ void interpreter::init_builtin_methods() {
         return arr.front();
     }},
 
-        {string_symbolizer_->intern("last"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("last"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "last() takes no arguments");
         }
@@ -535,14 +538,14 @@ void interpreter::init_builtin_methods() {
         return arr.back();
     }},
 
-        {string_symbolizer_->intern("length"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("length"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.unchecked_as_array().size()));
+        return ctx.make_value(static_cast<script_int>(self.unchecked_as_array().size()));
     }},
 
-        {string_symbolizer_->intern("slice"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("slice"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 2) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "slice() takes exactly two arguments");
         }
@@ -563,7 +566,7 @@ void interpreter::init_builtin_methods() {
 
         if (start > end) start = end;
 
-        script_value result = script_value::make_array(nullptr, interp->get_engine());
+        script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& resultPtr = result.unchecked_get_array_storage();
         for (script_int i = start; i < end; ++i) {
             resultPtr->push_back(arr[i].clone());
@@ -571,7 +574,7 @@ void interpreter::init_builtin_methods() {
         return result;
     }},
 
-        {string_symbolizer_->intern("filter"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("filter"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "filter() takes exactly one argument");
         }
@@ -583,7 +586,7 @@ void interpreter::init_builtin_methods() {
         // storage), reallocating the buffer and invalidating the iterator.
         const std::vector<script_value> arr = self.unchecked_as_array();
         const auto& func = args[0].unchecked_as_function();
-        script_value result = script_value::make_array(nullptr, interp->get_engine());
+        script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& resultPtr = result.unchecked_get_array_storage();
 
         for (const auto& elem : arr) {
@@ -598,7 +601,7 @@ void interpreter::init_builtin_methods() {
         return result;
     }},
 
-        {string_symbolizer_->intern("sort"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("sort"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() > 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "sort() takes zero or one argument");
         }
@@ -639,19 +642,19 @@ void interpreter::init_builtin_methods() {
             });
         }
         *arrPtr = std::move(tmp);
-        return interp->make_value();
+        return ctx.make_value();
     }},
 
-        {string_symbolizer_->intern("reverse"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("reverse"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
         }
         auto& arrPtr = self.unchecked_get_array_storage();
         std::reverse(arrPtr->begin(), arrPtr->end());
-        return interp->make_value();
+        return ctx.make_value();
     }},
 
-        {string_symbolizer_->intern("remove"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("remove"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove() takes exactly one argument");
         }
@@ -662,14 +665,14 @@ void interpreter::init_builtin_methods() {
         script_int index = args[0].unchecked_as_int();
 
         if (index < 0 || index >= static_cast<script_int>(arrPtr->size())) {
-            return interp->make_value(false);
+            return ctx.make_value(false);
         }
 
         arrPtr->erase(arrPtr->begin() + index);
-        return interp->make_value(true);
+        return ctx.make_value(true);
     }},
 
-        {string_symbolizer_->intern("remove_if"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("remove_if"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_if() takes exactly one argument");
         }
@@ -700,10 +703,10 @@ void interpreter::init_builtin_methods() {
             }
         }
         *arrPtr = std::move(kept);
-        return interp->make_value(removed_count);
+        return ctx.make_value(removed_count);
     }},
 
-        {string_symbolizer_->intern("join"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("join"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() > 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "join() takes 0 or 1 argument (separator)");
         }
@@ -744,58 +747,58 @@ void interpreter::init_builtin_methods() {
             }
         }
 
-        return interp->make_value(std::move(result));
+        return ctx.make_value(std::move(result));
     }}
     };
 
     // Map methods
-    map_methods_ = {
-        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+    out.map_methods = {
+        {symbolizer->intern("size"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.unchecked_as_map().size()));
+        return ctx.make_value(static_cast<script_int>(self.unchecked_as_map().size()));
     }},
 
-        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("empty"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
         }
-        return interp->make_value(self.unchecked_as_map().empty());
+        return ctx.make_value(self.unchecked_as_map().empty());
     }},
 
-        {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("clear"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
         auto& mapPtr = self.unchecked_get_map_storage();
         mapPtr->clear();
-        return interp->make_value();
+        return ctx.make_value();
     }},
 
-        {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("contains"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
         }
         const auto& map = self.unchecked_as_map();
-        return interp->make_value(map.find(args[0]) != map.end());
+        return ctx.make_value(map.find(args[0]) != map.end());
     }},
 
-        {string_symbolizer_->intern("erase"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("erase"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "erase() takes exactly one argument");
         }
         auto& mapPtr = self.unchecked_get_map_storage();
         mapPtr->erase(args[0]);
-        return interp->make_value();
+        return ctx.make_value();
     }},
 
-        {string_symbolizer_->intern("keys"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("keys"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "keys() takes no arguments");
         }
         const auto& map = self.unchecked_as_map();
-        script_value result = script_value::make_array(nullptr, interp->get_engine());
+        script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
@@ -804,12 +807,12 @@ void interpreter::init_builtin_methods() {
         return result;
     }},
 
-        {string_symbolizer_->intern("values"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("values"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "values() takes no arguments");
         }
         const auto& map = self.unchecked_as_map();
-        script_value result = script_value::make_array(nullptr, interp->get_engine());
+        script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
@@ -818,15 +821,15 @@ void interpreter::init_builtin_methods() {
         return result;
     }},
 
-        {string_symbolizer_->intern("has"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("has"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "has() takes exactly one argument");
         }
         const auto& map = self.unchecked_as_map();
-        return interp->make_value(map.find(args[0]) != map.end());
+        return ctx.make_value(map.find(args[0]) != map.end());
     }},
 
-        {string_symbolizer_->intern("get"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("get"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 2) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "get() takes exactly two arguments (key, default)");
         }
@@ -838,14 +841,14 @@ void interpreter::init_builtin_methods() {
         return args[1];  // Return default value
     }},
 
-        {string_symbolizer_->intern("length"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("length"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
         }
-        return interp->make_value(static_cast<script_int>(self.unchecked_as_map().size()));
+        return ctx.make_value(static_cast<script_int>(self.unchecked_as_map().size()));
     }},
 
-        {string_symbolizer_->intern("remove"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("remove"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove() takes exactly one argument");
         }
@@ -853,12 +856,12 @@ void interpreter::init_builtin_methods() {
         auto it = mapPtr->find(args[0]);
         if (it != mapPtr->end()) {
             mapPtr->erase(it);
-            return interp->make_value(true);
+            return ctx.make_value(true);
         }
-        return interp->make_value(false);
+        return ctx.make_value(false);
     }},
 
-        {string_symbolizer_->intern("remove_if"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("remove_if"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_if() takes exactly one argument");
         }
@@ -883,10 +886,10 @@ void interpreter::init_builtin_methods() {
                 ++it;
             }
         }
-        return interp->make_value(removed_count);
+        return ctx.make_value(removed_count);
     }},
 
-        {string_symbolizer_->intern("filter"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("filter"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "filter() takes exactly one argument");
         }
@@ -896,7 +899,7 @@ void interpreter::init_builtin_methods() {
 
         const auto& map = self.unchecked_as_map();
         const auto& predicate = args[0].unchecked_as_function();
-        script_value result = script_value::make_map(nullptr, nullptr, interp->get_engine());
+        script_value result = script_value::make_map(nullptr, nullptr, ctx.get_engine());
         auto& resultPtr = result.unchecked_get_map_storage();
 
         for (const auto& [key, value] : map) {
@@ -912,18 +915,18 @@ void interpreter::init_builtin_methods() {
         return result;
     }},
 
-        {string_symbolizer_->intern("to_array"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("to_array"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_array() takes no arguments");
         }
         const auto& map = self.unchecked_as_map();
-        script_value result = script_value::make_array(nullptr, interp->get_engine());
+        script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& arrayPtr = result.unchecked_get_array_storage();
         arrayPtr->reserve(map.size());
 
         // Return array of [key, value] pairs
         for (const auto& [key, value] : map) {
-            script_value pair = script_value::make_array(nullptr, interp->get_engine());
+            script_value pair = script_value::make_array(nullptr, ctx.get_engine());
             auto& pairPtr = pair.unchecked_get_array_storage();
             pairPtr->push_back(key.clone());
             pairPtr->push_back(value.clone());
@@ -935,33 +938,33 @@ void interpreter::init_builtin_methods() {
 
     // String methods - enable str.length(), str.substr(), etc.
     // Observer methods return values; mutating methods modify in place and return self
-    string_methods_ = {
+    out.string_methods = {
         // ============================================================
         // Observer methods (non-mutating)
         // ============================================================
 
-        {string_symbolizer_->intern("length"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("length"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
             }
-            return interp->make_value(static_cast<script_int>(self.unchecked_as_string().size()));
+            return ctx.make_value(static_cast<script_int>(self.unchecked_as_string().size()));
         }},
 
-        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("size"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
             }
-            return interp->make_value(static_cast<script_int>(self.unchecked_as_string().size()));
+            return ctx.make_value(static_cast<script_int>(self.unchecked_as_string().size()));
         }},
 
-        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("empty"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
             }
-            return interp->make_value(self.unchecked_as_string().empty());
+            return ctx.make_value(self.unchecked_as_string().empty());
         }},
 
-        {string_symbolizer_->intern("at"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("at"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "at() takes exactly one argument");
             }
@@ -981,10 +984,10 @@ void interpreter::init_builtin_methods() {
             }
 
             // Return single character as string
-            return interp->make_value(std::string(1, str[static_cast<size_t>(idx)]));
+            return ctx.make_value(std::string(1, str[static_cast<size_t>(idx)]));
         }},
 
-        {string_symbolizer_->intern("front"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("front"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "front() takes no arguments");
             }
@@ -992,10 +995,10 @@ void interpreter::init_builtin_methods() {
             if (str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "front() called on empty string");
             }
-            return interp->make_value(std::string(1, str.front()));
+            return ctx.make_value(std::string(1, str.front()));
         }},
 
-        {string_symbolizer_->intern("back"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("back"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "back() takes no arguments");
             }
@@ -1003,10 +1006,10 @@ void interpreter::init_builtin_methods() {
             if (str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "back() called on empty string");
             }
-            return interp->make_value(std::string(1, str.back()));
+            return ctx.make_value(std::string(1, str.back()));
         }},
 
-        {string_symbolizer_->intern("substr"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("substr"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "substr() takes 1 or 2 arguments (start, [length])");
             }
@@ -1021,7 +1024,7 @@ void interpreter::init_builtin_methods() {
             if (start < 0) start += len;
             if (start < 0) start = 0;
             if (start >= len) {
-                return interp->make_value(std::string(""));
+                return ctx.make_value(std::string(""));
             }
 
             if (args.size() == 2) {
@@ -1030,16 +1033,16 @@ void interpreter::init_builtin_methods() {
                 }
                 script_int sub_len = args[1].unchecked_as_int();
                 if (sub_len < 0) sub_len = 0;
-                return interp->make_value(str.substr(static_cast<size_t>(start), static_cast<size_t>(sub_len)));
+                return ctx.make_value(str.substr(static_cast<size_t>(start), static_cast<size_t>(sub_len)));
             }
-            return interp->make_value(str.substr(static_cast<size_t>(start)));
+            return ctx.make_value(str.substr(static_cast<size_t>(start)));
         }},
 
         // ============================================================
         // Search methods
         // ============================================================
 
-        {string_symbolizer_->intern("find"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("find"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find() takes 1 or 2 arguments (substr, [start])");
             }
@@ -1063,12 +1066,12 @@ void interpreter::init_builtin_methods() {
 
             auto pos = str.find(search, start_pos);
             if (pos == std::string::npos) {
-                return interp->make_value(static_cast<script_int>(-1));
+                return ctx.make_value(static_cast<script_int>(-1));
             }
-            return interp->make_value(static_cast<script_int>(pos));
+            return ctx.make_value(static_cast<script_int>(pos));
         }},
 
-        {string_symbolizer_->intern("rfind"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("rfind"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "rfind() takes 1 or 2 arguments (substr, [start])");
             }
@@ -1087,19 +1090,19 @@ void interpreter::init_builtin_methods() {
                 script_int start = args[1].unchecked_as_int();
                 if (start < 0) start += len;
                 if (start < 0) {
-                    return interp->make_value(static_cast<script_int>(-1));
+                    return ctx.make_value(static_cast<script_int>(-1));
                 }
                 start_pos = static_cast<size_t>(start);
             }
 
             auto pos = str.rfind(search, start_pos);
             if (pos == std::string::npos) {
-                return interp->make_value(static_cast<script_int>(-1));
+                return ctx.make_value(static_cast<script_int>(-1));
             }
-            return interp->make_value(static_cast<script_int>(pos));
+            return ctx.make_value(static_cast<script_int>(pos));
         }},
 
-        {string_symbolizer_->intern("find_first_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("find_first_of"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_first_of() takes 1 or 2 arguments (chars, [start])");
             }
@@ -1123,12 +1126,12 @@ void interpreter::init_builtin_methods() {
 
             auto pos = str.find_first_of(chars, start_pos);
             if (pos == std::string::npos) {
-                return interp->make_value(static_cast<script_int>(-1));
+                return ctx.make_value(static_cast<script_int>(-1));
             }
-            return interp->make_value(static_cast<script_int>(pos));
+            return ctx.make_value(static_cast<script_int>(pos));
         }},
 
-        {string_symbolizer_->intern("find_last_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("find_last_of"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_last_of() takes 1 or 2 arguments (chars, [start])");
             }
@@ -1147,19 +1150,19 @@ void interpreter::init_builtin_methods() {
                 script_int start = args[1].unchecked_as_int();
                 if (start < 0) start += len;
                 if (start < 0) {
-                    return interp->make_value(static_cast<script_int>(-1));
+                    return ctx.make_value(static_cast<script_int>(-1));
                 }
                 start_pos = static_cast<size_t>(start);
             }
 
             auto pos = str.find_last_of(chars, start_pos);
             if (pos == std::string::npos) {
-                return interp->make_value(static_cast<script_int>(-1));
+                return ctx.make_value(static_cast<script_int>(-1));
             }
-            return interp->make_value(static_cast<script_int>(pos));
+            return ctx.make_value(static_cast<script_int>(pos));
         }},
 
-        {string_symbolizer_->intern("find_first_not_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("find_first_not_of"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_first_not_of() takes 1 or 2 arguments (chars, [start])");
             }
@@ -1183,12 +1186,12 @@ void interpreter::init_builtin_methods() {
 
             auto pos = str.find_first_not_of(chars, start_pos);
             if (pos == std::string::npos) {
-                return interp->make_value(static_cast<script_int>(-1));
+                return ctx.make_value(static_cast<script_int>(-1));
             }
-            return interp->make_value(static_cast<script_int>(pos));
+            return ctx.make_value(static_cast<script_int>(pos));
         }},
 
-        {string_symbolizer_->intern("find_last_not_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("find_last_not_of"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_last_not_of() takes 1 or 2 arguments (chars, [start])");
             }
@@ -1207,19 +1210,19 @@ void interpreter::init_builtin_methods() {
                 script_int start = args[1].unchecked_as_int();
                 if (start < 0) start += len;
                 if (start < 0) {
-                    return interp->make_value(static_cast<script_int>(-1));
+                    return ctx.make_value(static_cast<script_int>(-1));
                 }
                 start_pos = static_cast<size_t>(start);
             }
 
             auto pos = str.find_last_not_of(chars, start_pos);
             if (pos == std::string::npos) {
-                return interp->make_value(static_cast<script_int>(-1));
+                return ctx.make_value(static_cast<script_int>(-1));
             }
-            return interp->make_value(static_cast<script_int>(pos));
+            return ctx.make_value(static_cast<script_int>(pos));
         }},
 
-        {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("contains"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
             }
@@ -1228,10 +1231,10 @@ void interpreter::init_builtin_methods() {
             }
             const auto& str = self.unchecked_as_string();
             const auto& search = args[0].unchecked_as_string();
-            return interp->make_value(str.find(search) != std::string::npos);
+            return ctx.make_value(str.find(search) != std::string::npos);
         }},
 
-        {string_symbolizer_->intern("starts_with"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("starts_with"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "starts_with() takes exactly one argument");
             }
@@ -1241,12 +1244,12 @@ void interpreter::init_builtin_methods() {
             const auto& str = self.unchecked_as_string();
             const auto& prefix = args[0].unchecked_as_string();
             if (prefix.size() > str.size()) {
-                return interp->make_value(false);
+                return ctx.make_value(false);
             }
-            return interp->make_value(str.compare(0, prefix.size(), prefix) == 0);
+            return ctx.make_value(str.compare(0, prefix.size(), prefix) == 0);
         }},
 
-        {string_symbolizer_->intern("ends_with"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("ends_with"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "ends_with() takes exactly one argument");
             }
@@ -1256,12 +1259,12 @@ void interpreter::init_builtin_methods() {
             const auto& str = self.unchecked_as_string();
             const auto& suffix = args[0].unchecked_as_string();
             if (suffix.size() > str.size()) {
-                return interp->make_value(false);
+                return ctx.make_value(false);
             }
-            return interp->make_value(str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0);
+            return ctx.make_value(str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0);
         }},
 
-        {string_symbolizer_->intern("count"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("count"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "count() takes exactly one argument");
             }
@@ -1272,7 +1275,7 @@ void interpreter::init_builtin_methods() {
             const auto& search = args[0].unchecked_as_string();
 
             if (search.empty()) {
-                return interp->make_value(static_cast<script_int>(0));
+                return ctx.make_value(static_cast<script_int>(0));
             }
 
             script_int count = 0;
@@ -1281,16 +1284,16 @@ void interpreter::init_builtin_methods() {
                 ++count;
                 pos += search.size();  // Non-overlapping
             }
-            return interp->make_value(count);
+            return ctx.make_value(count);
         }},
 
         // ============================================================
         // Parsing methods
         // ============================================================
 
-        {string_symbolizer_->intern("to_int"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("to_int"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             // to_int(default=null, base=10)
-            script_value default_val(std::monostate{}, interp->get_engine());
+            script_value default_val(std::monostate{}, ctx.get_engine());
             int base = 10;
 
             if (args.size() > 0) {
@@ -1320,15 +1323,15 @@ void interpreter::init_builtin_methods() {
                 if (pos != str.size()) {
                     return default_val;
                 }
-                return interp->make_value(static_cast<script_int>(val));
+                return ctx.make_value(static_cast<script_int>(val));
             } catch (...) {
                 return default_val;
             }
         }},
 
-        {string_symbolizer_->intern("to_float"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("to_float"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             // to_float(default=null)
-            script_value default_val(std::monostate{}, interp->get_engine());
+            script_value default_val(std::monostate{}, ctx.get_engine());
 
             if (args.size() > 0) {
                 default_val = args[0];
@@ -1347,7 +1350,7 @@ void interpreter::init_builtin_methods() {
                 if (pos != str.size()) {
                     return default_val;
                 }
-                return interp->make_value(val);
+                return ctx.make_value(val);
             } catch (...) {
                 return default_val;
             }
@@ -1357,7 +1360,7 @@ void interpreter::init_builtin_methods() {
         // Mutating methods (modify in place, return self for chaining)
         // ============================================================
 
-        {string_symbolizer_->intern("to_lower"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("to_lower"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_lower() takes no arguments");
             }
@@ -1370,7 +1373,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("to_upper"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("to_upper"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_upper() takes no arguments");
             }
@@ -1383,7 +1386,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("trim"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("trim"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             std::string chars = " \t\r\n";
             if (args.size() > 0) {
                 if (!args[0].is_string()) {
@@ -1406,7 +1409,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("trim_left"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("trim_left"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             std::string chars = " \t\r\n";
             if (args.size() > 0) {
                 if (!args[0].is_string()) {
@@ -1428,7 +1431,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("trim_right"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("trim_right"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             std::string chars = " \t\r\n";
             if (args.size() > 0) {
                 if (!args[0].is_string()) {
@@ -1450,7 +1453,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("pad_left"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("pad_left"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_left() takes 1 or 2 arguments (target_len, [char])");
             }
@@ -1481,7 +1484,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("pad_right"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("pad_right"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_right() takes 1 or 2 arguments (target_len, [char])");
             }
@@ -1512,7 +1515,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("pad_center"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("pad_center"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_center() takes 1 or 2 arguments (target_len, [char])");
             }
@@ -1547,7 +1550,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("replace_first"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("replace_first"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_first() takes exactly 2 arguments (old, new)");
             }
@@ -1569,7 +1572,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("replace_last"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("replace_last"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_last() takes exactly 2 arguments (old, new)");
             }
@@ -1591,7 +1594,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("replace_all"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("replace_all"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_all() takes exactly 2 arguments (old, new)");
             }
@@ -1614,7 +1617,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("insert"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("insert"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "insert() takes exactly 2 arguments (pos, text)");
             }
@@ -1640,7 +1643,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("erase"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("erase"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1 || args.size() > 2) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "erase() takes 1 or 2 arguments (pos, [count])");
             }
@@ -1672,7 +1675,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("remove_prefix"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("remove_prefix"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_prefix() takes exactly one argument");
             }
@@ -1690,7 +1693,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("remove_suffix"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("remove_suffix"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_suffix() takes exactly one argument");
             }
@@ -1708,7 +1711,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("reverse"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("reverse"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
             }
@@ -1717,7 +1720,7 @@ void interpreter::init_builtin_methods() {
             return self;
         }},
 
-        {string_symbolizer_->intern("repeat"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("repeat"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "repeat() takes exactly one argument");
             }
@@ -1745,7 +1748,7 @@ void interpreter::init_builtin_methods() {
         // Split method (returns array)
         // ============================================================
 
-        {string_symbolizer_->intern("split"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("split"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() > 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "split() takes 0 or 1 argument (delimiter)");
             }
@@ -1761,7 +1764,7 @@ void interpreter::init_builtin_methods() {
             const auto& str = self.unchecked_as_string();
 
             // Create array with string element type
-            auto eng = interp->get_engine();
+            auto eng = ctx.get_engine();
             if (!eng) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Engine reference expired");
             }
@@ -1772,16 +1775,16 @@ void interpreter::init_builtin_methods() {
             if (delim.empty()) {
                 // Split into individual characters
                 for (char c : str) {
-                    result.push_back(interp->make_value(std::string(1, c)));
+                    result.push_back(ctx.make_value(std::string(1, c)));
                 }
             } else {
                 size_t start = 0;
                 size_t end;
                 while ((end = str.find(delim, start)) != std::string::npos) {
-                    result.push_back(interp->make_value(str.substr(start, end - start)));
+                    result.push_back(ctx.make_value(str.substr(start, end - start)));
                     start = end + delim.size();
                 }
-                result.push_back(interp->make_value(str.substr(start)));
+                result.push_back(ctx.make_value(str.substr(start)));
             }
 
             return array_val;
@@ -1789,8 +1792,8 @@ void interpreter::init_builtin_methods() {
     };
 
     // Weak pointer methods
-    weak_ptr_methods_ = {
-        {string_symbolizer_->intern("lock"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+    out.weak_ptr_methods = {
+        {symbolizer->intern("lock"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "lock() takes no arguments");
         }
@@ -1803,7 +1806,7 @@ void interpreter::init_builtin_methods() {
         if (auto locked = weak_ptr.lock()) {
             // Reconstruct a script_value from the locked object_holder
             // IMPORTANT: Reuse the same std::shared_ptr<object_holder> to maintain reference semantics
-            script_value result(std::monostate{}, interp->get_engine());
+            script_value result(std::monostate{}, ctx.get_engine());
 
             // Preserve the original type info (including shared_ptr marker if present)
             auto weak_type_info = self.get_type_info();
@@ -1811,7 +1814,7 @@ void interpreter::init_builtin_methods() {
                 result.set_type_info(weak_type_info->element_type());
             } else {
                 // Fallback: use the object type
-                if (auto eng = interp->get_engine()) {
+                if (auto eng = ctx.get_engine()) {
                     result.set_type_info(eng->get_type_info_object(locked->type_id));
                 }
             }
@@ -1823,11 +1826,11 @@ void interpreter::init_builtin_methods() {
             return result;
         } else {
             // weak_ptr is expired, return null
-            return interp->make_value();
+            return ctx.make_value();
         }
     }},
 
-        {string_symbolizer_->intern("expired"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("expired"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "expired() takes no arguments");
         }
@@ -1837,10 +1840,10 @@ void interpreter::init_builtin_methods() {
         }
 
         auto weak_ptr = self.get_weak_ptr();
-        return interp->make_value(weak_ptr.expired());
+        return ctx.make_value(weak_ptr.expired());
     }},
 
-        {string_symbolizer_->intern("reset"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("reset"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reset() takes no arguments");
         }
@@ -1856,7 +1859,7 @@ void interpreter::init_builtin_methods() {
         return self; // Return the reset weak_ptr
     }},
 
-        {string_symbolizer_->intern("same_as"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("same_as"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         // Pointer identity comparison for weak_ptr: do they reference the same object?
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
@@ -1875,42 +1878,42 @@ void interpreter::init_builtin_methods() {
 
             // Both expired -> same
             if (self_expired && other_expired) {
-                return interp->make_value(true);
+                return ctx.make_value(true);
             }
             // One expired, one not -> not same
             if (self_expired || other_expired) {
-                return interp->make_value(false);
+                return ctx.make_value(false);
             }
 
             // Both valid - compare locked pointers
             auto self_locked = self_weak.lock();
             auto other_locked = other_weak.lock();
-            return interp->make_value(self_locked.get() == other_locked.get());
+            return ctx.make_value(self_locked.get() == other_locked.get());
         }
 
         // Handle other being shared_ptr or null
         if (other.is_null()) {
-            return interp->make_value(self_expired);
+            return ctx.make_value(self_expired);
         }
 
         if (!other.is_object()) {
-            return interp->make_value(false);
+            return ctx.make_value(false);
         }
 
         // Compare weak_ptr with shared_ptr/object
         if (self_expired) {
-            return interp->make_value(false);
+            return ctx.make_value(false);
         }
 
         auto self_locked = self_weak.lock();
         auto other_holder = const_cast<script_value&>(other).get_object_holder();
-        return interp->make_value(self_locked.get() == other_holder.get());
+        return ctx.make_value(self_locked.get() == other_holder.get());
     }}
     };
 
     // Shared pointer methods
-    shared_ptr_methods_ = {
-        {string_symbolizer_->intern("reset"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+    out.shared_ptr_methods = {
+        {symbolizer->intern("reset"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reset() takes no arguments");
         }
@@ -1918,13 +1921,13 @@ void interpreter::init_builtin_methods() {
         // In JaiScript, all objects are internally shared_ptr<object_holder>
         // Reset it to null while preserving the shared_ptr type
         auto current_type_info = self.get_type_info();
-        self = interp->make_value();
+        self = ctx.make_value();
         self.set_type_info(current_type_info); // Preserve the shared_ptr<T> type
 
         return self; // Return the reset shared_ptr
     }},
 
-        {string_symbolizer_->intern("use_count"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("use_count"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "use_count() takes no arguments");
         }
@@ -1934,15 +1937,15 @@ void interpreter::init_builtin_methods() {
             if (obj_holder && obj_holder->data) {
                 // Get the use count of the underlying shared_ptr
                 long count = obj_holder->data.use_count();
-                return interp->make_value(static_cast<script_int>(count));
+                return ctx.make_value(static_cast<script_int>(count));
             }
         }
 
         // Not a valid shared_ptr
-        return interp->make_value(static_cast<script_int>(0));
+        return ctx.make_value(static_cast<script_int>(0));
     }},
 
-        {string_symbolizer_->intern("unique"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("unique"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "unique() takes no arguments");
         }
@@ -1952,15 +1955,15 @@ void interpreter::init_builtin_methods() {
             if (obj_holder && obj_holder->data) {
                 // Check if use count is 1
                 bool is_unique = (obj_holder->data.use_count() == 1);
-                return interp->make_value(is_unique);
+                return ctx.make_value(is_unique);
             }
         }
 
         // Not a valid shared_ptr
-        return interp->make_value(false);
+        return ctx.make_value(false);
     }},
 
-        {string_symbolizer_->intern("same_as"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("same_as"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         // Pointer identity comparison: are these the same underlying object?
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
@@ -1970,17 +1973,17 @@ void interpreter::init_builtin_methods() {
 
         // Both null -> same
         if (self.is_null() && other.is_null()) {
-            return interp->make_value(true);
+            return ctx.make_value(true);
         }
 
         // One null, one not -> not same
         if (self.is_null() || other.is_null()) {
-            return interp->make_value(false);
+            return ctx.make_value(false);
         }
 
         // Both must be objects
         if (!self.is_object() || !other.is_object()) {
-            return interp->make_value(false);
+            return ctx.make_value(false);
         }
 
         auto self_holder = self.get_object_holder();
@@ -1988,686 +1991,19 @@ void interpreter::init_builtin_methods() {
 
         // Compare the underlying object_holder pointers (pointer identity)
         bool same = (self_holder.get() == other_holder.get());
-        return interp->make_value(same);
+        return ctx.make_value(same);
     }}
     };
 }
 
-void environment::define(const std::string& name, const script_value& value) {
-    uint64_t id = symbolizer_->intern(name);
-    define(id, value);
-}
-
-void environment::define(const std::string& name, script_value&& value) {
-    uint64_t id = symbolizer_->intern(name);
-    define(id, std::move(value));
-}
-
-void environment::define(uint64_t id, const script_value& value) {
-    // Check if we're redefining a local variable (shadowing parent is ok)
-    if (local_ids_.count(id) > 0) {
-        // Redefining local variable - update in place via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = value;
-            return;
-        }
-    }
-
-    // New local variable - add to stable storage
-    local_storage_.push_back(value);
-    flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
-    local_ids_.insert(id);
-}
-
-void environment::define(uint64_t id, script_value&& value) {
-    // Check if we're redefining a local variable (shadowing parent is ok)
-    if (local_ids_.count(id) > 0) {
-        // Redefining local variable - update in place via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = std::move(value);
-            return;
-        }
-    }
-
-    // New local variable - add to stable storage
-    local_storage_.push_back(std::move(value));
-    flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
-    local_ids_.insert(id);
-}
-
-checked_result<script_value> environment::get(const std::string& name) const {
-    uint64_t id = symbolizer_->intern(name);
-    return get(id);
-}
-
-checked_result<script_value> environment::get(uint64_t id) const {
-    // For method environments, handle 'this' specially
-    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return this_object_;
-    }
-
-    // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return *(it->second);
-    }
-
-    // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            // Found in ancestor cache - copy to our cache and return
-            flat_lookup_[id] = parent_it->second;
-            return *(parent_it->second);
-        }
-    }
-
-    // SLOW PATH: No ancestor had it cached - do full lookup
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            // Cache for future O(1) access
-            flat_lookup_[id] = ptr;
-            return *ptr;
-        }
-    }
-
-    // Kind-specific fallback: check 'this' object fields for method environments
-    if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
-        if (id != symbolizer_->get_this_id() &&
-            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-            !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-                // Try to get field first (non-throwing)
-                const script_value& field_ref = instance->get_field(id, false);
-                if (!field_ref.is_invalid()) {
-                    return field_ref;
-                }
-
-                // Try to get method (non-throwing)
-                script_value method = instance->get_method(id, false);
-                if (!method.is_invalid()) {
-                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                    return bound_method_storage_;
-                }
-
-                // Try to get static field from class definition
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->has_static_field(id)) {
-                    return class_def->get_static_field(id);
-                }
-            }
-        }
-    }
-
-    // Kind-specific fallback: check static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        // Check static fields
-        if (class_def_->has_static_field(id)) {
-            return class_def_->get_static_field(id);
-        }
-
-        // Check static methods (for calling other static methods)
-        if (class_def_->has_static_method(id)) {
-            return class_def_->get_static_method(id);
-        }
-    }
-
-    // Not found anywhere - id is already the interned variable name
-    return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
-}
-
-checked_result<void> environment::assign(const std::string& name, const script_value& value) {
-    uint64_t id = symbolizer_->intern(name);
-    return assign(id, value);
-}
-
-checked_result<std::reference_wrapper<const script_value>> environment::get_ref(const std::string& name) const {
-    uint64_t id = symbolizer_->intern(name);
-    return get_ref(id);
-}
-
-checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id) const {
-    // For method environments, handle 'this' specially
-    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return std::cref(this_object_);
-    }
-
-    // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return std::cref(*(it->second));
-    }
-
-    // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            return std::cref(*(parent_it->second));
-        }
-    }
-
-    // SLOW PATH: Cache miss - walk parent chain
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            flat_lookup_[id] = ptr;
-            return std::cref(*ptr);
-        }
-    }
-
-    // Kind-specific fallback: check 'this' object fields for method environments
-    if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
-        if (id != symbolizer_->get_this_id() &&
-            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-            !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-                // Try to get instance field first (return const reference)
-                const script_value& inst_field_ref = instance->get_field(id, false);
-                if (!inst_field_ref.is_invalid()) {
-                    return std::cref(inst_field_ref);
-                }
-
-                // Try to get static field from class definition (return const reference)
-                auto class_def = instance->get_class_definition();
-                if (class_def) {
-                    const script_value* field_ptr = class_def->get_static_field_ptr(id);
-                    if (field_ptr) {
-                        return std::cref(*field_ptr);
-                    }
-                }
-            }
-        }
-    }
-
-    // Kind-specific fallback: check static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        const script_value* field_ptr = class_def_->get_static_field_ptr(id);
-        if (field_ptr) {
-            return std::cref(*field_ptr);
-        }
-    }
-
-    return checked_result<std::reference_wrapper<const script_value>>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
-}
-
-checked_result<std::reference_wrapper<script_value>> environment::get_ref(const std::string& name) {
-    uint64_t id = symbolizer_->intern(name);
-    return get_ref(id);
-}
-
-checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64_t id) {
-    // For method environments, handle 'this' specially (note: this is non-const so we return mutable ref)
-    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return std::ref(this_object_);
-    }
-
-    // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return std::ref(*(it->second));
-    }
-
-    // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            return std::ref(*(parent_it->second));
-        }
-    }
-
-    // SLOW PATH: Cache miss - walk parent chain
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            flat_lookup_[id] = ptr;
-            return std::ref(*ptr);
-        }
-    }
-
-    // Kind-specific fallback: check 'this' object fields for method environments
-    if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
-        if (id != symbolizer_->get_this_id() &&
-            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-            !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-                // Try to get instance field first (return non-const reference)
-                script_value& inst_field_ref = instance->get_field(id, false);
-                if (!inst_field_ref.is_invalid()) {
-                    return std::ref(inst_field_ref);
-                }
-
-                // Try to get static field from class definition (return non-const reference)
-                auto class_def = instance->get_class_definition();
-                if (class_def) {
-                    script_value* field_ptr = class_def->get_static_field_ptr(id);
-                    if (field_ptr) {
-                        return std::ref(*field_ptr);
-                    }
-                }
-            }
-        }
-    }
-
-    // Kind-specific fallback: check static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(id);
-        if (field_ptr) {
-            return std::ref(*field_ptr);
-        }
-    }
-
-    return checked_result<std::reference_wrapper<script_value>>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
-}
-
-checked_result<void> environment::assign(const std::string& name, script_value&& value) {
-    uint64_t id = symbolizer_->intern(name);
-    return assign(id, std::move(value));
-}
-
-checked_result<void> environment::assign(uint64_t id, const script_value& value) {
-    // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        *(it->second) = value;
-        return {};
-    }
-
-    // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            *(parent_it->second) = value;
-            return {};
-        }
-    }
-
-    // SLOW PATH: Cache miss - walk parent chain
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            flat_lookup_[id] = ptr;
-            *ptr = value;
-            return {};
-        }
-    }
-
-    // Kind-specific fallback: assign to 'this' object fields for method environments
-    if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
-        if (id != symbolizer_->get_this_id() &&
-            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                if (instance && instance->has_field(id)) {
-                    // Check if this is a C++ parent property that needs setter method
-                    auto class_def = instance->get_class_definition();
-                    if (class_def) {
-                        auto cpp_base = class_def->get_cpp_base_class();
-                        if (cpp_base) {
-                            uint64_t setter_id = cpp_base->get_property_setter_id(id);
-                            if (setter_id != 0) {
-                                auto setter = cpp_base->get_method(setter_id, false);
-                                if (setter.is_function()) {
-                                    std::vector<script_value> args = {this_object_, value};
-                                    auto result = setter.as_function()(args);
-                                    if (!result) {
-                                        return result.error_value();
-                                    }
-                                    return {};
-                                }
-                            }
-                        }
-                    }
-                    instance->set_field(id, clone_for_assignment(value));
-                    return {};
-                }
-            }
-        }
-    }
-
-    // Kind-specific fallback: assign to static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        if (class_def_->has_static_field(id)) {
-            if (class_def_->set_static_field(id, value.clone())) {
-                return {};
-            }
-            // Field existed but set failed - shouldn't happen, but handle gracefully
-        }
-    }
-
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
-}
-
-checked_result<void> environment::assign(uint64_t id, script_value&& value) {
-    // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        *(it->second) = std::move(value);
-        return {};
-    }
-
-    // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            *(parent_it->second) = std::move(value);
-            return {};
-        }
-    }
-
-    // SLOW PATH: Cache miss - walk parent chain
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            flat_lookup_[id] = ptr;
-            *ptr = std::move(value);
-            return {};
-        }
-    }
-
-    // Kind-specific fallback: assign to 'this' object fields for method environments
-    if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
-        if (id != symbolizer_->get_this_id() &&
-            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                if (instance && instance->has_field(id)) {
-                    // Check if this is a C++ parent property that needs setter method
-                    auto class_def = instance->get_class_definition();
-                    if (class_def) {
-                        auto cpp_base = class_def->get_cpp_base_class();
-                        if (cpp_base) {
-                            uint64_t setter_id = cpp_base->get_property_setter_id(id);
-                            if (setter_id != 0) {
-                                auto setter = cpp_base->get_method(setter_id, false);
-                                if (setter.is_function()) {
-                                    std::vector<script_value> args = {this_object_, std::move(value)};
-                                    auto result = setter.as_function()(args);
-                                    if (!result) {
-                                        return result.error_value();
-                                    }
-                                    return {};
-                                }
-                            }
-                        }
-                    }
-                    instance->set_field(id, std::move(value));
-                    return {};
-                }
-            }
-        }
-    }
-
-    // Kind-specific fallback: assign to static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        if (class_def_->has_static_field(id)) {
-            if (class_def_->set_static_field(id, std::move(value))) {
-                return {};
-            }
-            // Field existed but set failed - shouldn't happen, but handle gracefully
-        }
-    }
-
-    return checked_result<void>(
-        make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
-}
-
-bool environment::contains(const std::string& name) const {
-    uint64_t id = symbolizer_->intern(name);
-    return contains(id);
-}
-
-bool environment::contains(uint64_t id) const {
-    // Check cache first (O(1))
-    if (flat_lookup_.find(id) != flat_lookup_.end()) {
-        return true;
-    }
-
-    // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
-        if (p->flat_lookup_.find(id) != p->flat_lookup_.end()) {
-            // Found in ancestor cache - we know it exists
-            // Note: we don't cache here since contains() is just a check
-            return true;
-        }
-    }
-
-    // SLOW PATH: Cache miss - walk parent chain
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            flat_lookup_[id] = ptr;
-            return true;
-        }
-    }
-    return false;
-}
-
-std::unordered_map<std::string_view, script_value> environment::get_local_variables() const {
-    std::unordered_map<std::string_view, script_value> result;
-    // Iterate over local_ids_ set and look up values via flat_lookup_
-    for (uint64_t id : local_ids_) {
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            result[symbolizer_->get_string(id)] = *(it->second);
-        }
-    }
-    return result;
-}
-
-void environment::clear_values() {
-    // Remove local IDs from flat_lookup_
-    for (uint64_t id : local_ids_) {
-        flat_lookup_.erase(id);
-    }
-
-    // Destroy locals in REVERSE declaration order (C++ LIFO semantics): script class
-    // destructors observably fire here, and deque::clear()'s element destruction
-    // order is implementation-defined (MS STL and libstdc++ disagree).
-    while (!local_storage_.empty()) {
-        local_storage_.pop_back();
-    }
-    local_ids_.clear();
-}
-
-void environment::clear_parent_cache() {
-    // Remove non-local entries (parent/field pointers that may be stale)
-    // Keep local variable entries (which have stable pointers into local_storage_)
-    for (auto it = flat_lookup_.begin(); it != flat_lookup_.end(); ) {
-        if (local_ids_.find(it->first) == local_ids_.end()) {
-            it = flat_lookup_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-void environment::reset(std::shared_ptr<environment> new_parent) {
-    // Clear all local values first
-    clear_values();
-
-    // Validate the parent chain before setting (debug mode only)
-    validate_parent_chain(new_parent);
-
-    // Only clear cache if parent actually changed
-    // If same parent, cached pointers to parent chain remain valid
-    // This is critical for recursive functions - avoids re-walking parent chain
-    if (parent_.get() != new_parent.get()) {
-        flat_lookup_.clear();
-    }
-
-    parent_ = new_parent;
-
-    // Reset to standard kind and clear kind-specific fields
-    kind_ = env_kind::standard;
-    this_object_ = script_value::make_null(nullptr);
-    class_def_.reset();
-    bound_method_storage_ = script_value::make_null(nullptr);
-}
-
-void environment::reset_as_method(std::shared_ptr<environment> parent, script_value this_obj) {
-    // Clear all local values first
-    clear_values();
-
-    // Validate the parent chain before setting (debug mode only)
-    validate_parent_chain(parent);
-
-    // Only clear cache if parent actually changed
-    if (parent_.get() != parent.get()) {
-        flat_lookup_.clear();
-    }
-
-    parent_ = parent;
-
-    // Set to method kind with this object
-    kind_ = env_kind::method;
-    this_object_ = std::move(this_obj);
-    class_def_.reset();
-    bound_method_storage_ = script_value::make_null(nullptr);
-}
-
-void environment::reset_as_static_method(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def) {
-    // Clear all local values first
-    clear_values();
-
-    // Validate the parent chain before setting (debug mode only)
-    validate_parent_chain(parent);
-
-    // Only clear cache if parent actually changed
-    if (parent_.get() != parent.get()) {
-        flat_lookup_.clear();
-    }
-
-    parent_ = parent;
-
-    // Set to static_method kind with class definition
-    kind_ = env_kind::static_method;
-    this_object_ = script_value::make_null(nullptr);
-    class_def_ = class_def;
-    bound_method_storage_ = script_value::make_null(nullptr);
-}
-
-std::unordered_map<std::string_view, script_value> environment::get_all_variables() const {
-    // With lazy caching, we need to walk the parent chain to get all variables
-    std::unordered_map<std::string_view, script_value> allVars;
-
-    // First, get all from parent (if any)
-    if (parent_) {
-        allVars = parent_->get_all_variables();
-    }
-
-    // Then add/override with our local variables
-    for (uint64_t id : local_ids_) {
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            allVars[symbolizer_->get_string(id)] = *(it->second);
-        }
-    }
-    return allVars;
-}
-
-script_value* environment::get_value_ptr(uint64_t id) {
-    // For method environments, handle 'this' specially
-    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return &this_object_;
-    }
-
-    // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return it->second;
-    }
-
-    // FAST PATH: Iterate parent caches without function call overhead
-    // This is critical for deep recursion (Fibonacci, BST) where the same
-    // function name is looked up repeatedly at each call depth.
-    // Once any ancestor has it cached, all descendants benefit.
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            // Found in ancestor cache - copy to our cache and return
-            flat_lookup_[id] = parent_it->second;
-            return parent_it->second;
-        }
-    }
-
-    // SLOW PATH: No ancestor had it cached - do full lookup
-    // This handles first-time lookups, locals, 'this' fields, static fields, etc.
-    if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
-        if (ptr) {
-            flat_lookup_[id] = ptr;
-            return ptr;
-        }
-    }
-
-    // Kind-specific fallback: check 'this' object fields for method environments
-    if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
-        if (id != symbolizer_->get_this_id() &&
-            (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-            !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-                // Try to get instance field - get_field returns a reference
-                script_value& field_ref = instance->get_field(id, false);
-                if (!field_ref.is_invalid()) {
-                    return &field_ref;
-                }
-
-                // Try to get static field from class definition
-                auto class_def = instance->get_class_definition();
-                if (class_def) {
-                    script_value* static_ptr = class_def->get_static_field_ptr(id);
-                    if (static_ptr) {
-                        return static_ptr;
-                    }
-                }
-            }
-        }
-    }
-
-    // Kind-specific fallback: check static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(id);
-        if (field_ptr) {
-            return field_ptr;
-        }
-    }
-
-    return nullptr;
+void interpreter::init_builtin_methods() {
+    builtin_method_registries registries;
+    init_builtin_method_registries(string_symbolizer_, registries);
+    array_methods_ = std::move(registries.array_methods);
+    map_methods_ = std::move(registries.map_methods);
+    string_methods_ = std::move(registries.string_methods);
+    weak_ptr_methods_ = std::move(registries.weak_ptr_methods);
+    shared_ptr_methods_ = std::move(registries.shared_ptr_methods);
 }
 
 // interpreter implementation
@@ -2699,41 +2035,7 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
 
 // Helper to create a bound method - binds 'this' as the first argument
 script_value interpreter::create_bound_method(const script_value& this_obj, const script_value& method) {
-    auto eng = this_obj.get_engine();
-    return script_value::make_function([this_obj, method](const std::vector<script_value>& args) -> checked_result<script_value> {
-        // Create a new argument list with 'this' as the first argument
-        std::vector<script_value> method_args;
-        method_args.reserve(args.size() + 1);
-        method_args.push_back(this_obj);
-        method_args.insert(method_args.end(), args.begin(), args.end());
-
-        // Call the method with 'this' included
-        const auto& method_func = method.as_function();
-        auto result = method_func(method_args);
-
-        // If the method returned a NON-OWNING reference into its receiver (the
-        // classic chaining idiom `Counter& increment() { ...; return *this; }`
-        // produces a cpp-bound T& whose object_holder owns nothing), pin the
-        // receiver's underlying object onto the result so it survives even when
-        // the receiver was a temporary, e.g. `Counter().increment().add(5)`.
-        // Without this, the temporary receiver is freed when this bound-method
-        // closure is destroyed, leaving the returned reference dangling
-        // (a use-after-free that Release builds happened to mask).
-        if (result && this_obj.is_object()) {
-            script_value& rv = result.value();
-            if (rv.is_non_owning_object()) {
-                auto rv_holder = rv.get_object_holder();
-                auto recv_holder = this_obj.get_object_holder();
-                if (rv_holder && recv_holder) {
-                    // Prefer the receiver's owning data; if the receiver is itself a
-                    // non-owning link in the chain, propagate its existing anchor.
-                    rv_holder->keep_alive = recv_holder->data ? recv_holder->data
-                                                              : recv_holder->keep_alive;
-                }
-            }
-        }
-        return result;
-    }, eng);
+    return make_bound_method(this_obj, method);
 }
 
 // Helper to check if an expression is an lvalue (existing object that should be cloned)
@@ -2764,16 +2066,61 @@ bool interpreter::is_lvalue_expression(expression* e) const {
     return false;
 }
 
+script_value interpreter::member_target::method(uint64_t id) const {
+    if (class_def) {
+        return class_def->get_method(id, false);
+    }
+    return script_value::make_invalid(nullptr);
+}
+
+bool interpreter::member_target::has_field(uint64_t id) const {
+    return instance && instance->has_field(id);
+}
+
+const script_value& interpreter::member_target::get_field(uint64_t id) const {
+    return instance->get_field(id);
+}
+
+const std::string& interpreter::member_target::class_name() const {
+    if (class_def) {
+        return class_def->get_name();
+    }
+    if (instance) {
+        return instance->get_class_name();
+    }
+    static const std::string no_name;
+    return no_name;
+}
+
+interpreter::member_target interpreter::resolve_member_target(const script_value& objectValue) const {
+    member_target target;
+    auto holder = objectValue.get_object_holder();
+    if (!holder) {
+        return target;
+    }
+    if (holder->is_class_instance_wrapper) {
+        target.instance = std::static_pointer_cast<class_instance>(holder->data);
+        if (target.instance) {
+            target.class_def = target.instance->get_class_definition();
+        }
+    } else if (engine_) {
+        target.engine_def = holder->type_id != UINT64_MAX
+            ? engine_->get_class_definition(holder->type_id)
+            : engine_->get_class_definition(holder->type_name);
+        target.class_def = target.engine_def.get();
+    }
+    return target;
+}
+
 // Helper for is_truthy() to check for to_bool() method on objects
 bool interpreter::object_to_bool_via_method(const script_value& value) {
-    // Use get_class_instance() which safely returns nullptr if not a class instance
-    auto instance = const_cast<script_value&>(value).get_class_instance();
-    if (!instance) {
-        return true;  // Not a class instance - treat as truthy
+    auto target = resolve_member_target(value);
+    if (!target) {
+        return true;  // Not a class object - treat as truthy
     }
 
     auto method_id = string_symbolizer_->intern("to_bool");
-    auto method_val = instance->get_method(method_id, false);
+    auto method_val = target.method(method_id);
     if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
         return true;  // No to_bool() method - objects are truthy by default
     }
@@ -2791,173 +2138,105 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
 // Helper for handle_equal() to check for operator== or equals() method on objects
 // Returns: nullopt if no custom equality method, true/false if method found and returned valid result
 std::optional<bool> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
-    // Get class instance from the left operand
-    auto instance = const_cast<script_value&>(left).get_class_instance();
-
-    if (instance) {
-        // Look for "==" method - used by both script classes (operator==) and dynamic_binder
-        auto eq_id = string_symbolizer_->intern("==");
-        auto method_val = instance->get_method(eq_id, false);
-        if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-            // Check if this is a transparent wrapper - if so, unwrap and retry
-            auto class_def = instance->get_class_definition();
-            if (class_def && class_def->is_transparent_wrapper()) {
-                script_value mutable_left = left;  // Need mutable copy for unwrap
-                script_value unwrapped = class_def->unwrap(mutable_left);
-                if (!unwrapped.is_null()) {
-                    // Retry the operation with the unwrapped value
-                    return object_equality_via_method(unwrapped, right);
-                }
-            }
-            return std::nullopt;  // No == method - use default reference comparison
-        }
-
-        // Create a bound method and call it with the right operand
-        script_value bound = create_bound_method(left, method_val);
-        const script_function& method = bound.as_function();
-        std::vector<script_value> args;
-        args.push_back(right);  // Push by copy (const ref)
-
-        auto result = method(args);
-        if (result.has_value() && result.value().is_bool()) {
-            return result.value().unchecked_as_bool();
-        }
+    auto target = resolve_member_target(left);
+    if (!target) {
         return std::nullopt;
     }
 
-    // Not a class_instance - check if it's a raw C++ object that might be a transparent wrapper
-    auto obj_holder = const_cast<script_value&>(left).get_object_holder();
-    if (obj_holder && !obj_holder->is_class_instance_wrapper) {
-        // This is a raw C++ object - look up its class definition by type_id
-        auto* eng = left.get_engine();
-        if (eng) {
-            auto class_def = eng->get_class_definition(obj_holder->type_id);
-            if (class_def && class_def->is_transparent_wrapper()) {
-                script_value mutable_left = left;  // Need mutable copy for unwrap
-                script_value unwrapped = class_def->unwrap(mutable_left);
-                if (!unwrapped.is_null()) {
-                    // Retry the operation with the unwrapped value
-                    return object_equality_via_method(unwrapped, right);
-                }
+    // Look for "==" method - used by both script classes (operator==) and dynamic_binder
+    auto eq_id = string_symbolizer_->intern("==");
+    auto method_val = target.method(eq_id);
+    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+        // Check if this is a transparent wrapper - if so, unwrap and retry
+        if (target.class_def && target.class_def->is_transparent_wrapper()) {
+            script_value mutable_left = left;  // Need mutable copy for unwrap
+            script_value unwrapped = target.class_def->unwrap(mutable_left);
+            if (!unwrapped.is_null()) {
+                return object_equality_via_method(unwrapped, right);
             }
         }
+        return std::nullopt;  // No == method - use default reference comparison
     }
 
+    // Create a bound method and call it with the right operand
+    script_value bound = create_bound_method(left, method_val);
+    const script_function& method = bound.as_function();
+    std::vector<script_value> args;
+    args.push_back(right);  // Push by copy (const ref)
+
+    auto result = method(args);
+    if (result.has_value() && result.value().is_bool()) {
+        return result.value().unchecked_as_bool();
+    }
     // Method didn't return a valid bool - fall back to reference comparison
     return std::nullopt;
 }
 
 // Generic helper for comparison operators (<, <=, >, >=) via custom methods
 std::optional<bool> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    // Get class instance from the left operand
-    auto instance = const_cast<script_value&>(left).get_class_instance();
-
-    if (instance) {
-        // Look for the operator method by symbol ID
-        auto method_val = instance->get_method(op_symbol_id, false);
-        if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-            // Check if this is a transparent wrapper - if so, unwrap and retry
-            auto class_def = instance->get_class_definition();
-            if (class_def && class_def->is_transparent_wrapper()) {
-                script_value mutable_left = left;  // Need mutable copy for unwrap
-                script_value unwrapped = class_def->unwrap(mutable_left);
-                if (!unwrapped.is_null()) {
-                    // Retry the operation with the unwrapped value
-                    return object_comparison_via_method(unwrapped, right, op_symbol_id);
-                }
-            }
-            return std::nullopt;  // No custom method - use default comparison
-        }
-
-        // Create a bound method and call it with the right operand
-        script_value bound = create_bound_method(left, method_val);
-        const script_function& method = bound.as_function();
-        std::vector<script_value> args;
-        args.push_back(right);
-
-        auto result = method(args);
-        if (result.has_value() && result.value().is_bool()) {
-            return result.value().unchecked_as_bool();
-        }
+    auto target = resolve_member_target(left);
+    if (!target) {
         return std::nullopt;
     }
 
-    // Not a class_instance - check if it's a raw C++ object that might be a transparent wrapper
-    auto obj_holder = const_cast<script_value&>(left).get_object_holder();
-    if (obj_holder && !obj_holder->is_class_instance_wrapper) {
-        // This is a raw C++ object - look up its class definition by type_id
-        auto* eng = left.get_engine();
-        if (eng) {
-            auto class_def = eng->get_class_definition(obj_holder->type_id);
-            if (class_def && class_def->is_transparent_wrapper()) {
-                script_value mutable_left = left;  // Need mutable copy for unwrap
-                script_value unwrapped = class_def->unwrap(mutable_left);
-                if (!unwrapped.is_null()) {
-                    // Retry the operation with the unwrapped value
-                    return object_comparison_via_method(unwrapped, right, op_symbol_id);
-                }
+    // Look for the operator method by symbol ID
+    auto method_val = target.method(op_symbol_id);
+    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+        // Check if this is a transparent wrapper - if so, unwrap and retry
+        if (target.class_def && target.class_def->is_transparent_wrapper()) {
+            script_value mutable_left = left;  // Need mutable copy for unwrap
+            script_value unwrapped = target.class_def->unwrap(mutable_left);
+            if (!unwrapped.is_null()) {
+                return object_comparison_via_method(unwrapped, right, op_symbol_id);
             }
         }
+        return std::nullopt;  // No custom method - use default comparison
     }
 
-    // Method didn't return a valid bool
+    // Create a bound method and call it with the right operand
+    script_value bound = create_bound_method(left, method_val);
+    const script_function& method = bound.as_function();
+    std::vector<script_value> args;
+    args.push_back(right);
+
+    auto result = method(args);
+    if (result.has_value() && result.value().is_bool()) {
+        return result.value().unchecked_as_bool();
+    }
     return std::nullopt;
 }
 
 // Generic helper for arithmetic operators (+, -, *, /, %) via custom methods
 std::optional<script_value> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    // Get class instance from the left operand
-    auto instance = const_cast<script_value&>(left).get_class_instance();
-
-    if (instance) {
-        // Look for the operator method by symbol ID
-        auto method_val = instance->get_method(op_symbol_id, false);
-        if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-            // Check if this is a transparent wrapper - if so, unwrap and retry
-            auto class_def = instance->get_class_definition();
-            if (class_def && class_def->is_transparent_wrapper()) {
-                script_value mutable_left = left;  // Need mutable copy for unwrap
-                script_value unwrapped = class_def->unwrap(mutable_left);
-                if (!unwrapped.is_null()) {
-                    // Retry the operation with the unwrapped value
-                    return object_arithmetic_via_method(unwrapped, right, op_symbol_id);
-                }
-            }
-            return std::nullopt;  // No custom method - use default arithmetic
-        }
-
-        // Create a bound method and call it with the right operand
-        script_value bound = create_bound_method(left, method_val);
-        const script_function& method = bound.as_function();
-        std::vector<script_value> args;
-        args.push_back(right);
-
-        auto result = method(args);
-        if (result.has_value()) {
-            return result.value();
-        }
+    auto target = resolve_member_target(left);
+    if (!target) {
         return std::nullopt;
     }
 
-    // Not a class_instance - check if it's a raw C++ object that might be a transparent wrapper
-    auto obj_holder = const_cast<script_value&>(left).get_object_holder();
-    if (obj_holder && !obj_holder->is_class_instance_wrapper) {
-        // This is a raw C++ object - look up its class definition by type_id
-        auto* eng = left.get_engine();
-        if (eng) {
-            auto class_def = eng->get_class_definition(obj_holder->type_id);
-            if (class_def && class_def->is_transparent_wrapper()) {
-                script_value mutable_left = left;  // Need mutable copy for unwrap
-                script_value unwrapped = class_def->unwrap(mutable_left);
-                if (!unwrapped.is_null()) {
-                    // Retry the operation with the unwrapped value
-                    return object_arithmetic_via_method(unwrapped, right, op_symbol_id);
-                }
+    // Look for the operator method by symbol ID
+    auto method_val = target.method(op_symbol_id);
+    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+        // Check if this is a transparent wrapper - if so, unwrap and retry
+        if (target.class_def && target.class_def->is_transparent_wrapper()) {
+            script_value mutable_left = left;  // Need mutable copy for unwrap
+            script_value unwrapped = target.class_def->unwrap(mutable_left);
+            if (!unwrapped.is_null()) {
+                return object_arithmetic_via_method(unwrapped, right, op_symbol_id);
             }
         }
+        return std::nullopt;  // No custom method - use default arithmetic
     }
 
-    // No custom method or transparent wrapper
+    // Create a bound method and call it with the right operand
+    script_value bound = create_bound_method(left, method_val);
+    const script_function& method = bound.as_function();
+    std::vector<script_value> args;
+    args.push_back(right);
+
+    auto result = method(args);
+    if (result.has_value()) {
+        return result.value();
+    }
     return std::nullopt;
 }
 
@@ -3199,8 +2478,8 @@ void interpreter::prepare_for_execution() {
         environment_ = eng_global;
     } else {
         // Fallback: walk up the parent chain (shouldn't happen if engine is alive)
-        while (environment_->parent_) {
-            environment_ = environment_->parent_;
+        while (environment_->get_parent()) {
+            environment_ = environment_->get_parent();
         }
     }
     // Note: We don't clear the global environment, so variables persist between executions
@@ -3211,11 +2490,11 @@ void interpreter::push_scope() {
 }
 
 void interpreter::pop_scope() {
-    if (environment_->parent_) {
+    if (environment_->get_parent()) {
         // Clear local values to trigger destructors before popping scope
         // This is crucial for script class destructors to run at scope exit
         auto current_env = environment_;
-        environment_ = environment_->parent_;
+        environment_ = environment_->get_parent();
         release_environment(current_env);
     }
 }
@@ -3437,13 +2716,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             script_value this_val = std::move(this_result.value());
             if (this_val.is_object()) {
                 // Try to access as a member of 'this'
-                auto obj_holder = this_val.get_object_holder();
-
-                // Both C++ and script classes wrap data in class_instance (script_class_instance inherits from class_instance)
-                // is_class_instance_wrapper should be true for both
-                std::shared_ptr<class_instance> instance = obj_holder->is_class_instance_wrapper
-                    ? std::static_pointer_cast<class_instance>(obj_holder->data)
-                    : nullptr;
+                std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
                 if (instance) {
                     // Intern the name to ID
@@ -4191,11 +3464,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                     auto this_result = environment_->get(string_symbolizer_->get_this_id());
                     if (this_result && this_result.value().is_object()) {
                         script_value this_val = std::move(this_result.value());
-                        auto obj_holder = this_val.get_object_holder();
-
-                        std::shared_ptr<class_instance> instance = obj_holder->is_class_instance_wrapper
-                            ? std::static_pointer_cast<class_instance>(obj_holder->data)
-                            : nullptr;
+                        std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
                         if (instance && instance->has_field(identifier->symbol_id)) {
                             script_value currentVal = instance->get_field(identifier->symbol_id);
@@ -4231,6 +3500,39 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
 
         default:
             return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator
+    }
+    return {};
+}
+
+checked_result<void> interpreter::assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value) {
+    auto target = resolve_member_target(objectValue);
+    if (!target) {
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+            "Cannot assign property to non-object value");
+    }
+
+    uint64_t member_id = memberExpr->member_id != UINT64_MAX
+        ? memberExpr->member_id
+        : string_symbolizer_->intern(memberExpr->member);
+
+    auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
+    script_value setter = target.method(setter_id);
+    if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
+        const script_function& func = setter.as_function();
+        std::vector<script_value> args = {objectValue, value.clone()};
+        auto result = func(args);
+        if (!result) {
+            return result.error_value();
+        }
+    } else if (target.has_field(member_id)) {
+        // Direct field assignment (deep copy for value types, share for shared_ptr)
+        target.instance->set_field(member_id, clone_for_assignment(value));
+    } else {
+        std::string member_str(memberExpr->member);
+        active_exception_value_ = make_value("Cannot assign to non-existent member '" + member_str + "'");
+        current_exception_ = script_exception("Cannot assign to non-existent member '" + member_str + "'", memberExpr->location);
+        is_unwinding_ = true;
+        return {};
     }
     return {};
 }
@@ -4525,10 +3827,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
 
                 script_value this_val = std::move(this_result.value());
-                auto obj_holder = this_val.get_object_holder();
-                std::shared_ptr<class_instance> instance = obj_holder->is_class_instance_wrapper
-                    ? std::static_pointer_cast<class_instance>(obj_holder->data)
-                    : nullptr;
+                std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
                 if (!instance || !instance->has_field(identifier->symbol_id)) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
@@ -4655,19 +3954,15 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (custom_result.has_value()) {
                         // Assign the result back to the property
                         JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
-                        script_value objectValue = pop_value();
+                        script_value objectValue = pop_value().deref();
                         if (objectValue.is_object()) {
-                            auto objHolder = objectValue.get_object_holder();
-                            if (objHolder) {
-                                auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
-                                // Use cached member_id or intern
-                                uint64_t member_id = memberExpr->member_id != UINT64_MAX
-                                    ? memberExpr->member_id
-                                    : string_symbolizer_->intern(memberExpr->member);
-                                instance->set_field(member_id, clone_for_assignment(custom_result.value()));
-                                push_value(std::move(custom_result.value()));
+                            JAISCRIPT_TRY(assign_member_value(objectValue, memberExpr, custom_result.value()));
+                            if (is_unwinding_) {
+                                push_value(make_value());
                                 return {};
                             }
+                            push_value(std::move(custom_result.value()));
+                            return {};
                         }
                     }
                 }
@@ -4751,9 +4046,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Now assign the result back to the property
             // We need to evaluate the object again to get a fresh reference
             JAISCRIPT_TRY(dispatch_expr(memberExpr->object.get()));
-            script_value objectValue = pop_value();
-
-            // After refactor: shared_ptr<T> uses same storage, no unwrapping needed
+            script_value objectValue = pop_value().deref();
 
             // Check if it's an object
             if (!objectValue.is_object()) {
@@ -4765,40 +4058,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 return {};
             }
 
-            // Extract the class_instance
-            auto objHolder = objectValue.get_object_holder();
-            if (!objHolder) {
-                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                    "Cannot assign property to non-object value");
-            }
-            auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
-
-            // Use cached member_id or intern
-            uint64_t member_id = memberExpr->member_id != UINT64_MAX
-                ? memberExpr->member_id
-                : string_symbolizer_->intern(memberExpr->member);
-
-            // Check if there's a property setter
-            auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
-            script_value setter = instance->get_method(setter_id, false);
-            if (!setter.is_null()) {
-                // Call the setter with 'this' and the value
-                const script_function& func = setter.as_function();
-                std::vector<script_value> args = {objectValue, std::move(resultValue.clone())};
-                auto result = func(args);
-                if (!result) {
-                    // Setter failed - propagate error
-                    return result.error_value();
-                }
-            } else if (instance->has_field(member_id)) {
-                // Direct field assignment (deep copy for value types, share for shared_ptr)
-                instance->set_field(member_id, clone_for_assignment(resultValue));
-            } else {
-                // Set exception state instead of throwing
-                std::string member_str(memberExpr->member);
-                active_exception_value_ = make_value("Cannot assign to non-existent member '" + member_str + "'");
-                current_exception_ = script_exception("Cannot assign to non-existent member '" + member_str + "'", memberExpr->location);
-                is_unwinding_ = true;
+            JAISCRIPT_TRY(assign_member_value(objectValue, memberExpr, resultValue));
+            if (is_unwinding_) {
                 push_value(make_value());
                 return {};
             }
@@ -5074,9 +4335,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 "Cannot assign to null shared_ptr");
                         }
 
-                        auto instance = holder->is_class_instance_wrapper
-                            ? std::static_pointer_cast<class_instance>(holder->data)
-                            : nullptr;
+                        auto instance = currentVal->get_class_instance();
                         if (!instance) {
                             // Not a class instance wrapper (e.g., raw C++ object not registered via dynamic_binder)
                             auto type_info = value.get_type_info();
@@ -5380,40 +4639,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 return {};
             }
 
-            // Extract the class_instance
-            auto objHolder = dereferenced.get_object_holder();
-            if (!objHolder) {
-                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                    "Cannot assign property to non-object value");
-            }
-            auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
-
-            // Use cached member_id or intern
-            uint64_t member_id = memberExpr->member_id != UINT64_MAX
-                ? memberExpr->member_id
-                : string_symbolizer_->intern(memberExpr->member);
-
-            // Check if there's a property setter first (for C++ properties)
-            auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
-            script_value setter = instance->get_method(setter_id, false);
-            if (!setter.is_null()) {
-                // Call the setter with 'this' and the value
-                const script_function& func = setter.as_function();
-                std::vector<script_value> args = {dereferenced, std::move(value.clone())};
-                auto result = func(args);
-                if (!result) {
-                    // Setter failed - propagate error
-                    return result.error_value();
-                }
-            } else if (instance->has_field(member_id)) {
-                // Direct field assignment (deep copy for value types, share for shared_ptr)
-                instance->set_field(member_id, clone_for_assignment(value));
-            } else {
-                // Set exception state instead of throwing
-                std::string member_str(memberExpr->member);
-                active_exception_value_ = make_value("Cannot assign to non-existent member '" + member_str + "'");
-                current_exception_ = script_exception("Cannot assign to non-existent member '" + member_str + "'", memberExpr->location);
-                is_unwinding_ = true;
+            JAISCRIPT_TRY(assign_member_value(dereferenced, memberExpr, value));
+            if (is_unwinding_) {
                 push_value(make_value());
                 return {};
             }
@@ -5460,7 +4687,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 value_type_id, expected_type_id);
                         }
                         // Convert element if needed (e.g., int -> float for array<float>)
-                        script_value converted = convert_array_element(this, value, element_type);
+                        script_value converted = convert_array_element(engine_, value, element_type);
                         *target_ptr = std::move(converted);
                     } else {
                         // No element type constraint - allow anything
@@ -5507,7 +4734,8 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     size_t start_index = 0;
     bool resuming = false;
     if (active_coroutine_) {
-        auto* cont = active_coroutine_->peek_continuation(stmt);
+        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             start_index = cont->index;
             // Restore the environment that was saved when this block yielded.
@@ -5516,7 +4744,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
             if (cont->saved_env) {
                 environment_ = cont->saved_env;
             }
-            active_coroutine_->pop_continuation();
+            coro_state.pop_continuation();
             resuming = true;
             // DON'T create new scope - the saved environment already has it
         }
@@ -5557,15 +4785,16 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
             // On yield: record continuation and return without releasing environment
             if (hasYieldRequest_) {
                 if (active_coroutine_) {
+                    auto& coro_state = coroutine_state(*active_coroutine_);
                     // If inner constructs (if/while/for/block) pushed continuations,
                     // we need to re-enter this statement on resume (save i).
                     // If no inner continuations exist, the yield was a direct child
                     // statement, so skip it on resume (save i + 1).
-                    size_t resume_index = active_coroutine_->has_continuations() ? i : i + 1;
+                    size_t resume_index = coro_state.has_continuations() ? i : i + 1;
                     // Save the current environment (may be deeper than this block's scope
                     // due to inner constructs like for-loops that didn't restore).
                     // On resume, we'll restore this to get back to the right depth.
-                    active_coroutine_->push_continuation(stmt, resume_index, environment_);
+                    coro_state.push_continuation(stmt, resume_index, environment_);
                 }
                 // Restore environment_ to previous so parent constructs see correct scope.
                 environment_ = previous;
@@ -6052,11 +5281,10 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
 // Helper to convert value to string, checking for to_string() method on objects
 std::string interpreter::value_to_string_with_method(const script_value& val) {
     if (val.type() == script_value_type::jai_object_type) {
-        // Use get_class_instance() which safely returns nullptr if not a class instance
-        auto instance = const_cast<script_value&>(val).get_class_instance();
-        if (instance) {
+        auto target = resolve_member_target(val);
+        if (target) {
             auto method_id = string_symbolizer_->intern("to_string");
-            auto method_val = instance->get_method(method_id, false);
+            auto method_val = target.method(method_id);
             if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
                 script_value bound = create_bound_method(val, method_val);
                 const script_function& method = bound.as_function();
@@ -6427,7 +5655,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
 
                     // Call method directly on the variable reference
                     script_value& var_ref = ref_result.value().get();
-                    auto result = methodIt->second(this, var_ref, arguments);
+                    auto result = methodIt->second(builtin_method_context{engine_, string_symbolizer_}, var_ref, arguments);
                     if (!result) {
                         return result.error_value();
                     }
@@ -6514,9 +5742,33 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
         }
     }
 
-    // Call the function - now returns checked_result instead of throwing
+    // Call the function - now returns checked_result instead of throwing. C++ callables
+    // may still throw (conversion failures, game-side exceptions) - convert those to
+    // script exceptions here so nothing propagates raw through the interpreter.
     const script_function& func = callee.as_function();
-    auto result_checked = func(arguments);
+    std::optional<checked_result<script_value>> callOutcome;
+    try {
+        callOutcome.emplace(func(arguments));
+    } catch (const script_exception& e) {
+        if (has_args) {
+            current_arg_metadata_ = std::move(saved_metadata);
+        }
+        active_exception_value_ = make_value(std::string(e.what()));
+        current_exception_ = e;
+        is_unwinding_ = true;
+        push_value(make_value());
+        return {};
+    } catch (const std::exception& e) {
+        if (has_args) {
+            current_arg_metadata_ = std::move(saved_metadata);
+        }
+        active_exception_value_ = make_value(std::string(e.what()));
+        current_exception_ = script_exception(e.what());
+        is_unwinding_ = true;
+        push_value(make_value());
+        return {};
+    }
+    checked_result<script_value>& result_checked = *callOutcome;
 
     // Restore previous metadata after call completes
     if (has_args) {
@@ -6586,8 +5838,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
         // PRIORITY 1: Check for namespace with this name FIRST
         // Namespaces can override class static methods
-        auto ns_it = namespaces_.find(name_id);
-        bool is_namespace = (ns_it != namespaces_.end());
+        auto& namespaces = engine_->script_namespaces();
+        auto ns_it = namespaces.find(name_id);
+        bool is_namespace = (ns_it != namespaces.end());
 
         // PRIORITY 1.5: Special case for namespace::class::static_member
         // ONLY if name is NOT a namespace itself
@@ -6601,8 +5854,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             uint64_t ns_id = string_symbolizer_->intern(potential_ns);
             uint64_t class_id = string_symbolizer_->intern(potential_class);
 
-            auto ns_check = namespaces_.find(ns_id);
-            if (ns_check != namespaces_.end()) {
+            auto ns_check = namespaces.find(ns_id);
+            if (ns_check != namespaces.end()) {
                 auto class_check = ns_check->second->classes.find(class_id);
                 if (class_check != ns_check->second->classes.end()) {
                     // Found! This is namespace::class, and we're accessing a static member
@@ -6649,34 +5902,45 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 }
                 // No class with this name - that's fine, fallback_class remains null
 
-                // Create a script_function that dispatches based on arity
-                // Capture namespace_id to provide access to namespace variables
+                // Create a script_function that dispatches based on arity.
+                // Captures engine* + payload only; the namespace registry is read through the
+                // engine at call time and the body runs through the live backend.
                 uint64_t namespace_id = name_id;
                 uint64_t member_id = expr->member_id;
-                script_function namespace_func = [this, overloads, name, namespace_id, fallback_class, member_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+                engine* eng = engine_;
+                auto mint_env = environment_;
+                script_function namespace_func = [eng, mint_env, overloads, namespace_id, fallback_class, member_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+                    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+                    if (!backend) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+                    }
+
                     // Find matching overload by arity in namespace
                     for (const auto& func_decl : overloads) {
                         if (func_decl->parameters.size() == args.size()) {
                             // Create an environment with namespace variables accessible
-                            auto ns_env = std::make_shared<environment>(environment_, string_symbolizer_);
+                            auto ns_env = std::make_shared<environment>(mint_env, eng->get_symbolizer());
 
                             // Add all namespace variables to this environment
-                            auto ns_it = namespaces_.find(namespace_id);
-                            if (ns_it != namespaces_.end()) {
+                            auto& namespaces = eng->script_namespaces();
+                            auto ns_it = namespaces.find(namespace_id);
+                            if (ns_it != namespaces.end()) {
                                 for (const auto& [var_id, var_value] : ns_it->second->variables) {
                                     ns_env->define(var_id, var_value);
                                 }
                             }
 
                             // Found matching arity - create script_defined_function with namespace environment
-                            auto script_func = std::make_shared<script_defined_function>(
+                            script_callable payload;
+                            payload.kind = script_callable::kind_type::function;
+                            payload.fn = std::make_shared<script_defined_function>(
                                 func_decl->name,
                                 func_decl->parameters,
                                 func_decl->return_type,
                                 func_decl->body,
                                 ns_env  // Environment with namespace variables
                             );
-                            return call_function(*script_func, args);
+                            return backend->execute_callable(payload, args);
                         }
                     }
 
@@ -6888,8 +6152,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the string value by moving it
-            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(this, capturedValue, args);
+            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+                return method(ctx, capturedValue, args);
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -6914,8 +6178,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the array value by moving it
-            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(this, capturedValue, args);
+            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+                return method(ctx, capturedValue, args);
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -6940,8 +6204,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the map value by moving it
-            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(this, capturedValue, args);
+            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+                return method(ctx, capturedValue, args);
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -6971,8 +6235,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the weak_ptr value by moving it
-            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(this, capturedValue, args);
+            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+                return method(ctx, capturedValue, args);
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -6996,8 +6260,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the shared_ptr value by moving it
-            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(this, capturedValue, args);
+            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+                return method(ctx, capturedValue, args);
             };
 
             push_value(script_value::make_function(boundMethod, engine_));
@@ -7083,64 +6347,10 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
-    // Extract the class_instance from the object
-    auto objHolder = objectValue.get_object_holder();
-
-    // Handle cpp_bound objects (non-owning references to C++ objects from T& returns)
-    // These have is_class_instance_wrapper=false and data=nullptr, but cpp_bound_ptr_ set
-    if (objectValue.is_cpp_bound() && !objHolder->is_class_instance_wrapper) {
-        auto class_def = engine_->get_class_definition(objHolder->type_name);
-        if (class_def) {
-            uint64_t member_id = expr->member_id;
-
-            script_value method = class_def->get_method(member_id, false);
-            if (!method.is_null() && !method.is_invalid()) {
-                push_value(create_bound_method(objectValue, method));
-                return {};
-            }
-
-            // Check for property getter
-            if (class_def->has_property_getters()) {
-                uint64_t getter_id = expr->getter_id;
-                if (getter_id == UINT64_MAX) {
-                    auto [id, _] = string_symbolizer_->get_getter_id_with_view(member_id);
-                    getter_id = id;
-                    expr->getter_id = getter_id;
-                }
-                script_value getter = class_def->get_method(getter_id, false);
-                if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
-                    // Call the getter with 'this' as argument
-                    const script_function& func = getter.as_function();
-                    std::vector<script_value> args = {objectValue};
-                    auto result = func(args);
-                    if (!result) {
-                        return result.error_value();
-                    }
-                    push_value(std::move(result.value()));
-                    return {};
-                }
-            }
-
-            // Member not found on cpp_bound object
-            std::string member_str(expr->member);
-            active_exception_value_ = make_value("Object has no member '" + member_str + "'");
-            current_exception_ = script_exception("Object has no member '" + member_str + "'", expr->location);
-            is_unwinding_ = true;
-            push_value(make_value());
-            return {};
-        }
-        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
-    }
-
-    // Get the class_instance - both C++ and script classes use class_instance wrapper
-    // (script_class_instance inherits from class_instance)
-    if (!objHolder->is_class_instance_wrapper) {
+    // One path for every object shape (class_instance wrapper, cpp_bound T&, raw holder)
+    auto target = resolve_member_target(objectValue);
+    if (!target) {
         // Cannot access member on non-class object
-        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
-    }
-
-    std::shared_ptr<class_instance> instance = std::static_pointer_cast<class_instance>(objHolder->data);
-    if (!instance) {
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
@@ -7150,8 +6360,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Check for property getter method (C++ properties and inherited properties)
     // OPTIMIZATION 1: Skip getter lookup entirely if class has no property getters
     // OPTIMIZATION 2: Cache getter_id on AST node to avoid repeated string allocation + interning
-    auto class_def = instance->get_class_definition();
-    if (class_def && class_def->has_property_getters()) {
+    if (target.class_def && target.class_def->has_property_getters()) {
         try {
             uint64_t getter_id = expr->getter_id;
             if (getter_id == UINT64_MAX) {
@@ -7159,7 +6368,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 getter_id = id;
                 expr->getter_id = getter_id;
             }
-            script_value getter = instance->get_method(getter_id, false);
+            script_value getter = target.method(getter_id);
             if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
                 // Call the getter with 'this' as argument
                 const script_function& func = getter.as_function();
@@ -7168,22 +6377,35 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 if (!result) {
                     return result.error_value();
                 }
+                // Getters for registered-class members return non-owning cpp_bound
+                // references into the receiver - pin the receiver's owning data (same
+                // anchor create_bound_method applies to chained method returns) so
+                // makeFoo().member doesn't dangle when the temporary receiver drops.
+                script_value& getterResult = result.value();
+                if (getterResult.is_non_owning_object()) {
+                    auto resultHolder = getterResult.get_object_holder();
+                    auto receiverHolder = objectValue.get_object_holder();
+                    if (resultHolder && receiverHolder) {
+                        resultHolder->keep_alive = receiverHolder->data ? receiverHolder->data
+                                                                        : receiverHolder->keep_alive;
+                    }
+                }
                 push_value(std::move(result.value()));
                 return {};
             }
         } catch (const std::exception&) {
-            // If get_method fails (e.g., class definition expired), fall back to field access
+            // If the getter fails (e.g., class definition expired), fall back to field access
         }
     }
 
     // Check if it's a field (script class fields without getters, or C++ fields)
-    if (instance->has_field(member_id)) {
-        push_value(instance->get_field(member_id));
+    if (target.has_field(member_id)) {
+        push_value(target.get_field(member_id));
         return {};
     }
 
-    // Look for a method (pass false to avoid throwing)
-    script_value method = instance->get_method(member_id, false);
+    // Look for a method (bound to the receiver)
+    script_value method = target.method(member_id);
     if (!method.is_null() && !method.is_invalid()) {
         // Return a bound method (function that has 'this' pre-bound)
         push_value(create_bound_method(objectValue, method));
@@ -7191,32 +6413,24 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     }
 
     // Check if this is a transparent wrapper - if so, unwrap and retry member access
-    if (class_def && class_def->is_transparent_wrapper()) {
+    if (target.class_def && target.class_def->is_transparent_wrapper()) {
         script_value mutable_obj = objectValue;  // Need mutable copy for unwrap
-        script_value unwrapped = class_def->unwrap(mutable_obj);
-        if (!unwrapped.is_null()) {
-            // For primitive types (int, float, string, etc.), they don't have members
-            // But for objects, we can try member access on the unwrapped value
-            if (unwrapped.is_object()) {
-                // Create a synthetic member_expr to reuse this visitor
-                // by directly pushing the unwrapped object and recursively calling
-                auto unwrapped_instance = unwrapped.get_class_instance();
-                if (unwrapped_instance) {
-                    // Check if unwrapped object has this field
-                    if (unwrapped_instance->has_field(member_id)) {
-                        push_value(unwrapped_instance->get_field(member_id));
-                        return {};
-                    }
-                    // Check if unwrapped object has this method
-                    script_value unwrapped_method = unwrapped_instance->get_method(member_id, false);
-                    if (!unwrapped_method.is_null() && !unwrapped_method.is_invalid()) {
-                        push_value(create_bound_method(unwrapped, unwrapped_method));
-                        return {};
-                    }
+        script_value unwrapped = target.class_def->unwrap(mutable_obj);
+        // For primitive types (int, float, string, etc.), the value itself doesn't have
+        // members (their operations are handled in binary operators); objects retry here
+        if (!unwrapped.is_null() && unwrapped.is_object()) {
+            auto unwrapped_target = resolve_member_target(unwrapped);
+            if (unwrapped_target) {
+                if (unwrapped_target.has_field(member_id)) {
+                    push_value(unwrapped_target.get_field(member_id));
+                    return {};
+                }
+                script_value unwrapped_method = unwrapped_target.method(member_id);
+                if (!unwrapped_method.is_null() && !unwrapped_method.is_invalid()) {
+                    push_value(create_bound_method(unwrapped, unwrapped_method));
+                    return {};
                 }
             }
-            // For primitives, the value itself doesn't have members
-            // (int, float, string, bool operations are handled in binary operators)
         }
     }
 
@@ -7872,10 +7086,18 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         needs_capture_env ? final_closure_env : nullptr  // Only use closure env if we have captures
     );
     
-    // Create a script_function wrapper
-    // capture lambdaFunc by value to ensure it stays alive
-    script_function funcWrapper = [this, lambdaFunc](const std::vector<script_value>& args) -> checked_result<script_value> {
-        return call_function(*lambdaFunc, args);
+    // Create a script_function wrapper resolving the live backend at call time
+    // (capture lambdaFunc by value inside the payload to keep it alive)
+    script_callable payload;
+    payload.kind = script_callable::kind_type::function;
+    payload.fn = lambdaFunc;
+    engine* eng = engine_;
+    script_function funcWrapper = [eng, payload](const std::vector<script_value>& args) -> checked_result<script_value> {
+        execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+        if (!backend) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+        }
+        return backend->execute_callable(payload, args);
     };
 
     // Push the lambda as a function value
@@ -8299,10 +7521,11 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
 
     // Check if we're resuming into a branch from a coroutine yield
     if (active_coroutine_) {
-        auto* cont = active_coroutine_->peek_continuation(stmt);
+        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             is_true = (cont->index == 0);  // 0=then branch, 1=else branch
-            active_coroutine_->pop_continuation();
+            coro_state.pop_continuation();
             resuming = true;
         }
     }
@@ -8324,12 +7547,12 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
     if (is_true) {
         JAISCRIPT_TRY(dispatch_stmt(stmt->then_statement.get()));
         if (hasYieldRequest_ && active_coroutine_) {
-            active_coroutine_->push_continuation(stmt, 0);  // then branch
+            coroutine_state(*active_coroutine_).push_continuation(stmt, 0);  // then branch
         }
     } else if (stmt->else_statement) {
         JAISCRIPT_TRY(dispatch_stmt(stmt->else_statement.get()));
         if (hasYieldRequest_ && active_coroutine_) {
-            active_coroutine_->push_continuation(stmt, 1);  // else branch
+            coroutine_state(*active_coroutine_).push_continuation(stmt, 1);  // else branch
         }
     }
     return {};
@@ -8342,10 +7565,11 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
     // Check if we're resuming into this while loop from a coroutine yield
     bool skip_first_condition = false;
     if (active_coroutine_) {
-        auto* cont = active_coroutine_->peek_continuation(stmt);
+        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             skip_first_condition = true;
-            active_coroutine_->pop_continuation();
+            coro_state.pop_continuation();
         }
     }
 
@@ -8407,7 +7631,7 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         // On yield: record continuation and return
         if (hasYieldRequest_) {
             if (active_coroutine_) {
-                active_coroutine_->push_continuation(stmt, 0);
+                coroutine_state(*active_coroutine_).push_continuation(stmt, 0);
             }
             return {};
         }
@@ -8680,7 +7904,25 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                 if (hasReturnValue_ || hasYieldRequest_) break;
                                 if (hasContinueRequest_) hasContinueRequest_ = false;
 
-                                // Update step - read from pointer if dynamic
+                                // General-path parity: honor body writes to the loop variable —
+                                // adopt int writes into the native counter; on a type change run
+                                // the real update once, then continue via the fallthrough loop
+                                if (var_ptr->raw_storage_index() != 1) [[unlikely]] {
+                                    if (stmt->update) {
+                                        auto update_result = dispatch_expr(stmt->update.get());
+                                        if (!update_result) {
+                                            if (body_env) { release_environment(body_env); }
+                                            release_environment(loop_env);
+                                            environment_ = previous;
+                                            return update_result;
+                                        }
+                                        pop_value();
+                                    }
+                                    fell_through = true;
+                                    break;
+                                }
+                                i = var_ptr->unchecked_as_int();
+
                                 script_int step = step_ptr ? *step_ptr : step_value;
                                 if (step_subtract) {
                                     i -= step;
@@ -8712,6 +7954,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                         return body_result;
                                     }
 
+                                    if (is_unwinding_) break;
                                     if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
                                     if (hasReturnValue_ || hasYieldRequest_) break;
                                     if (hasContinueRequest_) hasContinueRequest_ = false;
@@ -8744,14 +7987,15 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     // Check if we're resuming into this for-loop from a coroutine yield
     bool resuming_loop = false;
     if (active_coroutine_) {
-        auto* cont = active_coroutine_->peek_continuation(stmt);
+        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             resuming_loop = true;
             // Restore the for-loop's environment (includes loop variable scope)
             if (cont->saved_env) {
                 environment_ = cont->saved_env;
             }
-            active_coroutine_->pop_continuation();
+            coro_state.pop_continuation();
             // DON'T create new scope or execute initializer - saved environment has them
         }
     }
@@ -8879,7 +8123,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 // Save the current environment (for-loop scope or deeper) so we can
                 // restore it on resume. For-loop variables are environment-based
                 // (not slot-based) and must be accessible.
-                active_coroutine_->push_continuation(stmt, 0, environment_);
+                coroutine_state(*active_coroutine_).push_continuation(stmt, 0, environment_);
             }
             // Restore environment_ to previous so parent scope is correct
             environment_ = previous;
@@ -9434,14 +8678,16 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         func_decl_ptr->local_count = decl->local_count;
 
         auto closure_env = environment_;
+        engine* eng = engine_;
+        uint64_t coroutine_type_id = coroutine_handle_type_id_;
         script_value functionValue = script_value::make_function(
-            [this, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
-                // Create a new coroutine handle
-                auto handle = std::make_shared<coroutine_handle>(engine_);
+            [eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
+                // Create a new coroutine handle; resume() resolves the live backend itself
+                auto handle = std::make_shared<coroutine_handle>(eng);
                 handle->set_function(func_decl_ptr, args, closure_env);
 
                 // Wrap as a script object
-                return make_coroutine_object(handle);
+                return make_coroutine_object(eng, coroutine_type_id, handle);
             }, engine_);
 
         environment_->define(decl->name_id, functionValue);
@@ -9459,9 +8705,17 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         decl->local_count  // Slot count for stack allocation
     );
 
-    // Create wrapper function
-    script_value functionValue = script_value::make_function([this, scriptFunc](const std::vector<script_value>& args) -> checked_result<script_value> {
-        return call_function(*scriptFunc, args);
+    // Create wrapper function resolving the live backend at call time
+    script_callable payload;
+    payload.kind = script_callable::kind_type::function;
+    payload.fn = scriptFunc;
+    engine* eng = engine_;
+    script_value functionValue = script_value::make_function([eng, payload](const std::vector<script_value>& args) -> checked_result<script_value> {
+        execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+        if (!backend) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+        }
+        return backend->execute_callable(payload, args);
     }, engine_);
 
     // Define the function in current environment
@@ -9527,6 +8781,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         class_def->clear_asts();
         // Rebuild method overload sets from scratch so they don't accumulate across reloads.
         class_def->clear_instance_method_overloads();
+        class_def->clear_static_method_overloads();
     }
     
     // Collect new field defaults and methods (using uint64_t IDs for performance)
@@ -9759,8 +9014,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
                 try {
                     class_def->add_constructor_from_ast(
-                        std::static_pointer_cast<function_decl>(member.declaration),
-                        this
+                        std::static_pointer_cast<function_decl>(member.declaration)
                     );
                 } catch (const runtime_error&) {
                     // Reset in_method flag on error
@@ -9787,7 +9041,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 try {
                     class_def->add_destructor_from_ast(
                         std::static_pointer_cast<function_decl>(member.declaration),
-                        this
+                        environment_
                     );
                 } catch (const runtime_error&) {
                     // Reset in_method flag on error
@@ -9816,37 +9070,16 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     // We'll add it to the class via redefine_class later
 
                     if (method_ast->is_static) {
-                        // Static method - no 'this' parameter
-                        auto static_method_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()),
-                                                  method_ast,
-                                                  class_def,
-                                                  definition_env,
-                                                  class_name = decl->name](const std::vector<script_value>& args) -> checked_result<script_value> {
-                            auto self = weak_self.lock();
-                            if (!self) {
-                                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Interpreter was destroyed before static method call");
-                            }
-
-                            // Create a static method environment (C++ scope rules for static members)
-                            // This environment automatically resolves unqualified static member access
-                            // Use definition_env (namespace/global) as parent
-                            auto static_env = std::make_shared<environment>(
-                                definition_env,
-                                self->string_symbolizer_,
-                                class_def
-                            );
-
-                            // Call the interpreter method directly without 'this'
-                            return self->execute_method_ast(method_ast, static_env, args);
-                        };
-
-                        new_static_methods[method_id] = script_value::make_function(static_method_func, engine_);
+                        // Static method: rebuild through the same machinery a fresh class uses
+                        // (appends to static_method_overloads_ and installs the dispatching thunk).
+                        class_def->add_static_script_method(method_name, method_ast, definition_env);
+                        new_static_methods[method_id] = class_def->get_static_method(method_id, false);
                     } else {
                         // Instance method: rebuild the overload set + resolving dispatcher with
                         // the SAME machinery a fresh class uses (add_script_method appends to
                         // method_overloads_ and installs the type/arity dispatcher), so reloaded
                         // methods overload correctly instead of collapsing to the last-declared.
-                        class_def->add_script_method(method_name, method_ast, this, definition_env);
+                        class_def->add_script_method(method_name, method_ast, definition_env);
                         new_methods[method_id] = class_def->get_method(method_id, false);
                     }
                 } else {
@@ -9859,10 +9092,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
                         if (method_ast->is_static) {
                             // Add static method - pass current environment as definition environment
-                            class_def->add_static_script_method(method_name, method_ast, this, environment_);
+                            class_def->add_static_script_method(method_name, method_ast, environment_);
                         } else {
                             // Add instance method
-                            class_def->add_method_from_ast(method_name, method_ast, this, is_redefinition);
+                            class_def->add_method_from_ast(method_name, method_ast, environment_, is_redefinition);
                         }
                         
                         // Reset in_method flag
@@ -9893,447 +9126,18 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // This ensures constructor body has access to global definitions (classes, functions)
         auto definition_env = get_global_environment();
 
-        // Create a constructor dispatcher that selects based on argument count
-        auto ctor_dispatcher = [weak_self = std::weak_ptr<interpreter>(shared_from_this()),
-                               class_def,
-                               definition_env,
-                               class_name = decl->name,
-                               cpp_object_field_id = cpp_object_field_id_](const std::vector<script_value>& args) -> checked_result<script_value> {
-            auto self = weak_self.lock();
-            if (!self) {
+        // Create a constructor dispatcher resolving the live backend at call time
+        script_callable ctor_payload;
+        ctor_payload.kind = script_callable::kind_type::constructor;
+        ctor_payload.cls = class_def;
+        ctor_payload.definition_env = definition_env;
+        engine* ctor_eng = engine_;
+        auto ctor_dispatcher = [ctor_eng, ctor_payload](const std::vector<script_value>& args) -> checked_result<script_value> {
+            execution_backend* backend = ctor_eng ? ctor_eng->get_execution_backend() : nullptr;
+            if (!backend) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Interpreter was destroyed before constructor call");
             }
-            
-            // Get all constructor ASTs
-            const auto& ctor_asts = class_def->get_constructor_asts();
-
-            // Find constructor with matching parameter count AND types
-            // Priority: 1) exact type match, 2) numeric conversion match, 3) untyped fallback
-            std::shared_ptr<function_decl> exact_match_ctor;
-            std::shared_ptr<function_decl> convertible_match_ctor;
-            std::shared_ptr<function_decl> arity_match_ctor;  // Fallback for untyped params
-
-            for (const auto& ctor_ast : ctor_asts) {
-                if (ctor_ast->parameters.size() != args.size()) {
-                    continue;
-                }
-
-                // Remember first arity match as fallback
-                if (!arity_match_ctor) {
-                    arity_match_ctor = ctor_ast;
-                }
-
-                // Check if all parameter types match exactly
-                bool exact_match = true;
-                bool convertible_match = true;
-                for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
-                    const auto& param = ctor_ast->parameters[i];
-                    if (param.type && !param.type->type_name.empty()) {
-                        // Parameter has explicit type - check if arg is compatible
-                        auto arg_type = args[i].type();
-                        if (arg_type == script_value_type::jai_object_type) {
-                            // For objects, check class name
-                            auto instance = const_cast<script_value&>(args[i]).get_class_instance();
-                            if (instance) {
-                                if (instance->get_class_name() != param.type->type_name) {
-                                    exact_match = false;
-                                    convertible_match = false;
-                                }
-                            } else {
-                                exact_match = false;
-                                convertible_match = false;
-                            }
-                        } else {
-                            // For primitives, check base type
-                            if (arg_type != param.type->base_type) {
-                                exact_match = false;
-                                // Check if numeric conversion is allowed
-                                bool is_numeric_conversion =
-                                    (arg_type == script_value_type::jai_int_type &&
-                                     param.type->base_type == script_value_type::jai_float_type) ||
-                                    (arg_type == script_value_type::jai_float_type &&
-                                     param.type->base_type == script_value_type::jai_int_type);
-                                if (!is_numeric_conversion) {
-                                    convertible_match = false;
-                                }
-                            }
-                        }
-                    }
-                    // If param has no type, it accepts anything
-                }
-
-                if (exact_match && !exact_match_ctor) {
-                    exact_match_ctor = ctor_ast;
-                }
-                if (convertible_match && !convertible_match_ctor) {
-                    convertible_match_ctor = ctor_ast;
-                }
-            }
-
-            // Select best matching constructor: exact > convertible > arity fallback
-            std::shared_ptr<function_decl> matching_ctor = exact_match_ctor;
-            if (!matching_ctor) {
-                matching_ctor = convertible_match_ctor;
-            }
-            if (!matching_ctor) {
-                matching_ctor = arity_match_ctor;
-            }
-
-            if (!matching_ctor) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-                    "No constructor found with matching arguments");
-            }
-            
-            // Create instance
-            auto instance = class_def->create_instance();
-            // Instance created
-
-            // Create 'this' value using the class_def's registered name and type_id
-            // This ensures we use the exact name/id that was registered (e.g., with namespace)
-            // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
-            auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, self->engine_, true);
-
-            // Create a regular environment for field initializers and constructor initializer arguments
-            // Use the captured definition environment as the parent
-            auto init_env = std::make_shared<environment>(definition_env, self->string_symbolizer_);
-            init_env->define("this", this_value);
-
-            // Bind constructor parameters so they're available in initializer expressions
-            // NOTE: Do NOT clone here - these params are just for field initializer evaluation
-            // The actual parameter binding with proper value/reference semantics happens in call_function
-            if (matching_ctor->parameters.size() != args.size()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                    "Constructor parameter count mismatch");
-            }
-            for (size_t i = 0; i < matching_ctor->parameters.size(); ++i) {
-                init_env->define(matching_ctor->parameters[i].name, args[i]);
-            }
-
-            // Track whether the iterative multi-level loop handled parent field initializers
-            bool handled_parent_init = false;
-            // Track `: this(...)` delegation. C++ delegating-ctor semantics: the
-            // target constructor constructs the members; the delegating ctor must NOT
-            // re-run field initializers afterward (that re-applies declared defaults
-            // and clobbers what the target set).
-            bool delegated_to_this = false;
-
-            // Process constructor initializers (: super(args), : this(args))
-            for (const auto& initializer : matching_ctor->initializers) {
-                if (initializer.target == "super") {
-                    // Call base class constructor
-                    if (class_def->get_parent()) {
-                        // Evaluate initializer arguments in init environment
-                        std::vector<script_value> init_args;
-                        init_args.reserve(initializer.arguments.size());
-                        
-                        // Temporarily switch to init environment for argument evaluation
-                        auto old_env = self->environment_;
-                        self->environment_ = init_env;
-
-                        for (const auto& arg_expr : initializer.arguments) {
-                            auto result = self->dispatch_expr(arg_expr.get());
-                            if (!result) {
-                                // Restore environment before returning error
-                                self->environment_ = old_env;
-                                return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
-                                    "Failed to evaluate constructor initializer argument");
-                            }
-                            init_args.push_back(self->pop_value());
-                        }
-
-                        // Restore environment
-                        self->environment_ = old_env;
-                        
-                        // Call parent constructor to initialize parent fields
-                        auto parent_class = class_def->get_parent();
-                        if (parent_class) {
-                            // Check if parent is a script class
-                            auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent_class);
-                            if (parent_script_class) {
-                                // Find matching parent constructor
-                                const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
-                                std::shared_ptr<function_decl> parent_ctor;
-                                for (const auto& ctor_ast : parent_ctor_asts) {
-                                    if (ctor_ast->parameters.size() == init_args.size()) {
-                                        parent_ctor = ctor_ast;
-                                        break;
-                                    }
-                                }
-
-                                if (parent_ctor) {
-                                    // === Multi-level inheritance support ===
-                                    // We need to process the entire super() chain to find and call the C++ base constructor.
-                                    // Constructor bodies are executed AFTER field initializers by the outer flow.
-                                    //
-                                    // Algorithm (iterative):
-                                    // 1. Walk up super() calls, evaluating arguments at each level
-                                    // 2. When we hit a C++ class, call its constructor to get _cpp_object
-                                    // 3. Store constructor info for later body execution
-                                    // 4. Execute bodies from root to leaf, interleaved with field initializers
-
-                                    struct CtorChainEntry {
-                                        std::shared_ptr<script_class_definition> script_class;
-                                        std::shared_ptr<function_decl> ctor;
-                                        std::vector<script_value> args;
-                                    };
-
-                                    std::vector<CtorChainEntry> ctor_chain;
-                                    ctor_chain.push_back({parent_script_class, parent_ctor, init_args});
-
-                                    // Walk up the inheritance chain, collecting constructors and evaluating args
-                                    size_t chain_idx = 0;
-                                    while (chain_idx < ctor_chain.size()) {
-                                        auto& entry = ctor_chain[chain_idx];
-
-                                        // Create environment for this level's argument evaluation
-                                        auto level_env = std::make_shared<environment>(definition_env, self->string_symbolizer_);
-                                        level_env->define("this", this_value);
-                                        for (size_t pi = 0; pi < entry.ctor->parameters.size() && pi < entry.args.size(); ++pi) {
-                                            level_env->define(entry.ctor->parameters[pi].name, entry.args[pi]);
-                                        }
-
-                                        // Look for super() in this constructor's initializers
-                                        for (const auto& init : entry.ctor->initializers) {
-                                            if (init.target == "super") {
-                                                auto ancestor = entry.script_class->get_parent();
-                                                if (ancestor) {
-                                                    // Evaluate super() arguments in this level's environment
-                                                    std::vector<script_value> ancestor_args;
-                                                    auto old_env = self->environment_;
-                                                    self->environment_ = level_env;
-                                                    for (const auto& arg_expr : init.arguments) {
-                                                        auto r = self->dispatch_expr(arg_expr.get());
-                                                        if (!r) {
-                                                            self->environment_ = old_env;
-                                                            return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
-                                                                "Failed to evaluate super() argument");
-                                                        }
-                                                        ancestor_args.push_back(self->pop_value());
-                                                    }
-                                                    self->environment_ = old_env;
-
-                                                    auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor);
-                                                    if (ancestor_script) {
-                                                        // Ancestor is a script class - find matching constructor and add to chain
-                                                        const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
-                                                        std::shared_ptr<function_decl> ancestor_ctor;
-                                                        for (const auto& ac : ancestor_ctors) {
-                                                            if (ac->parameters.size() == ancestor_args.size()) {
-                                                                ancestor_ctor = ac;
-                                                                break;
-                                                            }
-                                                        }
-                                                        if (ancestor_ctor) {
-                                                            ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
-                                                        } else if (!ancestor_ctors.empty()) {
-                                                            return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-                                                                "No matching constructor for ancestor class");
-                                                        }
-                                                    } else {
-                                                        // Ancestor is a C++ class - call its constructor NOW
-                                                        auto cpp_name = ancestor->get_name();
-                                                        auto cpp_ctor_result = self->environment_->get(cpp_name);
-                                                        if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
-                                                            auto cpp_result = cpp_ctor_result.value().as_function()(ancestor_args);
-                                                            if (!cpp_result) {
-                                                                return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
-                                                                    "Failed to call C++ ancestor constructor");
-                                                            }
-                                                            script_value cpp_obj = std::move(cpp_result.value());
-
-                                                            // Copy _cpp_object from C++ instance to our instance
-                                                            if (cpp_obj.is_object()) {
-                                                                auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
-                                                                if (cpp_instance) {
-                                                                    uint64_t src_id = cpp_instance->get_cpp_object_field_id();
-                                                                    uint64_t dst_id = instance->get_cpp_object_field_id();
-                                                                    if (cpp_instance->has_field(src_id)) {
-                                                                        instance->set_field(dst_id, cpp_instance->get_field(src_id));
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                break; // Only one super() per constructor
-                                            }
-                                        }
-                                        chain_idx++;
-                                    }
-
-                                    // Execute field initializers and constructor bodies from root to leaf
-                                    // This ensures proper initialization order:
-                                    // 1. Grandparent field defaults, then grandparent body
-                                    // 2. Parent field defaults, then parent body
-                                    // 3. (Current class handled by outer code after this block)
-                                    for (auto it = ctor_chain.rbegin(); it != ctor_chain.rend(); ++it) {
-                                        // Create init environment for field initializers
-                                        auto level_init_env = std::make_shared<environment>(definition_env, self->string_symbolizer_);
-                                        level_init_env->define("this", this_value);
-                                        for (size_t pi = 0; pi < it->ctor->parameters.size() && pi < it->args.size(); ++pi) {
-                                            level_init_env->define(it->ctor->parameters[pi].name, it->args[pi]);
-                                        }
-
-                                        // Evaluate THIS class's field initializers only (not parents - they're handled by their own iteration)
-                                        const auto& field_initializers = it->script_class->get_field_initializer_asts();
-                                        auto old_env = self->environment_;
-                                        self->environment_ = level_init_env;
-                                        for (const auto& [field_id, initializer_ast] : field_initializers) {
-                                            if (initializer_ast) {
-                                                auto r = self->dispatch_expr(initializer_ast.get());
-                                                if (r) {
-                                                    script_value field_value = self->pop_value();
-                                                    // field_id is already the interned ID (map is keyed by ID)
-                                                    instance->set_field(field_id, std::move(field_value));
-                                                }
-                                            }
-                                        }
-                                        self->environment_ = old_env;
-
-                                        // Execute constructor body
-                                        scoped_method_environment method_env(
-                                            self.get(),
-                                            definition_env,
-                                            this_value
-                                        );
-                                        auto ctor_result = self->execute_method_ast(it->ctor, method_env.get(), it->args);
-                                        if (!ctor_result) return ctor_result.error_value();
-                                    }
-                                    // Mark that we handled all parent field initializers
-                                    handled_parent_init = true;
-                                } else if (parent_ctor_asts.empty() && init_args.empty()) {
-                                    // Parent has no explicit constructors (only default constructor)
-                                    // and super() called with no arguments - this is valid, nothing to do
-                                    // The parent fields will be initialized with their default values
-                                } else {
-                                    return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-                                        "No matching parent constructor found for super()");
-                                }
-                            } else {
-                                // Parent is a C++ class - call its constructor
-                                try {
-                                    // Get the C++ class constructor function
-                                    auto parent_name = parent_class->get_name();
-                                    auto ctor_result = self->environment_->get(parent_name);
-                                    if (ctor_result && ctor_result.value().is_function()) {
-                                        script_value cpp_ctor = std::move(ctor_result.value());
-                                        // Call C++ constructor with init_args
-                                        auto result = cpp_ctor.as_function()(init_args);
-                                        if (!result) {
-                                            // Constructor failed - propagate error
-                                            return result.error_value();
-                                        }
-                                        script_value cpp_obj = std::move(result.value());
-
-                                        // Extract the C++ object and store it in _cpp_object field
-                                        if (cpp_obj.is_object()) {
-                                            auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
-                                            if (cpp_instance) {
-                                                // Use each instance's own field ID getter to ensure consistency
-                                                uint64_t src_field_id = cpp_instance->get_cpp_object_field_id();
-                                                uint64_t dst_field_id = instance->get_cpp_object_field_id();
-                                                if (cpp_instance->has_field(src_field_id)) {
-                                                    // Copy _cpp_object from parent to derived instance
-                                                    auto src_value = cpp_instance->get_field(src_field_id);
-                                                    instance->set_field(dst_field_id, src_value);
-                                                }
-                                            }
-                                        }
-                                    }
-                                } catch (const runtime_error&) {
-                                    return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
-                                        "Failed to call C++ parent constructor");
-                                }
-                            }
-                        }
-                    } else {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-                            "Cannot call super() - class has no base class");
-                    }
-                } else if (initializer.target == "this") {
-                    // Delegate to another constructor in the same class
-                    // Evaluate initializer arguments in constructor environment
-                    std::vector<script_value> init_args;
-                    init_args.reserve(initializer.arguments.size());
-                    
-                    // Temporarily switch to init environment for argument evaluation
-                    auto old_env = self->environment_;
-                    self->environment_ = init_env;
-
-                    for (const auto& arg_expr : initializer.arguments) {
-                        auto result = self->dispatch_expr(arg_expr.get());
-                        if (!result) {
-                            // Restore environment before returning error
-                            self->environment_ = old_env;
-                            return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
-                                "Failed to evaluate constructor initializer argument");
-                        }
-                        init_args.push_back(self->pop_value());
-                    }
-
-                    // Restore environment
-                    self->environment_ = old_env;
-                    
-                    // Find matching constructor in same class
-                    const auto& ctor_asts = class_def->get_constructor_asts();
-                    std::shared_ptr<function_decl> target_ctor;
-                    for (const auto& ctor_ast : ctor_asts) {
-                        if (ctor_ast->parameters.size() == init_args.size() && ctor_ast != matching_ctor) {
-                            target_ctor = ctor_ast;
-                            break;
-                        }
-                    }
-                    
-                    if (!target_ctor) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-                            "No matching constructor found for this() delegation");
-                    }
-                    
-                    // Apply this class's field initializers (declared defaults) BEFORE the
-                    // delegated-to ctor body, so the target can override them. Suppress the
-                    // post-loop re-run below so they are not applied twice (the clobber bug).
-                    self->evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
-                    delegated_to_this = true;
-
-                    // Call the target constructor on this instance with method environment
-                    // Use definition_env as parent
-                    scoped_method_environment target_method_env(
-                        self.get(),
-                        definition_env,
-                        this_value
-                    );
-
-                    auto target_result = self->execute_method_ast(target_ctor, target_method_env.get(), init_args);
-                    if (!target_result) return target_result.error_value();
-                }
-            }
-
-            // Evaluate field initializers BEFORE executing the constructor body
-            // Field initializers can access constructor parameters via init_env
-            // If the iterative multi-level loop already handled parent field initializers,
-            // skip recursive parent processing to avoid re-evaluating defaults.
-            // Skip entirely when this ctor delegated via `: this(...)` — the target
-            // already initialized the fields and re-running would clobber them (#24).
-            if (!delegated_to_this) {
-                self->evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
-            }
-
-            // Execute the matching constructor with method environment
-            // Create a method environment that provides implicit 'this' field access
-            // Use definition_env as parent
-            scoped_method_environment method_env(
-                self.get(),
-                definition_env,
-                this_value
-            );
-
-            // Execute constructor as a method so it has access to 'this' and fields
-            // The constructor implicitly returns 'this', so use that return value
-            // instead of creating a new script_value (which would be a duplicate reference)
-            auto result = self->execute_method_ast(matching_ctor, method_env.get(), args);
-
-            // Constructor executed and returned 'this'
-            return result;
+            return backend->execute_callable(ctor_payload, args);
         };
 
         // Register the dispatcher in global environment (constructors are always global)
@@ -10343,53 +9147,17 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // If no constructor was found, create a default constructor
     else {
         // Create a default constructor that just initializes the instance
-        auto default_ctor_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), class_def, class_name = decl->name](const std::vector<script_value>& args) -> checked_result<script_value> {
-            // Get strong reference from weak_ptr
-            auto self = weak_self.lock();
-            if (!self) {
+        script_callable ctor_payload;
+        ctor_payload.kind = script_callable::kind_type::constructor;
+        ctor_payload.cls = class_def;
+        engine* ctor_eng = engine_;
+        auto default_ctor_func = [ctor_eng, ctor_payload](const std::vector<script_value>& args) -> checked_result<script_value> {
+            execution_backend* backend = ctor_eng ? ctor_eng->get_execution_backend() : nullptr;
+            if (!backend) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::internal_error),
                     "Interpreter was destroyed before constructor call");
             }
-
-            // Default constructor shouldn't have arguments
-            if (!args.empty()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                    "Default constructor takes no arguments");
-            }
-            
-            // Create instance using inherited create_instance()!
-            auto instance = class_def->create_instance();
-            // Default constructor instance created
-
-            // Create 'this' value for field initializer evaluation
-            // Use class_def's registered name and type_id to handle namespaces correctly
-            // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
-            auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, self->engine_, true);
-
-            // Find the root (global) environment with cycle detection
-            std::unordered_set<environment*> visited;
-            auto current_env = self->environment_;
-            while (current_env && current_env->get_parent()) {
-                // Cycle detection
-                if (visited.count(current_env.get()) > 0) {
-                    // Cycle detected! Log and break
-                    std::cerr << "WARNING: Environment cycle detected at " << current_env.get()
-                              << " (type: " << typeid(*current_env).name() << ")\n";
-                    std::cerr << "  Visited " << visited.size() << " environments before cycle\n";
-                    break;
-                }
-                visited.insert(current_env.get());
-                current_env = current_env->get_parent();
-            }
-            auto global_env = current_env ? current_env : self->environment_;
-
-            // Evaluate field initializers with a regular environment that has 'this'
-            auto init_env = std::make_shared<environment>(global_env, self->string_symbolizer_);
-            init_env->define("this", this_value);
-            self->evaluate_field_initializers(instance, class_def, init_env);
-
-            // Default constructor object wrapped
-            return this_value;
+            return backend->execute_callable(ctor_payload, args);
         };
 
         // Register default constructor in global environment (constructors are always global)
@@ -10595,9 +9363,12 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
     }
 
     // Get or create namespace data
-    auto& ns_data = namespaces_[decl->name_id];
+    if (!engine_) {
+        return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
+    }
+    auto& ns_data = engine_->script_namespaces()[decl->name_id];
     if (!ns_data) {
-        ns_data = std::make_shared<namespace_data>();
+        ns_data = std::make_shared<script_namespace_data>();
     }
 
     // Process all declarations within the namespace
@@ -10871,6 +9642,516 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
     environment_ = old_env;
 }
 
+checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
+    switch (payload.kind) {
+        case script_callable::kind_type::function:
+            return call_function(*payload.fn, args);
+        case script_callable::kind_type::method: {
+            auto method_env = get_pooled_method_environment(payload.definition_env, *payload.this_obj);
+            method_env->define("this", *payload.this_obj);
+            auto result = execute_method_ast(payload.ast, method_env, args);
+            // Always release the method environment back to the pool (even on error!)
+            release_environment(method_env, false);
+            return result;
+        }
+        case script_callable::kind_type::static_method: {
+            auto static_env = std::make_shared<environment>(payload.definition_env, string_symbolizer_, payload.cls);
+            return execute_method_ast(payload.ast, static_env, args);
+        }
+        case script_callable::kind_type::constructor: {
+            auto script_cls = std::dynamic_pointer_cast<script_class_definition>(payload.cls);
+            if (!script_cls) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Constructor payload without script class definition");
+            }
+            if (script_cls->get_constructor_asts().empty()) {
+                return construct_default_instance(script_cls, args);
+            }
+            return construct_instance(script_cls, payload.definition_env, args);
+        }
+    }
+    return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");
+}
+
+checked_result<script_value> interpreter::construct_instance(std::shared_ptr<script_class_definition> class_def,
+                                                              std::shared_ptr<environment> definition_env,
+                                                              const std::vector<script_value>& args) {
+    
+    // Get all constructor ASTs
+    const auto& ctor_asts = class_def->get_constructor_asts();
+
+    // Find constructor with matching parameter count AND types
+    // Priority: 1) exact type match, 2) numeric conversion match, 3) untyped fallback
+    std::shared_ptr<function_decl> exact_match_ctor;
+    std::shared_ptr<function_decl> convertible_match_ctor;
+    std::shared_ptr<function_decl> arity_match_ctor;  // Fallback for untyped params
+
+    for (const auto& ctor_ast : ctor_asts) {
+        if (ctor_ast->parameters.size() != args.size()) {
+            continue;
+        }
+
+        // Remember first arity match as fallback
+        if (!arity_match_ctor) {
+            arity_match_ctor = ctor_ast;
+        }
+
+        // Check if all parameter types match exactly
+        bool exact_match = true;
+        bool convertible_match = true;
+        for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
+            const auto& param = ctor_ast->parameters[i];
+            if (param.type && !param.type->type_name.empty()) {
+                // Parameter has explicit type - check if arg is compatible
+                auto arg_type = args[i].type();
+                if (arg_type == script_value_type::jai_object_type) {
+                    // For objects, check class name
+                    auto resolved = resolve_member_target(args[i]);
+                    if (resolved) {
+                        if (resolved.class_name() != param.type->type_name) {
+                            exact_match = false;
+                            convertible_match = false;
+                        }
+                    } else {
+                        exact_match = false;
+                        convertible_match = false;
+                    }
+                } else {
+                    // For primitives, check base type
+                    if (arg_type != param.type->base_type) {
+                        exact_match = false;
+                        // Check if numeric conversion is allowed
+                        bool is_numeric_conversion =
+                            (arg_type == script_value_type::jai_int_type &&
+                             param.type->base_type == script_value_type::jai_float_type) ||
+                            (arg_type == script_value_type::jai_float_type &&
+                             param.type->base_type == script_value_type::jai_int_type);
+                        if (!is_numeric_conversion) {
+                            convertible_match = false;
+                        }
+                    }
+                }
+            }
+            // If param has no type, it accepts anything
+        }
+
+        if (exact_match && !exact_match_ctor) {
+            exact_match_ctor = ctor_ast;
+        }
+        if (convertible_match && !convertible_match_ctor) {
+            convertible_match_ctor = ctor_ast;
+        }
+    }
+
+    // Select best matching constructor: exact > convertible > arity fallback
+    std::shared_ptr<function_decl> matching_ctor = exact_match_ctor;
+    if (!matching_ctor) {
+        matching_ctor = convertible_match_ctor;
+    }
+    if (!matching_ctor) {
+        matching_ctor = arity_match_ctor;
+    }
+
+    if (!matching_ctor) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+            "No constructor found with matching arguments");
+    }
+    
+    // Create instance
+    auto instance = class_def->create_instance();
+    // Instance created
+
+    // Create 'this' value using the class_def's registered name and type_id
+    // This ensures we use the exact name/id that was registered (e.g., with namespace)
+    // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
+    auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+
+    // Create a regular environment for field initializers and constructor initializer arguments
+    // Use the captured definition environment as the parent
+    auto init_env = std::make_shared<environment>(definition_env, string_symbolizer_);
+    init_env->define("this", this_value);
+
+    // Bind constructor parameters so they're available in initializer expressions
+    // NOTE: Do NOT clone here - these params are just for field initializer evaluation
+    // The actual parameter binding with proper value/reference semantics happens in call_function
+    if (matching_ctor->parameters.size() != args.size()) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+            "Constructor parameter count mismatch");
+    }
+    for (size_t i = 0; i < matching_ctor->parameters.size(); ++i) {
+        init_env->define(matching_ctor->parameters[i].name, args[i]);
+    }
+
+    // Track whether the iterative multi-level loop handled parent field initializers
+    bool handled_parent_init = false;
+    // Track `: this(...)` delegation. C++ delegating-ctor semantics: the
+    // target constructor constructs the members; the delegating ctor must NOT
+    // re-run field initializers afterward (that re-applies declared defaults
+    // and clobbers what the target set).
+    bool delegated_to_this = false;
+
+    // Process constructor initializers (: super(args), : this(args))
+    for (const auto& initializer : matching_ctor->initializers) {
+        if (initializer.target == "super") {
+            // Call base class constructor
+            if (class_def->get_parent()) {
+                // Evaluate initializer arguments in init environment
+                std::vector<script_value> init_args;
+                init_args.reserve(initializer.arguments.size());
+                
+                // Temporarily switch to init environment for argument evaluation
+                auto old_env = environment_;
+                environment_ = init_env;
+
+                for (const auto& arg_expr : initializer.arguments) {
+                    auto result = dispatch_expr(arg_expr.get());
+                    if (!result) {
+                        // Restore environment before returning error
+                        environment_ = old_env;
+                        return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
+                            "Failed to evaluate constructor initializer argument");
+                    }
+                    init_args.push_back(pop_value());
+                }
+
+                // Restore environment
+                environment_ = old_env;
+                
+                // Call parent constructor to initialize parent fields
+                auto parent_class = class_def->get_parent();
+                if (parent_class) {
+                    // Check if parent is a script class
+                    auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent_class);
+                    if (parent_script_class) {
+                        // Find matching parent constructor
+                        const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
+                        std::shared_ptr<function_decl> parent_ctor;
+                        for (const auto& ctor_ast : parent_ctor_asts) {
+                            if (ctor_ast->parameters.size() == init_args.size()) {
+                                parent_ctor = ctor_ast;
+                                break;
+                            }
+                        }
+
+                        if (parent_ctor) {
+                            // === Multi-level inheritance support ===
+                            // We need to process the entire super() chain to find and call the C++ base constructor.
+                            // Constructor bodies are executed AFTER field initializers by the outer flow.
+                            //
+                            // Algorithm (iterative):
+                            // 1. Walk up super() calls, evaluating arguments at each level
+                            // 2. When we hit a C++ class, call its constructor to get _cpp_object
+                            // 3. Store constructor info for later body execution
+                            // 4. Execute bodies from root to leaf, interleaved with field initializers
+
+                            struct CtorChainEntry {
+                                std::shared_ptr<script_class_definition> script_class;
+                                std::shared_ptr<function_decl> ctor;
+                                std::vector<script_value> args;
+                            };
+
+                            std::vector<CtorChainEntry> ctor_chain;
+                            ctor_chain.push_back({parent_script_class, parent_ctor, init_args});
+
+                            // Walk up the inheritance chain, collecting constructors and evaluating args
+                            size_t chain_idx = 0;
+                            while (chain_idx < ctor_chain.size()) {
+                                auto& entry = ctor_chain[chain_idx];
+
+                                // Create environment for this level's argument evaluation
+                                auto level_env = std::make_shared<environment>(definition_env, string_symbolizer_);
+                                level_env->define("this", this_value);
+                                for (size_t pi = 0; pi < entry.ctor->parameters.size() && pi < entry.args.size(); ++pi) {
+                                    level_env->define(entry.ctor->parameters[pi].name, entry.args[pi]);
+                                }
+
+                                // Look for super() in this constructor's initializers
+                                for (const auto& init : entry.ctor->initializers) {
+                                    if (init.target == "super") {
+                                        auto ancestor = entry.script_class->get_parent();
+                                        if (ancestor) {
+                                            // Evaluate super() arguments in this level's environment
+                                            std::vector<script_value> ancestor_args;
+                                            auto old_env = environment_;
+                                            environment_ = level_env;
+                                            for (const auto& arg_expr : init.arguments) {
+                                                auto r = dispatch_expr(arg_expr.get());
+                                                if (!r) {
+                                                    environment_ = old_env;
+                                                    return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
+                                                        "Failed to evaluate super() argument");
+                                                }
+                                                ancestor_args.push_back(pop_value());
+                                            }
+                                            environment_ = old_env;
+
+                                            auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor);
+                                            if (ancestor_script) {
+                                                // Ancestor is a script class - find matching constructor and add to chain
+                                                const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
+                                                std::shared_ptr<function_decl> ancestor_ctor;
+                                                for (const auto& ac : ancestor_ctors) {
+                                                    if (ac->parameters.size() == ancestor_args.size()) {
+                                                        ancestor_ctor = ac;
+                                                        break;
+                                                    }
+                                                }
+                                                if (ancestor_ctor) {
+                                                    ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
+                                                } else if (!ancestor_ctors.empty()) {
+                                                    return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                                                        "No matching constructor for ancestor class");
+                                                }
+                                            } else {
+                                                // Ancestor is a C++ class - call its constructor NOW
+                                                auto cpp_name = ancestor->get_name();
+                                                auto cpp_ctor_result = environment_->get(cpp_name);
+                                                if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
+                                                    auto cpp_result = cpp_ctor_result.value().as_function()(ancestor_args);
+                                                    if (!cpp_result) {
+                                                        return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
+                                                            "Failed to call C++ ancestor constructor");
+                                                    }
+                                                    script_value cpp_obj = std::move(cpp_result.value());
+
+                                                    // Copy _cpp_object from C++ instance to our instance
+                                                    if (cpp_obj.is_object()) {
+                                                        auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
+                                                        if (cpp_instance) {
+                                                            uint64_t src_id = cpp_instance->get_cpp_object_field_id();
+                                                            uint64_t dst_id = instance->get_cpp_object_field_id();
+                                                            if (cpp_instance->has_field(src_id)) {
+                                                                instance->set_field(dst_id, cpp_instance->get_field(src_id));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        break; // Only one super() per constructor
+                                    }
+                                }
+                                chain_idx++;
+                            }
+
+                            // Execute field initializers and constructor bodies from root to leaf
+                            // This ensures proper initialization order:
+                            // 1. Grandparent field defaults, then grandparent body
+                            // 2. Parent field defaults, then parent body
+                            // 3. (Current class handled by outer code after this block)
+                            for (auto it = ctor_chain.rbegin(); it != ctor_chain.rend(); ++it) {
+                                // Create init environment for field initializers
+                                auto level_init_env = std::make_shared<environment>(definition_env, string_symbolizer_);
+                                level_init_env->define("this", this_value);
+                                for (size_t pi = 0; pi < it->ctor->parameters.size() && pi < it->args.size(); ++pi) {
+                                    level_init_env->define(it->ctor->parameters[pi].name, it->args[pi]);
+                                }
+
+                                // Evaluate THIS class's field initializers only (not parents - they're handled by their own iteration)
+                                const auto& field_initializers = it->script_class->get_field_initializer_asts();
+                                auto old_env = environment_;
+                                environment_ = level_init_env;
+                                for (const auto& [field_id, initializer_ast] : field_initializers) {
+                                    if (initializer_ast) {
+                                        auto r = dispatch_expr(initializer_ast.get());
+                                        if (r) {
+                                            script_value field_value = pop_value();
+                                            // field_id is already the interned ID (map is keyed by ID)
+                                            instance->set_field(field_id, std::move(field_value));
+                                        }
+                                    }
+                                }
+                                environment_ = old_env;
+
+                                // Execute constructor body
+                                scoped_method_environment method_env(
+                                    this,
+                                    definition_env,
+                                    this_value
+                                );
+                                auto ctor_result = execute_method_ast(it->ctor, method_env.get(), it->args);
+                                if (!ctor_result) return ctor_result.error_value();
+                            }
+                            // Mark that we handled all parent field initializers
+                            handled_parent_init = true;
+                        } else if (parent_ctor_asts.empty() && init_args.empty()) {
+                            // Parent has no explicit constructors (only default constructor)
+                            // and super() called with no arguments - this is valid, nothing to do
+                            // The parent fields will be initialized with their default values
+                        } else {
+                            return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                                "No matching parent constructor found for super()");
+                        }
+                    } else {
+                        // Parent is a C++ class - call its constructor
+                        try {
+                            // Get the C++ class constructor function
+                            auto parent_name = parent_class->get_name();
+                            auto ctor_result = environment_->get(parent_name);
+                            if (ctor_result && ctor_result.value().is_function()) {
+                                script_value cpp_ctor = std::move(ctor_result.value());
+                                // Call C++ constructor with init_args
+                                auto result = cpp_ctor.as_function()(init_args);
+                                if (!result) {
+                                    // Constructor failed - propagate error
+                                    return result.error_value();
+                                }
+                                script_value cpp_obj = std::move(result.value());
+
+                                // Extract the C++ object and store it in _cpp_object field
+                                if (cpp_obj.is_object()) {
+                                    auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
+                                    if (cpp_instance) {
+                                        // Use each instance's own field ID getter to ensure consistency
+                                        uint64_t src_field_id = cpp_instance->get_cpp_object_field_id();
+                                        uint64_t dst_field_id = instance->get_cpp_object_field_id();
+                                        if (cpp_instance->has_field(src_field_id)) {
+                                            // Copy _cpp_object from parent to derived instance
+                                            auto src_value = cpp_instance->get_field(src_field_id);
+                                            instance->set_field(dst_field_id, src_value);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (const runtime_error&) {
+                            return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
+                                "Failed to call C++ parent constructor");
+                        }
+                    }
+                }
+            } else {
+                return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                    "Cannot call super() - class has no base class");
+            }
+        } else if (initializer.target == "this") {
+            // Delegate to another constructor in the same class
+            // Evaluate initializer arguments in constructor environment
+            std::vector<script_value> init_args;
+            init_args.reserve(initializer.arguments.size());
+            
+            // Temporarily switch to init environment for argument evaluation
+            auto old_env = environment_;
+            environment_ = init_env;
+
+            for (const auto& arg_expr : initializer.arguments) {
+                auto result = dispatch_expr(arg_expr.get());
+                if (!result) {
+                    // Restore environment before returning error
+                    environment_ = old_env;
+                    return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
+                        "Failed to evaluate constructor initializer argument");
+                }
+                init_args.push_back(pop_value());
+            }
+
+            // Restore environment
+            environment_ = old_env;
+            
+            // Find matching constructor in same class
+            const auto& ctor_asts = class_def->get_constructor_asts();
+            std::shared_ptr<function_decl> target_ctor;
+            for (const auto& ctor_ast : ctor_asts) {
+                if (ctor_ast->parameters.size() == init_args.size() && ctor_ast != matching_ctor) {
+                    target_ctor = ctor_ast;
+                    break;
+                }
+            }
+            
+            if (!target_ctor) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
+                    "No matching constructor found for this() delegation");
+            }
+            
+            // Apply this class's field initializers (declared defaults) BEFORE the
+            // delegated-to ctor body, so the target can override them. Suppress the
+            // post-loop re-run below so they are not applied twice (the clobber bug).
+            evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+            delegated_to_this = true;
+
+            // Call the target constructor on this instance with method environment
+            // Use definition_env as parent
+            scoped_method_environment target_method_env(
+                this,
+                definition_env,
+                this_value
+            );
+
+            auto target_result = execute_method_ast(target_ctor, target_method_env.get(), init_args);
+            if (!target_result) return target_result.error_value();
+        }
+    }
+
+    // Evaluate field initializers BEFORE executing the constructor body
+    // Field initializers can access constructor parameters via init_env
+    // If the iterative multi-level loop already handled parent field initializers,
+    // skip recursive parent processing to avoid re-evaluating defaults.
+    // Skip entirely when this ctor delegated via `: this(...)` — the target
+    // already initialized the fields and re-running would clobber them (#24).
+    if (!delegated_to_this) {
+        evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
+    }
+
+    // Execute the matching constructor with method environment
+    // Create a method environment that provides implicit 'this' field access
+    // Use definition_env as parent
+    scoped_method_environment method_env(
+        this,
+        definition_env,
+        this_value
+    );
+
+    // Execute constructor as a method so it has access to 'this' and fields
+    // The constructor implicitly returns 'this', so use that return value
+    // instead of creating a new script_value (which would be a duplicate reference)
+    auto result = execute_method_ast(matching_ctor, method_env.get(), args);
+
+    // Constructor executed and returned 'this'
+    return result;
+}
+
+checked_result<script_value> interpreter::construct_default_instance(std::shared_ptr<script_class_definition> class_def,
+                                                                      const std::vector<script_value>& args) {
+
+    // Default constructor shouldn't have arguments
+    if (!args.empty()) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+            "Default constructor takes no arguments");
+    }
+    
+    // Create instance using inherited create_instance()!
+    auto instance = class_def->create_instance();
+    // Default constructor instance created
+
+    // Create 'this' value for field initializer evaluation
+    // Use class_def's registered name and type_id to handle namespaces correctly
+    // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
+    auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, engine_, true);
+
+    // Find the root (global) environment with cycle detection
+    std::unordered_set<environment*> visited;
+    auto current_env = environment_;
+    while (current_env && current_env->get_parent()) {
+        // Cycle detection
+        if (visited.count(current_env.get()) > 0) {
+            // Cycle detected! Log and break
+            std::cerr << "WARNING: Environment cycle detected at " << current_env.get()
+                      << " (type: " << typeid(*current_env).name() << ")\n";
+            std::cerr << "  Visited " << visited.size() << " environments before cycle\n";
+            break;
+        }
+        visited.insert(current_env.get());
+        current_env = current_env->get_parent();
+    }
+    auto global_env = current_env ? current_env : environment_;
+
+    // Evaluate field initializers with a regular environment that has 'this'
+    auto init_env = std::make_shared<environment>(global_env, string_symbolizer_);
+    init_env->define("this", this_value);
+    evaluate_field_initializers(instance, class_def, init_env);
+
+    // Default constructor object wrapped
+    return this_value;
+}
+
 // RAII wrapper for method environments
 scoped_method_environment::scoped_method_environment(
     interpreter* interp,
@@ -11133,12 +10414,19 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     );
                 }
             } else {
-                // No metadata - can't create reference
-                cleanup();
-                return checked_result<script_value>(
-                    make_error_code(runtime_error_code::invalid_reference),
-                    "Cannot pass non-lvalue to reference parameter"
-                );
+                // No metadata: external (C++) invocation. Object values are handles, so a
+                // shallow copy aliases the same underlying object - reference semantics hold.
+                auto arg_type = arg.current_type();
+                if (arg_type == script_value_type::jai_object_type ||
+                    arg_type == script_value_type::jai_shared_ptr_type) {
+                    call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
+                } else {
+                    cleanup();
+                    return checked_result<script_value>(
+                        make_error_code(runtime_error_code::invalid_reference),
+                        "Cannot pass non-lvalue to reference parameter"
+                    );
+                }
             }
         } else {
             // Non-reference parameter - try to convert the argument to the parameter type if needed
@@ -11202,18 +10490,19 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     if (hasYieldRequest_) {
         if (active_coroutine_) {
             result = active_coroutine_->last_value();
+            auto& coro_state = coroutine_state(*active_coroutine_);
             // Record where to resume in the function body.
             // If inner constructs pushed continuations, re-enter this statement.
             // If no inner continuations, the yield was a direct child, skip it.
-            size_t resume_idx = active_coroutine_->has_continuations() ? last_body_idx : last_body_idx + 1;
-            active_coroutine_->push_continuation(function.body.get(), resume_idx);
+            size_t resume_idx = coro_state.has_continuations() ? last_body_idx : last_body_idx + 1;
+            coro_state.push_continuation(function.body.get(), resume_idx);
             // Save interpreter state into the coroutine for later resume
             // The visit_* methods have already pushed continuations onto the coroutine
             // and left the environment chain intact (no releases on yield path)
-            active_coroutine_->saved_environment_ = environment_;
-            active_coroutine_->saved_call_stack_ = std::move(call_stack_);
-            active_coroutine_->saved_return_value_ = std::move(returnValue_);
-            active_coroutine_->saved_has_return_ = hasReturnValue_;
+            coro_state.saved_environment = environment_;
+            coro_state.saved_call_stack = std::move(call_stack_);
+            coro_state.saved_return_value = std::move(returnValue_);
+            coro_state.saved_has_return = hasReturnValue_;
         }
         // Restore caller's environment and call stack WITHOUT releasing
         // (the coroutine now owns the environment chain and call frame)
@@ -11296,10 +10585,9 @@ bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr 
                 source_type_info->type_name == target_type->type_name) {
                 return true;
             }
-            // Also check the class_instance's class name (for script-defined classes)
-            // Use get_class_instance() which safely returns nullptr if not a class instance
-            auto instance = const_cast<script_value&>(source).get_class_instance();
-            if (instance && instance->get_class_name() == target_type->type_name) {
+            // Also check the resolved class name (script classes, cpp_bound references)
+            auto resolved = resolve_member_target(source);
+            if (resolved && resolved.class_name() == target_type->type_name) {
                 return true;
             }
             // Different object types - might still be convertible via constructor
@@ -11316,8 +10604,8 @@ bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr 
             if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
                 return true;  // Inner types match
             }
-            auto instance = const_cast<script_value&>(source).get_class_instance();
-            if (instance && instance->get_class_name() == target_type->type_name) {
+            auto resolved = resolve_member_target(source);
+            if (resolved && resolved.class_name() == target_type->type_name) {
                 return true;
             }
         }
@@ -11326,8 +10614,8 @@ bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr 
             if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
                 return true;
             }
-            auto instance = const_cast<script_value&>(source).get_class_instance();
-            if (instance && instance->get_class_name() == target_type->type_name) {
+            auto resolved = resolve_member_target(source);
+            if (resolved && resolved.class_name() == target_type->type_name) {
                 return true;
             }
         }
@@ -11398,16 +10686,14 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
                 source_type_info->type_name == target_type->type_name) {
                 return derefed_arg;  // Same object type - no conversion needed
             }
-            // Also check the class_instance's class name (for script-defined classes)
-            // Use get_class_instance() which safely returns nullptr if not a class instance
-            auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
-            if (instance) {
-                if (instance->get_class_name() == target_type->type_name) {
+            // Also check the resolved class name (script classes, cpp_bound references)
+            auto resolved = resolve_member_target(derefed_arg);
+            if (resolved) {
+                if (resolved.class_name() == target_type->type_name) {
                     return arg;  // Same object type - no conversion needed
                 }
                 // Check inheritance - derived types are compatible with base types
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->is_subtype_of(target_type->type_name)) {
+                if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
                     return arg;  // Derived type - compatible without conversion
                 }
             }
@@ -11432,15 +10718,14 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
             if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
                 return arg;  // shared_ptr<T> -> shared_ptr<T> with matching inner type
             }
-            // Also check via class instance (with inheritance support)
-            auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
-            if (instance) {
-                if (instance->get_class_name() == target_type->type_name) {
+            // Also check via resolved class (with inheritance support)
+            auto resolved = resolve_member_target(derefed_arg);
+            if (resolved) {
+                if (resolved.class_name() == target_type->type_name) {
                     return arg;
                 }
                 // Check inheritance
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->is_subtype_of(target_type->type_name)) {
+                if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
                     return arg;  // Derived type compatible with base
                 }
             }
@@ -11448,14 +10733,13 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         // shared_ptr<T> -> T - unwrap to regular object
         if (target_base_type == script_value_type::jai_object_type) {
             // Check if the inner type matches the target type (with inheritance)
-            auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
-            if (instance) {
-                if (instance->get_class_name() == target_type->type_name) {
+            auto resolved = resolve_member_target(derefed_arg);
+            if (resolved) {
+                if (resolved.class_name() == target_type->type_name) {
                     return arg;  // shared_ptr<T> -> T is allowed (preserves reference semantics)
                 }
                 // Check inheritance
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->is_subtype_of(target_type->type_name)) {
+                if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
                     return arg;  // Derived type compatible with base
                 }
             }
@@ -11486,10 +10770,10 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
                     std::string source_type_name;
                     class_definition* source_class_def = nullptr;
                     if (source_type == script_value_type::jai_object_type) {
-                        auto instance = const_cast<script_value&>(derefed_arg).get_class_instance();
-                        if (instance) {
-                            source_type_name = instance->get_class_name();
-                            source_class_def = instance->get_class_definition();
+                        auto resolved = resolve_member_target(derefed_arg);
+                        if (resolved) {
+                            source_type_name = resolved.class_name();
+                            source_class_def = resolved.class_def;
                         }
                     }
 
@@ -11615,40 +10899,145 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         target_type->id, derefed_arg.type_id());
 }
 
-script_value interpreter::make_coroutine_object(std::shared_ptr<coroutine_handle> handle) {
-    // Construct directly - interpreter is friend of script_value so can access private members
-    script_value v(std::monostate{}, engine_);
-    auto obj = make_strong<script_value::object_holder>();
-    obj->type_name = "coroutine_handle";
-    obj->type_id = coroutine_handle_type_id_;
-    obj->data = std::static_pointer_cast<void>(handle);
-    obj->is_class_instance_wrapper = false;
-    v.set_object_holder(std::move(obj));
-    return v;
+script_value interpreter::make_coroutine_object(engine* eng, uint64_t type_id, std::shared_ptr<coroutine_handle> handle) {
+    return script_value::make_coroutine_handle(type_id, std::static_pointer_cast<void>(handle), eng);
 }
 
-script_value interpreter::make_function(std::shared_ptr<script_defined_function> func) {
-    // Create a wrapper that handles reference parameters properly
-    script_function wrapper = [this, func](const std::vector<script_value>& args) -> checked_result<script_value> {
-        // For functions with reference parameters, we need special handling
-        bool hasRefParams = false;
-        for (const auto& param : func->parameters) {
-            if (param.is_reference) {
-                hasRefParams = true;
+checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& handle) {
+    // Host-level resume is its own budgeted entry; a resume nested inside an
+    // executing script keeps the outer deadline.
+    if (current_call_depth_ == 0) {
+        arm_execution_deadline();
+    }
+
+    auto& state = coroutine_state(handle);
+
+    coroutine_handle* prev_coroutine = active_coroutine_;
+    bool prev_yield_request = hasYieldRequest_;
+    active_coroutine_ = &handle;
+    hasYieldRequest_ = false;
+
+    auto prev_status = handle.get_status();
+    handle.set_status(coroutine_handle::status::running);
+
+    // A runtime error in the (re)started segment must reach the caller as an error;
+    // falling through to `return handle.yield_value_` would hand back the PREVIOUS
+    // yield as a bogus success and silently swallow the failure.
+    std::optional<checked_result<script_value>> error_result;
+
+    auto function = handle.get_function();
+
+    if (prev_status == coroutine_handle::status::created) {
+        // On yield, call_function saves environment/call_stack into this coroutine
+        // (via active_coroutine_) and returns the yield value WITHOUT running cleanup;
+        // on normal return it cleans up and returns the result.
+        script_defined_function scriptFunc(
+            function->name,
+            function->parameters,
+            function->return_type,
+            function->body,
+            handle.get_closure_env(),
+            function->local_count
+        );
+
+        auto call_result = call_function(scriptFunc, handle.get_args());
+
+        if (hasYieldRequest_) {
+            // call_function already saved state into this coroutine
+            // (saved_environment, saved_call_stack, etc.)
+            handle.set_status(coroutine_handle::status::suspended);
+        } else if (!call_result) {
+            handle.set_status(coroutine_handle::status::failed);
+            error_result.emplace(std::move(call_result));
+        } else {
+            handle.set_status(coroutine_handle::status::completed);
+            handle.yield_value_ = std::move(call_result.value());
+        }
+
+    } else {
+        auto caller_env = environment_;
+        auto caller_call_stack = std::move(call_stack_);
+        auto caller_return_value = std::move(returnValue_);
+        bool caller_has_return = hasReturnValue_;
+
+        environment_ = state.saved_environment;
+        call_stack_ = std::move(state.saved_call_stack);
+        returnValue_ = std::move(state.saved_return_value);
+        hasReturnValue_ = state.saved_has_return;
+
+        // The continuations are consumed LIFO (outermost first).
+        // The outermost continuation is for the function body (call_function's loop).
+        // Pop it to get the statement index where yield occurred.
+        auto* body_cont = state.peek_continuation(function->body.get());
+        size_t start_index = 0;
+        if (body_cont) {
+            start_index = body_cont->index;
+            state.pop_continuation();
+        }
+        bool had_error = false;
+        size_t last_body_idx = start_index;
+
+        for (size_t i = start_index; i < function->body->declarations.size(); ++i) {
+            last_body_idx = i;
+            // For the first statement (start_index), the inner continuations
+            // are still on the stack and will be consumed by visit_block_stmt,
+            // visit_if_stmt, visit_while_stmt, etc. to fast-forward to the
+            // exact point where yield occurred.
+            checked_result<void> decl_result = dispatch_decl(function->body->declarations[i].get());
+
+            if (!decl_result) {
+                if (decl_result.error() != std::error_code()) {
+                    handle.set_status(coroutine_handle::status::failed);
+                    had_error = true;
+                    error_result.emplace(decl_result.error_value());
+                    break;
+                }
+            }
+
+            if (hasReturnValue_ || hasYieldRequest_) {
                 break;
             }
         }
 
-        if (!hasRefParams) {
-            // No reference parameters - use normal call
-            return call_function(*func, args);
+        if (!had_error) {
+            if (hasYieldRequest_) {
+                // Record where to resume in the function body.
+                // If inner constructs pushed continuations, re-enter this statement.
+                // If no inner continuations, the yield was a direct child, skip it.
+                size_t resume_idx = state.has_continuations() ? last_body_idx : last_body_idx + 1;
+                state.push_continuation(function->body.get(), resume_idx);
+                state.saved_environment = environment_;
+                state.saved_call_stack = std::move(call_stack_);
+                state.saved_return_value = std::move(returnValue_);
+                state.saved_has_return = hasReturnValue_;
+                handle.set_status(coroutine_handle::status::suspended);
+            } else if (hasReturnValue_) {
+                handle.set_status(coroutine_handle::status::completed);
+                if (returnValue_) {
+                    handle.yield_value_ = std::move(returnValue_.value());
+                }
+                state.saved_environment.reset();
+                state.saved_call_stack.clear();
+            } else {
+                handle.set_status(coroutine_handle::status::completed);
+                state.saved_environment.reset();
+                state.saved_call_stack.clear();
+            }
         }
 
-        // Has reference parameters - we need to handle them specially
-        // For now, just call normally - we'll implement proper reference handling later
-        return call_function(*func, args);
-    };
-    return script_value::make_function(wrapper, engine_);
+        environment_ = caller_env;
+        call_stack_ = std::move(caller_call_stack);
+        returnValue_ = std::move(caller_return_value);
+        hasReturnValue_ = caller_has_return;
+    }
+
+    active_coroutine_ = prev_coroutine;
+    hasYieldRequest_ = prev_yield_request;
+
+    if (error_result) {
+        return std::move(*error_result);
+    }
+    return handle.yield_value_;
 }
 
 // Function call optimization helpers

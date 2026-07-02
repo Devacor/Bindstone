@@ -53,7 +53,7 @@ public:
     
     void forge_tests() override {
         test("container_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             // Test map deep copy
@@ -74,7 +74,7 @@ public:
         });
         
         test("nested_container_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(
@@ -106,7 +106,7 @@ public:
         });
         
         test("cpp_object_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             // Register Point class
@@ -133,7 +133,7 @@ public:
         });
         
         test("polymorphic_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             // Register polymorphic classes
@@ -176,7 +176,7 @@ public:
         });
         
         test("mixed_container_object_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             // Register Point class
@@ -209,7 +209,7 @@ public:
         });
         
         test("assignment_operator_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(
@@ -227,7 +227,7 @@ public:
         });
         
         test("function_parameter_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(

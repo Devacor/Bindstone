@@ -31,7 +31,7 @@ public:
         // Static fields are runtime state; a reload must preserve them, not reset to the
         // initializer.
         test("static_state_preserved_across_reload", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute("class Counter { static int count = 0; }");
             eng->execute("Counter::count = 5;");
             check_eq(eng->execute("Counter::count").as<int>(), 5);
@@ -41,7 +41,7 @@ public:
 
         // A static dropped from the new definition must no longer be accessible.
         test("removed_static_inaccessible_after_reload", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute("class S { static int a = 1; static int b = 2; }");
             eng->execute("class S { static int a = 1; }"); // b removed
             check_throws([&]() { (void)eng->execute("S::b"); }, "removed static must be inaccessible");
@@ -49,7 +49,7 @@ public:
 
         // Reloading a BASE class must not drop the derived instance's own field data.
         test("base_reload_preserves_derived_instance_data", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Base { int bv = 1; }
                 class Derived : Base { int dv = 2; }
@@ -68,7 +68,7 @@ public:
         // identical, so `fields_changed` stayed false and migration was skipped — the type
         // change is detected against the live instance value instead.
         test("field_type_change_resets_value", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )");
             eng->execute("class Box { string val = \"\"; }"); // int -> string
             check_eq(std::string(""), eng->execute("b.val").as<std::string>());
@@ -78,7 +78,7 @@ public:
         // the SAME type is not a type change — existing instances keep their runtime value (only
         // new instances get the new default), matching established reload semantics.
         test("same_type_initializer_change_keeps_value", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )");
             eng->execute("class Box { int val = 7; }"); // initializer 0 -> 7, still int
             check_eq(eng->execute("b.val").as<int>(), 42); // runtime value preserved, not reset
@@ -87,7 +87,7 @@ public:
         // An inherited field whose declared type changes when the BASE reloads must reset on the
         // derived instance too — the retype is propagated through update_instances_from_base.
         test("inherited_field_type_change_resets_on_derived", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Base { int bv = 0; }
                 class Derived : Base { int dv = 0; }
@@ -103,7 +103,7 @@ public:
         // An error in one instance's hot_reload_migrate hook must not abort the reload for
         // the others.
         test("migrate_hook_error_is_isolated", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Item {
                     int v = 0;
@@ -120,7 +120,7 @@ public:
         // A hot_reload_migrate hook that constructs a new same-class instance must not hang
         // the engine (instances_ mutated while iterated). The budget caps the runaway.
         test("migrate_hook_constructing_instance_terminates", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execution_budget(1.0);
             eng->execute(R"(
                 class Node {
@@ -133,9 +133,19 @@ public:
             check_eq(eng->execute("root.extra").as<int>(), 1);
         });
 
+        // A static method's body must update on reload (statics are rebuilt through
+        // add_static_script_method, the same door fresh classes use).
+        test("static_method_body_updates_on_reload", [&]() {
+            auto eng = make_engine();
+            eng->execute("class Util { static int ver() { return 1; } }");
+            check_eq(eng->execute("Util::ver()").as<int>(), 1);
+            eng->execute("class Util { static int ver() { return 2; } }"); // reload, new body
+            check_eq(eng->execute("Util::ver()").as<int>(), 2);
+        });
+
         // A bound method cached before a reload must not keep running the old code.
         test("bound_method_not_stale_after_reload", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class Greeter { int value() { return 1; } }
                 auto g = Greeter();
@@ -149,7 +159,7 @@ public:
         // don't overload by arity — that's default-parameter territory — so the review's
         // "overload collapse" only applies to constructors here.)
         test("constructor_overload_survives_reload", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             const char* def = R"(
                 class Pt {
                     int x = 0;
@@ -171,7 +181,7 @@ public:
         // field-changing reload must carry it across, so the inherited C++ method stays callable
         // and the C++ object is neither destructed nor rebuilt.
         test("cpp_object_survives_field_changing_reload", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             const int base_live = ReloadCppBase::live_instances;
 
             dynamic_binder<ReloadCppBase>(*eng, "ReloadCppBase")

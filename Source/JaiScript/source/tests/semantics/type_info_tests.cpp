@@ -14,7 +14,7 @@ public:
     void forge_tests() override {
         test("recursive_reference_type_creation", [this]() {
             // Create engine to get type_info objects
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test creating a reference type info
             auto int_type = eng->get_type_info_int();
@@ -32,7 +32,7 @@ public:
 
         test("type_info_equality", [this]() {
             // Create engine to get type_info objects
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test that same types are equal (should return same pointer due to interning)
             auto int_type1 = eng->get_type_info_int();
@@ -46,7 +46,7 @@ public:
 
         test("array_type_creation", [this]() {
             // Create engine to get type_info objects
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto int_type = eng->get_type_info_int();
             auto array_type = eng->get_type_info_array(int_type);
@@ -58,7 +58,7 @@ public:
 
         test("map_type_creation", [this]() {
             // Create engine to get type_info objects
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             auto string_type = eng->get_type_info_string();
             auto int_type = eng->get_type_info_int();

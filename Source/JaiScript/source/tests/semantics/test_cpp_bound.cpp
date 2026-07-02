@@ -13,7 +13,7 @@ public:
     
     void forge_tests() override {
         test("primitive_types_read_write", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             
             int counter = 100;
             double temperature = 20.5;
@@ -62,7 +62,7 @@ public:
         });
         
         test("cpp_changes_visible_in_script", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             
             int health = 100;
             eng->add_global_ref("health", health);
@@ -76,7 +76,7 @@ public:
         });
         
         test("integration_with_functions", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             
             int score = 0;
             eng->add_global_ref("score", score);
@@ -93,7 +93,7 @@ public:
         });
         
         test("mixed_operations", [this]() {
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             
             int x = 10;
             int y = 20;

@@ -18,7 +18,7 @@ public:
             std::string code = "function double(:x) { return x * 2; } double(21);";
 
             // Create engine once and use its symbolizer for all parsing
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto* symbolizer = eng->get_symbolizer();
             std::unordered_set<std::string> empty_types;
 

@@ -177,7 +177,7 @@ public:
         });
 
         test("bind_template_variant_to_engine", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplBinderVec2<int>>();
 
@@ -193,7 +193,7 @@ public:
         });
 
         test("bind_multiple_template_variants", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplBinderVec2<int>>();
             eng->bind_static_type<TplBinderVec2<float>>();
@@ -214,7 +214,7 @@ public:
         });
 
         test("bind_two_param_template_variant", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplBinderKVPair<int, std::string>>();
 
@@ -256,7 +256,7 @@ public:
                 ar.end_object();
             }
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             TplBinderVec2<int> v2;
             {
                 serialization::binary_archive_reader ar(buffer, eng.get());
@@ -286,7 +286,7 @@ public:
         });
 
         test("shared_template_object_access", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplBinderVec2<double>>();
 
@@ -305,7 +305,7 @@ public:
         });
 
         test("bind_static_type_is_idempotent", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplBinderVec2<int>>();
             eng->bind_static_type<TplBinderVec2<int>>();
@@ -317,7 +317,7 @@ public:
         });
 
         test("bind_static_types_multiple_same", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_types<TplBinderVec2<float>, TplBinderVec2<float>, TplBinderVec2<double>>();
 
@@ -357,7 +357,7 @@ public:
         });
 
         test("auto_detect_bind_without_explicit_registration", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplAutoDetectVec<int>>();
 
@@ -381,7 +381,7 @@ public:
                 ar.end_object();
             }
 
-            auto eng = engine::make();
+            auto eng = make_engine();
             TplAutoDetectVec<float> v2;
             {
                 serialization::binary_archive_reader ar(buffer, eng.get());
@@ -397,7 +397,7 @@ public:
         });
 
         test("auto_detect_multiple_variants", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplAutoDetectVec<int>>();
             eng->bind_static_type<TplAutoDetectVec<float>>();
@@ -417,7 +417,7 @@ public:
         });
 
         test("auto_bind_int32_also_binds_int64", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplAutoDetectVec<int>>();
 
@@ -431,7 +431,7 @@ public:
         });
 
         test("auto_bind_int64_also_binds_int32", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->bind_static_type<TplAutoDetectVec<int64_t>>();
 

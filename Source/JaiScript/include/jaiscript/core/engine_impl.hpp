@@ -21,14 +21,24 @@ namespace detail {
 				if (!eng || !fn.is_function()) {
 					if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
 				}
-				std::vector<script_value> values;
-				values.reserve(sizeof...(Args));
-				(values.push_back(eng->make_value(args)), ...);
-				auto result = fn.as_function()(values);
-				if constexpr (std::is_void_v<R>) {
-					(void)result;
-				} else {
-					return result ? result.value().template as<R>() : R{};
+				engine::external_call_guard scope(eng);
+				// No error-value channel through std::function and throwing into game
+				// callsites (frame hooks, signal emits) is unsafe - report and default.
+				try {
+					std::vector<script_value> values;
+					values.reserve(sizeof...(Args));
+					(values.push_back(eng->make_value(args)), ...);
+					auto result = fn.as_function()(values);
+					if (!result) {
+						eng->report_script_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+						if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
+					}
+					if constexpr (!std::is_void_v<R>) {
+						return result.value().template as<R>();
+					}
+				} catch (const std::exception& e) {
+					eng->report_script_error(e.what());
+					if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
 				}
 			};
 		}
@@ -102,6 +112,14 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
 
     throw runtime_error("Cannot convert non-copyable type by value. "
                        "Register the type with dynamic_binder or return shared_ptr<T>.");
+}
+
+template<typename T>
+std::optional<script_value> try_convert_shared_ptr_with_registry(const std::shared_ptr<T>& ptr, engine* eng) {
+    if (eng && eng->template has_registered_class<T>()) {
+        return eng->make_object(ptr);
+    }
+    return std::nullopt;
 }
 
 template<typename T>

@@ -37,7 +37,7 @@ public:
     
     void forge_tests() override {
         test("standard_vector_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register standard conversions
             engine->add_standard_conversions();
@@ -95,7 +95,7 @@ public:
         });
         
         test("standard_map_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register standard conversions
             engine->add_standard_conversions();
@@ -153,7 +153,7 @@ public:
         });
         
         test("custom_type_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register standard conversions first
             engine->add_standard_conversions();
@@ -217,7 +217,7 @@ public:
         });
         
         test("specific_type_registration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register only specific conversions we need
             engine->add_bound_array_conversion<int>();
@@ -264,7 +264,7 @@ public:
         });
         
         test("int64_downconversion_bounds_checking", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register standard conversions with bounds checking
             engine->add_standard_conversions();
@@ -295,7 +295,7 @@ public:
         });
         
         test("mixed_type_array_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register conversions
             engine->add_standard_conversions();

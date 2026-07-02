@@ -121,6 +121,17 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
     return v;
 }
 
+script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_ptr<void> handle, engine* eng) {
+    script_value v(std::monostate{}, eng);
+    auto obj = make_strong<object_holder>();
+    obj->type_name = "coroutine_handle";
+    obj->type_id = type_id;
+    obj->data = std::move(handle);
+    obj->is_class_instance_wrapper = false;
+    v.storage_ = obj;
+    return v;
+}
+
 script_value script_value::make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create cpp_object with null engine pointer");
@@ -377,7 +388,11 @@ script_value script_value::clone() const {
                 if (engine_) {
                     auto class_def = engine_->get_class_definition(obj_holder->type_id);
                     if (class_def && class_def->has_copy_function()) {
-                        auto new_cpp_obj = class_def->copy_object(obj_holder->data.get());
+                        // cpp_bound references own nothing (data null) - the live object is
+                        // cpp_bound_ptr_. Deep copy from it and drop the binding so the
+                        // clone is an independent owned object, not an alias.
+                        const void* copy_src = obj_holder->data ? obj_holder->data.get() : cpp_bound_ptr_;
+                        auto new_cpp_obj = copy_src ? class_def->copy_object(copy_src) : nullptr;
                         if (new_cpp_obj) {
                             auto new_holder = make_strong<object_holder>();
                             new_holder->type_name = obj_holder->type_name;
@@ -385,6 +400,7 @@ script_value script_value::clone() const {
                             new_holder->data = new_cpp_obj;
                             new_holder->is_class_instance_wrapper = false;
                             result.storage_ = new_holder;
+                            result.cpp_bound_ptr_ = nullptr;
                             copied = true;
                         }
                     }

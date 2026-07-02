@@ -15,7 +15,7 @@ public:
     
     void forge_tests() override {
         test("basic_class_performance", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             
             auto start = high_resolution_clock::now();
@@ -50,7 +50,7 @@ public:
         });
         
         test("inheritance_performance", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             
             auto start = high_resolution_clock::now();
@@ -95,7 +95,7 @@ public:
         });
         
         test("cat_tiger_example", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             jai::stdlib::register_all(engine);
             
             auto result = engine->execute(R"(

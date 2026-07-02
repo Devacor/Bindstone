@@ -11,7 +11,7 @@ public:
     
     void forge_tests() override {
         test("map_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(
@@ -26,7 +26,7 @@ public:
         });
         
         test("array_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(
@@ -41,7 +41,7 @@ public:
         });
         
         test("nested_container_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(
@@ -64,7 +64,7 @@ public:
         });
         
         test("assignment_operator_deep_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(
@@ -80,7 +80,7 @@ public:
         });
         
         test("function_parameter_copy", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(
@@ -100,7 +100,7 @@ public:
         });
         
         test("reference_semantics_preserved", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(*engine);
             
             std::string script = R"(

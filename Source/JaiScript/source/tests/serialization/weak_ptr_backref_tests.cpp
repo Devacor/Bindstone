@@ -217,7 +217,7 @@ public:
 
     void forge_tests() override {
         test("weak_ptr_backref_through_polymorphic_component", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             serialization::polymorphic_registry::try_auto_register<ReproDerived>("ReproDerived");
             serialization::polymorphic_registry::try_auto_register<ReproComponent>("ReproComponent");
@@ -261,7 +261,7 @@ public:
         });
 
         test("polymorphic_tree_parent_backrefs", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             serialization::polymorphic_registry::try_auto_register<ReproTreeNode>("ReproTreeNode");
 
             auto run = [&](const std::string& fmt, auto&& roundtrip) {

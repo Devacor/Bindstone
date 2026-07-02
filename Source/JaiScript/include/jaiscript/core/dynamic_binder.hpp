@@ -258,6 +258,11 @@ namespace detail {
             // If cpp_bound but wrong type, fall through to try class_instance path
         }
 
+        // Raw C++ holders (owned deep copies, unregistered make_object fallback): data IS the object
+        if (auto holder = val.get_object_holder(); holder && !holder->is_class_instance_wrapper && holder->data) {
+            return static_cast<T*>(holder->data.get());
+        }
+
         auto instance = val.as<std::shared_ptr<class_instance>>();
         auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
 
@@ -284,6 +289,8 @@ enum class bind_mode {
 // ============================================================================
 // Concepts for auto-detection (used by auto_build)
 // ============================================================================
+
+template<typename U> class dynamic_binder;
 
 namespace auto_bind_concepts {
 
@@ -323,9 +330,8 @@ concept has_base_types = requires {
     typename T::_jai_base_types;
 };
 
-template<typename U> class dynamic_binder;
-
 // allows classes to register their own private members during auto_bind()
+// (needs the real jai::dynamic_binder — a fwd-decl in this namespace shadows it and falsifies the concept for every T)
 template<typename T>
 concept has_jai_auto_bind = requires(dynamic_binder<T>& builder) {
     { T::jai_auto_bind(builder) } -> std::same_as<void>;
@@ -744,6 +750,19 @@ private:
                         cpp_obj->*member, eng);
                     return eng->make_object(wrapper);
                 }
+                else if constexpr (std::is_class_v<P> &&
+                                   !std::is_same_v<P, std::string> &&
+                                   !std::is_same_v<P, script_value> &&
+                                   !dynamic_binder_validation::is_std_container<P>::value &&
+                                   !dynamic_binder_validation::is_std_function<P>::value &&
+                                   !is_specialization_v<P, std::shared_ptr> &&
+                                   !is_specialization_v<P, std::weak_ptr> &&
+                                   !is_specialization_v<P, std::unique_ptr>) {
+                    // Registered class members bind by reference (cpp_bound) so mutation and
+                    // signal connect act on the live member, not a copy (which non-copyables
+                    // like signal_emitter would reject outright); unregistered copyables copy.
+                    return convert_reference_with_registry(cpp_obj->*member, eng);
+                }
                 else {
                     return detail::value_converter<P>::to(cpp_obj->*member, eng);
                 }
@@ -1113,6 +1132,10 @@ public:
         class_def_->set_unwrap_function(std::move(wrapped_fn));
         return *this;
     }
+
+    // The engine this binder registers into - configure lambdas need it for
+    // bind_signal_type/globals (Services may not carry the engine yet at bind time).
+    engine& bound_engine() const { return engine_; }
 
     // ============================================================================
     // auto_bind() - Apply auto-detection of base classes and common methods

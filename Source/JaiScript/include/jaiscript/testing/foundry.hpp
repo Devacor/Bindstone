@@ -12,7 +12,13 @@
 #include <type_traits>
 #include <cmath>
 
+namespace jai { class engine; }
+
 namespace jai::foundry {
+
+// Engine factory honoring the runner's --backend= selection (defined in main_test_runner.cpp).
+// Tests create engines through this so the whole suite can run on a chosen backend.
+std::shared_ptr<jai::engine> make_engine();
 
 // Test failure exception
 class test_failure : public std::exception {

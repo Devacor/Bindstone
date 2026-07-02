@@ -12,7 +12,7 @@ public:
 
     void forge_tests() override {
         test("namespace_basic_function", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace utils {
                     auto add(a, b) {
@@ -25,7 +25,7 @@ public:
         });
 
         test("namespace_function_overload", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace math {
                     auto square(x) {
@@ -43,7 +43,7 @@ public:
         });
 
         test("namespace_variable", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace config {
                     auto MAX_SIZE = 100;
@@ -55,7 +55,7 @@ public:
         });
 
         test("namespace_class", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace shapes {
                     class Rectangle {
@@ -80,7 +80,7 @@ public:
         });
 
         test("namespace_nested_blocks", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace outer {
                     namespace inner {
@@ -95,7 +95,7 @@ public:
         });
 
         test("namespace_scope_resolution_syntax", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace my::nested::deep {
                     auto getValue() {
@@ -108,7 +108,7 @@ public:
         });
 
         test("namespace_mixed_members", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace mylib {
                     auto VERSION = 1;
@@ -136,7 +136,7 @@ public:
         });
 
         test("namespace_override_required", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_throws([&]() {
                 eng->execute(R"(
                     namespace test {
@@ -148,7 +148,7 @@ public:
         });
 
         test("namespace_override_allowed", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace test {
                     auto func(x) { return x; }
@@ -160,7 +160,7 @@ public:
         });
 
         test("namespace_string_keyword_as_name", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 namespace string {
                     auto length(s) {
@@ -173,7 +173,7 @@ public:
         });
 
         test("namespace_member_not_found", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_throws([&]() {
                 eng->execute(R"(
                     namespace test {
@@ -185,7 +185,7 @@ public:
         });
 
         test("namespace_function_arity_mismatch", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             check_throws([&]() {
                 eng->execute(R"(
                     namespace math {
@@ -197,7 +197,7 @@ public:
         });
 
         test("namespace_complex_members", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Test class with static method, instance method, and global variable
             eng->execute(R"(
@@ -227,7 +227,7 @@ public:
         });
 
         test("namespace_overrides_class_static", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             eng->execute(R"(
                 class cat {
                 public:
@@ -265,7 +265,7 @@ public:
         });
 
         test("namespace_override_before_class", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             // Define namespace with override BEFORE the class exists
             // The override keyword should still work when class is defined later
             eng->execute(R"(

@@ -10,7 +10,6 @@
 namespace jai {
 
 class function_decl;
-class interpreter;
 class environment;
 
 enum class access_level {
@@ -325,9 +324,12 @@ public:
         }
     }
 
-    void add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env);
+    void add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env);
 
-    void add_static_script_method(std::string_view name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env);
+    void add_static_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env);
+
+    // Shared cache-aware overload resolution for script methods (defined in overload_resolution.hpp)
+    checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const std::vector<script_value>& args) const;
 
     void add_field(std::string_view name, const script_value& default_value) {
         auto eng = engine_;
@@ -372,6 +374,11 @@ public:
     void clear_instance_method_overloads() {
         method_overloads_.clear();
         overload_resolution_cache_.clear();
+    }
+
+    // Hot reload: same for script static-method overload sets (C++ static arities untouched).
+    void clear_static_method_overloads() {
+        static_method_overloads_.clear();
     }
 
     // Hot reload: drop statics absent from the new definition so they're no longer accessible.

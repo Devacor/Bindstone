@@ -134,7 +134,7 @@ public:
         // ====================================================================
 
         test("explicit_constructor_call", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Using two-argument constructor like the working test in script_class_tests.cpp
             eng->execute(R"(
@@ -156,7 +156,7 @@ public:
         });
 
         test("explicit_constructor_brace_init", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Wrapper {
@@ -179,7 +179,7 @@ public:
         // ====================================================================
 
         test("implicit_conversion_function_param_int", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Wrapper {
@@ -202,7 +202,7 @@ public:
         });
 
         test("implicit_conversion_function_param_string", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Label {
@@ -225,7 +225,7 @@ public:
         });
 
         test("implicit_conversion_function_param_float", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Percentage {
@@ -248,7 +248,7 @@ public:
         });
 
         test("implicit_conversion_function_param_object", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class SourceType {
@@ -281,7 +281,7 @@ public:
         // ====================================================================
 
         test("implicit_conversion_assignment_int", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Wrapper {
@@ -301,7 +301,7 @@ public:
         });
 
         test("implicit_conversion_assignment_string", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Label {
@@ -325,7 +325,7 @@ public:
         // ====================================================================
 
         test("implicit_conversion_return_int", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Wrapper {
@@ -348,7 +348,7 @@ public:
         });
 
         test("implicit_conversion_return_object", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class SourceType {
@@ -381,7 +381,7 @@ public:
         // ====================================================================
 
         test("script_to_int_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Counter {
@@ -405,7 +405,7 @@ public:
         });
 
         test("script_to_float_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Measurement {
@@ -429,7 +429,7 @@ public:
         });
 
         test("script_to_string_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Person {
@@ -453,7 +453,7 @@ public:
         });
 
         test("script_to_bool_in_conditional", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Truthy {
@@ -495,7 +495,7 @@ public:
         });
 
         test("script_to_string_in_concatenation", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Version {
@@ -521,7 +521,7 @@ public:
         // ====================================================================
 
         test("cpp_constructor_int_conversion", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Temperature>(*eng, "Temperature")
                 .constructor<>()
@@ -542,7 +542,7 @@ public:
         });
 
         test("cpp_constructor_object_conversion", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Point2D>(*eng, "Point2D")
                 .constructor<>()
@@ -574,7 +574,7 @@ public:
         });
 
         test("cpp_constructor_string_conversion", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<Color>(*eng, "Color")
                 .constructor<>()
@@ -602,7 +602,7 @@ public:
         // ====================================================================
 
         test("inheritance_ref_upcast_no_copy", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             dynamic_binder<BaseEntity>(*eng, "BaseEntity")
                 .constructor<>()
@@ -634,7 +634,7 @@ public:
         });
 
         test("script_inheritance_base_param", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Animal {
@@ -667,7 +667,7 @@ public:
         // ====================================================================
 
         test("null_assignment_no_conversion", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 var constructor_called = false;
@@ -697,7 +697,7 @@ public:
         // ====================================================================
 
         test("exact_match_priority", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 var conversion_count = 0;
@@ -729,7 +729,7 @@ public:
         // ====================================================================
 
         test("error_no_conversion_available", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class TypeA { int a = 0; }
@@ -754,7 +754,7 @@ public:
         // ====================================================================
 
         test("no_chained_conversions", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class TypeA { int value = 1; }
@@ -786,7 +786,7 @@ public:
         // ====================================================================
 
         test("hot_reload_adds_conversion", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Reloadable {
@@ -824,7 +824,7 @@ public:
         // ====================================================================
 
         test("multiple_constructors_exact_match", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Multi {
@@ -864,7 +864,7 @@ public:
         // ====================================================================
 
         test("conversion_preserves_value_semantics", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Source {
@@ -892,7 +892,7 @@ public:
         });
 
         test("recursive_type_conversion", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class NodeA {
@@ -928,7 +928,7 @@ public:
         });
 
         test("conversion_with_side_effects", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 var side_effect_count = 0;
@@ -952,7 +952,7 @@ public:
         });
 
         test("conversion_exception_handling", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Validator {
@@ -983,7 +983,7 @@ public:
         });
 
         test("bidirectional_conversion", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 class Celsius {

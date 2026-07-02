@@ -12,7 +12,7 @@ public:
     
     void forge_tests() override {
         test("array_value_iteration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(
@@ -28,7 +28,7 @@ public:
         });
         
         test("array_reference_iteration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(
@@ -47,7 +47,7 @@ public:
         });
         
         test("map_value_iteration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(
@@ -63,7 +63,7 @@ public:
         });
         
         test("map_reference_iteration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(
@@ -81,7 +81,7 @@ public:
         });
         
         test("map_key_const_check", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(
@@ -108,7 +108,7 @@ public:
         });
         
         test("nested_iteration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(
@@ -126,7 +126,7 @@ public:
         });
         
         test("break_in_range_for", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(
@@ -146,7 +146,7 @@ public:
         });
 
         test("continue_in_range_for", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
 
             auto result = engine->execute(R"(
@@ -166,7 +166,7 @@ public:
         });
         
         test("empty_container_iteration", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(
@@ -188,7 +188,7 @@ public:
         });
         
         test("pair_member_access", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             stdlib::register_all(engine);
             
             auto result = engine->execute(R"(

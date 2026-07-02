@@ -9,6 +9,7 @@
 #include "parameter_storage.hpp"
 #include "runtime_errors.hpp"
 #include <functional>
+#include <optional>
 #include <tuple>
 
 // Forward declarations to avoid circular dependencies
@@ -26,6 +27,12 @@ namespace jai {
     // Implementation in engine_impl.hpp
     template<typename T>
     script_value convert_reference_with_registry(T& t, engine* eng);
+
+    // For registered classes, wraps a shared_ptr as an engine object (shared ownership -
+    // identity and mutation preserved); returns nullopt for unregistered types.
+    // Implementation in engine_impl.hpp
+    template<typename T>
+    std::optional<script_value> try_convert_shared_ptr_with_registry(const std::shared_ptr<T>& ptr, engine* eng);
 
     // engine is incomplete here; the dependent E defers the symbolize lookup to the
     // instantiation point (where engine.hpp is complete) for conforming compilers.
@@ -255,7 +262,15 @@ class engine;
                     }
                     return script_value(std::monostate{}, eng); // Return null for nullptr
                 }
-                
+
+                // Registered classes share ownership (identity + mutation preserved; also the
+                // only lossless path for non-copyables like Node/Interface).
+                if constexpr (std::is_class_v<T> && !std::is_same_v<T, std::string>) {
+                    if (auto made = try_convert_shared_ptr_with_registry(ptr, eng)) {
+                        return std::move(*made);
+                    }
+                }
+
                 // Auto-unwrap: dereference the shared_ptr and convert the underlying object
                 // This delegates to the base value_converter<T> which may have custom handling
                 return value_converter<T>::to(*ptr, eng);
@@ -344,13 +359,13 @@ class engine;
                     temp = conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
                     return temp;
                 }
-                // For custom classes, extract shared_ptr and return reference to avoid copy
+                // For custom classes, alias the live object (handles class_instance
+                // wrappers, cpp_bound references, and raw holders via as<T&>)
                 else if constexpr (std::is_class_v<T> &&
                                   !std::is_same_v<T, std::string> &&
                                   !is_specialization_v<T, std::vector> &&
                                   !is_specialization_v<T, std::map>) {
-                    auto ptr = v.as<std::shared_ptr<T>>();
-                    return *ptr;
+                    return const_cast<script_value&>(v).deref().as<T&>();
                 } else {
                     // For basic types (int, float, bool, etc.), need to make a copy
                     auto* storage = detail::get_engine_parameter_storage(eng);

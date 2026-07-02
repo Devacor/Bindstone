@@ -79,7 +79,7 @@ public:
         // =====================================================================
 
         test("script_class_json_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             // Define a simple script class
@@ -112,7 +112,7 @@ public:
         });
 
         test("script_class_binary_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -139,7 +139,7 @@ public:
         });
 
         test("script_class_with_nested_objects", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -181,7 +181,7 @@ public:
         // =====================================================================
 
         test("cpp_class_json_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             // Register C++ Entity class
@@ -206,7 +206,7 @@ public:
         });
 
         test("cpp_class_binary_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             dynamic_binder<SerEntity>(*eng, "Entity")
@@ -232,7 +232,7 @@ public:
         // inherited properties in serialization. No need to re-declare base properties.
 
         test("cpp_derived_class_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             // Register hierarchy - inherited properties are automatically included
@@ -269,7 +269,7 @@ public:
         });
 
         test("cpp_deep_inheritance_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             // Register full hierarchy: Entity -> Character -> Player
@@ -321,7 +321,7 @@ public:
         // =====================================================================
 
         test("script_class_inheritance_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -355,7 +355,7 @@ public:
         });
 
         test("script_deep_inheritance_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -409,7 +409,7 @@ public:
         // =====================================================================
 
         test("type_preserved_after_deserialization", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -432,7 +432,7 @@ public:
         });
 
         test("cpp_type_preserved_after_deserialization", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             dynamic_binder<SerEntity>(*eng, "Entity")
@@ -455,7 +455,7 @@ public:
         });
 
         test("derived_type_preserved_not_sliced", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             dynamic_binder<SerEntity>(*eng, "Entity")
@@ -489,7 +489,7 @@ public:
         // =====================================================================
 
         test("post_load_called_on_derived_class", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -529,7 +529,7 @@ public:
         });
 
         test("cpp_class_post_load_with_inheritance", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             // Use static variables to track hook calls
@@ -576,7 +576,7 @@ public:
         // =====================================================================
 
         test("array_of_script_objects_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -606,7 +606,7 @@ public:
         });
 
         test("map_with_object_values_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -644,7 +644,7 @@ public:
         // =====================================================================
 
         test("version_migration_inherited_class", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             eng->execute(R"(
@@ -686,7 +686,7 @@ public:
         // =====================================================================
 
         test("json_binary_consistency_with_inheritance", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_json_functions(*eng);
 
             dynamic_binder<SerEntity>(*eng, "Entity")
@@ -856,7 +856,7 @@ public:
         });
 
         test("anonymous_namespace_property_owner_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             std::shared_ptr<ImplicitRegBase> original = std::make_shared<AnonImplicitDerived>();
 
             jai::serialization::json_archive_writer w(0, eng.get());
@@ -870,7 +870,7 @@ public:
         });
 
         test("property_owner_implicit_type_tag_written", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto derived = std::make_shared<ImplicitRegDerived>();
             derived->derivedTag = std::string("tagged");
             std::shared_ptr<ImplicitRegBase> original = derived;
@@ -885,7 +885,7 @@ public:
         // A tampered $type naming a registered but UNRELATED type must be rejected on load,
         // not silently reinterpreted as the requested base (type confusion, B5).
         test("polymorphic_load_rejects_unrelated_type", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             std::shared_ptr<ImplicitRegBase> original = std::make_shared<ImplicitRegDerived>();
             (void)std::make_shared<POLeftBase>();  // odr-use so POLeftBase is registered
 
@@ -906,7 +906,7 @@ public:
         });
 
         test("property_owner_implicit_round_trip", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto derived = std::make_shared<ImplicitRegDerived>();
             derived->derivedTag = std::string("round");
             std::shared_ptr<ImplicitRegBase> original = derived;
@@ -946,7 +946,7 @@ public:
         });
 
         test("multiple_inheritance_manual_base_relation", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto obj = std::make_shared<MIRawDerived>();
             obj->l = 5; obj->r = 6; obj->d = 7;
             std::shared_ptr<MIRawRight> asRight = obj;
@@ -974,7 +974,7 @@ public:
         });
 
         test("explicit_registrar_overrides_implicit_name", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             std::shared_ptr<ImplicitRegBase> original = std::make_shared<RenamedRegType>();
 
             jai::serialization::json_archive_writer w(0, eng.get());
@@ -988,7 +988,7 @@ public:
         });
 
         test("in_class_jai_type_name_pins_the_name", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             std::shared_ptr<ImplicitRegBase> original = std::make_shared<InClassNamedType>();
 
             jai::serialization::json_archive_writer w(0, eng.get());
@@ -1002,7 +1002,7 @@ public:
         });
 
         test("unregistered_polymorphic_save_throws", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             std::shared_ptr<UnregPolyBase> original = std::make_shared<UnregPolyDerived>();
 
             check_throws([&]() {
@@ -1022,7 +1022,7 @@ public:
         // just engine inheritance), so a shared_ptr<Base> with a derived $type passes the B5 load
         // check. Regression for the FileTextureDefinition-through-base load failure.
         test("base_class_registers_polymorphic_assignability_edge", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             dynamic_binder<EdgeDerived>(*eng, "EdgeDerived").constructor<>().base_class<EdgeBase>().build();
             auto& reg = jai::serialization::polymorphic_registry::instance();
             check_true(reg.is_assignable(std::type_index(typeid(EdgeDerived)), std::type_index(typeid(EdgeBase))));

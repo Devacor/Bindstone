@@ -13,7 +13,7 @@ public:
 
     void forge_tests() override {
         test("array_literal_basic", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [1, 2, 3, 4, 5];
@@ -30,7 +30,7 @@ public:
 
         test("array_literal_mixed_types_with_var", [&]() {
             // Mixed-type arrays require 'var' declaration (heterogeneous)
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 var mixed = [1, "hello", 3.14, true];
@@ -48,7 +48,7 @@ public:
 
         test("array_literal_auto_requires_homogeneous", [&]() {
             // auto x = [...] requires all elements to be the same type
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // This should fail - mixed types with auto
             bool threw = false;
@@ -71,7 +71,7 @@ public:
         });
 
         test("array_literal_empty", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute("auto empty = [];");
 
@@ -81,7 +81,7 @@ public:
         });
 
         test("array_indexing_read", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [10, 20, 30, 40, 50];
@@ -93,7 +93,7 @@ public:
         });
 
         test("array_indexing_write", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [1, 2, 3];
@@ -108,7 +108,7 @@ public:
         });
 
         test("array_push_operation", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [1, 2, 3];
@@ -124,7 +124,7 @@ public:
         });
 
         test("array_pop_operation", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [1, 2, 3, 4, 5];
@@ -139,7 +139,7 @@ public:
         });
 
         test("array_size_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [1, 2, 3];
@@ -155,7 +155,7 @@ public:
         });
 
         test("array_empty_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [];
@@ -168,7 +168,7 @@ public:
         });
 
         test("array_clear_method", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [1, 2, 3, 4, 5];
@@ -180,7 +180,7 @@ public:
         });
 
         test("array_nested_arrays", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
@@ -208,7 +208,7 @@ public:
         });
 
         test("array_nested_modification", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto matrix = [[1, 2], [3, 4]];
@@ -223,7 +223,7 @@ public:
         });
 
         test("array_deeply_nested", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto deep = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
@@ -236,7 +236,7 @@ public:
         });
 
         test("array_with_nested_mixed_types", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             // Use 'var' for heterogeneous nested arrays
             // 'auto' requires homogeneous elements at all levels
@@ -256,7 +256,7 @@ public:
         });
 
         test("array_iteration_for_loop", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [1, 2, 3, 4, 5];
@@ -270,7 +270,7 @@ public:
         });
 
         test("array_bounds_checking", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 auto arr = [1, 2, 3];
@@ -291,7 +291,7 @@ public:
         });
 
         test("array_in_function_parameter", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 function processArray(auto arr) -> int {
@@ -308,7 +308,7 @@ public:
         });
 
         test("array_as_return_value", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
 
             eng->execute(R"(
                 function makeArray() -> auto {
@@ -325,7 +325,7 @@ public:
 
         // TODO: Implement array concatenation operator
         // test("array_concatenation", [&]() {
-        //     auto eng = engine::make();
+        //     auto eng = make_engine();
 
         //     eng->execute(R"(
         //         auto arr1 = [1, 2, 3];
@@ -342,7 +342,7 @@ public:
 
         // TODO: Implement array slice method
         // test("array_slice_operation", [&]() {
-        //     auto eng = engine::make();
+        //     auto eng = make_engine();
 
         //     eng->execute(R"(
         //         auto arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -358,7 +358,7 @@ public:
         // });
 
         test("concatenate_arrays", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(eng);
 
             eng->execute(R"(
@@ -377,7 +377,7 @@ public:
         });
 
         test("append_arrays", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(eng);
 
             eng->execute(R"(
@@ -397,7 +397,7 @@ public:
         });
 
         test("concatenate_strings", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(eng);
 
             eng->execute(R"(
@@ -410,7 +410,7 @@ public:
         });
 
         test("append_strings", [&]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             stdlib::register_all(eng);
 
             eng->execute(R"(

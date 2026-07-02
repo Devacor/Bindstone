@@ -10,7 +10,7 @@ public:
     
     void forge_tests() override {
         test("exact_user_syntax", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             
             const char* script = R"(
                 class Cat { 
@@ -42,7 +42,7 @@ public:
         });
         
         test("simpler_no_constructor", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             
             const char* script = R"(
                 class Cat { 
@@ -71,7 +71,7 @@ public:
         });
         
         test("field_assignment_without_this", [this]() {
-            auto js_engine = engine::make();
+            auto js_engine = make_engine();
             
             const char* script = R"(
                 class Cat { 

@@ -22,7 +22,7 @@ public:
 
     void forge_tests() override {
         test("basic_class_redefinition", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             engine->add_variadic_function("print", [engine](const std::vector<jai::script_value>& args) {
                 for (const auto& arg : args) {
@@ -93,7 +93,7 @@ public:
         });
 
         test("inheritance_hot_reload", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             engine->add_variadic_function("print", [engine](const std::vector<jai::script_value>& args) {
                 for (const auto& arg : args) {
@@ -170,7 +170,7 @@ public:
         });
 
         test("multi_level_inheritance_hot_reload", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             engine->add_variadic_function("print", [engine](const std::vector<jai::script_value>& args) {
                 for (const auto& arg : args) {
@@ -249,7 +249,7 @@ public:
         });
         
         test("method_override_hot_reload", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             std::vector<std::string> method_calls;
             engine->add_function("record", [&method_calls, engine](const std::string& msg) {
@@ -331,7 +331,7 @@ public:
         });
         
         test("constructor_hot_reload", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             engine->add_variadic_function("print", [engine](const std::vector<jai::script_value>& args) {
                 for (const auto& arg : args) {
@@ -386,7 +386,7 @@ public:
         });
         
         test("complex_field_migration", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
@@ -466,7 +466,7 @@ public:
         });
 
         test("multiple_instances_hot_reload", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
@@ -541,7 +541,7 @@ public:
         });
 
         test("hot_reload_migrate_lifecycle", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
@@ -658,7 +658,7 @@ public:
         });
 
         test("performance_stress_test", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
@@ -735,7 +735,7 @@ public:
         });
 
         test("fields_unchanged_optimization", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {
@@ -852,7 +852,7 @@ public:
         });
 
         test("fields_unchanged_performance", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             engine->add_function("to_string", [](jai::script_int val) {
                 return std::to_string(val);
@@ -963,7 +963,7 @@ public:
         });
 
         test("identical_class_fingerprint", [this]() {
-            auto engine = jai::engine::make();
+            auto engine = jai::foundry::make_engine();
             
             auto test_results = std::make_shared<std::vector<std::string>>();
             engine->add_function("check_value", [test_results, engine](const std::string& desc, bool result) {

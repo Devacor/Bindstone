@@ -3,7 +3,7 @@
 
 int main() {
     try {
-        auto eng = jai::engine::make();
+        auto eng = jai::foundry::make_engine();
 
         // Test 1: Simple namespace function
         std::cout << "Test 1: Namespace function..." << std::endl;

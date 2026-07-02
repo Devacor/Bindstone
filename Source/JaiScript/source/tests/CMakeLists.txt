@@ -22,8 +22,8 @@ set(TEST_SOURCES_GLOB
     signals/*.hpp
     stdlib/*.cpp
     stdlib/*.hpp
-    # vm/*.cpp  # VM backend not yet implemented - excluded for now
-    # vm/*.hpp
+    vm/*.cpp
+    vm/*.hpp
 )
 
 # Add performance benchmarks if enabled
@@ -138,6 +138,9 @@ if(MSVC)
     set_property(TARGET jaiscript_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
     )
+    # JAI_MAX_CALL_DEPTH (10000) recursion frames exceed the 1 MB default stack in
+    # Debug; a larger stack lets the catchable depth-limit error actually fire.
+    target_link_options(jaiscript_tests PRIVATE /STACK:134217728)
 else()
     target_compile_options(jaiscript_tests PRIVATE
         -Wall

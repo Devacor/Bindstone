@@ -32,7 +32,7 @@ public:
     
     void forge_tests() override {
         test("basic_type_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test int conversion
             script_value int_val = engine->execute("42");
@@ -59,7 +59,7 @@ public:
         });
         
         test("array_to_vector_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test basic vector<script_value> conversion
             script_value int_array = engine->execute("[1, 2, 3, 4, 5]");
@@ -86,7 +86,7 @@ public:
         });
         
         test("map_to_stdmap_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test basic map conversion
             script_value map_val = engine->execute("{\"key1\": 1, \"key2\": 2, \"key3\": 3}");
@@ -101,7 +101,7 @@ public:
         });
         
         test("vector_parameter_binding_attempt", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test function that takes vector<int>
             engine->add_function("sum_vector", [](std::vector<int> nums) -> int {
@@ -122,7 +122,7 @@ public:
         });
         
         test("map_parameter_binding_attempt", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test function that takes map<string, int>
             engine->add_function("sum_map_values", [](std::map<std::string, int> map) -> int {
@@ -144,7 +144,7 @@ public:
         });
         
         test("script_value_vector_compatibility", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test function that takes vector<script_value> explicitly
             engine->add_function("count_integers", [](std::vector<script_value> values) -> int {
@@ -165,7 +165,7 @@ public:
         });
         
         test("script_value_map_compatibility", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test function that takes map<script_value, script_value> explicitly
             engine->add_function("count_int_values", [](std::map<script_value, script_value> map) -> int {
@@ -188,7 +188,7 @@ public:
         });
         
         test("bound_class_conversions", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Register TestObject class
             dynamic_binder<TestObject>(*engine, "TestObject")

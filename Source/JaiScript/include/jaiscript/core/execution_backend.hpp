@@ -2,7 +2,9 @@
 
 #include "value.hpp"
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/environment.hpp>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <string>
 #include <system_error>
@@ -11,9 +13,24 @@
 namespace jai {
 
 // Forward declarations
-class environment;
 class string_symbolizer;
 class class_definition;
+class coroutine_handle;
+
+// Backend-neutral payload describing a script-defined callable. Stored thunks capture
+// (engine*, payload) and resolve the live backend at call time via
+// engine::get_execution_backend()->execute_callable(), so no callable ever holds a
+// backend or interpreter pointer.
+struct script_callable {
+    enum class kind_type : uint8_t { function, method, static_method, constructor };
+    kind_type kind = kind_type::function;
+
+    std::shared_ptr<script_defined_function> fn;   // function (free functions, lambdas)
+    std::shared_ptr<function_decl> ast;            // method / static_method (resolved overload)
+    std::shared_ptr<class_definition> cls;         // method / static_method / constructor
+    std::shared_ptr<environment> definition_env;   // method / static_method / constructor
+    std::optional<script_value> this_obj;          // method ('this' receiver; args exclude it)
+};
 
 /**
  * Abstract interface for script execution backends.
@@ -26,6 +43,10 @@ public:
     // Core execution
     virtual script_value execute(const std::vector<declaration_ptr>& declarations) = 0;
     virtual void prepare_for_execution() = 0;
+
+    // Execute a script-defined callable (see script_callable). For kind::method the
+    // receiver rides in payload.this_obj and args exclude it.
+    virtual checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) = 0;
     
     // Variable access (needed by engine)
     virtual script_value get_variable(const std::string& name) const = 0;
@@ -37,7 +58,7 @@ public:
     virtual void define_variable(const std::string& name, const script_value& value) = 0;
     
     // Configuration
-    virtual void set_execution_budget(std::chrono::nanoseconds) {}
+    virtual void set_execution_budget(std::chrono::nanoseconds) = 0;
     virtual void set_has_custom_numeric_ops(bool value) = 0;
     virtual void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) = 0;
     virtual void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) = 0;
@@ -46,6 +67,19 @@ public:
     // Exception handling
     virtual bool is_unwinding() const = 0;
     virtual const script_exception& get_current_exception() const = 0;
+
+    // Stack trace captured at the last unwind (empty if the backend doesn't track one)
+    virtual std::vector<stack_frame> last_stack_trace() const { return {}; }
+    virtual std::string format_stack_trace() const { return {}; }
+
+    // Shelve/restore the in-flight call's argument metadata around an external (C++)
+    // invocation of a script function (see engine::external_call_guard)
+    virtual void push_external_call_scope() {}
+    virtual void pop_external_call_scope() {}
+
+    // Coroutine resume; default body (coroutine.cpp) fails the handle with
+    // "Coroutines are not supported by this backend"
+    virtual checked_result<script_value> resume_coroutine(coroutine_handle& handle);
 
     // Optional: Get backend name for debugging/logging
     virtual std::string get_backend_name() const = 0;

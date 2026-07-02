@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Run with Visual Studio Profiler to find hot paths.\n\n";
 
     // Create engine and register types (done ONCE, not in the loop)
-    auto eng = engine::make();
+    auto eng = make_engine();
 
     // Bind C++ TreeNode class
     dynamic_binder<CppTreeNode>(*eng, "CppTreeNode")

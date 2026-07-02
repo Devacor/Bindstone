@@ -32,6 +32,7 @@ namespace jai {
     class class_registry;
     class execution_backend;
     class string_symbolizer;
+    struct script_namespace_data;
 
     namespace serialization {
         class serialization_registry;
@@ -42,8 +43,9 @@ namespace jai {
     // Backend type enumeration
     enum class backend_type {
         interpreter,    // Default tree-walk interpreter
-        jvm,           // Bytecode virtual machine
-        auto_select    // Automatic selection based on heuristics
+        vm,             // Bytecode virtual machine
+        auto_select,    // Legacy alias for interpreter (implicit length-based switching removed)
+        custom          // Externally supplied via set_backend(std::unique_ptr<execution_backend>)
     };
 
     // Extended type info for overload resolution - stores base type + optional C++ type for objects
@@ -142,11 +144,7 @@ namespace jai {
         void execution_budget(double seconds);
         double execution_budget() const;
 
-        struct stack_frame {
-            std::string function;
-            std::string file;
-            size_t line = 0;
-        };
+        using stack_frame = ::jai::stack_frame;
         std::vector<stack_frame> last_stack_trace() const;
         std::string format_stack_trace() const;
 
@@ -469,6 +467,9 @@ namespace jai {
         std::string get_backend_name() const;
         execution_backend* get_execution_backend() const;
 
+        // Engine-owned script namespace registry (namespace_id -> data); survives across backends
+        std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces();
+
         // Get string symbolizer for interning identifiers
         string_symbolizer* get_symbolizer();
 
@@ -557,6 +558,35 @@ namespace jai {
         // Reference support for function parameters
         script_value try_create_reference(size_t arg_index, const script_value& fallback);
 
+        // Script errors surfacing at the C++ boundary (converted callbacks, signal
+        // receivers) have no error-value channel and must not throw into arbitrary game
+        // callsites; they route here instead. Default sink is std::cerr; the host app
+        // installs its own logger. The message includes the script stack trace if captured.
+        void set_script_error_handler(std::function<void(const std::string&)> a_handler);
+        void report_script_error(const std::string& a_message);
+
+        // Shelve/restore the in-flight script call's argument metadata around an external
+        // (C++) invocation of a script function - see external_call_guard below.
+        void push_external_call_scope();
+        void pop_external_call_scope();
+
+        // RAII scope for C++ code invoking script functions directly (converted callbacks,
+        // signal receivers): without it, reference parameters would bind against whatever
+        // script call happens to be in flight.
+        class external_call_guard {
+        public:
+            explicit external_call_guard(engine* a_engine) : engine_(a_engine) {
+                if (engine_) { engine_->push_external_call_scope(); }
+            }
+            ~external_call_guard() {
+                if (engine_) { engine_->pop_external_call_scope(); }
+            }
+            external_call_guard(const external_call_guard&) = delete;
+            external_call_guard& operator=(const external_call_guard&) = delete;
+        private:
+            engine* engine_;
+        };
+
         // Output stream redirection
         // Set a custom output stream for print() and related functions
         // Pass nullptr to reset to std::cout
@@ -605,6 +635,7 @@ namespace jai {
         std::unique_ptr<implementation> impl;
         
         void initialize_engine_reference();
+        void wire_backend();
         void add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef);
         void register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName);
         void register_type_converter_impl(const std::type_info& type, std::function<script_value(const void*)> converter);
@@ -723,6 +754,11 @@ namespace jai {
             }
         }
     };
+
+    // Resolve an include/import path against the engine's include paths. Shared by the
+    // interpreter and vm backends (defined in interpreter.cpp) so path resolution stays
+    // single-sourced.
+    checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);
 
 } // namespace jai
 

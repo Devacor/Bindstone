@@ -13,7 +13,7 @@ public:
     void forge_tests() override {
         // If statement tests
         test("if_statement_true", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var x = 5;
                 if (x > 0) {
@@ -25,7 +25,7 @@ public:
         });
         
         test("if_statement_false", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var x = 5;
                 if (x < 0) {
@@ -37,7 +37,7 @@ public:
         });
         
         test("if_else_branches", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             
             // Test true branch
             script_value result = engine->execute(R"(
@@ -65,7 +65,7 @@ public:
         });
         
         test("nested_if_statements", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var x = 5;
                 var y = 10;
@@ -81,7 +81,7 @@ public:
         
         // While loop tests
         test("while_loop_counter", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var counter = 0;
                 while (counter < 5) {
@@ -93,7 +93,7 @@ public:
         });
         
         test("while_loop_sum", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var sum = 0;
                 var i = 1;
@@ -107,7 +107,7 @@ public:
         });
         
         test("while_loop_with_break", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var i = 0;
                 while (true) {
@@ -122,7 +122,7 @@ public:
         });
         
         test("while_loop_with_continue", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var sum = 0;
                 var i = 0;
@@ -141,7 +141,7 @@ public:
         
         // For loop tests
         test("for_loop_basic", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var sum = 0;
                 for (var i = 1; i <= 5; i = i + 1) {
@@ -153,7 +153,7 @@ public:
         });
         
         test("for_loop_with_increment_operator", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var sum = 0;
                 for (int i = 0; i < 5; ++i) {
@@ -165,7 +165,7 @@ public:
         });
         
         test("for_loop_with_break", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var sum = 0;
                 for (int i = 1; i <= 10; ++i) {
@@ -181,7 +181,7 @@ public:
         });
         
         test("for_loop_with_continue", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var sum = 0;
                 for (int i = 1; i <= 10; ++i) {
@@ -197,7 +197,7 @@ public:
         });
         
         test("nested_loops", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var sum = 0;
                 for (int i = 1; i <= 3; ++i) {
@@ -211,7 +211,7 @@ public:
         });
         
         test("complex_control_flow", [this]() {
-            auto engine = engine::make();
+            auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var result = 0;
                 for (int i = 1; i <= 10; ++i) {

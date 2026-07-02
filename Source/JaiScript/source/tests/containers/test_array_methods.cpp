@@ -9,55 +9,55 @@ public:
 
     void forge_tests() override {
         test("index_of_found", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; arr.index_of(3);");
             check_eq(result.as<int>(), 2);
         });
 
         test("index_of_not_found", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [1, 2, 3]; arr.index_of(10);");
             check_eq(result.as<int>(), -1);
         });
 
         test("has_true", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [1, 2, 3]; arr.has(2);");
             check_eq(result.as<bool>(), true);
         });
 
         test("has_false", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [1, 2, 3]; arr.has(10);");
             check_eq(result.as<bool>(), false);
         });
 
         test("contains_alias", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [1, 2, 3]; arr.contains(2);");
             check_eq(result.as<bool>(), true);
         });
 
         test("first", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [10, 20, 30]; arr.first();");
             check_eq(result.as<int>(), 10);
         });
 
         test("last", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [10, 20, 30]; arr.last();");
             check_eq(result.as<int>(), 30);
         });
 
         test("length", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; arr.length();");
             check_eq(result.as<int>(), 5);
         });
 
         test("slice_positive", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; arr.slice(1, 3);");
             const auto& arr = result.as_array();
             check_eq(arr.size(), 2);
@@ -66,7 +66,7 @@ public:
         });
 
         test("slice_negative", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; arr.slice(-3, -1);");
             const auto& arr = result.as_array();
             check_eq(arr.size(), 2);
@@ -75,7 +75,7 @@ public:
         });
 
         test("filter", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [1, 2, 3, 4, 5, 6];
                 arr.filter([](auto x) -> auto { return x % 2 == 0; });
@@ -88,7 +88,7 @@ public:
         });
 
         test("sort", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [5, 2, 8, 1, 9];
                 arr.sort();
@@ -104,7 +104,7 @@ public:
         });
 
         test("sort_with_custom_comparator", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [1, 2, 3, 4, 5];
                 arr.sort([](auto a, auto b) -> auto { return a > b; });
@@ -120,7 +120,7 @@ public:
         });
 
         test("reverse", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [1, 2, 3, 4, 5];
                 arr.reverse();
@@ -136,7 +136,7 @@ public:
         });
 
         test("remove_by_index", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [1, 2, 3, 4, 5];
                 var removed = arr.remove(2);
@@ -149,7 +149,7 @@ public:
         });
 
         test("remove_if", [this]() {
-            auto eng = engine::make();
+            auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
                 arr.remove_if([](auto x) -> auto { return x % 2 == 0; });

@@ -439,6 +439,53 @@ public:
             bite->execute();
         });
 
+        benchmark("BST shared_ptr insert/sum (15 nodes)", [this]() {
+            // Reference-semantic variant: apples-to-apples with Squirrel/Lua instances
+            // (the value-semantic BST above deep-copies subtrees per by-value pass)
+            if (!bite) {
+                test_engine->execute(R"(
+                    class SNode {
+                        int value = 0;
+                        SNode left = null;
+                        SNode right = null;
+                        SNode(int val) { value = val; }
+                    }
+                    function sInsert(SNode root, int val) -> SNode {
+                        if (root == null) { return shared_ptr<SNode>(val); }
+                        if (val < root.value) {
+                            root.left = sInsert(root.left, val);
+                        } else {
+                            root.right = sInsert(root.right, val);
+                        }
+                        return root;
+                    }
+                    function sSum(SNode node) -> int {
+                        if (node == null) { return 0; }
+                        return sSum(node.left) + node.value + sSum(node.right);
+                    }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto s_root = shared_ptr<SNode>(8);
+                    s_root = sInsert(s_root, 4);
+                    s_root = sInsert(s_root, 12);
+                    s_root = sInsert(s_root, 2);
+                    s_root = sInsert(s_root, 6);
+                    s_root = sInsert(s_root, 10);
+                    s_root = sInsert(s_root, 14);
+                    s_root = sInsert(s_root, 1);
+                    s_root = sInsert(s_root, 3);
+                    s_root = sInsert(s_root, 5);
+                    s_root = sInsert(s_root, 7);
+                    s_root = sInsert(s_root, 9);
+                    s_root = sInsert(s_root, 11);
+                    s_root = sInsert(s_root, 13);
+                    s_root = sInsert(s_root, 15);
+                    auto s_total = sSum(s_root);
+                )");
+            }
+            bite->execute();
+        });
+
         // === String Performance Benchmarks ===
         // These measure the shared_ptr string optimization effectiveness
 

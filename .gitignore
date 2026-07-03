@@ -73,3 +73,4 @@ Tools/LocalServer/pgsql/
 Tools/LocalServer/pgdata/
 Tools/LocalServer/pg.log
 Tools/LocalServer/postgresql-binaries.zip
+Source/JaiScript/squirrel/

@@ -181,6 +181,35 @@ private:
 // For backward compatibility during migration
 using script_class_instance = class_instance;
 
+// Instance-method dispatcher body (declared in execution_backend.hpp). Resolves the
+// overload against the live class every call (hot reload) and executes through the
+// current backend; args[0] is the 'this' receiver.
+inline checked_result<script_value> script_method_dispatch::operator()(const std::vector<script_value>& args) const {
+    if (args.empty()) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::this_outside_method), "Method called without 'this' object");
+    }
+
+    std::vector<script_value> method_args(args.begin() + 1, args.end());
+
+    auto resolved = cls->resolve_method_overload(name_id, method_args);
+    if (!resolved) {
+        return resolved.error_value();
+    }
+
+    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+    if (!backend) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+    }
+
+    script_callable payload;
+    payload.kind = script_callable::kind_type::method;
+    payload.ast = std::move(resolved.value());
+    payload.cls = cls;
+    payload.definition_env = definition_env;
+    payload.this_obj = args[0];
+    return backend->execute_callable(payload, method_args);
+}
+
 // Implementation of add_script_method. The stored dispatcher captures only
 // (engine*, backend-neutral payload) and resolves the live backend at call time.
 inline void class_definition::add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env) {
@@ -212,34 +241,7 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
     methods_.insert_or_assign(name_id, script_value::make_function(
-        [class_def, name_id, definition_env, eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-            // First argument should be 'this' object
-            if (args.empty()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::this_outside_method), "Method called without 'this' object");
-            }
-
-            std::vector<script_value> method_args(args.begin() + 1, args.end());
-
-            auto resolved = class_def->resolve_method_overload(name_id, method_args);
-            if (!resolved) {
-                return resolved.error_value();
-            }
-
-            execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
-            if (!backend) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
-            }
-
-            script_callable payload;
-            payload.kind = script_callable::kind_type::method;
-            payload.ast = std::move(resolved.value());
-            payload.cls = class_def;
-            payload.definition_env = definition_env;
-            payload.this_obj = args[0];
-            return backend->execute_callable(payload, method_args);
-        },
-        eng
-    ));
+        script_method_dispatch{eng, class_def, name_id, definition_env}, eng));
 }
 
 // Implementation of add_static_script_method. Same engine*+payload pattern; overloads

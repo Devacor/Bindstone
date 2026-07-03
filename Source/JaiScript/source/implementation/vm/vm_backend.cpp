@@ -3895,7 +3895,7 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	return {};
 }
 
-checked_result<void> vm_backend::invoke_callee(const script_value& callee, std::vector<script_value>& arguments, const call_site& site) {
+checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site) {
 	const size_t argc = arguments.size();
 	const bool has_args = argc > 0;
 	std::vector<std::pair<uint64_t, environment*>> saved_metadata;
@@ -3919,6 +3919,25 @@ checked_result<void> vm_backend::invoke_callee(const script_value& callee, std::
 	const auto* thunk = func.target<script_callable_thunk>();
 	const bool direct = thunk && thunk->eng == engine_ &&
 	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
+	if (direct && arguments.size() == thunk->payload.fn->parameters.size()) {
+		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes
+		// switch_to_. push_script_frame owns saved_metadata restoration on every exit.
+		try {
+			return push_script_frame(f, std::move(callee), *thunk->payload.fn, arguments, saved_metadata, has_args);
+		} catch (const script_exception& e) {
+			active_exception_value_ = script_value(std::string(e.what()), engine_);
+			current_exception_ = e;
+			is_unwinding_ = true;
+			stack_.push_back(make_null());
+			return {};
+		} catch (const std::exception& e) {
+			active_exception_value_ = script_value(std::string(e.what()), engine_);
+			current_exception_ = script_exception(e.what());
+			is_unwinding_ = true;
+			stack_.push_back(make_null());
+			return {};
+		}
+	}
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
@@ -5036,6 +5055,39 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 		}
 	}
 
+	// Script-class instance methods enter the dispatch loop directly. The gate mirrors
+	// member_access_value's precedence exactly (super/coroutine/builtin/same_as/getter/
+	// field all bail to the native bound-method path), so behavior is byte-identical.
+	if (member->member_id != same_as_id_ &&
+	    !(member->object && member->object->get_type() == node_type::super_expr)) {
+		script_value objv = object.deref();
+		if (objv.is_object()) {
+			auto holder = objv.get_object_holder();
+			const bool shared_ptr_builtin = objv.get_type_info() &&
+				objv.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
+				builtins_.shared_ptr_methods.find(member->member_id) != builtins_.shared_ptr_methods.end();
+			if (holder && holder->type_id != coroutine_handle_type_id_ && !shared_ptr_builtin) {
+				auto target = resolve_member_target(objv);
+				if (target && target.class_def && !target.class_def->has_property_getters() &&
+				    !target.has_field(member->member_id)) {
+					script_value method_val = target.method(member->member_id);
+					if (method_val.is_function()) {
+						const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
+						if (dispatch && dispatch->eng == engine_) {
+							auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
+							// Resolution failures (and coroutine methods) fall through to the
+							// native path, which re-resolves and reports the identical error
+							if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+								return enter_script_method(f, std::move(method_val), *dispatch,
+								                           resolved.value(), std::move(objv), arguments, site);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	script_value callee = make_null();
 	JAISCRIPT_TRY(member_access_value(object, member, callee));
 	if (is_unwinding_) {
@@ -5049,7 +5101,7 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 	if (!callee.is_function()) {
 		return checked_result<void>(make_error_code(runtime_error_code::not_a_function));
 	}
-	return invoke_callee(callee, arguments, site);
+	return invoke_callee(f, std::move(callee), arguments, site);
 }
 
 checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
@@ -6769,6 +6821,13 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			case opcode::op_include:
 			case opcode::op_import:
 				VM_TRY_OP(exec_extended(f, ins));
+				if (switch_to_) {
+					// op_call_method pushed an in-loop callee (flattened method or
+					// direct field-function); park the caller's ip on the call op
+					fp = switch_to_;
+					switch_to_ = nullptr;
+					continue;
+				}
 				break;
 
 			// Suspends the fiber: exec_yield sets yielding_ and advances ip past the yield,
@@ -7071,7 +7130,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
 	rec.caller = &caller;
-	rec.fn = &function;
+	rec.return_type = function.return_type;
 	rec.callee_pin = std::move(callee);
 	rec.prev_env = environment_;
 	rec.try_base = try_records_.size();
@@ -7106,6 +7165,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 			rec.metadata_saved = false;
 		}
 		rec.callee_pin = make_null();
+		rec.return_type = nullptr;
 		rec.prev_env = nullptr;
 		--call_records_top_;
 		throw;
@@ -7126,7 +7186,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(function, arguments, rec.locals, *rec.f.code);
+		bound = bind_parameters(function.parameters, arguments, rec.locals, *rec.f.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -7137,6 +7197,169 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	}
 	switch_to_ = &rec.f;
 	return {};
+}
+
+checked_result<void> vm_backend::enter_script_method(frame& caller, script_value&& method_val,
+                                                     const script_method_dispatch& dispatch,
+                                                     const std::shared_ptr<function_decl>& ast,
+                                                     script_value&& receiver,
+                                                     const std::vector<script_value>& arguments,
+                                                     const call_site& site) {
+	const size_t argc = arguments.size();
+	const bool has_args = argc > 0;
+	std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+	if (has_args) {
+		saved_metadata = std::move(current_arg_metadata_);
+		current_arg_metadata_.clear();
+		current_arg_metadata_.reserve(argc);
+		for (size_t i = 0; i < argc; ++i) {
+			uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
+			if (symbol_id != UINT64_MAX) {
+				current_arg_metadata_.emplace_back(symbol_id, environment_.get());
+			} else {
+				current_arg_metadata_.emplace_back(UINT64_MAX, nullptr);
+			}
+		}
+	}
+	// push_method_frame owns saved_metadata restoration on every exit path
+	try {
+		return push_method_frame(caller, std::move(method_val), dispatch, ast, std::move(receiver),
+		                         arguments, saved_metadata, has_args);
+	} catch (const script_exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = e;
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	} catch (const std::exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = script_exception(e.what());
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	}
+}
+
+checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&& method_val,
+                                                   const script_method_dispatch& dispatch,
+                                                   const std::shared_ptr<function_decl>& ast,
+                                                   script_value&& receiver,
+                                                   const std::vector<script_value>& arguments,
+                                                   std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
+                                                   bool has_args) {
+	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
+		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
+		return checked_result<void>(
+			make_error_code(runtime_error_code::max_recursion_depth),
+			"Maximum recursion depth ({0}) exceeded - possible infinite recursion",
+			static_cast<uint64_t>(JAI_MAX_CALL_DEPTH));
+	}
+	if (execution_budget_exhausted()) [[unlikely]] {
+		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
+		return checked_result<void>(
+			make_error_code(runtime_error_code::execution_budget_exceeded),
+			"Script execution budget exceeded - raise engine::execution_budget or break up the work");
+	}
+	assert(!has_return_value_);
+
+	std::shared_ptr<chunk> body_chunk;
+	try {
+		if (dispatch.body_cache_key == ast->body.get()) {
+			body_chunk = std::static_pointer_cast<chunk>(dispatch.body_cache);
+		} else {
+			// Native parity: execute_method_ast's temp function carries local_count 0
+			body_chunk = chunk_for_body(ast->name, ast->parameters, ast->body, 0);
+			dispatch.body_cache = body_chunk;
+			dispatch.body_cache_key = ast->body.get();
+		}
+		if (call_records_top_ == call_records_.size()) {
+			call_records_.push_back(std::make_unique<call_record>());
+		}
+	} catch (...) {
+		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
+		throw;
+	}
+
+	call_record& rec = *call_records_[call_records_top_];
+	++call_records_top_;
+	rec.caller = &caller;
+	rec.return_type = ast->return_type;
+	rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload
+	rec.method_result_anchor = true;
+	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
+	rec.prev_env = environment_;
+	rec.try_base = try_records_.size();
+	rec.iter_base = iter_states_.size();
+	rec.cfor_base = cfor_states_.size();
+	if (has_args) {
+		std::swap(rec.saved_metadata, saved_metadata);
+		rec.metadata_saved = true;
+	}
+	rec.locals.function_name = ast->name;
+	rec.locals.reserve_locals(body_chunk->local_count);
+	rec.env_lazy = false;   // method envs never elide (env-kind fallbacks gate precedence)
+	try {
+		// Net effect of the native wrapper-env round trip: a method scope parented on
+		// definition_env with the receiver bound; the wrapper env and its define(this)
+		// are bypassed dead weight
+		rec.locals.set_this(receiver);
+		rec.locals.closure_env = dispatch.definition_env;
+		environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver));
+	} catch (...) {
+		if (rec.metadata_saved) {
+			current_arg_metadata_ = std::move(rec.saved_metadata);
+			rec.metadata_saved = false;
+		}
+		rec.callee_pin = make_null();
+		rec.return_type = nullptr;
+		rec.ast_pin.reset();
+		rec.method_result_anchor = false;
+		rec.locals.this_object_ptr.reset();
+		rec.locals.is_method = false;
+		rec.locals.closure_env = nullptr;
+		rec.prev_env = nullptr;
+		--call_records_top_;
+		throw;
+	}
+	++current_call_depth_;
+	rec.f.code = body_chunk.get();
+	rec.f.pin = std::move(body_chunk);
+	rec.f.ip = 0;
+	rec.f.locals = &rec.locals;
+	rec.f.entry_env = environment_;
+	rec.f.stack_base = stack_.size();
+	rec.f.top_level = false;
+	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
+
+	checked_result<void> bound;
+	try {
+		bound = bind_parameters(ast->parameters, arguments, rec.locals, *rec.f.code);
+	} catch (...) {
+		pop_script_frame_core(rec);
+		throw;
+	}
+	if (!bound) {
+		pop_script_frame_core(rec);
+		return bound;
+	}
+	switch_to_ = &rec.f;
+	return {};
+}
+
+// Mirrors make_bound_method's keep-alive fix-up: a NON-OWNING method result (the C++
+// chaining idiom surfacing through a script method) gets anchored to the receiver so a
+// temporary receiver survives the expression. No-op for owning results and implicit
+// this-returns, so only return_from_script_frame applies it.
+void vm_backend::anchor_method_result(script_value& result, script_value& receiver) {
+	if (!receiver.is_object() || !result.is_non_owning_object()) {
+		return;
+	}
+	auto rv_holder = result.get_object_holder();
+	auto recv_holder = receiver.get_object_holder();
+	if (rv_holder && recv_holder) {
+		rv_holder->keep_alive = recv_holder->data ? recv_holder->data
+		                                          : recv_holder->keep_alive;
+	}
 }
 
 // Exact cleanup order of call_script_function's epilogue (cleanup lambda + frame_guard
@@ -7179,6 +7402,9 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	rec.locals.static_class_def = nullptr;
 	rec.locals.is_static_method = false;
 	rec.callee_pin = make_null();
+	rec.return_type = nullptr;
+	rec.ast_pin.reset();
+	rec.method_result_anchor = false;
 	rec.f.pin.reset();
 	rec.f.code = nullptr;
 	if (rec.metadata_saved) {
@@ -7198,11 +7424,14 @@ checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_i
 		stack_.pop_back();
 	}
 	// Deref + conversion run while the callee's env/frame are still live (native order)
-	auto conv = convert_return_value(std::move(result), *rec.fn);
+	auto conv = convert_return_value(std::move(result), rec.return_type);
 	if (!conv) {
 		pop_script_frame_core(rec);
 		fp = rec.caller;
 		return conv.error_value();
+	}
+	if (rec.method_result_anchor) {
+		anchor_method_result(conv.value(), rec.locals.get_this());
 	}
 	pop_script_frame_core(rec);
 	fp = rec.caller;
@@ -7304,16 +7533,16 @@ script_value vm_backend::implicit_this_result(call_frame& locals) {
 	return make_null();
 }
 
-checked_result<script_value> vm_backend::convert_return_value(script_value result, const script_defined_function& function) {
+checked_result<script_value> vm_backend::convert_return_value(script_value result, const type_info_ptr& return_type) {
 	if (result.is_reference()) {
 		// References into this call frame would dangle once the frame dies
 		result = result.deref();
 	}
-	if (function.return_type && !function.return_type->type_name.empty() &&
-	    function.return_type->type_name != "void" &&
-	    function.return_type->type_name != "auto" &&
-	    function.return_type->base_type != script_value_type::jai_any_type) {
-		auto conv = try_convert_for_parameter(result, function.return_type);
+	if (return_type && !return_type->type_name.empty() &&
+	    return_type->type_name != "void" &&
+	    return_type->type_name != "auto" &&
+	    return_type->base_type != script_value_type::jai_any_type) {
+		auto conv = try_convert_for_parameter(result, return_type);
 		if (!conv) {
 			return conv.error_value();
 		}
@@ -7322,11 +7551,11 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 	return result;
 }
 
-checked_result<void> vm_backend::bind_parameters(const script_defined_function& function,
+checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const std::vector<script_value>& args,
                                                  call_frame& locals, chunk& body_chunk) {
-	for (size_t i = 0; i < function.parameters.size(); ++i) {
-		const auto& param = function.parameters[i];
+	for (size_t i = 0; i < parameters.size(); ++i) {
+		const auto& param = parameters[i];
 
 		if (i >= args.size()) {
 			if (param.default_value) {
@@ -7533,7 +7762,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	};
 
 	{
-		auto bind_result = bind_parameters(function, args, locals, *body_chunk);
+		auto bind_result = bind_parameters(function.parameters, args, locals, *body_chunk);
 		if (!bind_result) {
 			cleanup();
 			return bind_result.error_value();
@@ -7556,7 +7785,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	script_value result = make_null();
 
 	if (has_return_value_) {
-		auto conv = convert_return_value(std::move(return_value_.value()), function);
+		auto conv = convert_return_value(std::move(return_value_.value()), function.return_type);
 		if (!conv) {
 			cleanup();
 			return conv.error_value();

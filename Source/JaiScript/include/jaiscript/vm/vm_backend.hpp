@@ -83,8 +83,10 @@ namespace jai::vm {
         struct call_record {
             frame f;                                   // frames_ gets &f; f.locals = &locals
             call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
-            script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the script_defined_function
-            const script_defined_function* fn = nullptr;
+            script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
+            type_info_ptr return_type;                 // pop drivers convert the result against this
+            std::shared_ptr<function_decl> ast_pin;    // method frames: resolved overload outlives a mid-call hot reload
+            bool method_result_anchor = false;         // method frames: replicate make_bound_method's keep-alive fix-up
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             std::vector<std::pair<uint64_t, environment*>> saved_metadata;
@@ -228,6 +230,22 @@ namespace jai::vm {
                                                const std::vector<script_value>& arguments,
                                                std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
                                                bool has_args);
+        // Method-call flattening: a script-class instance method enters the dispatch loop
+        // directly (no bound-method mint, no arg re-copies, no native run() recursion)
+        checked_result<void> enter_script_method(frame& caller, script_value&& method_val,
+                                                 const script_method_dispatch& dispatch,
+                                                 const std::shared_ptr<function_decl>& ast,
+                                                 script_value&& receiver,
+                                                 const std::vector<script_value>& arguments,
+                                                 const call_site& site);
+        checked_result<void> push_method_frame(frame& caller, script_value&& method_val,
+                                               const script_method_dispatch& dispatch,
+                                               const std::shared_ptr<function_decl>& ast,
+                                               script_value&& receiver,
+                                               const std::vector<script_value>& arguments,
+                                               std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
+                                               bool has_args);
+        void anchor_method_result(script_value& result, script_value& receiver);
         void pop_script_frame_core(call_record& rec);
         checked_result<void> return_from_script_frame(frame*& fp, const vm_instruction& ins);
         checked_result<void> fall_off_script_frame(frame*& fp);
@@ -239,13 +257,13 @@ namespace jai::vm {
         // Shared between call_script_function and the in-loop call path (single source of truth)
         void setup_callee_env(const script_defined_function& function, call_frame& locals,
                               const std::shared_ptr<environment>& prev_env);
-        checked_result<void> bind_parameters(const script_defined_function& function,
+        checked_result<void> bind_parameters(const std::vector<parameter>& parameters,
                                              const std::vector<script_value>& args,
                                              call_frame& locals, chunk& body_chunk);
         void clear_this_on_frame_exit();
         script_value implicit_this_result(call_frame& locals);
         script_value implicit_result_for_record(call_record& rec);
-        checked_result<script_value> convert_return_value(script_value result, const script_defined_function& function);
+        checked_result<script_value> convert_return_value(script_value result, const type_info_ptr& return_type);
 
         void capture_stack_trace();
 
@@ -343,7 +361,7 @@ namespace jai::vm {
         checked_result<void> member_access_value(const script_value& raw_object, member_expr* expr, script_value& out);
         checked_result<void> static_member_value(member_expr* expr, script_value& out);
         checked_result<void> assign_member(const script_value& object_value, member_expr* member, const script_value& value);
-        checked_result<void> invoke_callee(const script_value& callee, std::vector<script_value>& arguments, const call_site& site);
+        checked_result<void> invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
 
         checked_result<void> exec_class_decl_node(class_decl* decl);
         checked_result<void> exec_namespace_decl_node(namespace_decl* decl);

@@ -287,6 +287,131 @@ public:
 			}
 		});
 
+		// Stage 2 (compile-time lazy envs): plain in-loop callees whose bodies provably never
+		// touch the per-call scope environment skip creating it. These pin the parity contract
+		// on both backends and the compiler's fail-closed trigger table.
+		test("lazy_env_quirk_from_method_top_scope", [this]() {
+			// helper's body is lazy-eligible; the pinned caller-this-clear quirk must survive
+			const char* src = R"(
+				int helper(int a) { return a + 1; }
+				class L { int x = 5; int m() { helper(1); return x; } }
+				var l = L();
+				l.m();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				std::string error;
+				try { e->execute(src); }
+				catch (const std::exception& ex) { error = ex.what(); }
+				check_true(error.find("Undefined variable 'x'") != std::string::npos,
+					"lazy callee still clears the caller method's this");
+			}
+		});
+
+		test("lazy_env_no_this_clear_from_method_block_scope", [this]() {
+			// Caller env at the call is a plain block env, so neither the eager two-level
+			// walk nor the lazy single-level rule clears this: the field stays readable
+			const char* src = R"(
+				int helper(int a) { return a + 1; }
+				class B { int x = 5; int m() { { var t = helper(1); return x + t; } } }
+				var b = B();
+				b.m();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)7, e->execute(src).as_int());
+			}
+		});
+
+		test("lazy_env_ref_param_binding", [this]() {
+			// Caller env metadata resolves through env == environment_.get() into a lazy
+			// callee's reference parameter; repeated calls exercise pooled-record reuse.
+			// (By-ref args THROUGH an intermediate function frame diverge between the
+			// backends today — pre-existing before lazy envs, deliberately not pinned here.)
+			const char* direct = R"(
+				function bump(int& t) { t = t + 1; }
+				var v = 5;
+				bump(v);
+				bump(v);
+				v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)7, e->execute(direct).as_int());
+			}
+		});
+
+		test("lazy_env_throw_caught_by_caller", [this]() {
+			const char* src = R"(
+				function boom(int x) { throw "lazy bang"; }
+				var msg = "";
+				try { boom(1); } catch (err) { msg = err; }
+				msg;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq(std::string("lazy bang"), e->execute(src).as<std::string>());
+			}
+		});
+
+		test("lazy_env_ref_decl_callee_parity", [this]() {
+			// op_decl_ref bodies stay eager (references capture env identity); semantics
+			// must remain byte-identical on both backends
+			const char* src = R"(
+				var gv = 4;
+				function via_ref() -> int { int& r = gv; r = r * 3; return gv; }
+				via_ref();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)12, e->execute(src).as_int());
+			}
+		});
+
+		test("needs_frame_env_trigger_table", [this]() {
+			auto e = vm_engine();
+			auto body_needs_env = [&](const char* script) -> bool {
+				auto* symbolizer = e->get_symbolizer();
+				auto templates = e->get_registered_template_types();
+				jai::lexer lex(script, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, e.get(), templates);
+				auto parsed = p.parse();
+				check_true(parsed.has_value(), "trigger-table snippet parses");
+				for (const auto& d : parsed.value()) {
+					if (d->get_type() == jai::node_type::function_decl) {
+						auto fn = std::static_pointer_cast<jai::function_decl>(d);
+						jai::vm::vm_compiler compiler(symbolizer);
+						auto compiled = compiler.compile_callable(fn->name, fn->parameters, fn->body, fn->local_count);
+						return compiled->needs_frame_env;
+					}
+				}
+				check_true(false, "no function decl in trigger-table snippet");
+				return true;
+			};
+			// Lazy-eligible bodies (call-dense recursion is the whole point)
+			check_false(body_needs_env("function fib(auto n) -> auto { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }"),
+				"fib-shaped body elides its frame env");
+			check_false(body_needs_env("function bump(int& t) { t = t + 1; }"),
+				"ref-param assignment body elides");
+			check_false(body_needs_env("function boom() { throw \"bang\"; }"),
+				"throwing body elides");
+			// Trigger table: env-identity-capturing bodies stay eager
+			check_true(body_needs_env("function refs(int x) -> int { int& r = x; r = 7; return x; }"),
+				"reference decl keeps the eager env");
+			check_true(body_needs_env("function closes() -> auto { var n = 2; return [=](int v) { return v + n; }; }"),
+				"closure mint keeps the eager env");
+			check_true(body_needs_env("function tries() -> int { try { return 1; } catch (e) { return 0; } }"),
+				"try/catch keeps the eager env");
+			check_true(body_needs_env("function scoped() -> int { { var t = 1; t = t + 1; } return 2; }"),
+				"block scope push keeps the eager env");
+		});
+
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
 			e->add_variadic_function("sum_all", [](const std::vector<script_value>& args) -> checked_result<script_value> {

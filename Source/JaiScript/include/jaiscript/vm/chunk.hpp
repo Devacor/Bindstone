@@ -112,6 +112,9 @@ namespace jai::vm {
         std::string function_name;                         // empty = top level
         size_t local_count = 0;
         bool is_function_body = false;
+        // Compile-time lazy-env gate: false = every op proven not to need the per-call
+        // scope environment, so plain in-loop callees skip creating it (fail-closed default)
+        bool needs_frame_env = true;
 
         // Pins the whole program tree for top-level chunks
         std::vector<declaration_ptr> pinned_decls;

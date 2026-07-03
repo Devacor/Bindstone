@@ -1,5 +1,6 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <cassert>
 #include <functional>
 
 namespace jai::vm {
@@ -211,6 +212,68 @@ namespace {
 		}
 	}
 
+	// Lazy-env gate for function-body chunks: false only when EVERY op is on the explicit
+	// safe list (fail-closed: anything that can capture the frame env's identity — refs,
+	// closures, try records, scope pushes, decls into the env — keeps the eager env).
+	bool body_needs_frame_env(const chunk& body) {
+		for (const auto& ins : body.code) {
+			switch (ins.op) {
+			case opcode::op_const:
+			case opcode::op_null:
+			case opcode::op_true:
+			case opcode::op_false:
+			case opcode::op_pop:
+			case opcode::op_dup:
+			case opcode::op_to_bool:
+			case opcode::op_load:
+			case opcode::op_store:
+			case opcode::op_compound_store:
+			case opcode::op_incdec:
+			case opcode::op_binary:
+			case opcode::op_binary_fused:
+			case opcode::op_index:
+			case opcode::op_index_assign:
+			case opcode::op_index_compound:
+			case opcode::op_unary:
+			case opcode::op_array:
+			case opcode::op_map:
+			case opcode::op_jump:
+			case opcode::op_jump_if_false:
+			case opcode::op_jump_if_true:
+			case opcode::op_loop_back:
+			case opcode::op_call:
+			case opcode::op_return:
+			case opcode::op_call_method:
+			case opcode::op_this:
+			case opcode::op_super:
+			case opcode::op_from_this:
+			case opcode::op_null_guard:
+			case opcode::op_throw:
+			case opcode::op_case_eq:
+			case opcode::op_cfor_prep:
+			case opcode::op_cfor_back:
+			case opcode::op_cfor_pop:
+			case opcode::op_halt:
+				break;
+			case opcode::op_decl_var: {
+				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
+				assert(decl->slot_index != SIZE_MAX && "parser slots every function-body decl");
+				if (decl->slot_index == SIZE_MAX) return true;
+				break;
+			}
+			case opcode::op_destructure: {
+				for (const auto& name : body.destructure_protos[ins.a].names) {
+					if (name.second == SIZE_MAX) return true;
+				}
+				break;
+			}
+			default:
+				return true;
+			}
+		}
+		return false;
+	}
+
 	inline uint32_t compound_kind_for(token_type op) {
 		switch (op) {
 		case token_type::plus_equal: return compound_plus;
@@ -349,6 +412,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 		compile_declaration(decl, false);
 	}
 	emit(opcode::op_halt);
+	result->needs_frame_env = body_needs_frame_env(*result);
 	chunk_ = nullptr;
 	return result;
 }

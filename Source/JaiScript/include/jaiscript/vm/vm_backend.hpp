@@ -198,10 +198,20 @@ namespace jai::vm {
                                               const std::shared_ptr<block_stmt>& body,
                                               size_t local_count);
 
-        checked_result<void> run(frame& f);
+        checked_result<void> run(frame& entry);
+        checked_result<void> run_dispatch(frame*& fp);
         script_value run_program(std::shared_ptr<chunk> program);
         checked_result<script_value> call_script_function(const script_defined_function& function,
                                                           const std::vector<script_value>& args);
+        // Shared between call_script_function and the in-loop call path (single source of truth)
+        void setup_callee_env(const script_defined_function& function, call_frame& locals,
+                              const std::shared_ptr<environment>& prev_env);
+        checked_result<void> bind_parameters(const script_defined_function& function,
+                                             const std::vector<script_value>& args,
+                                             call_frame& locals, chunk& body_chunk);
+        void clear_this_on_frame_exit();
+        script_value implicit_this_result(call_frame& locals);
+        checked_result<script_value> convert_return_value(script_value result, const script_defined_function& function);
 
         void capture_stack_trace();
 

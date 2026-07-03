@@ -6567,10 +6567,17 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 	      if (!handle_op_error(f, shared_op_result_)) return shared_op_result_.error_value(); \
 	      continue; } }
 
-checked_result<void> vm_backend::run(frame& f) {
-	const auto& code = f.code->code;
+checked_result<void> vm_backend::run(frame& entry) {
+	frame* fp = &entry;
+	return run_dispatch(fp);
+}
+
+checked_result<void> vm_backend::run_dispatch(frame*& fp) {
 	checked_result<void> shared_op_result_;
 	for (;;) {
+		// Rebound every iteration: frame switches write fp and `continue`
+		frame& f = *fp;
+		const auto& code = f.code->code;
 		if (f.ip >= code.size()) {
 			return {};
 		}
@@ -6921,6 +6928,205 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 	return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");
 }
 
+void vm_backend::setup_callee_env(const script_defined_function& function, call_frame& locals,
+                                  const std::shared_ptr<environment>& prev_env) {
+	if (function.closure_env) {
+		if (function.closure_env->is_method_env()) {
+			auto this_obj = function.closure_env->get_this_object();
+			locals.set_this(this_obj);
+			locals.closure_env = function.closure_env->get_parent();
+			environment_ = acquire_method_scope_env(function.closure_env->get_parent(), std::move(this_obj));
+		} else if (function.closure_env->is_static_method_env()) {
+			locals.static_class_def = function.closure_env->get_class_definition();
+			locals.is_static_method = true;
+			locals.closure_env = function.closure_env->get_parent();
+			environment_ = acquire_static_scope_env(
+				function.closure_env->get_parent(), function.closure_env->get_class_definition());
+		} else {
+			locals.closure_env = function.closure_env;
+			environment_ = acquire_scope_env(function.closure_env);
+		}
+	} else {
+		locals.closure_env = prev_env;
+		environment_ = acquire_scope_env(prev_env);
+	}
+}
+
+// The parent branch also clears a CALLER method scope's this-binding when the exiting
+// frame is a plain function called from a method body — a parity-locked quirk both
+// backends share (pinned by "pinned_quirk_callee_clears_caller_this")
+void vm_backend::clear_this_on_frame_exit() {
+	auto function_env = environment_;
+	if (function_env->is_method_env()) {
+		function_env->clear_this_reference();
+	} else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
+		function_env->get_parent()->clear_this_reference();
+	}
+}
+
+script_value vm_backend::implicit_this_result(call_frame& locals) {
+	if (locals.is_method) {
+		return locals.get_this();
+	}
+	auto function_env = environment_;
+	if (function_env->is_method_env()) {
+		return function_env->get_this_object();
+	}
+	if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
+		return function_env->get_parent()->get_this_object();
+	}
+	return make_null();
+}
+
+checked_result<script_value> vm_backend::convert_return_value(script_value result, const script_defined_function& function) {
+	if (result.is_reference()) {
+		// References into this call frame would dangle once the frame dies
+		result = result.deref();
+	}
+	if (function.return_type && !function.return_type->type_name.empty() &&
+	    function.return_type->type_name != "void" &&
+	    function.return_type->type_name != "auto" &&
+	    function.return_type->base_type != script_value_type::jai_any_type) {
+		auto conv = try_convert_for_parameter(result, function.return_type);
+		if (!conv) {
+			return conv.error_value();
+		}
+		result = std::move(conv.value());
+	}
+	return result;
+}
+
+checked_result<void> vm_backend::bind_parameters(const script_defined_function& function,
+                                                 const std::vector<script_value>& args,
+                                                 call_frame& locals, chunk& body_chunk) {
+	for (size_t i = 0; i < function.parameters.size(); ++i) {
+		const auto& param = function.parameters[i];
+
+		if (i >= args.size()) {
+			if (param.default_value) {
+				auto default_chunk = i < body_chunk.param_default_chunks.size() ? body_chunk.param_default_chunks[i] : nullptr;
+				if (!default_chunk) {
+					return checked_result<void>(make_error_code(runtime_error_code::internal_error), "Missing compiled default argument");
+				}
+				frame df;
+				df.code = default_chunk.get();
+				df.pin = default_chunk;
+				df.ip = 0;
+				df.locals = &locals;
+				df.entry_env = environment_;
+				df.stack_base = stack_.size();
+				df.top_level = false;
+				auto dr = run(df);
+				if (!dr) {
+					return dr;
+				}
+				script_value default_val = std::move(stack_.back());
+				stack_.pop_back();
+				locals.set_local(param.slot_index, std::move(default_val));
+				continue;
+			}
+		}
+
+		const auto& arg = args[i];
+
+		if (param.is_reference) {
+			if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
+				auto symbol_id = current_arg_metadata_[i].first;
+				auto env = current_arg_metadata_[i].second;
+
+				if (symbol_id != UINT64_MAX && env != nullptr) {
+					script_value* argPtr = env->get_value_ptr(symbol_id);
+					if (!argPtr) {
+						return checked_result<void>(
+							make_error_code(runtime_error_code::undefined_variable),
+							"Cannot take reference of undefined variable");
+					}
+
+					if (argPtr->is_reference()) {
+						auto refHolder = argPtr->get_reference_holder();
+						if (!refHolder || !refHolder->target) {
+							return checked_result<void>(
+								make_error_code(runtime_error_code::invalid_reference),
+								"Reference target is null");
+						}
+						script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
+						locals.set_local(param.slot_index, std::move(refValue));
+					} else {
+						std::shared_ptr<environment> env_shared;
+						if (env == environment_.get()) {
+							env_shared = environment_;
+						} else {
+							for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+								frame* fr = *it;
+								if (fr->locals && fr->locals->closure_env.get() == env) {
+									env_shared = fr->locals->closure_env;
+									break;
+								}
+							}
+							if (!env_shared && engine_) {
+								auto global_env = engine_->get_global_environment();
+								if (global_env.get() == env) {
+									env_shared = global_env;
+								}
+							}
+						}
+						script_value refValue = script_value::make_reference(argPtr, env_shared);
+						locals.set_local(param.slot_index, std::move(refValue));
+					}
+				} else {
+					return checked_result<void>(
+						make_error_code(runtime_error_code::invalid_reference),
+						"Cannot pass non-lvalue to reference parameter");
+				}
+			} else {
+				// External (C++) invocation: object values are handles, shallow copy aliases
+				auto arg_type = arg.current_type();
+				if (arg_type == script_value_type::jai_object_type ||
+				    arg_type == script_value_type::jai_shared_ptr_type) {
+					locals.set_local(param.slot_index, script_value(arg));
+				} else {
+					return checked_result<void>(
+						make_error_code(runtime_error_code::invalid_reference),
+						"Cannot pass non-lvalue to reference parameter");
+				}
+			}
+		} else {
+			// auto (inferred) parameter + primitive argument: copy IS clone for
+			// primitives and carries the same type_info the inference locks onto,
+			// so the conversion machinery has nothing to do. var (any-typed) and
+			// explicitly typed parameters take the full path.
+			const size_t ri = arg.raw_storage_index();
+			if (!param.type && !arg.is_cpp_bound() &&
+			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT ||
+			     ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR)) {
+				locals.set_local(param.slot_index, script_value(arg));
+				continue;
+			}
+
+			auto converted_result = try_convert_for_parameter(arg, param.type);
+			if (!converted_result) {
+				return converted_result.error_value();
+			}
+			script_value converted_arg = std::move(converted_result.value());
+
+			bool should_share = false;
+			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
+				should_share = true;
+			}
+			if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+				should_share = true;
+			}
+
+			if (should_share) {
+				locals.set_local(param.slot_index, converted_arg);
+			} else {
+				locals.set_local(param.slot_index, converted_arg.clone());
+			}
+		}
+	}
+	return {};
+}
+
 checked_result<script_value> vm_backend::call_script_function(const script_defined_function& function, const std::vector<script_value>& args) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
 		return checked_result<script_value>(
@@ -6970,26 +7176,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	auto previousEnv = environment_;
 
-	if (function.closure_env) {
-		if (function.closure_env->is_method_env()) {
-			auto this_obj = function.closure_env->get_this_object();
-			locals.set_this(this_obj);
-			locals.closure_env = function.closure_env->get_parent();
-			environment_ = acquire_method_scope_env(function.closure_env->get_parent(), std::move(this_obj));
-		} else if (function.closure_env->is_static_method_env()) {
-			locals.static_class_def = function.closure_env->get_class_definition();
-			locals.is_static_method = true;
-			locals.closure_env = function.closure_env->get_parent();
-			environment_ = acquire_static_scope_env(
-				function.closure_env->get_parent(), function.closure_env->get_class_definition());
-		} else {
-			locals.closure_env = function.closure_env;
-			environment_ = acquire_scope_env(function.closure_env);
-		}
-	} else {
-		locals.closure_env = previousEnv;
-		environment_ = acquire_scope_env(previousEnv);
-	}
+	setup_callee_env(function, locals, previousEnv);
 
 	bool previousHasReturn = has_return_value_;
 	std::optional<script_value> previousReturn = std::move(return_value_);
@@ -7008,13 +7195,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	auto cleanup = [&]() {
 		if (is_unwinding_ && !trace_captured_) capture_stack_trace();
-		auto function_env = environment_;
-		if (function_env->is_method_env()) {
-			function_env->clear_this_reference();
-		} else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
-			function_env->get_parent()->clear_this_reference();
-		}
-		function_env = nullptr;
+		clear_this_on_frame_exit();
 		environment_ = previousEnv;
 		has_return_value_ = previousHasReturn;
 		return_value_ = std::move(previousReturn);
@@ -7025,137 +7206,11 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		release_arg_vector(std::move(locals.locals));
 	};
 
-	// Bind parameters
-	for (size_t i = 0; i < function.parameters.size(); ++i) {
-		const auto& param = function.parameters[i];
-
-		if (i >= args.size()) {
-			if (param.default_value) {
-				auto default_chunk = i < body_chunk->param_default_chunks.size() ? body_chunk->param_default_chunks[i] : nullptr;
-				if (!default_chunk) {
-					cleanup();
-					return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Missing compiled default argument");
-				}
-				frame df;
-				df.code = default_chunk.get();
-				df.pin = default_chunk;
-				df.ip = 0;
-				df.locals = &locals;
-				df.entry_env = environment_;
-				df.stack_base = stack_.size();
-				df.top_level = false;
-				auto dr = run(df);
-				if (!dr) {
-					cleanup();
-					return dr.error_value();
-				}
-				script_value default_val = std::move(stack_.back());
-				stack_.pop_back();
-				locals.set_local(param.slot_index, std::move(default_val));
-				continue;
-			}
-		}
-
-		const auto& arg = args[i];
-
-		if (param.is_reference) {
-			if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
-				auto symbol_id = current_arg_metadata_[i].first;
-				auto env = current_arg_metadata_[i].second;
-
-				if (symbol_id != UINT64_MAX && env != nullptr) {
-					script_value* argPtr = env->get_value_ptr(symbol_id);
-					if (!argPtr) {
-						cleanup();
-						return checked_result<script_value>(
-							make_error_code(runtime_error_code::undefined_variable),
-							"Cannot take reference of undefined variable");
-					}
-
-					if (argPtr->is_reference()) {
-						auto refHolder = argPtr->get_reference_holder();
-						if (!refHolder || !refHolder->target) {
-							cleanup();
-							return checked_result<script_value>(
-								make_error_code(runtime_error_code::invalid_reference),
-								"Reference target is null");
-						}
-						script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-						locals.set_local(param.slot_index, std::move(refValue));
-					} else {
-						std::shared_ptr<environment> env_shared;
-						if (env == environment_.get()) {
-							env_shared = environment_;
-						} else {
-							for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
-								frame* fr = *it;
-								if (fr->locals && fr->locals->closure_env.get() == env) {
-									env_shared = fr->locals->closure_env;
-									break;
-								}
-							}
-							if (!env_shared && engine_) {
-								auto global_env = engine_->get_global_environment();
-								if (global_env.get() == env) {
-									env_shared = global_env;
-								}
-							}
-						}
-						script_value refValue = script_value::make_reference(argPtr, env_shared);
-						locals.set_local(param.slot_index, std::move(refValue));
-					}
-				} else {
-					cleanup();
-					return checked_result<script_value>(
-						make_error_code(runtime_error_code::invalid_reference),
-						"Cannot pass non-lvalue to reference parameter");
-				}
-			} else {
-				// External (C++) invocation: object values are handles, shallow copy aliases
-				auto arg_type = arg.current_type();
-				if (arg_type == script_value_type::jai_object_type ||
-				    arg_type == script_value_type::jai_shared_ptr_type) {
-					locals.set_local(param.slot_index, script_value(arg));
-				} else {
-					cleanup();
-					return checked_result<script_value>(
-						make_error_code(runtime_error_code::invalid_reference),
-						"Cannot pass non-lvalue to reference parameter");
-				}
-			}
-		} else {
-			// auto (inferred) parameter + primitive argument: copy IS clone for
-			// primitives and carries the same type_info the inference locks onto,
-			// so the conversion machinery has nothing to do. var (any-typed) and
-			// explicitly typed parameters take the full path.
-			const size_t ri = arg.raw_storage_index();
-			if (!param.type && !arg.is_cpp_bound() &&
-			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT ||
-			     ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR)) {
-				locals.set_local(param.slot_index, script_value(arg));
-				continue;
-			}
-
-			auto converted_result = try_convert_for_parameter(arg, param.type);
-			if (!converted_result) {
-				cleanup();
-				return converted_result.error_value();
-			}
-			script_value converted_arg = std::move(converted_result.value());
-
-			bool should_share = false;
-			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
-				should_share = true;
-			}
-			if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
-				should_share = true;
-			}
-
-			if (should_share) {
-				locals.set_local(param.slot_index, converted_arg);
-			} else {
-				locals.set_local(param.slot_index, converted_arg.clone());
-			}
+	{
+		auto bind_result = bind_parameters(function, args, locals, *body_chunk);
+		if (!bind_result) {
+			cleanup();
+			return bind_result.error_value();
 		}
 	}
 
@@ -7175,37 +7230,14 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	script_value result = make_null();
 
 	if (has_return_value_) {
-		if (return_value_.value().is_reference()) {
-			// References into this call frame would dangle once the frame dies
-			result = return_value_.value().deref();
-		} else {
-			result = std::move(return_value_.value());
+		auto conv = convert_return_value(std::move(return_value_.value()), function);
+		if (!conv) {
+			cleanup();
+			return conv.error_value();
 		}
-
-		if (function.return_type && !function.return_type->type_name.empty() &&
-		    function.return_type->type_name != "void" &&
-		    function.return_type->type_name != "auto" &&
-		    function.return_type->base_type != script_value_type::jai_any_type) {
-			auto conv = try_convert_for_parameter(result, function.return_type);
-			if (!conv) {
-				cleanup();
-				return conv.error_value();
-			}
-			result = std::move(conv.value());
-		}
+		result = std::move(conv.value());
 	} else {
-		if (locals.is_method) {
-			result = locals.get_this();
-		} else {
-			auto function_env = environment_;
-			if (function_env->is_method_env()) {
-				result = function_env->get_this_object();
-			} else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
-				result = function_env->get_parent()->get_this_object();
-			} else {
-				result = make_null();
-			}
-		}
+		result = implicit_this_result(locals);
 	}
 
 	cleanup();

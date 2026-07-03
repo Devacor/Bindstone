@@ -105,6 +105,135 @@ public:
             auto result = eng->execute("(2 + 3) * (4 - 1) / 5");
             check_eq(result.as<int>(), 3);
         });
+
+        test("jaibite_execute_returns_value", [this]() {
+            auto eng = make_engine();
+            auto bite = eng->jaibite("2 + 2");
+            check_eq(bite.execute().as<int>(), 4);
+            check_eq(bite.execute().as<int>(), 4);   // steady-state re-execution
+        });
+
+        test("jaibite_engine_execute_form", [this]() {
+            auto eng = make_engine();
+            auto bite = eng->jaibite("10 * 3");
+            check_eq(eng->execute(bite).as<int>(), 30);
+            check_eq(eng->execute(bite).as<int>(), 30);
+        });
+
+        test("jaibite_state_persists_across_runs", [this]() {
+            auto eng = make_engine();
+            eng->execute("var counter = 0;");
+            auto bite = eng->jaibite("counter = counter + 1; counter");
+            check_eq(bite.execute().as<int>(), 1);
+            check_eq(bite.execute().as<int>(), 2);
+            check_eq(bite.execute().as<int>(), 3);
+            check_eq(eng->execute("counter").as<int>(), 3);
+        });
+
+        test("jaibite_loop_and_functions", [this]() {
+            auto eng = make_engine();
+            auto bite = eng->jaibite(R"(
+                function double_it(auto n) -> auto { return n * 2; }
+                auto sum = 0;
+                for (auto i = 0; i < 100; i += 1) {
+                    sum += double_it(i);
+                }
+                sum
+            )");
+            check_eq(bite.execute().as<int>(), 9900);
+            check_eq(bite.execute().as<int>(), 9900);
+        });
+
+        test("jaibite_parse_error_throws_at_creation", [this]() {
+            auto eng = make_engine();
+            check_throws([&]() {
+                auto bite = eng->jaibite("auto x = = 5;");
+            }, "Parse errors should surface when the jaibite is created");
+        });
+
+        test("jaibite_runtime_error_throws_on_execute", [this]() {
+            auto eng = make_engine();
+            auto bite = eng->jaibite("undefined_variable_xyz");
+            check_throws([&]() { bite.execute(); }, "Runtime errors should throw on execute");
+            check_throws([&]() { bite.execute(); }, "And keep throwing on re-execute");
+        });
+
+        test("jaibite_outlives_engine_safely", [this]() {
+            jai::jaibite bite;
+            {
+                auto eng = make_engine();
+                bite = eng->jaibite("1 + 1");
+                check_eq(bite.execute().as<int>(), 2);
+            }
+            check_throws([&]() { bite.execute(); }, "Executing after engine destruction should throw");
+        });
+
+        test("jaibite_class_redefinition_across_runs", [this]() {
+            // Re-executing the same AST redefines the class each run (hot-reload path)
+            auto eng = make_engine();
+            auto bite = eng->jaibite(R"(
+                class Point {
+                    int x = 7;
+                    int doubled() { return x * 2; }
+                }
+                auto p = Point();
+                p.doubled()
+            )");
+            check_eq(bite.execute().as<int>(), 14);
+            check_eq(bite.execute().as<int>(), 14);
+            check_eq(bite.execute().as<int>(), 14);
+        });
+
+        test("jaibite_try_catch_across_runs", [this]() {
+            auto eng = make_engine();
+            eng->execute("var caught = 0;");
+            auto bite = eng->jaibite(R"(
+                try {
+                    throw "boom";
+                } catch (e) {
+                    caught = caught + 1;
+                }
+                caught
+            )");
+            check_eq(bite.execute().as<int>(), 1);
+            check_eq(bite.execute().as<int>(), 2);
+        });
+
+        test("jaibite_coroutine_across_runs", [this]() {
+            // Range-for over a STORED coroutine handle (each run mints a fresh handle)
+            auto eng = make_engine();
+            auto bite = eng->jaibite(R"(
+                coroutine int counter() {
+                    yield 1;
+                    yield 2;
+                    yield 3;
+                }
+                auto c = counter();
+                auto total = 0;
+                for (auto v : c) {
+                    total += v;
+                }
+                total
+            )");
+            check_eq(bite.execute().as<int>(), 6);
+            check_eq(bite.execute().as<int>(), 6);
+        });
+
+        test("jaibite_coroutine_resume_across_runs", [this]() {
+            auto eng = make_engine();
+            auto bite = eng->jaibite(R"(
+                coroutine int counter() {
+                    yield 1;
+                    yield 2;
+                    return 3;
+                }
+                auto c = counter();
+                auto total = c.resume() + c.resume() + c.resume();
+                total
+            )");
+            check_eq(bite.execute().as<int>(), 6);
+            check_eq(bite.execute().as<int>(), 6);
+        });
     }
 };
 

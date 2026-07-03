@@ -26,6 +26,7 @@ namespace jai::vm {
         ~vm_backend() override = default;
 
         script_value execute(const std::vector<declaration_ptr>& declarations) override;
+        script_value execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;
         void prepare_for_execution() override;
         checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override;
 
@@ -113,6 +114,7 @@ namespace jai::vm {
             bool in_catch = false;
             size_t stack_size = 0;
             size_t iter_size = 0;
+            size_t cfor_size = 0;
             std::shared_ptr<environment> entry_env;
         };
         std::vector<try_record> try_records_;
@@ -126,6 +128,21 @@ namespace jai::vm {
             std::shared_ptr<coroutine_handle> coroutine;   // set = coroutine-driven range-for
         };
         std::vector<iter_state> iter_states_;
+
+        // Counted-for runtime state (op_cfor_prep/back/pop). Pointers are cached into
+        // environment/frame storage — stable for the loop's lifetime (deque-backed envs,
+        // and fibers pin their env chains across suspension).
+        struct counted_for_state {
+            script_value* var = nullptr;
+            script_int* end_ptr = nullptr;
+            script_int end_val = 0;
+            script_int* step_ptr = nullptr;
+            script_int step_val = 1;
+            uint8_t cmp = 0;
+            bool subtract = false;
+            bool fast = false;   // false: run the loop's generic cond/update bytecode
+        };
+        std::vector<counted_for_state> cfor_states_;
 
         // Suspended-fiber state stored opaquely on a coroutine_handle (frames+ip+stack model,
         // not the interpreter's AST continuation replay). Defined in vm_backend.cpp.
@@ -182,6 +199,7 @@ namespace jai::vm {
                                               size_t local_count);
 
         checked_result<void> run(frame& f);
+        script_value run_program(std::shared_ptr<chunk> program);
         checked_result<script_value> call_script_function(const script_defined_function& function,
                                                           const std::vector<script_value>& args);
 
@@ -206,6 +224,18 @@ namespace jai::vm {
             const std::string& class_name() const;
         };
         member_target resolve_member_target(const script_value& objectValue) const;
+
+        // Scope-environment free list for op_scope_push/pop (mirrors the interpreter's
+        // environment pool). release only recycles unshared scopes, so anything captured
+        // (closure env, coroutine snapshot, reference source) keeps its identity.
+        std::vector<std::shared_ptr<environment>> scope_env_pool_;
+        std::shared_ptr<environment> acquire_scope_env(std::shared_ptr<environment> parent);
+        void release_scope_env(std::shared_ptr<environment> env);
+        void pop_scopes_pooled(uint32_t count);
+
+        // Bodies live outside run() to keep its Debug frame flat (JAI_MAX_CALL_DEPTH path)
+        void exec_array(frame& f, const vm_instruction& ins);
+        void exec_map(frame& f, const vm_instruction& ins);
 
         script_value* resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id);
         checked_result<void> define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value);
@@ -269,6 +299,16 @@ namespace jai::vm {
         checked_result<void> exec_decl_ref_ident(frame& f, const vm_instruction& ins);
         checked_result<void> exec_decl_ref_value(frame& f, const vm_instruction& ins);
         checked_result<void> exec_binary(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_binary_fused(frame& f, const vm_instruction& ins);
+        // Counted-for ops: both always retarget f.ip (run() must `continue` after them)
+        checked_result<void> exec_cfor_prep(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_cfor_back(frame& f, const vm_instruction& ins);
+        bool resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val);
+        // Resolves an identifier operand exactly like exec_load (catch var, frame slot,
+        // type-ctor names, env, this-field/bound-method/static) without pushing;
+        // values that must be materialized land in scratch.
+        checked_result<const script_value*> fused_ident_value(frame& f, const fused_operand& operand,
+                                                              std::optional<script_value>& scratch);
         checked_result<void> exec_index(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_assign(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_compound(frame& f, const vm_instruction& ins);

@@ -354,9 +354,11 @@ struct engine::implementation {
     // Global environment shared with interpreter
     std::shared_ptr<environment> global_environment_;
     
-    execution_backend_ptr backend;
+    execution_backend_ptr backend;   // constructed lazily via engine::backend()
     backend_type current_backend_type = backend_type::interpreter; // Default to interpreter
     bool has_executed_ = false; // Once true, set_backend is forbidden (defined callables capture the backend)
+    bool tearing_down = false;  // engine dtor: backend() must not reconstruct for late thunks
+    bool custom_numeric_ops_flag_ = false; // sticky signal from add_function; applied at wiring
 
     // Script namespace registry (engine-owned so namespaces survive across backends)
     std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>> script_namespaces_;
@@ -370,6 +372,52 @@ struct engine::implementation {
         std::filesystem::file_time_type last_modified;
     };
     std::unordered_map<std::string, import_record> import_cache;
+
+    // Source-string execution cache: re-executing identical source skips lex/parse
+    // (both backends) and bytecode compilation (the vm fills the compiled slot), with
+    // the same semantics as re-executing a jaibite. Bounded LRU; parse-affecting
+    // registrations (template types, classes) bump the epoch and invalidate.
+    struct script_cache_entry {
+        std::vector<declaration_ptr> declarations;
+        std::shared_ptr<void> compiled;
+        uint64_t epoch = 0;
+        uint64_t last_used = 0;
+    };
+    std::unordered_map<std::string, std::shared_ptr<script_cache_entry>> script_cache;
+    uint64_t script_cache_epoch = 0;
+    uint64_t script_cache_clock = 0;
+    static constexpr size_t script_cache_max = 64;
+
+    std::shared_ptr<script_cache_entry> find_cached_script(const std::string& source) {
+        auto it = script_cache.find(source);
+        if (it == script_cache.end()) {
+            return nullptr;
+        }
+        if (it->second->epoch != script_cache_epoch) {
+            script_cache.erase(it);
+            return nullptr;
+        }
+        it->second->last_used = ++script_cache_clock;
+        return it->second;
+    }
+
+    std::shared_ptr<script_cache_entry> store_cached_script(const std::string& source, std::vector<declaration_ptr> decls) {
+        if (script_cache.size() >= script_cache_max) {
+            auto victim = script_cache.begin();
+            for (auto it = script_cache.begin(); it != script_cache.end(); ++it) {
+                if (it->second->last_used < victim->second->last_used) {
+                    victim = it;
+                }
+            }
+            script_cache.erase(victim);
+        }
+        auto entry = std::make_shared<script_cache_entry>();
+        entry->declarations = std::move(decls);
+        entry->epoch = script_cache_epoch;
+        entry->last_used = ++script_cache_clock;
+        script_cache.emplace(source, entry);
+        return entry;
+    }
 
     implementation();
     ~implementation();
@@ -394,8 +442,8 @@ engine::implementation::implementation()
     global_environment_ = std::make_shared<environment>(&string_symbolizer_);
 
     current_backend_type = backend_type::interpreter;
-    backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
-    // Backend callbacks/config are applied by engine::wire_backend() via initialize_engine_reference().
+    // The backend is constructed lazily by engine::backend() (callbacks/config applied
+    // there via engine::wire_backend()), so unused engines never pay for one.
 
 
     // Initialize commonly used type_info objects for fast access
@@ -470,8 +518,26 @@ engine::engine() : impl(std::make_unique<implementation>()) {}
 // and fail soft instead of re-entering a half-destroyed backend.
 engine::~engine() {
     if (impl) {
+        impl->tearing_down = true;
         impl->backend.reset();
     }
+}
+
+execution_backend* engine::backend() const {
+    if (!impl->backend) {
+        if (impl->tearing_down) {
+            return nullptr;
+        }
+        auto* self = const_cast<engine*>(this);
+        if (impl->current_backend_type == backend_type::vm) {
+            impl->backend = create_vm_backend();
+        } else {
+            // interpreter, and auto_select as its legacy alias
+            impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
+        }
+        self->wire_backend();
+    }
+    return impl->backend.get();
 }
 
 int engine::select_cpp_overload(const std::vector<script_value>& args,
@@ -498,8 +564,6 @@ engine::engine(engine&&) noexcept = default;
 engine& engine::operator=(engine&&) noexcept = default;
 
 void engine::initialize_engine_reference() {
-    wire_backend();
-
     // Pass the engine reference to the conversion registry
     impl->conversions->set_engine(this);
 
@@ -759,70 +823,111 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
     impl->has_executed_ = true;
     try {
         // Prepare backend for new execution
-        impl->backend->prepare_for_execution();
-        
+        backend()->prepare_for_execution();
+
+        // Identical source re-executes through its cached parse (and, on the vm,
+        // its cached compiled chunk) — same semantics as re-executing a jaibite.
+        auto cached = impl->find_cached_script(scriptContent);
+        if (!cached) {
+            lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
+            auto tokens = lexer.tokenize();
+            parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
+            auto parse_result = parser.parse();
+
+            // Convert checked_result to exception at API boundary. format_error resolves
+            // the interned detail (file:line:col + message, one line per collected error)
+            // instead of the bare category string the error_code carries.
+            if (!parse_result) {
+                throw parse_error(format_error(parse_result));
+            }
+            cached = impl->store_cached_script(scriptContent, std::move(parse_result.value()));
+        }
+
+        return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars);
+
+    } catch (const parse_error&) {
+        // Parse errors should propagate as-is (don't wrap compilation errors)
+        backend()->prepare_for_execution();
+        throw;
+    }
+}
+
+script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarations,
+                                    std::shared_ptr<void>& compiled_slot,
+                                    const instance_variables* instanceVars) {
+    try {
+        execution_backend* be = backend();
+
         // Push scope for instance variables if any
-        bool hasInstanceVars = !instanceVars.empty();
+        bool hasInstanceVars = instanceVars && !instanceVars->empty();
         if (hasInstanceVars) {
-            impl->backend->push_scope();
-            for (const auto& [name, value] : instanceVars) {
-                impl->backend->define_variable(name, value);
+            be->push_scope();
+            for (const auto& [name, value] : *instanceVars) {
+                be->define_variable(name, value);
             }
         }
-        
-        // Parse and execute
-        lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
-        auto tokens = lexer.tokenize();
-        parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
-        auto parse_result = parser.parse();
 
-        // Convert checked_result to exception at API boundary. format_error resolves
-        // the interned detail (file:line:col + message, one line per collected error)
-        // instead of the bare category string the error_code carries.
-        if (!parse_result) {
-            throw parse_error(format_error(parse_result));
-        }
-
-        script_value result = impl->backend->execute(parse_result.value());
+        script_value result = be->execute(declarations, compiled_slot);
 
         // Check for unhandled script exception
-        if (impl->backend->is_unwinding()) {
-            const auto& exception = impl->backend->get_current_exception();
+        if (be->is_unwinding()) {
+            const auto& exception = be->get_current_exception();
 
             // Pop instance scope before throwing
             if (hasInstanceVars) {
-                impl->backend->pop_scope();
+                be->pop_scope();
             }
 
             throw exception;
         }
-        
+
         // No need to sync globals - they're already in the shared environment!
-        
+
         // Pop instance scope if we pushed one
         if (hasInstanceVars) {
-            impl->backend->pop_scope();
+            be->pop_scope();
         }
-        
+
         return result;
 
     } catch (const script_exception&) {
         // Script exceptions bubble up to C++
-        impl->backend->prepare_for_execution();
-        throw;
-    } catch (const parse_error&) {
-        // Parse errors should propagate as-is (don't wrap compilation errors)
-        impl->backend->prepare_for_execution();
+        backend()->prepare_for_execution();
         throw;
     } catch (const std::runtime_error& e) {
         // Wrap runtime C++ exceptions as script exceptions for consistency
-        impl->backend->prepare_for_execution();
+        backend()->prepare_for_execution();
         throw script_exception(std::string("C++ exception: ") + e.what());
     } catch (const std::exception& e) {
         // Wrap other C++ exceptions with their actual message
-        impl->backend->prepare_for_execution();
+        backend()->prepare_for_execution();
         throw script_exception(std::string("C++ exception: ") + e.what());
     }
+}
+
+jai::jaibite engine::jaibite(const std::string& scriptContent) {
+    lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
+    auto tokens = lexer.tokenize();
+    parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
+    auto parse_result = parser.parse();
+    if (!parse_result) {
+        throw parse_error(format_error(parse_result));
+    }
+    return jai::jaibite(weak_from_this(), std::move(parse_result.value()));
+}
+
+script_value engine::execute(jai::jaibite& bite) {
+    impl->has_executed_ = true;
+    backend()->prepare_for_execution();
+    return execute_parsed(bite.declarations_, bite.compiled_, nullptr);
+}
+
+script_value jaibite::execute() {
+    auto owner = engine_.lock();
+    if (!owner) {
+        throw script_exception("jaibite: owning engine no longer exists");
+    }
+    return owner->execute(*this);
 }
 
 script_value engine::execute_file(const std::string& scriptPath) {
@@ -932,6 +1037,7 @@ uint64_t engine::symbolize(std::string_view str) const {
 }
 
 void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {
+    ++impl->script_cache_epoch;   // class registration can change how source parses
     impl->classes[name] = classDef;
     impl->classesByTypeId[classDef->get_type_id()] = classDef;  // Fast lookup by interned type_id
     // Also register with the unified class_registry for both C++ and script classes
@@ -991,7 +1097,7 @@ void engine::register_type_conversion(script_value_type from, script_value_type 
 script_value engine::get_variable(const std::string& name) const {
     // Use backend to properly handle references
     try {
-        return impl->backend->get_variable(name);
+        return backend()->get_variable(name);
     } catch (...) {
         // Not in global environment, check overloaded functions
     }
@@ -1030,7 +1136,7 @@ script_value engine::get_variable(const std::string& name) const {
 
 bool engine::has_variable(const std::string& name) const {
     // Delegate to backend to ensure consistency
-    return impl->backend->has_variable(name);
+    return backend()->has_variable(name);
 }
 
 bool engine::has_function(const std::string& name) const {
@@ -1100,11 +1206,16 @@ void engine::set_has_custom_numeric_operators(bool value) {
     // Explicitly set whether custom numeric operators are in use
     // This allows users to opt-in to custom operator support when needed
     // By default, the fast path is enabled (no custom operators)
-    impl->backend->set_has_custom_numeric_ops(value);
+    impl->custom_numeric_ops_flag_ = value;
+    if (impl->backend) {
+        impl->backend->set_has_custom_numeric_ops(value);
+    }
 }
 
 void engine::register_template_type(const std::string& baseTemplateName) {
-    impl->registeredTemplateTypes.insert(baseTemplateName);
+    if (impl->registeredTemplateTypes.insert(baseTemplateName).second) {
+        ++impl->script_cache_epoch;   // parses depend on the template-name set
+    }
 }
 
 std::unordered_set<std::string> engine::get_registered_template_types() const {
@@ -1139,7 +1250,8 @@ void engine::wire_backend() {
         return func(args);
     });
 
-    impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 ||
+    impl->backend->set_has_custom_numeric_ops(impl->custom_numeric_ops_flag_ ||
+                                              impl->overloadedFunctions.count("+") > 0 ||
                                               impl->overloadedFunctions.count("-") > 0 ||
                                               impl->overloadedFunctions.count("*") > 0 ||
                                               impl->overloadedFunctions.count("/") > 0);
@@ -1163,14 +1275,8 @@ void engine::set_backend(backend_type type) {
 
     impl->current_backend_type = type;
 
-    if (type == backend_type::vm) {
-        impl->backend = create_vm_backend();
-    } else {
-        // interpreter, and auto_select as its legacy alias
-        impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
-    }
-
-    wire_backend();
+    // Constructed lazily by engine::backend() with the new type
+    impl->backend.reset();
 }
 
 void engine::set_backend(std::unique_ptr<execution_backend> backend) {
@@ -1192,11 +1298,12 @@ backend_type engine::get_backend_type() const {
 }
 
 std::string engine::get_backend_name() const {
-    return impl->backend->get_backend_name();
+    execution_backend* be = backend();
+    return be ? be->get_backend_name() : std::string();
 }
 
 execution_backend* engine::get_execution_backend() const {
-    return impl ? impl->backend.get() : nullptr;
+    return impl ? backend() : nullptr;
 }
 
 std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::script_namespaces() {
@@ -1205,7 +1312,10 @@ std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::sc
 
 void engine::setHasCustomNumericOps(bool value) {
     // Set the flag on the backend (which might be interpreter or VM)
-    impl->backend->set_has_custom_numeric_ops(value);
+    impl->custom_numeric_ops_flag_ = value;
+    if (impl->backend) {
+        impl->backend->set_has_custom_numeric_ops(value);
+    }
 }
 
 // Removed duplicate - already defined at line 748
@@ -1484,10 +1594,13 @@ bool engine::throw_on_overflow() const {
 
 void engine::execution_budget(double seconds) {
     impl->execution_budget_seconds_ = seconds;
-    auto budget = seconds > 0
-        ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds))
-        : std::chrono::nanoseconds(0);
-    impl->backend->set_execution_budget(budget);
+    if (impl->backend) {
+        auto budget = seconds > 0
+            ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds))
+            : std::chrono::nanoseconds(0);
+        impl->backend->set_execution_budget(budget);
+    }
+    // Not yet constructed: wire_backend applies the stored value at first use
 }
 
 double engine::execution_budget() const {
@@ -1495,11 +1608,11 @@ double engine::execution_budget() const {
 }
 
 std::vector<engine::stack_frame> engine::last_stack_trace() const {
-    return impl->backend->last_stack_trace();
+    return impl->backend ? impl->backend->last_stack_trace() : std::vector<stack_frame>{};
 }
 
 std::string engine::format_stack_trace() const {
-    return impl->backend->format_stack_trace();
+    return impl->backend ? impl->backend->format_stack_trace() : std::string();
 }
 
 void engine::set_script_error_handler(std::function<void(const std::string&)> a_handler) {
@@ -1520,11 +1633,11 @@ void engine::report_script_error(const std::string& a_message) {
 }
 
 void engine::push_external_call_scope() {
-    impl->backend->push_external_call_scope();
+    backend()->push_external_call_scope();
 }
 
 void engine::pop_external_call_scope() {
-    impl->backend->pop_external_call_scope();
+    backend()->pop_external_call_scope();
 }
 
 script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {

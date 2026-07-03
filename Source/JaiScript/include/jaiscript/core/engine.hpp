@@ -12,6 +12,7 @@
 // conversion_registry_templates.hpp moved to after engine class definition
 #include "bound_array.hpp"
 #include "bound_map.hpp"
+#include "jaibite.hpp"
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <memory>
 #include <optional>
@@ -99,6 +100,13 @@ namespace jai {
         
         script_value execute_file(const std::string& scriptPath);
         script_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
+
+        // Pre-parsed script handle: parse once here, then run it repeatedly via
+        // bite.execute() or engine->execute(bite) without re-lexing/parsing (the vm
+        // backend also caches its compiled bytecode inside the bite). Engine-bound —
+        // never share a jaibite across engines. Parse errors throw here.
+        jai::jaibite jaibite(const std::string& scriptContent);
+        script_value execute(jai::jaibite& bite);
 
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
@@ -633,7 +641,18 @@ namespace jai {
     private:
         struct implementation;
         std::unique_ptr<implementation> impl;
-        
+
+        // Single post-parse execution pipeline shared by execute(string) and
+        // execute(jaibite&): every string execute exercises the same machinery a
+        // jaibite does, so the pre-parsed path can never drift semantically.
+        script_value execute_parsed(const std::vector<declaration_ptr>& declarations,
+                                    std::shared_ptr<void>& compiled_slot,
+                                    const instance_variables* instanceVars);
+
+        // Lazily constructs + wires the selected backend on first use, so creating an
+        // engine (or switching backend type) costs nothing until a script actually runs.
+        execution_backend* backend() const;
+
         void initialize_engine_reference();
         void wire_backend();
         void add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef);

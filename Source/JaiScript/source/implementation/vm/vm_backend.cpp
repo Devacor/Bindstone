@@ -319,8 +319,10 @@ struct vm_backend::frame_guard {
 	vm_backend* vm;
 	size_t try_base;
 	size_t iter_base;
+	size_t cfor_base;
 	frame_guard(vm_backend* backend, frame* f)
-		: vm(backend), try_base(backend->try_records_.size()), iter_base(backend->iter_states_.size()) {
+		: vm(backend), try_base(backend->try_records_.size()), iter_base(backend->iter_states_.size()),
+		  cfor_base(backend->cfor_states_.size()) {
 		vm->frames_.push_back(f);
 	}
 	~frame_guard() {
@@ -330,6 +332,9 @@ struct vm_backend::frame_guard {
 		}
 		if (vm->iter_states_.size() > iter_base) {
 			vm->iter_states_.erase(vm->iter_states_.begin() + iter_base, vm->iter_states_.end());
+		}
+		if (vm->cfor_states_.size() > cfor_base) {
+			vm->cfor_states_.erase(vm->cfor_states_.begin() + cfor_base, vm->cfor_states_.end());
 		}
 	}
 };
@@ -431,6 +436,7 @@ void vm_backend::prepare_for_execution() {
 		stack_.clear();
 		try_records_.clear();
 		iter_states_.clear();
+		cfor_states_.clear();
 	}
 
 	// Preserve a running coroutine's fiber so its next yield still finds its handle;
@@ -508,6 +514,7 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	std::vector<script_value> saved_stack;
 	std::vector<try_record> saved_try;      // stack_size/iter_size stored relative to fiber bases
 	std::vector<iter_state> saved_iter;
+	std::vector<counted_for_state> saved_cfor;
 	bool started = false;
 };
 
@@ -647,11 +654,16 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	for (auto& is : state.saved_iter) { iter_states_.push_back(std::move(is)); }
 	state.saved_iter.clear();
 
+	const size_t cfor_base = cfor_states_.size();
+	for (auto& cs : state.saved_cfor) { cfor_states_.push_back(cs); }
+	state.saved_cfor.clear();
+
 	const size_t try_base = try_records_.size();
 	for (auto& tr : state.saved_try) {
 		tr.owner = &f;
 		tr.stack_size += stack_base;
 		tr.iter_size += iter_base;
+		tr.cfor_size += cfor_base;
 		try_records_.push_back(std::move(tr));
 	}
 	state.saved_try.clear();
@@ -687,11 +699,14 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			tr.owner = nullptr;
 			tr.stack_size -= stack_base;
 			tr.iter_size -= iter_base;
+			tr.cfor_size -= cfor_base;
 			state.saved_try.push_back(std::move(tr));
 		}
 		try_records_.erase(try_records_.begin() + try_base, try_records_.end());
 		for (size_t i = iter_base; i < iter_states_.size(); ++i) { state.saved_iter.push_back(std::move(iter_states_[i])); }
 		iter_states_.erase(iter_states_.begin() + iter_base, iter_states_.end());
+		for (size_t i = cfor_base; i < cfor_states_.size(); ++i) { state.saved_cfor.push_back(cfor_states_[i]); }
+		cfor_states_.erase(cfor_states_.begin() + cfor_base, cfor_states_.end());
 
 		// Deref: a reference into the fiber's own locals would dangle once abandoned.
 		script_value yielded = handle.last_value();
@@ -711,6 +726,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	// Completed, errored, or threw: discard any leftover fiber frame slices.
 	if (try_records_.size() > try_base) { try_records_.erase(try_records_.begin() + try_base, try_records_.end()); }
 	if (iter_states_.size() > iter_base) { iter_states_.erase(iter_states_.begin() + iter_base, iter_states_.end()); }
+	if (cfor_states_.size() > cfor_base) { cfor_states_.erase(cfor_states_.begin() + cfor_base, cfor_states_.end()); }
 	if (stack_.size() > stack_base) { stack_.erase(stack_.begin() + stack_base, stack_.end()); }
 
 	const bool completed_has_return = has_return_value_;
@@ -992,6 +1008,57 @@ std::optional<script_value> vm_backend::object_arithmetic_via_method(const scrip
 		return result.value();
 	}
 	return std::nullopt;
+}
+
+std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<environment> parent) {
+	if (!scope_env_pool_.empty()) {
+		auto env = std::move(scope_env_pool_.back());
+		scope_env_pool_.pop_back();
+		env->reset(std::move(parent));
+		return env;
+	}
+	return std::make_shared<environment>(std::move(parent), symbolizer_);
+}
+
+void vm_backend::release_scope_env(std::shared_ptr<environment> env) {
+	if (env.use_count() == 1 && scope_env_pool_.size() < 64) {
+		env->reset(nullptr);
+		scope_env_pool_.push_back(std::move(env));
+	}
+}
+
+void vm_backend::pop_scopes_pooled(uint32_t count) {
+	for (uint32_t i = 0; i < count; ++i) {
+		auto parent = environment_->get_parent();
+		if (!parent) break;
+		release_scope_env(std::move(environment_));
+		environment_ = std::move(parent);
+	}
+}
+
+void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
+	script_value arrayValue = script_value::make_array(nullptr, engine_);
+	auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
+	const size_t n = ins.a;
+	array.reserve(n);
+	const size_t base = stack_.size() - n;
+	for (size_t i = 0; i < n; ++i) {
+		array.push_back(std::move(stack_[base + i]));
+	}
+	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.push_back(std::move(arrayValue));
+}
+
+void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
+	script_value mapValue = script_value::make_map(nullptr, nullptr, engine_);
+	auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
+	const size_t n = ins.a;
+	const size_t base = stack_.size() - n * 2;
+	for (size_t i = 0; i < n; ++i) {
+		map.insert_or_assign(std::move(stack_[base + i * 2]), std::move(stack_[base + i * 2 + 1]));
+	}
+	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.push_back(std::move(mapValue));
 }
 
 script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id) {
@@ -1746,7 +1813,9 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			default: return false;
 			}
 		}
-		if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+		if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
+		    !left.is_cpp_bound() && !right.is_cpp_bound()) {
+			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
 			out.emplace(script_value(left.unchecked_as_string() + right.unchecked_as_string(), engine_));
 			return true;
 		}
@@ -2595,6 +2664,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 	const uint64_t sym = f.code->symbols[ins.a];
 	const uint32_t kind = ins.c & compound_kind_mask;
 	const bool result_needed = (ins.c & compound_flag_result_needed) != 0;
+	const bool no_result = (ins.c & compound_flag_no_result) != 0;
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 
@@ -2623,7 +2693,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 						return result.error_value();
 					}
 					target = std::move(result.value());
-					stack_.push_back(result_needed ? target.clone() : target);
+					if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 					return {};
 				}
 			}
@@ -2643,7 +2713,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				auto custom_result = object_arithmetic_via_method(target, rightValue, op_symbol_id);
 				if (custom_result.has_value()) {
 					target = std::move(custom_result.value());
-					stack_.push_back(result_needed ? target.clone() : target);
+					if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 					return {};
 				}
 			}
@@ -2726,7 +2796,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
 		}
 
-		stack_.push_back(result_needed ? target.clone() : target);
+		if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 		return {};
 	}
 
@@ -2761,7 +2831,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 			auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_result.has_value()) {
 				instance->set_field(sym, clone_for_assignment(custom_result.value()));
-				stack_.push_back(std::move(custom_result.value()));
+				if (!no_result) { stack_.push_back(std::move(custom_result.value())); }
 				return {};
 			}
 		}
@@ -2833,7 +2903,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 	}
 
 	instance->set_field(sym, clone_for_assignment(resultValue));
-	stack_.push_back(std::move(resultValue));
+	if (!no_result) { stack_.push_back(std::move(resultValue)); }
 	return {};
 }
 
@@ -2942,8 +3012,8 @@ checked_result<void> vm_backend::exec_binary(frame& f, const vm_instruction& ins
 	stack_.pop_back();
 	script_value left_raw = std::move(stack_.back());
 	stack_.pop_back();
-	script_value left = left_raw.deref();
-	script_value right = right_raw.deref();
+	const script_value& left = left_raw.deref();
+	const script_value& right = right_raw.deref();
 	const token_type op = static_cast<token_type>(ins.a);
 
 	if (ins.b != binary_shape_none && !has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
@@ -2962,6 +3032,259 @@ checked_result<void> vm_backend::exec_binary(frame& f, const vm_instruction& ins
 		return result.error_value();
 	}
 	stack_.push_back(std::move(result.value()));
+	return {};
+}
+
+checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, const fused_operand& operand,
+                                                                  std::optional<script_value>& scratch) {
+	const uint64_t sym = f.code->symbols[operand.symbol];
+	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
+		scratch.emplace(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
+		return &scratch.value();
+	}
+	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
+		if (auto* local = f.locals->get_local(operand.slot)) {
+			return &local->deref();
+		}
+	}
+	if (operand.load_flags & load_flag_type_ctor) {
+		std::string_view name = symbolizer_->get_string(sym);
+		size_t pos = name.find('<');
+		std::string base_type(name.substr(0, pos));
+		auto ctor_result = environment_->get(base_type);
+		if (ctor_result && ctor_result.value().is_function()) {
+			scratch.emplace(std::move(ctor_result.value()));
+			return &scratch.value();
+		}
+	}
+	auto ref_result = environment_->get_ref(sym);
+	if (ref_result) {
+		return &ref_result.value().get().deref();
+	}
+	auto this_result = environment_->get(this_id_);
+	if (this_result) {
+		script_value this_val = std::move(this_result.value());
+		if (this_val.is_object()) {
+			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
+			if (instance) {
+				if (instance->has_field(sym)) {
+					scratch.emplace(instance->get_field(sym));
+					return &scratch.value();
+				}
+				script_value method = instance->get_method(sym, false);
+				if (!method.is_invalid()) {
+					scratch.emplace(make_bound_method(this_val, method));
+					return &scratch.value();
+				}
+				auto class_def = instance->get_class_definition();
+				if (class_def && class_def->has_static_field(sym)) {
+					scratch.emplace(class_def->get_static_field(sym));
+					return &scratch.value();
+				}
+			}
+		}
+	}
+	return checked_result<const script_value*>(make_error_code(runtime_error_code::undefined_variable),
+		"Undefined variable '{0}'", sym);
+}
+
+checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
+	const fused_binary_proto& p = f.code->fused_binary_protos[ins.a];
+	const token_type op = static_cast<token_type>(p.op);
+
+	std::optional<script_value> lscratch, rscratch;
+	const script_value* lp;
+	const script_value* rp;
+
+	if (p.left.const_index != k_invalid_u32) {
+		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
+	} else {
+		auto resolved = fused_ident_value(f, p.left, lscratch);
+		if (!resolved) return resolved.error_value();
+		lp = resolved.value();
+	}
+	if (p.right.const_index != k_invalid_u32) {
+		rp = &f.code->constants[p.right.const_index];
+	} else {
+		auto resolved = fused_ident_value(f, p.right, rscratch);
+		if (!resolved) return resolved.error_value();
+		rp = resolved.value();
+	}
+
+	// Fast path: mirrors binary_fast_shape without materializing operand loads
+	if (!has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
+		const size_t li = lp->raw_storage_index();
+		const size_t ri = rp->raw_storage_index();
+		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+			const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+			switch (op) {
+			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) return vm_int_overflow_v("Integer overflow in '+'"); stack_.push_back(script_value(rr, engine_)); return {}; }
+			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) return vm_int_overflow_v("Integer overflow in '-'"); stack_.push_back(script_value(rr, engine_)); return {}; }
+			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) return vm_int_overflow_v("Integer overflow in '*'"); stack_.push_back(script_value(rr, engine_)); return {}; }
+			case token_type::slash:
+				if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+				{ script_int rr; if (!ints::try_div(a, b, rr)) return vm_int_overflow_v("Integer overflow in '/'"); stack_.push_back(script_value(rr, engine_)); return {}; }
+			case token_type::percent:
+				if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+				stack_.push_back(script_value(ints::mod(a, b), engine_)); return {};
+			case token_type::less: stack_.push_back(script_value(a < b, engine_)); return {};
+			case token_type::less_equal: stack_.push_back(script_value(a <= b, engine_)); return {};
+			case token_type::greater: stack_.push_back(script_value(a > b, engine_)); return {};
+			case token_type::greater_equal: stack_.push_back(script_value(a >= b, engine_)); return {};
+			case token_type::equal_equal: stack_.push_back(script_value(a == b, engine_)); return {};
+			case token_type::bang_equal: stack_.push_back(script_value(a != b, engine_)); return {};
+			default: break;
+			}
+		} else if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+		           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+			const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(lp->unchecked_as_int()) : lp->unchecked_as_float();
+			const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(rp->unchecked_as_int()) : rp->unchecked_as_float();
+			switch (op) {
+			case token_type::plus: stack_.push_back(script_value(a + b, engine_)); return {};
+			case token_type::minus: stack_.push_back(script_value(a - b, engine_)); return {};
+			case token_type::star: stack_.push_back(script_value(a * b, engine_)); return {};
+			case token_type::slash:
+				if (b == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
+				stack_.push_back(script_value(a / b, engine_)); return {};
+			case token_type::percent:
+				if (b == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
+				stack_.push_back(script_value(std::fmod(a, b), engine_)); return {};
+			case token_type::less: stack_.push_back(script_value(a < b, engine_)); return {};
+			case token_type::less_equal: stack_.push_back(script_value(a <= b, engine_)); return {};
+			case token_type::greater: stack_.push_back(script_value(a > b, engine_)); return {};
+			case token_type::greater_equal: stack_.push_back(script_value(a >= b, engine_)); return {};
+			case token_type::equal_equal: stack_.push_back(script_value(a == b, engine_)); return {};
+			case token_type::bang_equal: stack_.push_back(script_value(a != b, engine_)); return {};
+			default: break;
+			}
+		} else if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
+		           !lp->is_cpp_bound() && !rp->is_cpp_bound()) {
+			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
+			stack_.push_back(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
+			return {};
+		}
+	}
+
+	// Fallback: snapshot the operands (isolation from mutation by nested calls) and
+	// give constant templates their engine ref, exactly as op_const would have
+	script_value left = *lp;
+	if (!left.has_valid_engine()) left.set_engine(engine_);
+	script_value right = *rp;
+	if (!right.has_valid_engine()) right.set_engine(engine_);
+	auto result = binary_general(op, left.deref(), right.deref());
+	if (!result) {
+		return result.error_value();
+	}
+	stack_.push_back(std::move(result.value()));
+	return {};
+}
+
+namespace {
+	inline bool cfor_compare(uint8_t cmp, script_int a, script_int b) {
+		switch (static_cast<token_type>(cmp)) {
+			case token_type::less: return a < b;
+			case token_type::less_equal: return a <= b;
+			case token_type::greater: return a > b;
+			case token_type::greater_equal: return a >= b;
+			case token_type::equal_equal: return a == b;
+			case token_type::bang_equal: return a != b;
+			default: return false;
+		}
+	}
+}
+
+bool vm_backend::resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val) {
+	if (operand.const_index != k_invalid_u32) {
+		const script_value& tmpl = f.code->constants[operand.const_index];
+		if (tmpl.raw_storage_index() != script_value::TYPEID_INT) return false;
+		val = tmpl.unchecked_as_int();
+		return true;
+	}
+	script_value* resolved = resolve_local_or_env(f, operand.slot, f.code->symbols[operand.symbol]);
+	if (!resolved) return false;
+	script_value& target = resolved->deref();
+	if (target.raw_storage_index() != script_value::TYPEID_INT || target.is_cpp_bound()) return false;
+	ptr = &target.unchecked_as_int_ref();
+	return true;
+}
+
+checked_result<void> vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
+	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
+	counted_for_state st;
+	st.cmp = p.cmp;
+	st.subtract = p.step_subtract;
+
+	bool fast = !has_custom_numeric_ops_;
+	if (fast) {
+		script_value* varPtr = resolve_local_or_env(f, p.var.slot, f.code->symbols[p.var.symbol]);
+		if (varPtr) {
+			script_value& target = varPtr->deref();
+			if (target.raw_storage_index() == script_value::TYPEID_INT && !target.is_cpp_bound()) {
+				st.var = &target;
+			} else {
+				fast = false;
+			}
+		} else {
+			fast = false;
+		}
+	}
+	if (fast) fast = resolve_cfor_int_operand(f, p.end, st.end_ptr, st.end_val);
+	if (fast) fast = resolve_cfor_int_operand(f, p.step, st.step_ptr, st.step_val);
+	st.fast = fast;
+
+	if (!fast) {
+		cfor_states_.push_back(st);
+		f.ip = p.generic_cond_ip;
+		return {};
+	}
+
+	const script_int i = st.var->unchecked_as_int();
+	const script_int end = st.end_ptr ? *st.end_ptr : st.end_val;
+	if (cfor_compare(st.cmp, i, end)) {
+		cfor_states_.push_back(st);
+		f.ip = p.body_ip;
+	} else {
+		f.ip = p.exit_ip;
+	}
+	return {};
+}
+
+checked_result<void> vm_backend::exec_cfor_back(frame& f, const vm_instruction& ins) {
+	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
+	if (cfor_states_.empty()) {
+		return checked_result<void>(make_error_code(runtime_error_code::internal_error), "counted-for state stack underflow");
+	}
+	counted_for_state& st = cfor_states_.back();
+
+	if (execution_budget_exhausted()) [[unlikely]] {
+		return budget_exceeded_error();
+	}
+	if (!st.fast) {
+		f.ip = p.generic_update_ip;
+		return {};
+	}
+	// Honor body writes to the loop variable; a type change demotes to the generic path
+	if (st.var->raw_storage_index() != script_value::TYPEID_INT) [[unlikely]] {
+		st.fast = false;
+		f.ip = p.generic_update_ip;
+		return {};
+	}
+	const script_int i = st.var->unchecked_as_int();
+	const script_int step = st.step_ptr ? *st.step_ptr : st.step_val;
+	script_int next;
+	if (st.subtract) {
+		if (!ints::try_sub(i, step, next)) return vm_int_overflow_v("Integer overflow in '-='");
+	} else {
+		if (!ints::try_add(i, step, next)) return vm_int_overflow_v("Integer overflow in '+='");
+	}
+	st.var->unchecked_as_int_ref() = next;
+	const script_int end = st.end_ptr ? *st.end_ptr : st.end_val;
+	if (cfor_compare(st.cmp, next, end)) {
+		f.ip = p.body_ip;
+	} else {
+		cfor_states_.pop_back();
+		f.ip = p.exit_ip;
+	}
 	return {};
 }
 
@@ -5804,6 +6127,7 @@ checked_result<void> vm_backend::exec_try_push(frame& f, const vm_instruction& i
 	rec.saved_unwinding = is_unwinding_;
 	rec.stack_size = stack_.size();
 	rec.iter_size = iter_states_.size();
+	rec.cfor_size = cfor_states_.size();
 	rec.entry_env = environment_;
 
 	// Inside a catch block the exception state survives so a bare rethrow works
@@ -5881,6 +6205,9 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		}
 		if (iter_states_.size() > rec.iter_size) {
 			iter_states_.erase(iter_states_.begin() + rec.iter_size, iter_states_.end());
+		}
+		if (cfor_states_.size() > rec.cfor_size) {
+			cfor_states_.erase(cfor_states_.begin() + rec.cfor_size, cfor_states_.end());
 		}
 		environment_ = rec.entry_env;
 		f.ip = rec.handler_ip;
@@ -6188,8 +6515,18 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 	      if (!handle_op_error(f, __result)) return __result.error_value(); \
 	      continue; } }
 
+// Shared-slot variant for cases added after the frame-size ceiling was reached:
+// reuses one function-scope temp so run()'s Debug frame stays flat (see the
+// grouped exec_extended dispatch note below).
+#define VM_TRY_OP_SHARED(expr) \
+	{ shared_op_result_ = (expr); \
+	  if (!shared_op_result_) [[unlikely]] { \
+	      if (!handle_op_error(f, shared_op_result_)) return shared_op_result_.error_value(); \
+	      continue; } }
+
 checked_result<void> vm_backend::run(frame& f) {
 	const auto& code = f.code->code;
+	checked_result<void> shared_op_result_;
 	for (;;) {
 		if (f.ip >= code.size()) {
 			return {};
@@ -6236,14 +6573,28 @@ checked_result<void> vm_backend::run(frame& f) {
 			}
 
 			case opcode::op_load: VM_TRY_OP(exec_load(f, ins)); break;
-			case opcode::op_store: VM_TRY_OP(exec_store(f, ins)); break;
+			case opcode::op_store:
+				VM_TRY_OP(exec_store(f, ins));
+				if (ins.c & store_flag_no_result) { stack_.pop_back(); }
+				break;
 			case opcode::op_compound_store: VM_TRY_OP(exec_compound_store(f, ins)); break;
-			case opcode::op_incdec: VM_TRY_OP(exec_incdec(f, ins)); break;
+			case opcode::op_incdec:
+				VM_TRY_OP(exec_incdec(f, ins));
+				if (ins.c & incdec_flag_no_result) { stack_.pop_back(); }
+				break;
 			case opcode::op_decl_var: VM_TRY_OP(exec_decl_var(f, ins)); break;
 			case opcode::op_decl_ref_ident: VM_TRY_OP(exec_decl_ref_ident(f, ins)); break;
 			case opcode::op_decl_ref_value: VM_TRY_OP(exec_decl_ref_value(f, ins)); break;
 			case opcode::op_destructure: VM_TRY_OP(exec_destructure(f, ins)); break;
 			case opcode::op_binary: VM_TRY_OP(exec_binary(f, ins)); break;
+			case opcode::op_binary_fused: VM_TRY_OP_SHARED(exec_binary_fused(f, ins)); break;
+
+			// Both always retarget f.ip
+			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;
+			case opcode::op_cfor_back: VM_TRY_OP_SHARED(exec_cfor_back(f, ins)); continue;
+			case opcode::op_cfor_pop:
+				if (!cfor_states_.empty()) { cfor_states_.pop_back(); }
+				break;
 			case opcode::op_index: VM_TRY_OP(exec_index(f, ins)); break;
 			case opcode::op_index_assign: VM_TRY_OP(exec_index_assign(f, ins)); break;
 			case opcode::op_index_compound: VM_TRY_OP(exec_index_compound(f, ins)); break;
@@ -6294,32 +6645,13 @@ checked_result<void> vm_backend::run(frame& f) {
 				}
 				break;
 
-			case opcode::op_array: {
-				script_value arrayValue = script_value::make_array(nullptr, engine_);
-				auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
-				const size_t n = ins.a;
-				array.reserve(n);
-				const size_t base = stack_.size() - n;
-				for (size_t i = 0; i < n; ++i) {
-					array.push_back(std::move(stack_[base + i]));
-				}
-				stack_.erase(stack_.begin() + base, stack_.end());
-				stack_.push_back(std::move(arrayValue));
+			case opcode::op_array:
+				exec_array(f, ins);
 				break;
-			}
 
-			case opcode::op_map: {
-				script_value mapValue = script_value::make_map(nullptr, nullptr, engine_);
-				auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
-				const size_t n = ins.a;
-				const size_t base = stack_.size() - n * 2;
-				for (size_t i = 0; i < n; ++i) {
-					map.insert_or_assign(std::move(stack_[base + i * 2]), std::move(stack_[base + i * 2 + 1]));
-				}
-				stack_.erase(stack_.begin() + base, stack_.end());
-				stack_.push_back(std::move(mapValue));
+			case opcode::op_map:
+				exec_map(f, ins);
 				break;
-			}
 
 			case opcode::op_jump:
 				f.ip = ins.a;
@@ -6373,23 +6705,16 @@ checked_result<void> vm_backend::run(frame& f) {
 			}
 
 			case opcode::op_scope_push:
-				environment_ = std::make_shared<environment>(environment_, symbolizer_);
+				environment_ = acquire_scope_env(environment_);
 				break;
 
 			case opcode::op_scope_pop:
-				if (environment_->get_parent()) {
-					environment_ = environment_->get_parent();
-				}
+				pop_scopes_pooled(1);
 				break;
 
-			case opcode::op_scope_pop_n: {
-				for (uint32_t i = 0; i < ins.a; ++i) {
-					if (environment_->get_parent()) {
-						environment_ = environment_->get_parent();
-					}
-				}
+			case opcode::op_scope_pop_n:
+				pop_scopes_pooled(ins.a);
 				break;
-			}
 
 			case opcode::op_error: {
 				const auto code_value = static_cast<runtime_error_code>(ins.a);
@@ -6415,19 +6740,31 @@ checked_result<void> vm_backend::run(frame& f) {
 }
 
 #undef VM_TRY_OP
+#undef VM_TRY_OP_SHARED
 
 // ============================================================
 // Execution entry points
 // ============================================================
 
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
+	return run_program(compiler_.compile_program(declarations));
+}
+
+script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
+	auto program = std::static_pointer_cast<chunk>(compiled_slot);
+	if (!program) {
+		program = compiler_.compile_program(declarations);
+		compiled_slot = program;
+	}
+	return run_program(std::move(program));
+}
+
+script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 	implicit_result_.reset();
 	has_return_value_ = false;
 	return_value_.reset();
 	captured_trace_.clear();
 	trace_captured_ = false;
-
-	auto program = compiler_.compile_program(declarations);
 
 	call_frame top_locals;
 	frame f;

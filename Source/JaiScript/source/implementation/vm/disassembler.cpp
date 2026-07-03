@@ -70,6 +70,12 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_binary:
 				out << " op=" << ins.a << " shape=" << ins.b;
 				break;
+			case opcode::op_binary_fused:
+				if (ins.a < ch.fused_binary_protos.size()) {
+					out << " op=" << static_cast<uint32_t>(ch.fused_binary_protos[ins.a].op);
+				}
+				out << " proto=" << ins.a << " shape=" << ins.b;
+				break;
 			case opcode::op_unary:
 				out << " op=" << ins.a;
 				break;

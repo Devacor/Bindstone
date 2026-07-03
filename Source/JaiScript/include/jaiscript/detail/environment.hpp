@@ -304,6 +304,11 @@ namespace jai {
         std::shared_ptr<environment> closure_env;  // capture environment for closures
         size_t local_count = 0;  // Total slots needed (params + locals) for stack allocation
 
+        // Backend-owned compiled artifact for the body (the vm caches its chunk here so a
+        // call skips the body-keyed cache lookup; the interpreter ignores it). mutable:
+        // filled through const refs on the call path; per-engine, single backend.
+        mutable std::shared_ptr<void> backend_body_cache;
+
         script_defined_function(std::string_view n, std::vector<parameter> params,
                             type_info_ptr retType, std::shared_ptr<block_stmt> b,
                             std::shared_ptr<environment> env = nullptr, size_t slots = 0)

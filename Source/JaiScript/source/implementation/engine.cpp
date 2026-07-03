@@ -18,6 +18,14 @@ namespace jai {
 // Factory defined by the VM backend TU (source/implementation/vm/vm_backend.cpp)
 std::unique_ptr<execution_backend> create_vm_backend();
 
+checked_result<script_value> script_callable_thunk::operator()(const std::vector<script_value>& args) const {
+    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+    if (!backend) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+    }
+    return backend->execute_callable(payload, args);
+}
+
 // Cost of matching args[first_arg .. first_arg+paramTypes.size()) against paramTypes, using the
 // same ranking as free-function overload resolution: exact 0 > int<->float small > convertible >
 // object/inheritance, with a non-match returning -1. Single source of truth shared by

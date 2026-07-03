@@ -32,6 +32,17 @@ struct script_callable {
     std::optional<script_value> this_obj;          // method ('this' receiver; args exclude it)
 };
 
+// Named trampoline for script-defined callables. Backends mint function values through
+// this type (instead of an anonymous lambda) so hot call paths can recover the payload
+// via std::function::target<script_callable_thunk>() and dispatch straight into their
+// own call machinery — the analog of a bytecode VM's direct closure call — while any
+// other caller still goes through operator() with identical behavior.
+struct script_callable_thunk {
+    engine* eng = nullptr;
+    script_callable payload;
+    checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+};
+
 /**
  * Abstract interface for script execution backends.
  * This allows us to have both interpreter and bytecode VM implementations.

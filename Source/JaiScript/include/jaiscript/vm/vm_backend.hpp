@@ -224,10 +224,13 @@ namespace jai::vm {
 
         checked_result<void> run(frame& entry);
         checked_result<void> run_dispatch(frame*& fp, const size_t records_base);
-        // In-loop call machinery: push/pop of call_records_ without native recursion
+        // In-loop call machinery: push/pop of call_records_ without native recursion.
+        // args may alias stack_ (zero-copy slice [args_base, args_base+argc) with the
+        // callee slot at args_base-1); the pooled-vector path passes (vec, 0, vec.size()).
         checked_result<void> push_script_frame(frame& caller, script_value&& callee,
                                                const script_defined_function& function,
-                                               const std::vector<script_value>& arguments,
+                                               const std::vector<script_value>& args,
+                                               size_t args_base, size_t argc,
                                                std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
                                                bool has_args);
         // Method-call flattening: a script-class instance method enters the dispatch loop
@@ -259,6 +262,7 @@ namespace jai::vm {
                               const std::shared_ptr<environment>& prev_env);
         checked_result<void> bind_parameters(const std::vector<parameter>& parameters,
                                              const std::vector<script_value>& args,
+                                             size_t args_base, size_t argc,
                                              call_frame& locals, chunk& body_chunk);
         void clear_this_on_frame_exit();
         script_value implicit_this_result(call_frame& locals);

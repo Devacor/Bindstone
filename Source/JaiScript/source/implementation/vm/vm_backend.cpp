@@ -1020,10 +1020,47 @@ std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<envir
 	return std::make_shared<environment>(std::move(parent), symbolizer_);
 }
 
+std::shared_ptr<environment> vm_backend::acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj) {
+	if (!scope_env_pool_.empty()) {
+		auto env = std::move(scope_env_pool_.back());
+		scope_env_pool_.pop_back();
+		env->reset_as_method(std::move(parent), std::move(this_obj));
+		return env;
+	}
+	return std::make_shared<environment>(std::move(parent), symbolizer_, std::move(this_obj));
+}
+
+std::shared_ptr<environment> vm_backend::acquire_static_scope_env(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def) {
+	if (!scope_env_pool_.empty()) {
+		auto env = std::move(scope_env_pool_.back());
+		scope_env_pool_.pop_back();
+		env->reset_as_static_method(std::move(parent), std::move(class_def));
+		return env;
+	}
+	return std::make_shared<environment>(std::move(parent), symbolizer_, std::move(class_def));
+}
+
 void vm_backend::release_scope_env(std::shared_ptr<environment> env) {
 	if (env.use_count() == 1 && scope_env_pool_.size() < 64) {
 		env->reset(nullptr);
 		scope_env_pool_.push_back(std::move(env));
+	}
+}
+
+std::vector<script_value> vm_backend::acquire_arg_vector(size_t reserve) {
+	std::vector<script_value> vec;
+	if (!arg_vector_pool_.empty()) {
+		vec = std::move(arg_vector_pool_.back());
+		arg_vector_pool_.pop_back();
+	}
+	vec.reserve(reserve);
+	return vec;
+}
+
+void vm_backend::release_arg_vector(std::vector<script_value> vec) {
+	if (arg_vector_pool_.size() < 32) {
+		vec.clear();   // drop value refs promptly, keep capacity
+		arg_vector_pool_.push_back(std::move(vec));
 	}
 }
 
@@ -3758,8 +3795,8 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 
-	std::vector<script_value> arguments;
-	arguments.reserve(argc);
+	auto arguments = acquire_arg_vector(argc);
+	arg_vector_return arg_return{this, &arguments};
 	const size_t base = stack_.size() - argc;
 	for (size_t i = 0; i < argc; ++i) {
 		arguments.push_back(std::move(stack_[base + i]));
@@ -4945,8 +4982,8 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 	const call_site& site = f.code->call_sites[ins.b];
 	auto* member = static_cast<member_expr*>(f.code->nodes[site.member_node].get());
 
-	std::vector<script_value> arguments;
-	arguments.reserve(argc);
+	auto arguments = acquire_arg_vector(argc);
+	arg_vector_return arg_return{this, &arguments};
 	const size_t base = stack_.size() - argc;
 	for (size_t i = 0; i < argc; ++i) {
 		arguments.push_back(std::move(stack_[base + i]));
@@ -6245,7 +6282,7 @@ checked_result<void> vm_backend::exec_iter_init(frame&, const vm_instruction&) {
 	script_value container = std::move(stack_.back());
 	stack_.pop_back();
 
-	environment_ = std::make_shared<environment>(environment_, symbolizer_);
+	environment_ = acquire_scope_env(environment_);
 
 	iter_state state;
 	if (container.is_array()) {
@@ -6379,7 +6416,7 @@ checked_result<void> vm_backend::exec_iter_pop(frame&, const vm_instruction&) {
 	if (!iter_states_.empty()) {
 		iter_states_.pop_back();
 	}
-	pop_scope();
+	pop_scopes_pooled(1);
 	return {};
 }
 
@@ -6852,13 +6889,17 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 			if (!payload.this_obj) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Method payload without 'this' receiver");
 			}
-			auto method_env = std::make_shared<environment>(payload.definition_env, symbolizer_, *payload.this_obj);
-			method_env->define("this", *payload.this_obj);
-			return execute_method_ast(payload.ast, method_env, args);
+			auto method_env = acquire_method_scope_env(payload.definition_env, *payload.this_obj);
+			method_env->define(this_id_, *payload.this_obj);
+			auto result = execute_method_ast(payload.ast, method_env, args);
+			release_scope_env(std::move(method_env));
+			return result;
 		}
 		case script_callable::kind_type::static_method: {
-			auto static_env = std::make_shared<environment>(payload.definition_env, symbolizer_, payload.cls);
-			return execute_method_ast(payload.ast, static_env, args);
+			auto static_env = acquire_static_scope_env(payload.definition_env, payload.cls);
+			auto result = execute_method_ast(payload.ast, static_env, args);
+			release_scope_env(std::move(static_env));
+			return result;
 		}
 		case script_callable::kind_type::constructor: {
 			auto script_cls = std::dynamic_pointer_cast<script_class_definition>(payload.cls);
@@ -6924,20 +6965,20 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 			auto this_obj = function.closure_env->get_this_object();
 			locals.set_this(this_obj);
 			locals.closure_env = function.closure_env->get_parent();
-			environment_ = std::make_shared<environment>(function.closure_env->get_parent(), symbolizer_, this_obj);
+			environment_ = acquire_method_scope_env(function.closure_env->get_parent(), std::move(this_obj));
 		} else if (function.closure_env->is_static_method_env()) {
 			locals.static_class_def = function.closure_env->get_class_definition();
 			locals.is_static_method = true;
 			locals.closure_env = function.closure_env->get_parent();
-			environment_ = std::make_shared<environment>(
-				function.closure_env->get_parent(), symbolizer_, function.closure_env->get_class_definition());
+			environment_ = acquire_static_scope_env(
+				function.closure_env->get_parent(), function.closure_env->get_class_definition());
 		} else {
 			locals.closure_env = function.closure_env;
-			environment_ = std::make_shared<environment>(function.closure_env, symbolizer_);
+			environment_ = acquire_scope_env(function.closure_env);
 		}
 	} else {
 		locals.closure_env = previousEnv;
-		environment_ = std::make_shared<environment>(previousEnv, symbolizer_);
+		environment_ = acquire_scope_env(previousEnv);
 	}
 
 	bool previousHasReturn = has_return_value_;
@@ -6963,12 +7004,14 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		} else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
 			function_env->get_parent()->clear_this_reference();
 		}
+		function_env = nullptr;
 		environment_ = previousEnv;
 		has_return_value_ = previousHasReturn;
 		return_value_ = std::move(previousReturn);
 		if (stack_.size() > f.stack_base) {
 			stack_.erase(stack_.begin() + f.stack_base, stack_.end());
 		}
+		release_scope_env(std::move(f.entry_env));
 	};
 
 	// Bind parameters

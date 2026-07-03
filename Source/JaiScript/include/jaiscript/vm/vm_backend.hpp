@@ -230,8 +230,21 @@ namespace jai::vm {
         // (closure env, coroutine snapshot, reference source) keeps its identity.
         std::vector<std::shared_ptr<environment>> scope_env_pool_;
         std::shared_ptr<environment> acquire_scope_env(std::shared_ptr<environment> parent);
+        std::shared_ptr<environment> acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj);
+        std::shared_ptr<environment> acquire_static_scope_env(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def);
         void release_scope_env(std::shared_ptr<environment> env);
         void pop_scopes_pooled(uint32_t count);
+
+        // Argument-vector free list for script calls (mirrors the interpreter's argument_pool_)
+        std::vector<std::vector<script_value>> arg_vector_pool_;
+        std::vector<script_value> acquire_arg_vector(size_t reserve);
+        void release_arg_vector(std::vector<script_value> vec);
+        // RAII: returns the vector to the pool on every exit path
+        struct arg_vector_return {
+            vm_backend* vm;
+            std::vector<script_value>* vec;
+            ~arg_vector_return() { vm->release_arg_vector(std::move(*vec)); }
+        };
 
         // Bodies live outside run() to keep its Debug frame flat (JAI_MAX_CALL_DEPTH path)
         void exec_array(frame& f, const vm_instruction& ins);

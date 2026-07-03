@@ -3829,9 +3829,18 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	}
 
 	const script_function& func = callee.as_function();
+	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
+	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
+	const auto* thunk = func.target<script_callable_thunk>();
+	const bool direct = thunk && thunk->eng == engine_ &&
+	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
-		callOutcome.emplace(func(arguments));
+		if (direct) {
+			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments));
+		} else {
+			callOutcome.emplace(func(arguments));
+		}
 	} catch (const script_exception& e) {
 		if (has_args) {
 			current_arg_metadata_ = std::move(saved_metadata);
@@ -3884,9 +3893,18 @@ checked_result<void> vm_backend::invoke_callee(const script_value& callee, std::
 	}
 
 	const script_function& func = callee.as_function();
+	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
+	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
+	const auto* thunk = func.target<script_callable_thunk>();
+	const bool direct = thunk && thunk->eng == engine_ &&
+	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
-		callOutcome.emplace(func(arguments));
+		if (direct) {
+			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments));
+		} else {
+			callOutcome.emplace(func(arguments));
+		}
 	} catch (const script_exception& e) {
 		if (has_args) {
 			current_arg_metadata_ = std::move(saved_metadata);
@@ -3943,13 +3961,8 @@ checked_result<void> vm_backend::exec_func_decl(frame& f, const vm_instruction& 
 	script_callable payload;
 	payload.kind = script_callable::kind_type::function;
 	payload.fn = proto.fn;
-	script_value functionValue = script_value::make_function([eng, payload](const std::vector<script_value>& args) -> checked_result<script_value> {
-		execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
-		if (!backend) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
-		}
-		return backend->execute_callable(payload, args);
-	}, engine_);
+	script_value functionValue = script_value::make_function(
+		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
 
 	environment_->define(proto.decl->name_id, functionValue);
 	return {};
@@ -4135,14 +4148,7 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 	script_callable payload;
 	payload.kind = script_callable::kind_type::function;
 	payload.fn = lambdaFunc;
-	engine* eng = engine_;
-	script_function funcWrapper = [eng, payload](const std::vector<script_value>& args) -> checked_result<script_value> {
-		execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
-		if (!backend) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
-		}
-		return backend->execute_callable(payload, args);
-	};
+	script_function funcWrapper = script_callable_thunk{engine_, std::move(payload)};
 
 	stack_.push_back(script_value::make_function(funcWrapper, engine_));
 	return {};
@@ -6952,7 +6958,11 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		}
 	}
 
-	auto body_chunk = chunk_for_body(function.name, function.parameters, function.body, function.local_count);
+	auto body_chunk = std::static_pointer_cast<chunk>(function.backend_body_cache);
+	if (!body_chunk) {
+		body_chunk = chunk_for_body(function.name, function.parameters, function.body, function.local_count);
+		function.backend_body_cache = body_chunk;
+	}
 
 	call_frame locals;
 	locals.function_name = function.name;

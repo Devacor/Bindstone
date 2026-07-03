@@ -181,6 +181,47 @@ namespace {
 		return std::make_shared<block_stmt>(loc, std::move(stmts));
 	}
 
+	// True when executing the node can define a name directly into the CURRENT scope,
+	// so an enclosing block must own a real environment. Blocks whose statements all
+	// report false compile without op_scope_push/pop (hot for loop bodies).
+	bool declares_in_current_scope(const ast_node* node) {
+		if (!node) return false;
+		switch (node->get_type()) {
+		case node_type::expression_stmt:
+		case node_type::expression_decl:
+		case node_type::return_stmt:
+		case node_type::break_stmt:
+		case node_type::continue_stmt:
+		case node_type::fallthrough_stmt:
+		case node_type::block_stmt:       // owns its own scope
+		case node_type::for_stmt:         // compile_for pushes its own scope
+		case node_type::range_for_stmt:   // loop variable lives in the iteration scope
+			return false;
+		case node_type::statement_decl:
+			return declares_in_current_scope(static_cast<const statement_decl*>(node)->statement.get());
+		case node_type::if_stmt: {
+			auto* branch = static_cast<const if_stmt*>(node);
+			return declares_in_current_scope(branch->then_statement.get()) ||
+			       declares_in_current_scope(branch->else_statement.get());
+		}
+		case node_type::while_stmt:
+			return declares_in_current_scope(static_cast<const while_stmt*>(node)->body.get());
+		default:
+			return true;   // declarations, include/import, switch/try: keep the scope
+		}
+	}
+
+	inline uint32_t compound_kind_for(token_type op) {
+		switch (op) {
+		case token_type::plus_equal: return compound_plus;
+		case token_type::minus_equal: return compound_minus;
+		case token_type::star_equal: return compound_star;
+		case token_type::slash_equal: return compound_slash;
+		case token_type::percent_equal: return compound_percent;
+		default: return compound_plus;
+		}
+	}
+
 } // namespace
 
 size_t vm_compiler::emit(opcode op, uint32_t a, uint32_t b, uint32_t c) {
@@ -374,6 +415,7 @@ void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_leve
 	case node_type::expression_decl: {
 		auto* ed = static_cast<expression_decl*>(decl.get());
 		const bool implicit = top_level && ed->implicit_return;
+		if (!implicit && compile_no_result_expression(ed->expression)) return;
 		compile_expression(ed->expression, !implicit);
 		emit(implicit ? opcode::op_implicit_return : opcode::op_pop);
 		return;
@@ -443,10 +485,13 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 	if (!stmt) return;
 	current_stmt_ = stmt.get();
 	switch (stmt->get_type()) {
-	case node_type::expression_stmt:
-		compile_expression(static_cast<expression_stmt*>(stmt.get())->expression, true);
+	case node_type::expression_stmt: {
+		const auto& e = static_cast<expression_stmt*>(stmt.get())->expression;
+		if (compile_no_result_expression(e)) return;
+		compile_expression(e, true);
 		emit(opcode::op_pop);
 		return;
+	}
 	case node_type::block_stmt:
 		compile_block(static_cast<block_stmt*>(stmt.get()));
 		return;
@@ -508,6 +553,19 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 }
 
 void vm_compiler::compile_block(block_stmt* block) {
+	bool needs_scope = false;
+	for (const auto& decl : block->declarations) {
+		if (declares_in_current_scope(decl.get())) {
+			needs_scope = true;
+			break;
+		}
+	}
+	if (!needs_scope) {
+		for (const auto& decl : block->declarations) {
+			compile_declaration(decl, false);
+		}
+		return;
+	}
 	emit(opcode::op_scope_push);
 	++scope_depth_;
 	for (const auto& decl : block->declarations) {
@@ -555,6 +613,10 @@ void vm_compiler::compile_while(while_stmt* stmt) {
 }
 
 void vm_compiler::compile_for(for_stmt* stmt) {
+	if (compile_counted_for(stmt)) {
+		return;
+	}
+
 	emit(opcode::op_scope_push);
 	++scope_depth_;
 
@@ -580,8 +642,10 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 		patch_jump(at, continue_target);
 	}
 	if (stmt->update) {
-		compile_expression(stmt->update, true);
-		emit(opcode::op_pop);
+		if (!compile_no_result_expression(stmt->update)) {
+			compile_expression(stmt->update, true);
+			emit(opcode::op_pop);
+		}
 	}
 	emit(opcode::op_loop_back, static_cast<uint32_t>(top));
 
@@ -596,6 +660,137 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 
 	--scope_depth_;
 	emit(opcode::op_scope_pop);
+}
+
+// Counting-loop codegen (mirrors the interpreter's visit_for_stmt fast path):
+//   for (var/auto/int i = <int literal>; i cmp <int literal|ident>; i ++/--/+=/-= <int literal|ident>)
+// Fast iterations run through op_cfor_prep/op_cfor_back with cached int pointers; when
+// runtime types don't cooperate the SAME loop runs its generic cond/update bytecode.
+bool vm_compiler::compile_counted_for(for_stmt* stmt) {
+	if (!stmt->initializer || !stmt->condition || !stmt->update) return false;
+
+	// Initializer: variable_decl with an int-literal initializer
+	if (stmt->initializer->get_type() != node_type::variable_decl) return false;
+	auto* init_var = static_cast<variable_decl*>(stmt->initializer.get());
+	if (!init_var->initializer || init_var->initializer->get_type() != node_type::literal_expr) return false;
+	auto* init_lit = static_cast<literal_expr*>(init_var->initializer.get());
+	if (init_lit->value.raw_storage_index() != script_value::TYPEID_INT) return false;
+	const uint64_t var_id = init_var->name_id;
+	if (var_id == UINT64_MAX) return false;
+
+	// Condition: var cmp (int literal | identifier)
+	if (stmt->condition->get_type() != node_type::binary_expr) return false;
+	auto* cond = static_cast<binary_expr*>(stmt->condition.get());
+	switch (cond->op.type) {
+	case token_type::less: case token_type::less_equal:
+	case token_type::greater: case token_type::greater_equal:
+	case token_type::equal_equal: case token_type::bang_equal:
+		break;
+	default:
+		return false;
+	}
+	if (cond->left->get_type() != node_type::identifier_expr) return false;
+	auto* cond_var = static_cast<identifier_expr*>(cond->left.get());
+	if (cond_var->symbol_id != var_id) return false;
+	if (cond->right->get_type() == node_type::literal_expr) {
+		if (static_cast<literal_expr*>(cond->right.get())->value.raw_storage_index() != script_value::TYPEID_INT) return false;
+	} else if (cond->right->get_type() != node_type::identifier_expr) {
+		return false;
+	}
+
+	// Update: ++var / --var / var += x / var -= x  (x = int literal | identifier)
+	bool subtract = false;
+	const expression* step_expr = nullptr;   // null = literal 1
+	if (stmt->update->get_type() == node_type::unary_expr) {
+		auto* un = static_cast<unary_expr*>(stmt->update.get());
+		if (un->op.type != token_type::plus_plus && un->op.type != token_type::minus_minus) return false;
+		if (un->operand->get_type() != node_type::identifier_expr) return false;
+		if (static_cast<identifier_expr*>(un->operand.get())->symbol_id != var_id) return false;
+		subtract = un->op.type == token_type::minus_minus;
+	} else if (stmt->update->get_type() == node_type::assignment_expr) {
+		auto* assign = static_cast<assignment_expr*>(stmt->update.get());
+		if (assign->op.type != token_type::plus_equal && assign->op.type != token_type::minus_equal) return false;
+		if (assign->target->get_type() != node_type::identifier_expr) return false;
+		if (static_cast<identifier_expr*>(assign->target.get())->symbol_id != var_id) return false;
+		subtract = assign->op.type == token_type::minus_equal;
+		if (assign->value->get_type() == node_type::literal_expr) {
+			if (static_cast<literal_expr*>(assign->value.get())->value.raw_storage_index() != script_value::TYPEID_INT) return false;
+		} else if (assign->value->get_type() != node_type::identifier_expr) {
+			return false;
+		}
+		step_expr = assign->value.get();
+	} else {
+		return false;
+	}
+
+	// === Pattern matched: emit the counted form ===
+	emit(opcode::op_scope_push);
+	++scope_depth_;
+
+	compile_declaration(stmt->initializer, false);
+
+	counted_for_proto proto;
+	proto.var = make_fused_operand(cond->left.get());
+	proto.end = make_fused_operand(cond->right.get());
+	if (step_expr) {
+		proto.step = make_fused_operand(step_expr);
+	} else {
+		proto.step.const_index = add_constant(script_value(static_cast<script_int>(1), static_cast<engine*>(nullptr)));
+	}
+	proto.cmp = static_cast<uint8_t>(cond->op.type);
+	proto.step_subtract = subtract;
+	chunk_->counted_for_protos.push_back(proto);
+	const uint32_t proto_idx = static_cast<uint32_t>(chunk_->counted_for_protos.size() - 1);
+
+	emit(opcode::op_cfor_prep, proto_idx);
+
+	const size_t generic_cond = chunk_->code.size();
+	{
+		const uint32_t proved = expression_returns_bool(stmt->condition.get()) ? 1u : 0u;
+		compile_expression(stmt->condition);
+		emit(opcode::op_jump_if_false, k_invalid_u32, proved);   // patched to exit_pop below
+	}
+	const size_t generic_exit_jump = chunk_->code.size() - 1;
+
+	const size_t body_start = chunk_->code.size();
+
+	loops_.push_back({});
+	loops_.back().scope_depth = scope_depth_;
+
+	compile_statement(stmt->body);
+
+	const size_t continue_target = chunk_->code.size();
+	for (size_t at : loops_.back().continue_patches) {
+		patch_jump(at, continue_target);
+	}
+	emit(opcode::op_cfor_back, proto_idx);
+
+	const size_t generic_update = chunk_->code.size();
+	if (!compile_no_result_expression(stmt->update)) {
+		compile_expression(stmt->update, true);
+		emit(opcode::op_pop);
+	}
+	emit(opcode::op_loop_back, static_cast<uint32_t>(generic_cond));
+
+	const size_t exit_pop = chunk_->code.size();
+	emit(opcode::op_cfor_pop);
+	const size_t end = chunk_->code.size();
+
+	patch_jump(generic_exit_jump, exit_pop);
+	for (size_t at : loops_.back().break_patches) {
+		patch_jump(at, exit_pop);
+	}
+	loops_.pop_back();
+
+	auto& stored = chunk_->counted_for_protos[proto_idx];
+	stored.body_ip = static_cast<uint32_t>(body_start);
+	stored.exit_ip = static_cast<uint32_t>(end);
+	stored.generic_cond_ip = static_cast<uint32_t>(generic_cond);
+	stored.generic_update_ip = static_cast<uint32_t>(generic_update);
+
+	--scope_depth_;
+	emit(opcode::op_scope_pop);
+	return true;
 }
 
 void vm_compiler::emit_region_exits(size_t target_region) {
@@ -827,6 +1022,37 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 	loops_.pop_back();
 }
 
+bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
+	if (expr->get_type() == node_type::assignment_expr) {
+		auto* assign = static_cast<assignment_expr*>(expr.get());
+		if (assign->target->get_type() != node_type::identifier_expr) return false;
+		auto* ident = static_cast<identifier_expr*>(assign->target.get());
+		compile_expression(assign->value);
+		if (assign->op.type == token_type::equal) {
+			uint32_t flags = store_flag_no_result;
+			if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
+			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+		} else {
+			emit(opcode::op_compound_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident),
+			     compound_kind_for(assign->op.type) | compound_flag_no_result);
+		}
+		return true;
+	}
+	if (expr->get_type() == node_type::unary_expr) {
+		auto* un = static_cast<unary_expr*>(expr.get());
+		if ((un->op.type == token_type::plus_plus || un->op.type == token_type::minus_minus) &&
+		    un->operand->get_type() == node_type::identifier_expr) {
+			auto* ident = static_cast<identifier_expr*>(un->operand.get());
+			uint32_t flags = incdec_flag_no_result;
+			if (un->is_postfix) flags |= incdec_flag_postfix;
+			if (un->op.type == token_type::plus_plus) flags |= incdec_flag_increment;
+			emit(opcode::op_incdec, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+			return true;
+		}
+	}
+	return false;
+}
+
 void vm_compiler::compile_expression(const expression_ptr& expr, bool as_statement) {
 	switch (expr->get_type()) {
 	case node_type::literal_expr:
@@ -957,9 +1183,36 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		return;
 	}
 
+	const uint32_t shape = binary_shape(expr.get());
+	if (shape != binary_shape_none) {
+		fused_binary_proto proto;
+		proto.op = static_cast<uint8_t>(expr->op.type);
+		proto.left = make_fused_operand(expr->left.get());
+		proto.right = make_fused_operand(expr->right.get());
+		chunk_->fused_binary_protos.push_back(proto);
+		emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), shape);
+		return;
+	}
+
 	compile_expression(expr->left);
 	compile_expression(expr->right);
-	emit(opcode::op_binary, static_cast<uint32_t>(expr->op.type), binary_shape(expr.get()));
+	emit(opcode::op_binary, static_cast<uint32_t>(expr->op.type), binary_shape_none);
+}
+
+fused_operand vm_compiler::make_fused_operand(const expression* e) {
+	fused_operand out;
+	if (e->get_type() == node_type::identifier_expr) {
+		auto* ident = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(e));
+		out.slot = identifier_slot_operand(ident);
+		out.symbol = add_symbol(ident->symbol_id);
+		if (!ident->name.empty() && (ident->name.front() == 'w' || ident->name.front() == 's') &&
+		    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
+			out.load_flags |= load_flag_type_ctor;
+		}
+	} else {
+		out.const_index = add_constant(static_cast<const literal_expr*>(e)->value);
+	}
+	return out;
 }
 
 void vm_compiler::compile_unary(const std::shared_ptr<unary_expr>& expr) {

@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <optional>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -14,10 +15,22 @@ public:
     // Reusable engine instance - created once, reused across benchmarks
     std::shared_ptr<jai::engine> test_engine;
 
+    // Pre-parsed handle for the [jaibite] benchmark variants: parsed lazily on the
+    // first (warmup) iteration, reused for every measured one.
+    std::optional<jai::jaibite> bite;
+
     void pre_test() override {
         // Create engine once before tests
         test_engine = make_engine();
         jai::stdlib::register_all(test_engine);
+        bite.reset();
+    }
+
+    void run_bite(const char* source) {
+        if (!bite) {
+            bite = test_engine->jaibite(source);
+        }
+        bite->execute();
     }
 
     void post_test() override {
@@ -279,6 +292,52 @@ public:
                     [{"name": "a", "val": 1}, {"name": "b", "val": 2}],
                     [{"name": "c", "val": 3}, {"name": "d", "val": 4}]
                 ];
+            )");
+        });
+
+        // === jaibite (pre-parsed) variants: steady-state execution cost only ===
+
+        benchmark("Integer Addition [jaibite]", [this]() {
+            run_bite("42 + 58");
+        });
+
+        benchmark("Function Calls [jaibite]", [this]() {
+            run_bite(R"(
+                function add(auto a, auto b) -> auto {
+                    return a + b;
+                }
+                add(10, 20);
+            )");
+        });
+
+        benchmark("Method Invocation [jaibite]", [this]() {
+            run_bite(R"(
+                class Calculator {
+                    int add(int a, int b) {
+                        return a + b;
+                    }
+                }
+
+                auto calc = Calculator();
+                calc.add(10, 20);
+            )");
+        });
+
+        benchmark("For Loop (100 iterations) [jaibite]", [this]() {
+            run_bite(R"(
+                auto sum = 0;
+                for (auto i = 0; i < 100; i += 1) {
+                    sum += i;
+                }
+            )");
+        });
+
+        benchmark("Hot Loop (1000 iterations) [jaibite]", [this]() {
+            run_bite(R"(
+                auto sum = 0;
+                for (auto i = 0; i < 1000; i += 1) {
+                    sum += i * 2;
+                }
             )");
         });
 

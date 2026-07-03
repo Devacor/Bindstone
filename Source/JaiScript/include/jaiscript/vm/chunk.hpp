@@ -56,6 +56,39 @@ namespace jai::vm {
         bool is_reference = false;
     };
 
+    // One side of a fused binary/compound operand: identifier (slot + symbol index)
+    // or literal (constant index). Mirrors what op_load/op_const would resolve.
+    struct fused_operand {
+        uint32_t slot = k_invalid_u32;        // function-frame slot (k_invalid_u32 = env)
+        uint32_t symbol = k_invalid_u32;      // index into chunk::symbols; invalid = literal
+        uint32_t const_index = k_invalid_u32; // index into chunk::constants; invalid = identifier
+        uint32_t load_flags = 0;              // load_flag_* (type-ctor names)
+    };
+
+    // op_binary_fused: evaluates `left op right` without materializing operand loads
+    // on the value stack (the vm's analog of the interpreter's AST-shape fast paths)
+    struct fused_binary_proto {
+        uint8_t op = 0;                        // token_type
+        fused_operand left;
+        fused_operand right;
+    };
+
+    // Counting-loop pattern `for (i = lit; i cmp end; i +=/-= step)` — the vm analog of
+    // the interpreter's native-loop fast path. When the runtime types don't cooperate
+    // the loop falls back to the generic cond/update bytecode (targets below).
+    struct counted_for_proto {
+        fused_operand var;                     // loop variable (identifier)
+        fused_operand end;                     // identifier or int literal
+        fused_operand step;                    // identifier or int literal
+        uint8_t cmp = 0;                       // token_type of the comparison
+        bool step_subtract = false;            // -= / -- update
+        // Jump targets patched at compile time
+        uint32_t body_ip = k_invalid_u32;
+        uint32_t exit_ip = k_invalid_u32;      // past the op_cfor_pop (fast exits pop in-op)
+        uint32_t generic_cond_ip = k_invalid_u32;
+        uint32_t generic_update_ip = k_invalid_u32;
+    };
+
     struct chunk {
         std::vector<vm_instruction> code;
         // Per instruction: the statement node in effect (raw pointer into the pinned tree)
@@ -70,6 +103,8 @@ namespace jai::vm {
         std::vector<closure_proto> closure_protos;
         std::vector<destructure_proto> destructure_protos;
         std::vector<iter_proto> iter_protos;
+        std::vector<fused_binary_proto> fused_binary_protos;
+        std::vector<counted_for_proto> counted_for_protos;
 
         // Default-argument expressions compiled per parameter (function-body chunks only)
         std::vector<std::shared_ptr<chunk>> param_default_chunks;

@@ -30,6 +30,7 @@ namespace jai::vm {
         op_destructure,     // a=proto index; pops source array
 
         op_binary,          // a=token_type, b=operand shape (binary_shape_*); pops rhs,lhs, pushes result
+        op_binary_fused,    // a=fused_binary_proto index, b=shape; resolves operands in place, pushes result
         op_index,           // a=flags(index_flag_*); pops index,container, pushes element/reference
         op_index_assign,    // pops reference,value; assigns through, pushes value
         op_index_compound,  // a=compound kind; pops rhs,reference; computes, assigns through, pushes result
@@ -77,6 +78,10 @@ namespace jai::vm {
         op_iter_next,       // a=iter proto index; assigns loop var, pushes bool(has element); budget check
         op_iter_pop,        // pops iteration state + loop-var scope
 
+        op_cfor_prep,       // a=counted_for_proto index; resolves loop state, runs first cmp, always jumps
+        op_cfor_back,       // a=counted_for_proto index; steps + cmp via cached pointers, always jumps; budget check
+        op_cfor_pop,        // pops the counted-for state (generic-exit / break label)
+
         op_yield,           // a=has value (pops it); suspends the active fiber, resume value is null
         op_include,         // a=literal path message index (k_invalid_u32 = expr), b=path-is-expr; pushes result
         op_import,          // a=literal path message index (k_invalid_u32 = expr), b=path-is-expr; pushes result
@@ -90,8 +95,9 @@ namespace jai::vm {
 
     // op_store c flags
     inline constexpr uint32_t store_flag_rhs_lvalue = 1; // RHS was identifier/member/subscript
+    inline constexpr uint32_t store_flag_no_result = 2;  // statement position: run() pops the result
 
-    // op_compound_store c layout: low 3 bits = kind, bit 3 = result needed
+    // op_compound_store c layout: low 3 bits = kind, upper bits = flags
     inline constexpr uint32_t compound_kind_mask = 0x7;
     inline constexpr uint32_t compound_plus = 0;
     inline constexpr uint32_t compound_minus = 1;
@@ -99,10 +105,12 @@ namespace jai::vm {
     inline constexpr uint32_t compound_slash = 3;
     inline constexpr uint32_t compound_percent = 4;
     inline constexpr uint32_t compound_flag_result_needed = 0x8;
+    inline constexpr uint32_t compound_flag_no_result = 0x10; // statement position: nothing pushed
 
     // op_incdec c flags
     inline constexpr uint32_t incdec_flag_postfix = 1;
     inline constexpr uint32_t incdec_flag_increment = 2;
+    inline constexpr uint32_t incdec_flag_no_result = 4;  // statement position: run() pops the result
 
     // op_binary b operand shapes (mirror the interpreter's AST-shape fast paths)
     inline constexpr uint32_t binary_shape_none = 0;
@@ -139,6 +147,7 @@ namespace jai::vm {
             case opcode::op_decl_ref_value: return "DECL_REF_VALUE";
             case opcode::op_destructure: return "DESTRUCTURE";
             case opcode::op_binary: return "BINARY";
+            case opcode::op_binary_fused: return "BINARY_FUSED";
             case opcode::op_index: return "INDEX";
             case opcode::op_index_assign: return "INDEX_ASSIGN";
             case opcode::op_index_compound: return "INDEX_COMPOUND";
@@ -179,6 +188,9 @@ namespace jai::vm {
             case opcode::op_iter_init: return "ITER_INIT";
             case opcode::op_iter_next: return "ITER_NEXT";
             case opcode::op_iter_pop: return "ITER_POP";
+            case opcode::op_cfor_prep: return "CFOR_PREP";
+            case opcode::op_cfor_back: return "CFOR_BACK";
+            case opcode::op_cfor_pop: return "CFOR_POP";
             case opcode::op_yield: return "YIELD";
             case opcode::op_include: return "INCLUDE";
             case opcode::op_import: return "IMPORT";

@@ -42,6 +42,15 @@ public:
     
     // Core execution
     virtual script_value execute(const std::vector<declaration_ptr>& declarations) = 0;
+
+    // Pre-parsed execution (engine::execute(jaibite&)). compiled_slot is a caller-owned
+    // cache the backend may fill with a compiled artifact keyed to these declarations
+    // (the vm stores its chunk there; the default ignores it and re-walks the AST).
+    virtual script_value execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
+        (void)compiled_slot;
+        return execute(declarations);
+    }
+
     virtual void prepare_for_execution() = 0;
 
     // Execute a script-defined callable (see script_callable). For kind::method the

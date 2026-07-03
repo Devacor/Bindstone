@@ -68,6 +68,9 @@ namespace jai::vm {
         void compile_statement(const statement_ptr& stmt);
         void compile_block(block_stmt* block);
         void compile_expression(const expression_ptr& expr, bool as_statement = false);
+        // Statement-position stores/incdecs whose result is discarded compile to a
+        // no-result form (no push, no op_pop). Returns false if the shape doesn't apply.
+        bool compile_no_result_expression(const expression_ptr& expr);
 
         void compile_identifier_load(identifier_expr* ident);
         void compile_binary(const std::shared_ptr<binary_expr>& expr);
@@ -82,6 +85,9 @@ namespace jai::vm {
         void compile_if(if_stmt* stmt);
         void compile_while(while_stmt* stmt);
         void compile_for(for_stmt* stmt);
+        // Emits the op_cfor_prep/back counted-loop form when the for matches the
+        // interpreter's counting-loop pattern; false = use the generic codegen
+        bool compile_counted_for(for_stmt* stmt);
         void compile_range_for(range_for_stmt* stmt);
         void compile_try(try_stmt* stmt);
         void compile_switch(switch_stmt* stmt);
@@ -100,6 +106,7 @@ namespace jai::vm {
 
         uint32_t identifier_slot_operand(identifier_expr* ident) const;
         bool symbol_is_env_only(uint64_t symbol_id) const;
+        fused_operand make_fused_operand(const expression* e);
 
         static uint32_t binary_shape(binary_expr* expr);
     };

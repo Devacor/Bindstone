@@ -244,6 +244,7 @@ namespace jai::vm {
                                              call_frame& locals, chunk& body_chunk);
         void clear_this_on_frame_exit();
         script_value implicit_this_result(call_frame& locals);
+        script_value implicit_result_for_record(call_record& rec);
         checked_result<script_value> convert_return_value(script_value result, const script_defined_function& function);
 
         void capture_stack_trace();

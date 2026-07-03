@@ -6313,7 +6313,7 @@ bool vm_backend::handle_throw_unwind(frame*& fp, size_t records_base) {
 		// An unwinding callee "completes" with its implicit this-return, conversion
 		// skipped — the native path's cleanup + exec_call result push, frame by frame
 		call_record& rec = *call_records_[call_records_top_ - 1];
-		script_value result = implicit_this_result(rec.locals);
+		script_value result = implicit_result_for_record(rec);
 		pop_script_frame_core(rec);
 		fp = rec.caller;
 		stack_.push_back(std::move(result));
@@ -7083,8 +7083,23 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	}
 	rec.locals.function_name = function.name;
 	rec.locals.reserve_locals(std::max(function.local_count, body_chunk->local_count));
+	// Compile-time lazy elision: plain callees whose bodies provably never touch the
+	// per-call scope env skip creating it (methods/statics never elide — env kind
+	// fallbacks gate field-vs-shadowing precedence)
+	rec.env_lazy = !body_chunk->needs_frame_env &&
+	               (!function.closure_env ||
+	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
 	try {
-		setup_callee_env(function, rec.locals, rec.prev_env);
+		if (rec.env_lazy) {
+			if (function.closure_env) {
+				rec.locals.closure_env = function.closure_env;
+				environment_ = function.closure_env;
+			} else {
+				rec.locals.closure_env = rec.prev_env;   // ref-param frames_ scan needs it
+			}
+		} else {
+			setup_callee_env(function, rec.locals, rec.prev_env);
+		}
 	} catch (...) {
 		if (rec.metadata_saved) {
 			current_arg_metadata_ = std::move(rec.saved_metadata);
@@ -7100,7 +7115,11 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	rec.f.pin = std::move(body_chunk);
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;
-	rec.f.entry_env = environment_;
+	if (rec.env_lazy) {
+		rec.f.entry_env = nullptr;
+	} else {
+		rec.f.entry_env = environment_;
+	}
 	rec.f.stack_base = stack_.size();
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
@@ -7124,7 +7143,16 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 // + depth guard). Destroys the callee's script_value state NOW — deferring destruction
 // is observable.
 void vm_backend::pop_script_frame_core(call_record& rec) {
-	clear_this_on_frame_exit();
+	if (rec.env_lazy) {
+		// Single-level rule: prev_env plays the never-created entry env's parent, so only
+		// the immediate env is checked (reproduces the pinned caller-this-clear quirk;
+		// a parent check would look two levels up and diverge for block-scope callers)
+		if (environment_->is_method_env()) {
+			environment_->clear_this_reference();
+		}
+	} else {
+		clear_this_on_frame_exit();
+	}
 	environment_ = std::move(rec.prev_env);
 	if (stack_.size() > rec.f.stack_base) {
 		stack_.erase(stack_.begin() + rec.f.stack_base, stack_.end());
@@ -7185,7 +7213,7 @@ checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_i
 
 checked_result<void> vm_backend::fall_off_script_frame(frame*& fp) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
-	script_value result = implicit_this_result(rec.locals);   // conversion skipped: fall-off parity
+	script_value result = implicit_result_for_record(rec);   // conversion skipped: fall-off parity
 	pop_script_frame_core(rec);
 	fp = rec.caller;
 	stack_.push_back(std::move(result));
@@ -7248,6 +7276,18 @@ void vm_backend::clear_this_on_frame_exit() {
 	} else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
 		function_env->get_parent()->clear_this_reference();
 	}
+}
+
+// Record-aware implicit result: lazy frames apply the single-level rule against their
+// effective env (prev_env / closure_env); eager frames keep the two-level native walk
+script_value vm_backend::implicit_result_for_record(call_record& rec) {
+	if (rec.env_lazy) {
+		if (environment_->is_method_env()) {
+			return environment_->get_this_object();
+		}
+		return make_null();
+	}
+	return implicit_this_result(rec.locals);
 }
 
 script_value vm_backend::implicit_this_result(call_frame& locals) {

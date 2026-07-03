@@ -6935,7 +6935,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		~call_depth_guard() { --depth; }
 	} depth_guard(current_call_depth_);
 
-	{
+	if (args.size() != function.parameters.size()) {   // exact arity: no default-arg scan needed
 		size_t required_params = 0;
 		for (const auto& p : function.parameters) {
 			if (!p.default_value) {
@@ -6956,7 +6956,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	call_frame locals;
 	locals.function_name = function.name;
-	locals.reserve_locals(std::max(function.local_count, body_chunk->local_count));
+	locals.locals = acquire_arg_vector(std::max(function.local_count, body_chunk->local_count));
 
 	auto previousEnv = environment_;
 
@@ -7012,6 +7012,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 			stack_.erase(stack_.begin() + f.stack_base, stack_.end());
 		}
 		release_scope_env(std::move(f.entry_env));
+		release_arg_vector(std::move(locals.locals));
 	};
 
 	// Bind parameters
@@ -7113,6 +7114,18 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 				}
 			}
 		} else {
+			// auto (inferred) parameter + primitive argument: copy IS clone for
+			// primitives and carries the same type_info the inference locks onto,
+			// so the conversion machinery has nothing to do. var (any-typed) and
+			// explicitly typed parameters take the full path.
+			const size_t ri = arg.raw_storage_index();
+			if (!param.type && !arg.is_cpp_bound() &&
+			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT ||
+			     ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR)) {
+				locals.set_local(param.slot_index, script_value(arg));
+				continue;
+			}
+
 			auto converted_result = try_convert_for_parameter(arg, param.type);
 			if (!converted_result) {
 				cleanup();

@@ -3796,6 +3796,56 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 
+	// In-loop fast path peeks the callee below the args (Squirrel's OP_CALL→StartCall
+	// shape): exact-arity direct callees bind straight from the stack_ slice — no pooled
+	// arg vector, no per-arg move. Default-arg and arity-error calls fall through.
+	if (stack_.size() > argc && stack_[stack_.size() - argc - 1].is_function()) {
+		const size_t args_base = stack_.size() - argc;
+		const auto* thunk = stack_[args_base - 1].as_function().target<script_callable_thunk>();
+		if (thunk && thunk->eng == engine_ &&
+		    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn &&
+		    argc == thunk->payload.fn->parameters.size()) {
+			const script_defined_function& fn = *thunk->payload.fn;
+			// Ref-free callees never read arg metadata, so skip the build entirely
+			const bool has_metadata = argc > 0 && fn.has_reference_parameters;
+			std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+			if (has_metadata) {
+				saved_metadata = std::move(current_arg_metadata_);
+				current_arg_metadata_.clear();
+				current_arg_metadata_.reserve(argc);
+				for (size_t i = 0; i < argc; ++i) {
+					uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
+					if (symbol_id != UINT64_MAX) {
+						current_arg_metadata_.emplace_back(symbol_id, environment_.get());
+					} else {
+						current_arg_metadata_.emplace_back(UINT64_MAX, nullptr);
+					}
+				}
+			}
+			// push_script_frame owns saved_metadata restoration on every exit path
+			try {
+				return push_script_frame(f, std::move(stack_[args_base - 1]), fn,
+				                         stack_, args_base, argc, saved_metadata, has_metadata);
+			} catch (const script_exception& e) {
+				// pre-record throws leave callee+args on the stack; drop them like the
+				// pooled path already had (bind-time throws pop-core'd them already)
+				stack_.erase(stack_.begin() + (args_base - 1), stack_.end());
+				active_exception_value_ = script_value(std::string(e.what()), engine_);
+				current_exception_ = e;
+				is_unwinding_ = true;
+				stack_.push_back(make_null());
+				return {};
+			} catch (const std::exception& e) {
+				stack_.erase(stack_.begin() + (args_base - 1), stack_.end());
+				active_exception_value_ = script_value(std::string(e.what()), engine_);
+				current_exception_ = script_exception(e.what());
+				is_unwinding_ = true;
+				stack_.push_back(make_null());
+				return {};
+			}
+		}
+	}
+
 	auto arguments = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &arguments};
 	const size_t base = stack_.size() - argc;
@@ -3811,18 +3861,9 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 		return checked_result<void>(make_error_code(runtime_error_code::not_a_function));
 	}
 
-	const script_function& func = callee.as_function();
-	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
-	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
-	const auto* thunk = func.target<script_callable_thunk>();
-	const bool direct = thunk && thunk->eng == engine_ &&
-	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
-	const bool in_loop = direct && arguments.size() == thunk->payload.fn->parameters.size();
-
 	// Inline the invoke tail: an extra callee frame per script call would blow the
-	// native stack before JAI_MAX_CALL_DEPTH is reached in Debug builds.
-	// Ref-free in-loop callees never read arg metadata, so skip the build entirely.
-	const bool has_args = argc > 0 && !(in_loop && !thunk->payload.fn->has_reference_parameters);
+	// native stack before JAI_MAX_CALL_DEPTH is reached in Debug builds
+	const bool has_args = argc > 0;
 	std::vector<std::pair<uint64_t, environment*>> saved_metadata;
 	if (has_args) {
 		saved_metadata = std::move(current_arg_metadata_);
@@ -3838,26 +3879,10 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 		}
 	}
 
-	if (in_loop) {
-		// Exact-arity direct callees stay inside the dispatch loop (Squirrel EnterFrame
-		// shape); default-arg and arity-error calls keep the native path below.
-		// push_script_frame owns saved_metadata restoration on every exit path.
-		try {
-			return push_script_frame(f, std::move(callee), *thunk->payload.fn, arguments, saved_metadata, has_args);
-		} catch (const script_exception& e) {
-			active_exception_value_ = script_value(std::string(e.what()), engine_);
-			current_exception_ = e;
-			is_unwinding_ = true;
-			stack_.push_back(make_null());
-			return {};
-		} catch (const std::exception& e) {
-			active_exception_value_ = script_value(std::string(e.what()), engine_);
-			current_exception_ = script_exception(e.what());
-			is_unwinding_ = true;
-			stack_.push_back(make_null());
-			return {};
-		}
-	}
+	const script_function& func = callee.as_function();
+	const auto* thunk = func.target<script_callable_thunk>();
+	const bool direct = thunk && thunk->eng == engine_ &&
+	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
@@ -3930,7 +3955,8 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes
 		// switch_to_. push_script_frame owns saved_metadata restoration on every exit.
 		try {
-			return push_script_frame(f, std::move(callee), *thunk->payload.fn, arguments, saved_metadata, has_args);
+			return push_script_frame(f, std::move(callee), *thunk->payload.fn,
+			                         arguments, 0, argc, saved_metadata, has_args);
 		} catch (const script_exception& e) {
 			active_exception_value_ = script_value(std::string(e.what()), engine_);
 			current_exception_ = e;
@@ -7100,7 +7126,8 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 
 checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&& callee,
                                                    const script_defined_function& function,
-                                                   const std::vector<script_value>& arguments,
+                                                   const std::vector<script_value>& args,
+                                                   size_t args_base, size_t argc,
                                                    std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
                                                    bool has_args) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
@@ -7187,13 +7214,17 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	} else {
 		rec.f.entry_env = environment_;
 	}
-	rec.f.stack_base = stack_.size();
+	// Zero-copy callers leave callee+args on the stack through binding; stack_base is the
+	// callee slot so every pop/unwind truncation cleans them (any try_record live at the
+	// call op snapshotted a stack size <= the callee slot at try entry)
+	const bool args_on_stack = &args == &stack_;
+	rec.f.stack_base = args_on_stack ? args_base - 1 : stack_.size();
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(function.parameters, arguments, rec.locals, *rec.f.code);
+		bound = bind_parameters(function.parameters, args, args_base, argc, rec.locals, *rec.f.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -7201,6 +7232,11 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	if (!bound) {
 		pop_script_frame_core(rec);
 		return bound;
+	}
+	if (args_on_stack) {
+		// Conversions during binding push and pop above the args, so the slice is intact
+		assert(stack_.size() == args_base + argc);
+		stack_.erase(stack_.begin() + rec.f.stack_base, stack_.end());
 	}
 	switch_to_ = &rec.f;
 	return {};
@@ -7340,7 +7376,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(ast->parameters, arguments, rec.locals, *rec.f.code);
+		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.locals, *rec.f.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -7560,11 +7596,12 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 
 checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const std::vector<script_value>& args,
+                                                 size_t args_base, size_t argc,
                                                  call_frame& locals, chunk& body_chunk) {
 	for (size_t i = 0; i < parameters.size(); ++i) {
 		const auto& param = parameters[i];
 
-		if (i >= args.size()) {
+		if (i >= argc) {
 			if (param.default_value) {
 				auto default_chunk = i < body_chunk.param_default_chunks.size() ? body_chunk.param_default_chunks[i] : nullptr;
 				if (!default_chunk) {
@@ -7589,7 +7626,9 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			}
 		}
 
-		const auto& arg = args[i];
+		// Fresh element access per parameter: args may alias stack_, which nested
+		// conversions can reallocate between iterations
+		const auto& arg = args[args_base + i];
 
 		if (param.is_reference) {
 			if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
@@ -7665,7 +7704,10 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				continue;
 			}
 
-			auto converted_result = try_convert_for_parameter(arg, param.type);
+			// Shallow copy shields the conversion: it can reenter script (conversion
+			// ctors / to_* methods) and reallocate stack_ under an on-stack arg
+			script_value arg_shield(arg);
+			auto converted_result = try_convert_for_parameter(arg_shield, param.type);
 			if (!converted_result) {
 				return converted_result.error_value();
 			}
@@ -7680,7 +7722,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			}
 
 			if (should_share) {
-				locals.set_local(param.slot_index, converted_arg);
+				locals.set_local(param.slot_index, std::move(converted_arg));
 			} else {
 				locals.set_local(param.slot_index, converted_arg.clone());
 			}
@@ -7769,7 +7811,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	};
 
 	{
-		auto bind_result = bind_parameters(function.parameters, args, locals, *body_chunk);
+		auto bind_result = bind_parameters(function.parameters, args, 0, args.size(), locals, *body_chunk);
 		if (!bind_result) {
 			cleanup();
 			return bind_result.error_value();

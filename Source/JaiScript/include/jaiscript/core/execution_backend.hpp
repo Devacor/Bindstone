@@ -43,6 +43,24 @@ struct script_callable_thunk {
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
 };
 
+// Named dispatcher for script-class instance methods, stored in
+// class_definition::methods_ (operator() defined in script_class.hpp). Same pattern as
+// script_callable_thunk: hot call paths recover it via
+// std::function::target<script_method_dispatch>() and enter the resolved method body
+// directly; every other caller goes through operator() with identical behavior.
+struct script_method_dispatch {
+    engine* eng = nullptr;
+    std::shared_ptr<class_definition> cls;
+    uint64_t name_id = 0;
+    std::shared_ptr<environment> definition_env;
+    // Backend-owned compiled-body slot keyed by body identity, so the hot path skips
+    // its body-keyed hash lookup. Method RESOLUTION still walks the live class every
+    // call (hot reload). mutable: filled through the const target<>() pointer.
+    mutable std::shared_ptr<void> body_cache;
+    mutable const void* body_cache_key = nullptr;
+    checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+};
+
 /**
  * Abstract interface for script execution backends.
  * This allows us to have both interpreter and bytecode VM implementations.

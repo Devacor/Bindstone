@@ -412,6 +412,26 @@ public:
 				"block scope push keeps the eager env");
 		});
 
+		// Stage 3 (method flattening): method self-recursion no longer stacks native
+		// frames, but the depth-10000 error must still be raised and stay catchable
+		// through the flattened path on both backends.
+		test("method_recursion_depth_error_catchable", [this]() {
+			const char* src = R"(
+				class R { int spin(int n) { return this.spin(n + 1); } }
+				var msg = "";
+				try { R().spin(0); } catch (err) { msg = err; }
+				msg;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->execution_budget(0);   // depth-10000 method recursion outruns the default budget in Debug
+				auto msg = e->execute(src).as<std::string>();
+				check_true(msg.find("Maximum recursion depth") != std::string::npos,
+					"method self-recursion raises the catchable depth error");
+			}
+		});
+
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
 			e->add_variadic_function("sum_all", [](const std::vector<script_value>& args) -> checked_result<script_value> {

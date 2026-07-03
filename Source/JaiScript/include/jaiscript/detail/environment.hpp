@@ -309,10 +309,17 @@ namespace jai {
         // filled through const refs on the call path; per-engine, single backend.
         mutable std::shared_ptr<void> backend_body_cache;
 
+        // Precomputed so ref-free call sites can skip the per-call arg-metadata build
+        bool has_reference_parameters = false;
+
         script_defined_function(std::string_view n, std::vector<parameter> params,
                             type_info_ptr retType, std::shared_ptr<block_stmt> b,
                             std::shared_ptr<environment> env = nullptr, size_t slots = 0)
-            : name(n), parameters(std::move(params)), return_type(retType), body(b), closure_env(env), local_count(slots) {}
+            : name(n), parameters(std::move(params)), return_type(retType), body(b), closure_env(env), local_count(slots) {
+            for (const auto& p : parameters) {
+                if (p.is_reference) { has_reference_parameters = true; break; }
+            }
+        }
     };
 
 } // namespace jai

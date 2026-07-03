@@ -7,6 +7,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
+#include <cassert>
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -3834,6 +3835,26 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	const auto* thunk = func.target<script_callable_thunk>();
 	const bool direct = thunk && thunk->eng == engine_ &&
 	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
+	if (direct && arguments.size() == thunk->payload.fn->parameters.size()) {
+		// Exact-arity direct callees stay inside the dispatch loop (Squirrel EnterFrame
+		// shape); default-arg and arity-error calls keep the native path below.
+		// push_script_frame owns saved_metadata restoration on every exit path.
+		try {
+			return push_script_frame(f, std::move(callee), *thunk->payload.fn, arguments, saved_metadata, has_args);
+		} catch (const script_exception& e) {
+			active_exception_value_ = script_value(std::string(e.what()), engine_);
+			current_exception_ = e;
+			is_unwinding_ = true;
+			stack_.push_back(make_null());
+			return {};
+		} catch (const std::exception& e) {
+			active_exception_value_ = script_value(std::string(e.what()), engine_);
+			current_exception_ = script_exception(e.what());
+			is_unwinding_ = true;
+			stack_.push_back(make_null());
+			return {};
+		}
+	}
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
@@ -6260,13 +6281,43 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 	return false;
 }
 
-bool vm_backend::handle_op_error(frame& f, const checked_result<void>& result) {
+bool vm_backend::handle_op_error(frame*& fp, size_t records_base, const checked_result<void>& result) {
 	error_propagator failure = result.error_value();
-	return unwind_to_handler(f, &failure);
+	for (;;) {
+		if (unwind_to_handler(*fp, &failure)) {
+			return true;
+		}
+		if (call_records_top_ == records_base) {
+			return false;
+		}
+		if (!trace_captured_) {
+			capture_stack_trace();
+		}
+		call_record& rec = *call_records_[call_records_top_ - 1];
+		pop_script_frame_core(rec);
+		fp = rec.caller;
+	}
 }
 
-bool vm_backend::handle_throw_unwind(frame& f) {
-	return unwind_to_handler(f, nullptr);
+bool vm_backend::handle_throw_unwind(frame*& fp, size_t records_base) {
+	for (;;) {
+		if (unwind_to_handler(*fp, nullptr)) {
+			return true;
+		}
+		if (call_records_top_ == records_base) {
+			return false;
+		}
+		if (is_unwinding_ && !trace_captured_) {
+			capture_stack_trace();
+		}
+		// An unwinding callee "completes" with its implicit this-return, conversion
+		// skipped — the native path's cleanup + exec_call result push, frame by frame
+		call_record& rec = *call_records_[call_records_top_ - 1];
+		script_value result = implicit_this_result(rec.locals);
+		pop_script_frame_core(rec);
+		fp = rec.caller;
+		stack_.push_back(std::move(result));
+	}
 }
 
 checked_result<void> vm_backend::exec_case_eq(frame&, const vm_instruction&) {
@@ -6555,7 +6606,7 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 #define VM_TRY_OP(expr) \
 	{ auto __result = (expr); \
 	  if (!__result) [[unlikely]] { \
-	      if (!handle_op_error(f, __result)) return __result.error_value(); \
+	      if (!handle_op_error(fp, records_base, __result)) return __result.error_value(); \
 	      continue; } }
 
 // Shared-slot variant for cases added after the frame-size ceiling was reached:
@@ -6564,27 +6615,57 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 #define VM_TRY_OP_SHARED(expr) \
 	{ shared_op_result_ = (expr); \
 	  if (!shared_op_result_) [[unlikely]] { \
-	      if (!handle_op_error(f, shared_op_result_)) return shared_op_result_.error_value(); \
+	      if (!handle_op_error(fp, records_base, shared_op_result_)) return shared_op_result_.error_value(); \
 	      continue; } }
 
+// Thin exception boundary: C++ exceptions thrown while in-loop frames are live get
+// converted to script unwinding AT the failing logical frame (the native path converts
+// them in exec_call at each recursion level); with no in-loop frames they rethrow
+// byte-identically. Kept separate so its EH funclets never touch run_dispatch's frame.
 checked_result<void> vm_backend::run(frame& entry) {
 	frame* fp = &entry;
-	return run_dispatch(fp);
+	const size_t records_base = call_records_top_;
+	for (;;) {
+		try {
+			return run_dispatch(fp, records_base);
+		} catch (const script_exception& e) {
+			if (call_records_top_ == records_base) { throw; }
+			convert_cpp_exception_at_frame(fp, e);
+			if (!handle_throw_unwind(fp, records_base)) { return {}; }
+		} catch (const std::exception& e) {
+			if (call_records_top_ == records_base) { throw; }
+			convert_cpp_exception_at_frame(fp, script_exception(e.what()));
+			if (!handle_throw_unwind(fp, records_base)) { return {}; }
+		} catch (...) {
+			pop_records_to(records_base, fp);
+			throw;
+		}
+	}
 }
 
-checked_result<void> vm_backend::run_dispatch(frame*& fp) {
+checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	checked_result<void> shared_op_result_;
 	for (;;) {
 		// Rebound every iteration: frame switches write fp and `continue`
 		frame& f = *fp;
 		const auto& code = f.code->code;
 		if (f.ip >= code.size()) {
-			return {};
+			if (call_records_top_ == records_base) {
+				return {};
+			}
+			VM_TRY_OP_SHARED(fall_off_script_frame(fp));
+			continue;
 		}
 		const vm_instruction& ins = code[f.ip];
 		switch (ins.op) {
 			case opcode::op_halt:
-				return {};
+				if (call_records_top_ == records_base) {
+					return {};
+				}
+				// Function-body chunks end in op_halt: this is an in-loop callee's
+				// implicit-return exit
+				VM_TRY_OP_SHARED(fall_off_script_frame(fp));
+				continue;
 
 			case opcode::op_const: {
 				// Literals are engine-less parse-time templates; re-materialize with the engine
@@ -6649,7 +6730,16 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp) {
 			case opcode::op_index_assign: VM_TRY_OP(exec_index_assign(f, ins)); break;
 			case opcode::op_index_compound: VM_TRY_OP(exec_index_compound(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
-			case opcode::op_call: VM_TRY_OP(exec_call(f, ins)); break;
+			case opcode::op_call:
+				VM_TRY_OP(exec_call(f, ins));
+				if (switch_to_) {
+					// Enter the pushed callee; skipping ++f.ip parks the suspended
+					// caller's ip on the call op (stack-trace parity)
+					fp = switch_to_;
+					switch_to_ = nullptr;
+					continue;
+				}
+				break;
 			case opcode::op_func_decl: VM_TRY_OP(exec_func_decl(f, ins)); break;
 			case opcode::op_closure: VM_TRY_OP(exec_closure(f, ins)); break;
 
@@ -6683,7 +6773,10 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp) {
 
 			// Suspends the fiber: exec_yield sets yielding_ and advances ip past the yield,
 			// then run() returns cleanly so run_fiber can snapshot and hand back the value.
+			// Parser guarantees op_yield only in coroutine body chunks, which are only ever
+			// run_fiber entry frames — in-loop callees are always popped before this op.
 			case opcode::op_yield:
+				assert(call_records_top_ == records_base);
 				exec_yield(f, ins);
 				return {};
 
@@ -6737,17 +6830,22 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp) {
 				continue;
 
 			case opcode::op_return: {
-				if (ins.a) {
-					return_value_ = std::move(stack_.back());
-					stack_.pop_back();
-				} else {
-					return_value_ = make_null();
+				if (call_records_top_ == records_base) {
+					if (ins.a) {
+						return_value_ = std::move(stack_.back());
+						stack_.pop_back();
+					} else {
+						return_value_ = make_null();
+					}
+					has_return_value_ = true;
+					return {};
 				}
-				has_return_value_ = true;
-				return {};
+				VM_TRY_OP_SHARED(return_from_script_frame(fp, ins));
+				continue;
 			}
 
 			case opcode::op_implicit_return: {
+				assert(call_records_top_ == records_base);   // top-level chunks only
 				script_value v = std::move(stack_.back());
 				stack_.pop_back();
 				implicit_result_ = v.deref();
@@ -6780,7 +6878,7 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp) {
 		}
 
 		if (is_unwinding_) [[unlikely]] {
-			if (!handle_throw_unwind(f)) {
+			if (!handle_throw_unwind(fp, records_base)) {
 				return {};
 			}
 			continue;
@@ -6815,6 +6913,9 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 	return_value_.reset();
 	captured_trace_.clear();
 	trace_captured_ = false;
+
+	const int entry_call_depth = current_call_depth_;
+	(void)entry_call_depth;
 
 	call_frame top_locals;
 	frame f;
@@ -6866,6 +6967,9 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 		stack_.erase(stack_.begin() + f.stack_base, stack_.end());
 	}
 	environment_ = f.entry_env;
+
+	// Every in-loop pop path must decrement exactly once (no RAII on that path)
+	assert(current_call_depth_ == entry_call_depth);
 
 	if (has_return_value_) {
 		script_value out = std::move(return_value_.value());
@@ -6926,6 +7030,188 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 		}
 	}
 	return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");
+}
+
+checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&& callee,
+                                                   const script_defined_function& function,
+                                                   const std::vector<script_value>& arguments,
+                                                   std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
+                                                   bool has_args) {
+	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
+		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
+		return checked_result<void>(
+			make_error_code(runtime_error_code::max_recursion_depth),
+			"Maximum recursion depth ({0}) exceeded - possible infinite recursion",
+			static_cast<uint64_t>(JAI_MAX_CALL_DEPTH));
+	}
+	if (execution_budget_exhausted()) [[unlikely]] {
+		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
+		return checked_result<void>(
+			make_error_code(runtime_error_code::execution_budget_exceeded),
+			"Script execution budget exceeded - raise engine::execution_budget or break up the work");
+	}
+	// In-loop dispatch invariant: results travel on stack_, never through return_value_
+	assert(!has_return_value_);
+
+	std::shared_ptr<chunk> body_chunk;
+	try {
+		body_chunk = std::static_pointer_cast<chunk>(function.backend_body_cache);
+		if (!body_chunk) {
+			body_chunk = chunk_for_body(function.name, function.parameters, function.body, function.local_count);
+			function.backend_body_cache = body_chunk;
+		}
+		if (call_records_top_ == call_records_.size()) {
+			call_records_.push_back(std::make_unique<call_record>());
+		}
+	} catch (...) {
+		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
+		throw;
+	}
+
+	call_record& rec = *call_records_[call_records_top_];
+	++call_records_top_;
+	rec.caller = &caller;
+	rec.fn = &function;
+	rec.callee_pin = std::move(callee);
+	rec.prev_env = environment_;
+	rec.try_base = try_records_.size();
+	rec.iter_base = iter_states_.size();
+	rec.cfor_base = cfor_states_.size();
+	if (has_args) {
+		std::swap(rec.saved_metadata, saved_metadata);   // swap reuses both capacities
+		rec.metadata_saved = true;
+	}
+	rec.locals.function_name = function.name;
+	rec.locals.reserve_locals(std::max(function.local_count, body_chunk->local_count));
+	try {
+		setup_callee_env(function, rec.locals, rec.prev_env);
+	} catch (...) {
+		if (rec.metadata_saved) {
+			current_arg_metadata_ = std::move(rec.saved_metadata);
+			rec.metadata_saved = false;
+		}
+		rec.callee_pin = make_null();
+		rec.prev_env = nullptr;
+		--call_records_top_;
+		throw;
+	}
+	++current_call_depth_;
+	rec.f.code = body_chunk.get();
+	rec.f.pin = std::move(body_chunk);
+	rec.f.ip = 0;
+	rec.f.locals = &rec.locals;
+	rec.f.entry_env = environment_;
+	rec.f.stack_base = stack_.size();
+	rec.f.top_level = false;
+	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
+
+	checked_result<void> bound;
+	try {
+		bound = bind_parameters(function, arguments, rec.locals, *rec.f.code);
+	} catch (...) {
+		pop_script_frame_core(rec);
+		throw;
+	}
+	if (!bound) {
+		pop_script_frame_core(rec);
+		return bound;
+	}
+	switch_to_ = &rec.f;
+	return {};
+}
+
+// Exact cleanup order of call_script_function's epilogue (cleanup lambda + frame_guard
+// + depth guard). Destroys the callee's script_value state NOW — deferring destruction
+// is observable.
+void vm_backend::pop_script_frame_core(call_record& rec) {
+	clear_this_on_frame_exit();
+	environment_ = std::move(rec.prev_env);
+	if (stack_.size() > rec.f.stack_base) {
+		stack_.erase(stack_.begin() + rec.f.stack_base, stack_.end());
+	}
+	if (try_records_.size() > rec.try_base) {
+		try_records_.erase(try_records_.begin() + rec.try_base, try_records_.end());
+	}
+	if (iter_states_.size() > rec.iter_base) {
+		iter_states_.erase(iter_states_.begin() + rec.iter_base, iter_states_.end());
+	}
+	if (cfor_states_.size() > rec.cfor_base) {
+		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
+	}
+	if (!rec.env_lazy) {
+		// Moved out first so the pool's use_count()==1 guard sees today's count
+		release_scope_env(std::move(rec.f.entry_env));
+	} else {
+		rec.f.entry_env = nullptr;
+	}
+	rec.locals.locals.clear();   // destroy callee locals now, keep capacity
+	rec.locals.closure_env = nullptr;
+	rec.locals.this_object_ptr.reset();
+	rec.locals.is_method = false;
+	rec.locals.static_class_def = nullptr;
+	rec.locals.is_static_method = false;
+	rec.callee_pin = make_null();
+	rec.f.pin.reset();
+	rec.f.code = nullptr;
+	if (rec.metadata_saved) {
+		current_arg_metadata_ = std::move(rec.saved_metadata);
+		rec.metadata_saved = false;
+	}
+	--current_call_depth_;
+	frames_.pop_back();
+	--call_records_top_;
+}
+
+checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {
+	call_record& rec = *call_records_[call_records_top_ - 1];
+	script_value result = make_null();
+	if (ins.a) {
+		result = std::move(stack_.back());
+		stack_.pop_back();
+	}
+	// Deref + conversion run while the callee's env/frame are still live (native order)
+	auto conv = convert_return_value(std::move(result), *rec.fn);
+	if (!conv) {
+		pop_script_frame_core(rec);
+		fp = rec.caller;
+		return conv.error_value();
+	}
+	pop_script_frame_core(rec);
+	fp = rec.caller;
+	stack_.push_back(std::move(conv.value()));
+	++fp->ip;
+	return {};
+}
+
+checked_result<void> vm_backend::fall_off_script_frame(frame*& fp) {
+	call_record& rec = *call_records_[call_records_top_ - 1];
+	script_value result = implicit_this_result(rec.locals);   // conversion skipped: fall-off parity
+	pop_script_frame_core(rec);
+	fp = rec.caller;
+	stack_.push_back(std::move(result));
+	++fp->ip;
+	return {};
+}
+
+void vm_backend::convert_cpp_exception_at_frame(frame*& fp, const script_exception& e) {
+	call_record& rec = *call_records_[call_records_top_ - 1];
+	assert(fp == &rec.f);
+	// The throwing frame's cleanup runs while is_unwinding_ is still false (no trace),
+	// like the native catch(...) path; conversion then happens at the caller
+	pop_script_frame_core(rec);
+	fp = rec.caller;
+	active_exception_value_ = script_value(std::string(e.what()), engine_);
+	current_exception_ = e;
+	is_unwinding_ = true;
+	stack_.push_back(make_null());
+}
+
+void vm_backend::pop_records_to(size_t records_base, frame*& fp) {
+	while (call_records_top_ > records_base) {
+		call_record& rec = *call_records_[call_records_top_ - 1];
+		pop_script_frame_core(rec);
+		fp = rec.caller;
+	}
 }
 
 void vm_backend::setup_callee_env(const script_defined_function& function, call_frame& locals,

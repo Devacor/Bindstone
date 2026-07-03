@@ -76,6 +76,28 @@ namespace jai::vm {
 
         struct frame_guard;
 
+        // One logical script->script activation executed inside the current native run()
+        // (Squirrel EnterFrame shape). Records live behind unique_ptr in a grow-only pool
+        // so &rec.f stays address-stable (frames_ entries, try_record.owner and rec.caller
+        // hold raw frame*).
+        struct call_record {
+            frame f;                                   // frames_ gets &f; f.locals = &locals
+            call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
+            script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the script_defined_function
+            const script_defined_function* fn = nullptr;
+            frame* caller = nullptr;                   // resume target: native entry frame or another record's f
+            std::shared_ptr<environment> prev_env;
+            std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+            bool metadata_saved = false;
+            bool env_lazy = false;
+            size_t try_base = 0;
+            size_t iter_base = 0;
+            size_t cfor_base = 0;
+        };
+        std::vector<std::unique_ptr<call_record>> call_records_;  // grows, never shrinks mid-run
+        size_t call_records_top_ = 0;                  // records [0, top) are live
+        frame* switch_to_ = nullptr;                   // set by the push path, consumed by op_call's case
+
         string_symbolizer* symbolizer_;
         std::shared_ptr<environment> environment_;
         engine* engine_ = nullptr;
@@ -199,7 +221,18 @@ namespace jai::vm {
                                               size_t local_count);
 
         checked_result<void> run(frame& entry);
-        checked_result<void> run_dispatch(frame*& fp);
+        checked_result<void> run_dispatch(frame*& fp, const size_t records_base);
+        // In-loop call machinery: push/pop of call_records_ without native recursion
+        checked_result<void> push_script_frame(frame& caller, script_value&& callee,
+                                               const script_defined_function& function,
+                                               const std::vector<script_value>& arguments,
+                                               std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
+                                               bool has_args);
+        void pop_script_frame_core(call_record& rec);
+        checked_result<void> return_from_script_frame(frame*& fp, const vm_instruction& ins);
+        checked_result<void> fall_off_script_frame(frame*& fp);
+        void convert_cpp_exception_at_frame(frame*& fp, const script_exception& e);
+        void pop_records_to(size_t records_base, frame*& fp);
         script_value run_program(std::shared_ptr<chunk> program);
         checked_result<script_value> call_script_function(const script_defined_function& function,
                                                           const std::vector<script_value>& args);
@@ -359,8 +392,9 @@ namespace jai::vm {
         checked_result<script_value> run_fiber(coroutine_handle& handle, vm_coroutine_state& state);
         // Walks try records innermost-out: false = no handler in this frame, propagate
         bool unwind_to_handler(frame& f, const error_propagator* failure);
-        bool handle_op_error(frame& f, const checked_result<void>& result);
-        bool handle_throw_unwind(frame& f);
+        // Both walk outward over in-loop frames down to records_base, popping as they go
+        bool handle_op_error(frame*& fp, size_t records_base, const checked_result<void>& result);
+        bool handle_throw_unwind(frame*& fp, size_t records_base);
         checked_result<void> budget_exceeded_error() const;
         checked_result<void> exec_this(frame& f, const vm_instruction& ins);
         checked_result<void> exec_super(frame& f, const vm_instruction& ins);

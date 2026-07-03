@@ -253,6 +253,40 @@ public:
 			}, "runaway recursion raises max_recursion_depth");
 		});
 
+		// Parity-locked quirk (verified on both backends 2026-07-03): when a method calls a
+		// plain top-level function, the callee's exit path clears the CALLER method scope's
+		// this-binding. Afterwards an unqualified field read throws undefined-variable and
+		// `this.x` reads through a nulled this (type mismatch). Any call-path rework must
+		// reproduce this bug-for-bug on both backends.
+		test("pinned_quirk_callee_clears_caller_this", [this]() {
+			const char* unqualified_field_read = R"(
+				int helper() { return 1; }
+				class P { int x = 5; int m() { helper(); return x; } }
+				var p = P();
+				p.m();
+			)";
+			const char* qualified_this_read = R"(
+				int helper() { return 1; }
+				class Q { int x = 5; auto m() { helper(); return this.x; } }
+				var q = Q();
+				q.m();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				std::string unqualified_error;
+				try { e->execute(unqualified_field_read); }
+				catch (const std::exception& ex) { unqualified_error = ex.what(); }
+				check_true(unqualified_error.find("Undefined variable 'x'") != std::string::npos,
+					"unqualified field read after a plain-function call throws undefined variable");
+				std::string qualified_error;
+				try { e->execute(qualified_this_read); }
+				catch (const std::exception& ex) { qualified_error = ex.what(); }
+				check_true(qualified_error.find("Type mismatch") != std::string::npos,
+					"this.x after a plain-function call reads a nulled this");
+			}
+		});
+
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
 			e->add_variadic_function("sum_all", [](const std::vector<script_value>& args) -> checked_result<script_value> {

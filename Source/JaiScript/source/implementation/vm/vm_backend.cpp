@@ -3811,9 +3811,18 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 		return checked_result<void>(make_error_code(runtime_error_code::not_a_function));
 	}
 
+	const script_function& func = callee.as_function();
+	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
+	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
+	const auto* thunk = func.target<script_callable_thunk>();
+	const bool direct = thunk && thunk->eng == engine_ &&
+	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
+	const bool in_loop = direct && arguments.size() == thunk->payload.fn->parameters.size();
+
 	// Inline the invoke tail: an extra callee frame per script call would blow the
-	// native stack before JAI_MAX_CALL_DEPTH is reached in Debug builds
-	const bool has_args = argc > 0;
+	// native stack before JAI_MAX_CALL_DEPTH is reached in Debug builds.
+	// Ref-free in-loop callees never read arg metadata, so skip the build entirely.
+	const bool has_args = argc > 0 && !(in_loop && !thunk->payload.fn->has_reference_parameters);
 	std::vector<std::pair<uint64_t, environment*>> saved_metadata;
 	if (has_args) {
 		saved_metadata = std::move(current_arg_metadata_);
@@ -3829,13 +3838,7 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 		}
 	}
 
-	const script_function& func = callee.as_function();
-	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
-	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
-	const auto* thunk = func.target<script_callable_thunk>();
-	const bool direct = thunk && thunk->eng == engine_ &&
-	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
-	if (direct && arguments.size() == thunk->payload.fn->parameters.size()) {
+	if (in_loop) {
 		// Exact-arity direct callees stay inside the dispatch loop (Squirrel EnterFrame
 		// shape); default-arg and arity-error calls keep the native path below.
 		// push_script_frame owns saved_metadata restoration on every exit path.
@@ -3897,7 +3900,17 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 
 checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site) {
 	const size_t argc = arguments.size();
-	const bool has_args = argc > 0;
+
+	const script_function& func = callee.as_function();
+	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
+	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
+	const auto* thunk = func.target<script_callable_thunk>();
+	const bool direct = thunk && thunk->eng == engine_ &&
+	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
+	const bool in_loop = direct && arguments.size() == thunk->payload.fn->parameters.size();
+
+	// Ref-free in-loop callees never read arg metadata, so skip the build entirely
+	const bool has_args = argc > 0 && !(in_loop && !thunk->payload.fn->has_reference_parameters);
 	std::vector<std::pair<uint64_t, environment*>> saved_metadata;
 	if (has_args) {
 		saved_metadata = std::move(current_arg_metadata_);
@@ -3913,13 +3926,7 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 		}
 	}
 
-	const script_function& func = callee.as_function();
-	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
-	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
-	const auto* thunk = func.target<script_callable_thunk>();
-	const bool direct = thunk && thunk->eng == engine_ &&
-	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
-	if (direct && arguments.size() == thunk->payload.fn->parameters.size()) {
+	if (in_loop) {
 		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes
 		// switch_to_. push_script_frame owns saved_metadata restoration on every exit.
 		try {

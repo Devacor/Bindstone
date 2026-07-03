@@ -432,6 +432,42 @@ public:
 			}
 		});
 
+		// Stage 4 (metadata skip): ref-free direct callees skip the per-call arg-metadata
+		// build, so current_arg_metadata_ holds a stale outer snapshot while they run.
+		// Ref-param binding around and after such calls must be unaffected.
+		test("ref_param_call_surrounds_ref_free_call", [this]() {
+			const char* src = R"(
+				int plain(int a) { return a + 1; }
+				function bump(int& t) { var w = plain(2); t = t + w; }
+				var v = 5;
+				bump(v);
+				bump(v);
+				v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)11, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_free_call_inside_ref_call_arguments", [this]() {
+			// plain() runs (and skips metadata) while bump's argument list is being
+			// evaluated; bump's own ref metadata is built afterwards and must bind v
+			const char* src = R"(
+				int plain(int a) { return a * 2; }
+				function bump(int& t, int by) { t = t + by; }
+				var v = 1;
+				bump(v, plain(3));
+				v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)7, e->execute(src).as_int());
+			}
+		});
+
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
 			e->add_variadic_function("sum_all", [](const std::vector<script_value>& args) -> checked_result<script_value> {

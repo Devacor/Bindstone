@@ -341,6 +341,104 @@ public:
             )");
         });
 
+        // === Worst cases: recursion + allocation heavy (from the Squirrel comparison) ===
+
+        benchmark("Fibonacci(15) [recursion]", [this]() {
+            if (!bite) {
+                test_engine->execute("function fib(auto n) -> auto { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }");
+                bite = test_engine->jaibite("fib(15);");
+            }
+            bite->execute();
+        });
+
+        benchmark("Recurse 10 Locals (depth=15)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    function recurseWithLocals(int depth) -> int {
+                        if (depth <= 0) { return 0; }
+                        auto a = depth * 2;
+                        auto b = depth + 3;
+                        auto c = a + b;
+                        auto d = c * 2;
+                        auto e = d - a;
+                        auto f = e + b;
+                        auto g = f * depth;
+                        auto h = g - c;
+                        auto i = h + d;
+                        auto j = i - e;
+                        auto sum = a + b + c + d + e + f + g + h + i + j;
+                        return sum + recurseWithLocals(depth - 1);
+                    }
+                )");
+                bite = test_engine->jaibite("recurseWithLocals(15);");
+            }
+            bite->execute();
+        });
+
+        benchmark("BST insert/sum/rotate (15 nodes)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    class TreeNode {
+                        int value = 0;
+                        TreeNode left = null;
+                        TreeNode right = null;
+                        TreeNode(int val) { value = val; }
+                    }
+                    function insertNode(TreeNode root, int val) -> TreeNode {
+                        if (root == null) { return TreeNode(val); }
+                        if (val < root.value) {
+                            root.left = insertNode(root.left, val);
+                        } else {
+                            root.right = insertNode(root.right, val);
+                        }
+                        return root;
+                    }
+                    function inorderSum(TreeNode node) -> int {
+                        if (node == null) { return 0; }
+                        return inorderSum(node.left) + node.value + inorderSum(node.right);
+                    }
+                    function treeHeight(TreeNode node) -> int {
+                        if (node == null) { return 0; }
+                        auto leftH = treeHeight(node.left);
+                        auto rightH = treeHeight(node.right);
+                        if (leftH > rightH) { return 1 + leftH; }
+                        return 1 + rightH;
+                    }
+                    function rotateRight(TreeNode y) -> TreeNode {
+                        if (y == null) { return null; }
+                        if (y.left == null) { return y; }
+                        auto x = y.left;
+                        y.left = x.right;
+                        x.right = y;
+                        return x;
+                    }
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto tree_root = TreeNode(8);
+                    tree_root = insertNode(tree_root, 4);
+                    tree_root = insertNode(tree_root, 12);
+                    tree_root = insertNode(tree_root, 2);
+                    tree_root = insertNode(tree_root, 6);
+                    tree_root = insertNode(tree_root, 10);
+                    tree_root = insertNode(tree_root, 14);
+                    tree_root = insertNode(tree_root, 1);
+                    tree_root = insertNode(tree_root, 3);
+                    tree_root = insertNode(tree_root, 5);
+                    tree_root = insertNode(tree_root, 7);
+                    tree_root = insertNode(tree_root, 9);
+                    tree_root = insertNode(tree_root, 11);
+                    tree_root = insertNode(tree_root, 13);
+                    tree_root = insertNode(tree_root, 15);
+
+                    auto tree_sum = inorderSum(tree_root);
+                    auto tree_height = treeHeight(tree_root);
+                    tree_root = rotateRight(tree_root);
+                    tree_sum = inorderSum(tree_root);
+                )");
+            }
+            bite->execute();
+        });
+
         // === String Performance Benchmarks ===
         // These measure the shared_ptr string optimization effectiveness
 

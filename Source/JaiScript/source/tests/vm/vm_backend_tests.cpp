@@ -468,6 +468,196 @@ public:
 			}
 		});
 
+		// Ref-param binding across scopes: both backends must mutate the actual argument
+		// variable, wherever it lives (block env, method env, caller frame slot).
+		test("ref_param_from_block_and_loop_scopes", [this]() {
+			const char* src = R"(
+				function bump(int& t) { t = t + 1; }
+				var a = 0;
+				{ bump(a); }
+				if (true) { bump(a); }
+				var i = 0;
+				while (i < 2) { bump(a); i = i + 1; }
+				for (int k = 0; k < 3; k++) { bump(a); }
+				for (auto x : [1, 2]) { bump(a); }
+				a;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)9, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_binds_caller_slot_local_not_same_named_global", [this]() {
+			// The worst historical failure: the callee wrote through a same-named GLOBAL
+			// while the caller's slot local stayed untouched
+			const char* src = R"(
+				var t = 100;
+				function bump(int& t) { t = t + 1; }
+				function caller() -> int { var t = 5; bump(t); return t; }
+				caller() * 1000 + t;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)6100, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_slot_local_from_inner_block_survives_block_exit", [this]() {
+			const char* src = R"(
+				function bump(int& t) { t = t + 1; }
+				function f() -> int {
+					var t = 5;
+					{ bump(t); }
+					return t;
+				}
+				f();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)6, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_global_from_method_body", [this]() {
+			const char* src = R"(
+				var g = 1;
+				function bumpg(int& t) { t = t + 5; }
+				class C { int m() { bumpg(g); return g; } }
+				var c = C();
+				c.m();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)6, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_pass_through", [this]() {
+			const char* src = R"(
+				function inner(int& x) { x = x + 1; }
+				function outer(int& y) { inner(y); }
+				var v = 0;
+				outer(v);
+				v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)1, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_pass_through_with_intermediate_local", [this]() {
+			// The extra local used to flip the vm intermediate into a framed env and
+			// change behavior; both shapes must work identically now
+			const char* src = R"(
+				function inner(int& x) { x = x + 1; }
+				function mid(int& x) { var t = x; inner(x); }
+				var x = 1;
+				mid(x);
+				x;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)2, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_array_mutation_from_try_block", [this]() {
+			const char* src = R"(
+				var arr = [1];
+				function r1(auto& a) { a.push(4); }
+				var failed = 0;
+				try { r1(arr); } catch (e) { failed = 1; }
+				arr.size() * 10 + failed;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)20, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_default_arg_slow_path_from_function_local", [this]() {
+			const char* src = R"(
+				function r4(auto& a, int z = 0) { a.push(9); }
+				function f() -> int {
+					var arr = [1];
+					r4(arr);
+					return arr.size();
+				}
+				f();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)2, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_two_same_named_block_locals", [this]() {
+			const char* src = R"(
+				function bump(int& t) { t = t + 1; }
+				function f() -> int {
+					var acc = 0;
+					{ var t = 10; bump(t); acc = acc + t; }
+					{ var t = 20; bump(t); acc = acc + t; }
+					return acc;
+				}
+				f();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)32, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_interleaved_locals_in_loop", [this]() {
+			const char* src = R"(
+				function bump(int& t) { t = t + 1; }
+				function f() -> int {
+					var a = 0;
+					var b = 100;
+					for (int i = 0; i < 3; i++) { bump(a); bump(b); }
+					return a * 1000 + b;
+				}
+				f();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)3103, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_instance_field_from_method_body", [this]() {
+			// The mutation must land in the instance field on both backends. (A bare
+			// field read right after a plain call in the same method body hits the
+			// separately-pinned caller-this-clear quirk, so the size is read outside.)
+			const char* src = R"(
+				function pushRef(auto& a) { a.push(5); }
+				class Holder {
+					auto d = [1];
+					int go() { pushRef(d); return 7; }
+				}
+				var h = Holder();
+				var r = h.go();
+				r * 10 + h.d.size();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)72, e->execute(src).as_int());
+			}
+		});
+
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
 			e->add_variadic_function("sum_all", [](const std::vector<script_value>& args) -> checked_result<script_value> {

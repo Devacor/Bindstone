@@ -19,6 +19,7 @@ namespace jai::vm {
     // Per-call-site argument metadata: symbol id per argument (UINT64_MAX = not an identifier)
     struct call_site {
         std::vector<uint64_t> arg_symbols;
+        std::vector<uint32_t> arg_slots;           // caller frame slot per argument (k_invalid_u32 = env-resolved)
         uint32_t member_node = k_invalid_u32;      // op_call_method: member_expr node index
         uint64_t receiver_symbol = UINT64_MAX;     // op_call_method: identifier receiver symbol id
     };

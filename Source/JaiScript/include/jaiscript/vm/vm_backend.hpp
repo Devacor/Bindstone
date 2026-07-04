@@ -89,7 +89,7 @@ namespace jai::vm {
             bool method_result_anchor = false;         // method frames: replicate make_bound_method's keep-alive fix-up
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
-            std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+            std::vector<arg_ref_metadata> saved_metadata;
             bool metadata_saved = false;
             bool env_lazy = false;
             size_t try_base = 0;
@@ -174,8 +174,8 @@ namespace jai::vm {
         coroutine_handle* active_coroutine_ = nullptr;
         bool yielding_ = false;
 
-        std::vector<std::pair<uint64_t, environment*>> current_arg_metadata_;
-        std::vector<std::vector<std::pair<uint64_t, environment*>>> external_metadata_stack_;
+        std::vector<arg_ref_metadata> current_arg_metadata_;
+        std::vector<std::vector<arg_ref_metadata>> external_metadata_stack_;
 
         bool has_custom_numeric_ops_ = false;
         std::function<checked_result<script_value>(const std::vector<script_value>&)> subscript_resolver_;
@@ -231,7 +231,7 @@ namespace jai::vm {
                                                const script_defined_function& function,
                                                const std::vector<script_value>& args,
                                                size_t args_base, size_t argc,
-                                               std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
+                                               std::vector<arg_ref_metadata>& saved_metadata,
                                                bool has_args);
         // Method-call flattening: a script-class instance method enters the dispatch loop
         // directly (no bound-method mint, no arg re-copies, no native run() recursion)
@@ -246,7 +246,7 @@ namespace jai::vm {
                                                const std::shared_ptr<function_decl>& ast,
                                                script_value&& receiver,
                                                const std::vector<script_value>& arguments,
-                                               std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
+                                               std::vector<arg_ref_metadata>& saved_metadata,
                                                bool has_args);
         void anchor_method_result(script_value& result, script_value& receiver);
         void pop_script_frame_core(call_record& rec);
@@ -263,7 +263,11 @@ namespace jai::vm {
         checked_result<void> bind_parameters(const std::vector<parameter>& parameters,
                                              const std::vector<script_value>& args,
                                              size_t args_base, size_t argc,
-                                             call_frame& locals, chunk& body_chunk);
+                                             call_frame& locals, chunk& body_chunk,
+                                             const std::shared_ptr<environment>& caller_env);
+        // Fills current_arg_metadata_ (already cleared/reserved) from the call site,
+        // recording caller frame-slot coordinates for bare-identifier slot locals
+        void build_call_arg_metadata(frame& f, const call_site& site, size_t argc);
         void clear_this_on_frame_exit();
         script_value implicit_this_result(call_frame& locals);
         script_value implicit_result_for_record(call_record& rec);

@@ -1419,11 +1419,15 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				site.receiver_symbol = static_cast<identifier_expr*>(member->object.get())->symbol_id;
 			}
 			site.arg_symbols.reserve(expr->arguments.size());
+			site.arg_slots.reserve(expr->arguments.size());
 			for (const auto& arg : expr->arguments) {
 				if (arg->get_type() == node_type::identifier_expr) {
-					site.arg_symbols.push_back(static_cast<identifier_expr*>(arg.get())->symbol_id);
+					auto* arg_ident = static_cast<identifier_expr*>(arg.get());
+					site.arg_symbols.push_back(arg_ident->symbol_id);
+					site.arg_slots.push_back(identifier_slot_operand(arg_ident));
 				} else {
 					site.arg_symbols.push_back(UINT64_MAX);
+					site.arg_slots.push_back(k_invalid_u32);
 				}
 				compile_expression(arg);
 			}
@@ -1440,11 +1444,15 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	compile_expression(expr->callee);
 	call_site site;
 	site.arg_symbols.reserve(expr->arguments.size());
+	site.arg_slots.reserve(expr->arguments.size());
 	for (const auto& arg : expr->arguments) {
 		if (arg->get_type() == node_type::identifier_expr) {
-			site.arg_symbols.push_back(static_cast<identifier_expr*>(arg.get())->symbol_id);
+			auto* arg_ident = static_cast<identifier_expr*>(arg.get());
+			site.arg_symbols.push_back(arg_ident->symbol_id);
+			site.arg_slots.push_back(identifier_slot_operand(arg_ident));
 		} else {
 			site.arg_symbols.push_back(UINT64_MAX);
+			site.arg_slots.push_back(k_invalid_u32);
 		}
 		compile_expression(arg);
 	}

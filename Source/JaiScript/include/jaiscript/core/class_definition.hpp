@@ -651,6 +651,26 @@ public:
         return all_field_defaults_cache_;
     }
 
+    /// Class that DECLARED field `id` (own defaults first, then parents, then the C++
+    /// base). Field-reference bindability needs the declarer's kind: a C++ .property()
+    /// member keeps a dead fields_ placeholder whose truth lives in the C++ object.
+    const class_definition* find_field_declaring_class(uint64_t id) const {
+        if (field_defaults_.find(id) != field_defaults_.end()) {
+            return this;
+        }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (const class_definition* found = parent->find_field_declaring_class(id)) {
+                    return found;
+                }
+            }
+        }
+        if (cpp_base_class_) {
+            return cpp_base_class_->find_field_declaring_class(id);
+        }
+        return nullptr;
+    }
+
     void set_parent(std::shared_ptr<class_definition> parent) {
         parent_classes_.clear();
         if (parent) {

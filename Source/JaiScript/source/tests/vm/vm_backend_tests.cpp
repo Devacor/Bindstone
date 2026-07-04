@@ -2310,6 +2310,147 @@ public:
 				"interp: rejection names the actual class");
 			check_eq(i_out, v_out, "rejection message parity");
 		});
+
+		// A script destructor firing at callee-frame pop used to segfault the interpreter:
+		// call_stack_.pop_back() released the frame's locals mid-mutation and the dtor's
+		// reentrant call_function grew the vector under it. Teardown now destroys the
+		// frame's locals after the pop completes (VM stable-record parity).
+		test("script_dtor_at_frame_pop_reentrancy", [this, run_both_backends]() {
+			const char* plain = R"(
+				class Box { int v = 0; ~Box() { } }
+				function f() -> int { var b = Box(); return 1; }
+				f();
+			)";
+			auto [i_plain, v_plain] = run_both_backends(plain);
+			check_eq(std::string("1"), i_plain, "interp: local dtor at frame pop");
+			check_eq(i_plain, v_plain, "plain dtor-at-pop parity");
+
+			// Ref-pinned owner dropped mid-call: the holder keeps the instance alive, so
+			// the dtor fires at callee-frame pop, after the write and before the caller
+			// resumes - same ordering on both backends
+			const char* pinned = R"(
+				var log = "";
+				class Box { int v = 5; ~Box() { log = log + "D"; } }
+				var g = Box();
+				function f(int& x) { g = null; log = log + "a"; x = 7; log = log + "b"; return x; }
+				var r = f(g.v);
+				log = log + "c";
+				if (r == 7) { log = log + "!"; }
+				log;
+			)";
+			auto [i_pin, v_pin] = run_both_backends(pinned);
+			check_eq(std::string("abDc!"), i_pin, "interp: dtor fires at frame pop, ref write lands");
+			check_eq(i_pin, v_pin, "pinned dtor ordering parity");
+		});
+
+		// dynamic_binder .property() members (stdlib pair, engine objects) have a
+		// class-level field default but NO instance fields_ node: binding must keep the
+		// exact non-lvalue error instead of lazily inserting a dead shadow field that
+		// swallows writes
+		test("tier1_cpp_property_member_keeps_non_lvalue_error", [this]() {
+			const char* src = R"(
+				var m = {"a": 1, "b": 2};
+				function f(int& x) { x = 77; }
+				var msg = "";
+				for (var& kv : m) {
+					try { f(kv.second); } catch (e) { msg = "" + e; }
+					kv.second = 55;
+					break;
+				}
+				msg + "|" + to_string(m["a"]);
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
+					std::string("C++ property member keeps the exact error, got: ") + got);
+				check_true(got.find("|55") != std::string::npos, "direct property write still reaches the map");
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical behavior on both backends"); }
+			}
+		});
+
+		// shared_ptr-tagged field constraint: raw same-class/subtype instances are
+		// accepted (every direct field-write path accepts them), and rejections render
+		// the constraint in full instead of "Cannot assign 'S' to field of type 'S'"
+		test("tier1_shared_ptr_field_constraint_accepts_same_class", [this, run_both_backends]() {
+			const char* src = R"(
+				class S { int x = 1; }
+				class T : S { int t = 2; }
+				class H { S p = null; }
+				function put(var& x, var val) { x = val; }
+				var h1 = H(); h1.p = shared_ptr<S>();
+				var s2 = S(); s2.x = 9;
+				put(h1.p, s2);
+				var h2 = H(); h2.p = shared_ptr<S>();
+				put(h2.p, T());
+				var h3 = H(); h3.p = shared_ptr<S>();
+				var msg = "";
+				try { put(h3.p, 5); } catch (e) { msg = "" + e; }
+				var summary = "";
+				if (h1.p.x == 9) { summary = summary + "A"; }
+				if (h2.p.t == 2) { summary = summary + "B"; }
+				summary + "|" + msg;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_true(i_out.find("AB|") == 0, std::string("interp: raw same-class and subtype accepted, got: ") + i_out);
+			check_true(i_out.find("Cannot assign 'int' to field of type 'shared_ptr<S>'") != std::string::npos,
+				"interp: rejection names the full shared_ptr constraint");
+			check_eq(i_out, v_out, "shared_ptr field constraint parity");
+		});
+
+		// Element refs and direct subscript assign are ONE gate: the same store into the
+		// same typed array passes or fails with byte-identical text on both routes
+		// (the ref gate used to accept subtypes/var-held instances the direct gate
+		// rejects, and named 'any'-tagged values by their actual class)
+		test("tier1_element_ref_gate_matches_direct_subscript", [this, run_both_backends]() {
+			const char* src = R"(
+				class Animal { int id = 0; }
+				class Dog : Animal { int extra = 1; }
+				class Box { int b = 0; }
+				function put(var& x, var val) { x = val; }
+				array<Animal> pen = [Animal()];
+				array<int> ints = [1, 2, 3];
+				var va = Animal();
+				var vb = Box();
+				var d1 = ""; var r1 = "";
+				try { pen[0] = Dog(); } catch (e) { d1 = "" + e; }
+				try { put(pen[0], Dog()); } catch (e) { r1 = "" + e; }
+				var d2 = ""; var r2 = "";
+				try { pen[0] = va; } catch (e) { d2 = "" + e; }
+				try { put(pen[0], va); } catch (e) { r2 = "" + e; }
+				var d3 = ""; var r3 = "";
+				try { ints[0] = vb; } catch (e) { d3 = "" + e; }
+				try { put(ints[1], vb); } catch (e) { r3 = "" + e; }
+				d1 + "&" + r1 + "&" + d2 + "&" + r2 + "&" + d3 + "&" + r3;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			auto split = [](const std::string& s) {
+				std::vector<std::string> parts;
+				size_t pos = 0;
+				while (true) {
+					size_t amp = s.find('&', pos);
+					parts.push_back(amp == std::string::npos ? s.substr(pos) : s.substr(pos, amp - pos));
+					if (amp == std::string::npos) { break; }
+					pos = amp + 1;
+				}
+				return parts;
+			};
+			auto parts = split(i_out);
+			check_eq((size_t)6, parts.size(), "six error captures");
+			check_true(parts[0].find("Cannot assign 'Dog' to element of type 'Animal'") != std::string::npos,
+				std::string("direct gate rejects subtype, got: ") + parts[0]);
+			check_eq(parts[0], parts[1], "subtype: ref matches direct");
+			check_true(parts[2].find("Cannot assign 'any' to element of type 'Animal'") != std::string::npos,
+				std::string("direct gate rejects var-held instance, got: ") + parts[2]);
+			check_eq(parts[2], parts[3], "var-held: ref matches direct");
+			check_true(parts[4].find("Cannot assign 'any' to element of type 'int'") != std::string::npos,
+				std::string("direct gate names var tags 'any', got: ") + parts[4]);
+			check_eq(parts[4], parts[5], "naming: ref matches direct");
+			check_eq(i_out, v_out, "element gate parity");
+		});
 	}
 };
 

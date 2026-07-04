@@ -477,6 +477,12 @@ void vm_backend::prepare_for_execution() {
 		yielding_ = false;
 	}
 
+	// The outer run may be suspended inside a ctor/method scope env holding 'this';
+	// run_program swaps the nested program to the global env and restores this one.
+	if (reentrant) {
+		return;
+	}
+
 	if (engine_) {
 		if (auto global = engine_->get_global_environment()) {
 			environment_ = global;
@@ -7102,6 +7108,34 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 }
 
 script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
+	// Reentrant execute (include/import, or a host callback firing mid-script, e.g. hot
+	// reload): the nested program runs at TOP LEVEL - global environment - and the
+	// suspended outer run's environment (a ctor/method scope env carrying 'this') is
+	// restored afterwards. Mirrors interpreter::execute's reentry_isolation.
+	struct reentry_isolation {
+		vm_backend* self;
+		bool reentrant;
+		std::shared_ptr<environment> saved_env;
+		explicit reentry_isolation(vm_backend* backend) : self(backend), reentrant(!backend->frames_.empty()) {
+			if (!reentrant) { return; }
+			saved_env = self->environment_;
+			if (self->engine_) {
+				if (auto global = self->engine_->get_global_environment()) {
+					self->environment_ = std::move(global);
+					return;
+				}
+			}
+			while (self->environment_ && self->environment_->get_parent()) {
+				self->environment_ = self->environment_->get_parent();
+			}
+		}
+		~reentry_isolation() {
+			if (reentrant) {
+				self->environment_ = std::move(saved_env);
+			}
+		}
+	} isolation(this);
+
 	implicit_result_.reset();
 	has_return_value_ = false;
 	return_value_.reset();

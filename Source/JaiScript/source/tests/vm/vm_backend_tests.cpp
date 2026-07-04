@@ -2451,6 +2451,81 @@ public:
 			check_eq(parts[4], parts[5], "naming: ref matches direct");
 			check_eq(i_out, v_out, "element gate parity");
 		});
+
+		auto run_both_backends_stdlib = [](const char* src) {
+			std::string out[2];
+			int idx = 0;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->execution_budget(0);
+				stdlib::register_all(*e);
+				try { out[idx] = e->execute(src).to_string(); }
+				catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+				++idx;
+			}
+			return std::make_pair(out[0], out[1]);
+		};
+
+		// Tier 3(a): the primitive bind fast path must be invisible - tagging, retype
+		// freedom, and caller isolation identical whether the gate takes (primitive
+		// arg) or not (string arg takes the full conversion path)
+		test("tier3_var_param_bind_semantics", [this, run_both_backends_stdlib]() {
+			const char* src = R"(
+				function probe(var x) -> string {
+					var before = type_of(x);
+					x = [1, 2];
+					return before + ">" + type_of(x);
+				}
+				function clobber(var x) { x = 999; }
+				var i = 7; var f = 1.5; var b = true; var c = 'q'; var s = "str";
+				var out = probe(i) + "|" + probe(f) + "|" + probe(b) + "|" + probe(c) + "|" + probe(s);
+				clobber(i); clobber(s);
+				out + "|" + i + "|" + s;
+			)";
+			auto [i_out, v_out] = run_both_backends_stdlib(src);
+			check_eq(std::string("int>array|float>array|bool>array|char>array|string>array|7|str"), i_out,
+				"interp var-param bind semantics");
+			check_eq(i_out, v_out, "var-param bind parity");
+		});
+
+		test("tier3_int_param_bind_semantics", [this, run_both_backends_stdlib]() {
+			const char* src = R"(
+				function take(int x) -> string {
+					var t = type_of(x);
+					x = x + 1;
+					return t + ":" + x;
+				}
+				var a = 5;
+				var r1 = take(a);
+				var r2 = take(2.9);
+				r1 + "|" + r2 + "|" + a;
+			)";
+			auto [i_out, v_out] = run_both_backends_stdlib(src);
+			check_eq(i_out, v_out, "int-param bind parity");
+			check_true(i_out.find("|5") == i_out.size() - 2, std::string("caller local isolated, got: ") + i_out);
+			check_true(i_out.find("int:6|") == 0, std::string("int arg binds unconverted, got: ") + i_out);
+		});
+
+		// Tier 3(c): a throw during callee setup (default-arg eval / param conversion)
+		// restores the caller environment - script keeps running and sees caller locals
+		test("tier3_env_restored_after_throwing_bind", [this, run_both_backends]() {
+			const char* src = R"(
+				class NC { int z = 0; }
+				function boom(int n, int d = 1 / 0) -> int { return n + d; }
+				function wants(int x) -> int { return x; }
+				var keep = 40;
+				var msg = "";
+				try { boom(1); } catch (e) { msg = "caught"; }
+				keep = keep + 1;
+				try { wants(NC()); } catch (e) { msg = msg + "+caught2"; }
+				keep = keep + 1;
+				msg + ":" + keep;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("caught+caught2:42"), i_out, "interp env restored after throwing bind");
+			check_eq(i_out, v_out, "throwing-bind parity");
+		});
 	}
 };
 

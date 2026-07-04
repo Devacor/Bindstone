@@ -7865,15 +7865,20 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				}
 			}
 		} else {
-			// auto (inferred) or var (any-typed) parameter + primitive argument: copy IS
-			// clone for primitives and carries the arg's type_info verbatim - exactly what
-			// the full path (identity try_convert + clone) produces, so the conversion
-			// machinery has nothing to do. Explicitly typed parameters take the full path.
+			// auto/var parameter + primitive argument, or a typed primitive parameter whose
+			// storage already matches: copy IS clone for primitives and carries the arg's
+			// type_info verbatim - exactly what the full path (identity try_convert + clone)
+			// produces, so the conversion machinery has nothing to do. Mismatched-storage
+			// typed parameters take the full conversion path.
 			const size_t ri = arg.raw_storage_index();
-			if ((!param.type || param.type->base_type == script_value_type::jai_any_type) &&
-			    !arg.is_cpp_bound() &&
+			if (!arg.is_cpp_bound() &&
 			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT ||
-			     ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR)) {
+			     ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR) &&
+			    (!param.type || param.type->base_type == script_value_type::jai_any_type ||
+			     (param.type->base_type == script_value_type::jai_int_type && ri == script_value::TYPEID_INT) ||
+			     (param.type->base_type == script_value_type::jai_float_type && ri == script_value::TYPEID_FLOAT) ||
+			     (param.type->base_type == script_value_type::jai_bool_type && ri == script_value::TYPEID_BOOL) ||
+			     (param.type->base_type == script_value_type::jai_char_type && ri == script_value::TYPEID_CHAR))) {
 				locals.set_local(param.slot_index, script_value(arg));
 				continue;
 			}

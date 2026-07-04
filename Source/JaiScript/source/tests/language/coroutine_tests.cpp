@@ -365,6 +365,130 @@ public:
             check_eq(int64_t(112), result.as<int64_t>());
         });
 
+        test("resume_inside_running_function_keeps_caller_frame", [this]() {
+            // Suspending used to steal the CALLER's call frames into the coroutine
+            // state, leaving the rest of the caller's body frameless (hang/corruption)
+            auto eng = jai::foundry::make_engine();
+            auto result = eng->execute(R"(
+                coroutine int gen2() {
+                    yield 10;
+                    yield 11;
+                    return 0;
+                }
+                function pair() -> int {
+                    auto g = gen2();
+                    var local = 100;
+                    return g.resume() + g.resume() + local;
+                }
+                pair() + pair();
+            )");
+            check_eq(int64_t(242), result.as<int64_t>());
+        });
+
+        test("nested_coroutine_declared_and_resumed_inside_function", [this]() {
+            auto eng = jai::foundry::make_engine();
+            auto result = eng->execute(R"(
+                function pair_sum(int base) -> int {
+                    coroutine int gen() {
+                        yield base * 10;
+                        yield base * 10 + 1;
+                        return 0;
+                    }
+                    auto g = gen();
+                    return g.resume() + g.resume();
+                }
+                pair_sum(1) + pair_sum(2);
+            )");
+            check_eq(int64_t(62), result.as<int64_t>());
+        });
+
+        test("coroutine_range_for_over_inner_coroutine", [this]() {
+            // Interpreter used to abort the whole process (env-cycle abort) here
+            auto eng = jai::foundry::make_engine();
+            auto result = eng->execute(R"(
+                coroutine int inner() {
+                    for (int i = 0; i < 3; i++) {
+                        yield i;
+                    }
+                }
+                coroutine int outer() {
+                    for (auto x : inner()) {
+                        yield x * 10;
+                    }
+                    return 0 - 1;
+                }
+                auto o = outer();
+                o.resume() * 100 + o.resume() * 10 + o.resume();
+            )");
+            check_eq(int64_t(120), result.as<int64_t>());
+        });
+
+        test("failed_resume_marks_only_that_handle_done", [this]() {
+            // The failed handle must report done() even when an unrelated coroutine
+            // was resumed between its suspension and its failure
+            auto eng = jai::foundry::make_engine();
+            auto result = eng->execute(R"(
+                function boom() -> auto { throw "die"; }
+                coroutine int bad() { yield 1; boom(); yield 2; return 3; }
+                coroutine int good() { yield 10; yield 20; return 30; }
+                auto vb = bad();
+                auto vg = good();
+                auto d = 0;
+                auto r1 = vb.resume();
+                if (vb.done()) { d = d + 1; }
+                auto r2 = vg.resume();
+                if (vb.done()) { d = d + 2; }
+                auto caught = 0;
+                try { vb.resume(); } catch (e) { caught = 1; }
+                if (vb.done()) { d = d + 4; }
+                if (!vg.done()) { d = d + 8; }
+                d * 10 + caught;
+            )");
+            check_eq(int64_t(121), result.as<int64_t>());
+        });
+
+        test("yield_per_element_inside_array_range_for", [this]() {
+            // Resume used to re-evaluate the container and restart iteration at 0
+            auto eng = jai::foundry::make_engine();
+            auto result = eng->execute(R"(
+                coroutine int walker() {
+                    auto acc = 1000;
+                    for (auto x : [3, 5, 7]) {
+                        yield x;
+                        acc = acc + x;
+                    }
+                    return acc;
+                }
+                auto w = walker();
+                w.resume() * 1000 + w.resume() * 100 + w.resume() * 10 + (w.resume() - 1000);
+            )");
+            check_eq(int64_t(3585), result.as<int64_t>());
+        });
+
+        test("resume_through_by_ref_helper_param", [this]() {
+            auto eng = jai::foundry::make_engine();
+            auto result = eng->execute(R"(
+                coroutine int gen() {
+                    for (int i = 1; i <= 4; i++) {
+                        yield i * i;
+                    }
+                    return 0;
+                }
+                function pump(auto& h) -> auto {
+                    auto local = 100;
+                    auto v = h.resume();
+                    return local + v;
+                }
+                auto c = gen();
+                auto s = 0;
+                for (int i = 0; i < 4; i++) {
+                    s = s + pump(c);
+                }
+                s;
+            )");
+            check_eq(int64_t(430), result.as<int64_t>());
+        });
+
         test("nested_coroutine_snapshot_is_per_declaration", [this]() {
             auto eng = jai::foundry::make_engine();
             auto result = eng->execute(R"(

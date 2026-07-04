@@ -2451,6 +2451,16 @@ std::shared_ptr<environment> interpreter::get_global_environment() const {
 void interpreter::prepare_for_execution() {
     arm_execution_deadline();
 
+    // Reentrant execute (include/import or a host callback calling execute() mid-run):
+    // the outer run's live state - value stack, return/exception state, environment -
+    // must survive; interpreter::execute isolates the nested program at top level
+    // itself. Clearing here used to hand the outer frame the GLOBAL env to release
+    // into the pool, which later recycled (and wiped) it. Mirrors the vm backend's
+    // frames_-based reentrancy guard.
+    if (executing_) {
+        return;
+    }
+
     // Clear execution state
     valueStack_.clear();
     returnValue_.reset();  // No need to create a value - value_or() will create it if needed
@@ -2505,7 +2515,47 @@ void interpreter::define_variable(const std::string& name, const script_value& v
 }
 
 script_value interpreter::execute(const std::vector<declaration_ptr>& declarations) {
-    // std::cerr << "DEBUG: interpreter::execute called with " << declarations.size() << " declarations\n";
+    // Reentrant execute (a host callback firing mid-script, e.g. hot reload): the
+    // nested program must run at TOP LEVEL - global environment, fresh call/value
+    // stacks - and restore the in-flight run's state afterwards. Without this,
+    // top-level definitions land in the running frame's pooled env (and evaporate
+    // with it), the outer run's value stack gets cleared, and the pool reset below
+    // recycles environments the outer frames still hold.
+    struct reentry_isolation {
+        interpreter* self;
+        bool reentrant;
+        std::shared_ptr<environment> saved_env;
+        std::vector<call_frame> saved_call_stack;
+        script_valueStack saved_values;
+        std::optional<script_value> saved_return;
+        bool saved_has_return = false;
+
+        explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->executing_) {
+            if (reentrant) {
+                saved_env = self->environment_;
+                saved_call_stack = std::move(self->call_stack_);
+                self->call_stack_.clear();
+                saved_values = std::move(self->valueStack_);
+                self->valueStack_.clear();
+                saved_return = std::move(self->returnValue_);
+                saved_has_return = self->hasReturnValue_;
+                self->environment_ = self->get_global_environment();
+            }
+            self->executing_ = true;
+        }
+        ~reentry_isolation() {
+            if (reentrant) {
+                self->environment_ = std::move(saved_env);
+                self->call_stack_ = std::move(saved_call_stack);
+                self->valueStack_ = std::move(saved_values);
+                self->returnValue_ = std::move(saved_return);
+                self->hasReturnValue_ = saved_has_return;
+            } else {
+                self->executing_ = false;
+            }
+        }
+    } isolation(this);
+
     script_value last_script_value = make_value();
     hasReturnValue_ = false;  // Reset return value state
     captured_trace_.clear();
@@ -2569,14 +2619,18 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         
         // If we hit a return statement, break out of execution
         if (hasReturnValue_) {
-            reset_environment_pool();  // Reset pool for next execution
+            if (!isolation.reentrant) {
+                reset_environment_pool();  // Reset pool for next execution
+            }
             return returnValue_.value();
         }
     }
-    
 
 
-    reset_environment_pool();  // Reset pool for next execution
+
+    if (!isolation.reentrant) {
+        reset_environment_pool();  // Reset pool for next execution
+    }
     return last_script_value;
 }
 

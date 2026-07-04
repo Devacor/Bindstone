@@ -594,6 +594,11 @@ namespace jai {
         bool hasBreakRequest_ = false;
         bool hasContinueRequest_ = false;
 
+        // True while execute() runs a program - a reentrant execute (host callback
+        // mid-script, e.g. hot reload) isolates itself at top level and must not
+        // reset the environment pool the outer run still uses
+        bool executing_ = false;
+
         // Coroutine support
         coroutine_handle* active_coroutine_ = nullptr;
         bool hasYieldRequest_ = false;

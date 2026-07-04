@@ -2481,9 +2481,17 @@ std::shared_ptr<environment> interpreter::get_global_environment() const {
 void interpreter::prepare_for_execution() {
     arm_execution_deadline();
 
+    // Clear exception state even when re-entered: the engine's catch path relies on
+    // this scrub to strip a nested run's uncaught throw before the suspended outer
+    // run resumes (vm backend ordering — clears before its reentrancy early-return).
+    current_exception_.reset();
+    is_unwinding_ = false; trace_captured_ = false;
+    active_exception_value_.reset();  // No need to create a value here either
+    current_catch_var_id_ = 0;
+
     // Reentrant execute (include/import or a host callback calling execute() mid-run):
-    // the outer run's live state - value stack, return/exception state, environment -
-    // must survive; interpreter::execute isolates the nested program at top level
+    // the outer run's live state - value stack, return value, environment - must
+    // survive; interpreter::execute isolates the nested program at top level
     // itself. Clearing here used to hand the outer frame the GLOBAL env to release
     // into the pool, which later recycled (and wiped) it. Mirrors the vm backend's
     // frames_-based reentrancy guard.
@@ -2495,12 +2503,6 @@ void interpreter::prepare_for_execution() {
     valueStack_.clear();
     returnValue_.reset();  // No need to create a value - value_or() will create it if needed
     hasReturnValue_ = false;
-
-    // Clear exception state
-    current_exception_.reset();
-    is_unwinding_ = false; trace_captured_ = false;
-    active_exception_value_.reset();  // No need to create a value here either
-    current_catch_var_id_ = 0;
 
     // Clear coroutine state — unless re-entered from inside a RUNNING coroutine
     // (include/import, or a host callback calling execute() mid-resume): clearing

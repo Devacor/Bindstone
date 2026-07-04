@@ -306,6 +306,27 @@ public:
             check_eq((int64_t)5, eng->execute("wants3(5)").as_int());
             check_eq((int64_t)1, eng->execute("g_c").as_int());
         });
+
+        // A nested execute's uncaught throw belongs to the C++ host: once the host
+        // swallows it, the suspended outer run must resume clean. The interpreter used
+        // to skip the exception-state scrub on reentrant prepare_for_execution, so the
+        // nested exception leaked into (and killed, or teleported into a catch of) the
+        // outer run.
+        test("reentrant_execute_swallowed_throw_does_not_leak_into_outer_run", [&]() {
+            auto eng = make_engine();
+            jai::engine* raw = eng.get();
+            bool host_caught = false;
+            eng->add_function("swallow", [raw, &host_caught]() {
+                try { raw->execute("throw \"nested boom\";"); }
+                catch (const std::exception&) { host_caught = true; }
+            });
+            check_eq((int64_t)42, eng->execute("var ok = 0; swallow(); ok = 42; ok;").as_int());
+            check_true(host_caught);
+            // Not catchable by an unrelated outer try/catch either
+            check_eq(std::string("none"),
+                eng->execute("var got = \"none\"; try { swallow(); } catch (e) { got = \"\" + e; } got;").as<std::string>());
+            check_eq((int64_t)7, eng->execute("3 + 4").as_int());
+        });
     }
 };
 

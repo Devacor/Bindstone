@@ -341,6 +341,48 @@ public:
             check_eq(eng->get_variable("r3").as<int64_t>(), int64_t(99));
         });
 
+        test("nested_coroutine_captures_enclosing_locals", [this]() {
+            // A coroutine declared inside a function snapshots the enclosing frame's
+            // slot locals at declaration (lambda-style capture); each factory call gets
+            // its own independent snapshot.
+            auto eng = jai::foundry::make_engine();
+            auto result = eng->execute(R"(
+                function make_counter(auto start) -> auto {
+                    coroutine int counter() {
+                        auto v = start;
+                        while (v < start + 3) {
+                            yield v;
+                            v = v + 1;
+                        }
+                        return 0 - 1;
+                    }
+                    return counter();
+                }
+                auto c1 = make_counter(5);
+                auto c2 = make_counter(50);
+                c1.resume() + c2.resume() + c1.resume() + c2.resume();
+            )");
+            check_eq(int64_t(112), result.as<int64_t>());
+        });
+
+        test("nested_coroutine_snapshot_is_per_declaration", [this]() {
+            auto eng = jai::foundry::make_engine();
+            auto result = eng->execute(R"(
+                function make_gen(int base) -> auto {
+                    coroutine int gen() {
+                        yield base * 10;
+                        yield base * 10 + 1;
+                        return 0;
+                    }
+                    return gen();
+                }
+                auto g1 = make_gen(1);
+                auto g2 = make_gen(2);
+                g1.resume() + g1.resume() + g2.resume() + g2.resume();
+            )");
+            check_eq(int64_t(62), result.as<int64_t>());
+        });
+
     }
 };
 

@@ -4,6 +4,7 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
+#include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <stdexcept>
 #include <sstream>
 #include <cmath>
@@ -8700,6 +8701,65 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         func_decl_ptr->local_count = decl->local_count;
 
         auto closure_env = environment_;
+
+        // Nested (function-local) coroutine: the resumed body runs on its own call
+        // frame, so enclosing-frame slot locals are invisible to it. Snapshot them by
+        // value into a capture env, lambda-style: the first declaration builds the plan
+        // and patches those body identifiers to env lookups; later declarations replay it.
+        if (!call_stack_.empty()) {
+            if (!decl->outer_slot_plan_built) {
+                std::unordered_set<uint64_t> declared;
+                for (const auto& p : decl->parameters) {
+                    if (p.symbol_id == UINT64_MAX) {
+                        p.symbol_id = string_symbolizer_->intern(p.name);
+                    }
+                    declared.insert(p.symbol_id);
+                }
+                {
+                    detail::body_walker walker;
+                    walker.symbolizer = string_symbolizer_;
+                    walker.on_declared = [&declared](uint64_t id) { declared.insert(id); };
+                    walker.stmt(decl->body);
+                }
+                std::vector<identifier_expr*> to_patch;
+                std::unordered_set<uint64_t> seen;
+                detail::body_walker walker;
+                walker.symbolizer = string_symbolizer_;
+                walker.on_identifier = [&](identifier_expr* ident) {
+                    if (ident->slot_index == SIZE_MAX) return;
+                    if (declared.count(ident->symbol_id)) return;
+                    if (seen.insert(ident->symbol_id).second) {
+                        decl->outer_slot_plan.emplace_back(ident->symbol_id, ident->slot_index);
+                    }
+                    to_patch.push_back(ident);
+                };
+                walker.stmt(decl->body);
+                for (auto* ident : to_patch) {
+                    ident->slot_index = SIZE_MAX;
+                }
+                decl->outer_slot_plan_built = true;
+            }
+            if (!decl->outer_slot_plan.empty()) {
+                const size_t outer_slot_count = call_stack_.back().local_count();
+                std::shared_ptr<environment> captureEnv;
+                for (const auto& [sym, slot] : decl->outer_slot_plan) {
+                    if (slot < outer_slot_count) {
+                        if (script_value* slot_val = call_stack_.back().get_local(slot)) {
+                            if (!captureEnv) {
+                                // Parent = global, NOT the enclosing pooled env: an escaping
+                                // handle would otherwise recycle its own ancestor into an env
+                                // cycle (same lifecycle hazard visit_lambda_expr documents)
+                                captureEnv = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
+                            }
+                            captureEnv->define(sym, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                        }
+                    }
+                }
+                if (captureEnv) {
+                    closure_env = captureEnv;
+                }
+            }
+        }
         engine* eng = engine_;
         uint64_t coroutine_type_id = coroutine_handle_type_id_;
         script_value functionValue = script_value::make_function(

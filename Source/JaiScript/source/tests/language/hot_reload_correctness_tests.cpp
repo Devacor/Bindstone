@@ -269,6 +269,43 @@ public:
             check_eq((int64_t)400, eng->execute("r.rec(4)").as_int());
             check_eq((int64_t)100, eng->execute("auto r2 = R(); r2.rec(1);").as_int());
         });
+
+        // A reentrant execute must not clobber the suspended outer run's environment:
+        // the VM used to lose the method-scope env (and with it 'this') after a host
+        // callback executed script mid-ctor/mid-method.
+        test("reentrant_execute_preserves_this_in_ctor_and_method", [&]() {
+            auto eng = make_engine();
+            jai::engine* raw = eng.get();
+            eng->add_function("reenter", [raw]() { raw->execute("g_r = g_r + 1;"); });
+            eng->execute("var g_r = 0;");
+            auto ctor_result = eng->execute(R"(
+                class W2 {
+                    int x = 0;
+                    W2(int n) { reenter(); x = n; }
+                    int bump(int n) { reenter(); x = x + n; return x; }
+                }
+                var w = W2(3);
+                "" + w.x + ":" + g_r;
+            )");
+            check_eq(std::string("3:1"), ctor_result.as<std::string>());
+            check_eq((int64_t)10, eng->execute("w.bump(7)").as_int());
+            check_eq((int64_t)2, eng->execute("g_r").as_int());
+        });
+
+        // Same failure surfaced silently when the ctor ran as a bind-time conversion:
+        // the VM swallowed the broken ctor and reported "no suitable constructor".
+        test("reentrant_execute_inside_conversion_ctor", [&]() {
+            auto eng = make_engine();
+            jai::engine* raw = eng.get();
+            eng->add_function("reenter2", [raw]() { raw->execute("g_c = g_c + 1;"); });
+            eng->execute("var g_c = 0;");
+            eng->execute(R"(
+                class W3 { int x = 0; W3(int n) { reenter2(); x = n; } }
+                function wants3(W3 w) -> int { return w.x; }
+            )");
+            check_eq((int64_t)5, eng->execute("wants3(5)").as_int());
+            check_eq((int64_t)1, eng->execute("g_c").as_int());
+        });
     }
 };
 

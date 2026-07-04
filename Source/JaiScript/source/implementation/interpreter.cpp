@@ -27,6 +27,29 @@ namespace {
         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
     }
 
+    // Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: share the
+    // holder, except constrained element refs re-derive an unconstrained alias (auto&
+    // drops the element-type constraint - pinned decl semantics)
+    checked_result<script_value> decl_ref_alias(const script_value& source, engine* eng) {
+        auto refHolder = source.get_reference_holder();
+        if (!refHolder) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+        }
+        if (!refHolder->container && refHolder->sourceEnv.expired()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
+        }
+        if (refHolder->container_element_type) {
+            if (refHolder->container) {
+                if (refHolder->container_index >= refHolder->container->size()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
+                }
+                return script_value::make_element_reference(refHolder->container, refHolder->container_index, refHolder->sourceEnv.lock(), eng, nullptr);
+            }
+            return script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock(), eng);
+        }
+        return script_value(source);
+    }
+
     // A handle's backend_state is always interpreter-owned here: an engine's backend
     // is fixed before its first execute, so no other backend can have populated it.
     interpreter_coroutine_state& coroutine_state(coroutine_handle& handle) {
@@ -5031,16 +5054,11 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             
             // Check if the target is itself a reference
             if (targetPtr->is_reference()) {
-                // Reference to reference - get the final target and its environment
-                auto refHolder = targetPtr->get_reference_holder();
-                targetPtr = refHolder->target;
-                // Use the original reference's environment
-                auto target_env = refHolder->sourceEnv.lock();
-                if (!target_env) {
-                    return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
+                auto aliased = decl_ref_alias(*targetPtr, engine_);
+                if (!aliased) {
+                    return aliased.error_value();
                 }
-                script_value refValue = script_value::make_reference(targetPtr, target_env);
-                define_variable(std::move(refValue));
+                define_variable(std::move(aliased.value()));
             } else {
                 // Regular reference - use current environment
                 script_value refValue = script_value::make_reference(targetPtr, environment_);
@@ -5051,17 +5069,13 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value result = pop_value();
             
-            // If the result is a reference, we can create a reference to its target
+            // If the result is a reference, alias it (share the holder)
             if (result.is_reference()) {
-                auto refHolder = result.get_reference_holder();
-                script_value* targetPtr = refHolder->target;
-                auto target_env = refHolder->sourceEnv.lock();
-                if (!target_env) {
-                    return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
+                auto aliased = decl_ref_alias(result, engine_);
+                if (!aliased) {
+                    return aliased.error_value();
                 }
-                // Create a new reference to the same target
-                script_value refValue = script_value::make_reference(targetPtr, target_env);
-                define_variable(std::move(refValue));
+                define_variable(std::move(aliased.value()));
             } else {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Cannot take reference of non-lvalue expression");
             }
@@ -10415,15 +10429,15 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         script_value* slotPtr = caller_frame.get_local(meta.slot);
         if (slotPtr) {
             if (slotPtr->is_reference()) {
-                auto refHolder = slotPtr->get_reference_holder();
-                if (!refHolder || !refHolder->target) {
+                if (!slotPtr->get_reference_holder()) {
                     return checked_result<void>(
                         make_error_code(runtime_error_code::invalid_reference),
                         "Reference target is null"
                     );
                 }
-                script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-                call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
+                // Share the holder: zero alloc, and element refs keep their container
+                // re-resolution instead of a stale flattened pointer
+                call_stack_[frame_index].set_local(param.slot_index, script_value(*slotPtr));
             } else {
                 script_value refValue = script_value::make_reference(slotPtr, caller_frame.ensure_ref_anchor(string_symbolizer_));
                 call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
@@ -10450,17 +10464,15 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         );
     }
 
-    // If the argument is itself a reference, get the final target
+    // If the argument is itself a reference, share its holder
     if (argPtr->is_reference()) {
-        auto refHolder = argPtr->get_reference_holder();
-        if (!refHolder || !refHolder->target) {
+        if (!argPtr->get_reference_holder()) {
             return checked_result<void>(
                 make_error_code(runtime_error_code::invalid_reference),
                 "Reference target is null"
             );
         }
-        script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-        call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
+        call_stack_[frame_index].set_local(param.slot_index, script_value(*argPtr));
         return {};
     }
 

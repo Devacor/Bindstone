@@ -678,6 +678,246 @@ public:
 			}
 		});
 
+		// Stage 1 (shared-holder pass-through): passing a bound reference onward shares the
+		// original holder instead of minting a new one per hop, so element refs keep their
+		// container re-resolution and env-anchored refs keep the origin anchor.
+		test("ref_param_pass_through_chain_depth3", [this]() {
+			// pre-fix: green both backends (slot-path flatten kept the origin anchor alive)
+			const char* src = R"(
+				function inc(int& x) { x = x + 1; }
+				function relay1(int& y) { inc(y); }
+				function relay2(int& z) { relay1(z); }
+				function origin() -> int { var t = 5; relay2(t); return t; }
+				origin();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)6, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_pass_through_env_origin_depth3", [this]() {
+			// pre-fix: green both backends
+			const char* src = R"(
+				function inc(int& x) { x = x + 7; }
+				function relay1(int& y) { inc(y); }
+				function relay2(int& z) { relay1(z); }
+				var v = 1;
+				relay2(v);
+				v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)8, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_env_visible_ref_decl_arg", [this]() {
+			// pre-fix: green both backends (env-path flatten of a global ref decl)
+			const char* src = R"(
+				var v = 1;
+				auto& g = v;
+				function bump(int& t) { t = t + 9; }
+				bump(g);
+				v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)10, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_element_ref_single_hop", [this]() {
+			// pre-fix: green both backends (no realloc, creation-time element address valid)
+			const char* src = R"(
+				var arr = [1, 2, 3];
+				function inc(int& x) { x = x + 10; }
+				function driver() { for (auto& el : arr) { inc(el); } }
+				driver();
+				arr[0] + arr[1] + arr[2];
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)36, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_element_ref_pass_through_realloc", [this]() {
+			// Sanctioned fix (b): pre-fix the bind flatten pinned the creation-time element
+			// address, so the write landed in the freed pre-realloc buffer (arr[0] stayed 7)
+			const char* src = R"(
+				var arr = [7];
+				function grow(int& x) {
+					for (int i = 0; i < 64; i = i + 1) { arr.push(0); }
+					x = 42;
+				}
+				function relay(int& x) { grow(x); }
+				function driver() { for (auto& el : arr) { relay(el); break; } }
+				driver();
+				arr[0];
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)42, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_element_ref_shrink_errors", [this]() {
+			// Sanctioned fix (b): pre-fix the write went through a stale pointer into the
+			// popped element (silent corruption, msg stayed empty); now the re-resolve errors
+			const char* src = R"(
+				var arr = [1, 2, 3];
+				var msg = "";
+				function wipe(int& x) { arr.pop(); arr.pop(); arr.pop(); x = 5; }
+				function driver() { for (auto& el : arr) { try { wipe(el); } catch (e) { msg = e; } break; } }
+				driver();
+				msg;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				auto msg = e->execute(src).as<std::string>();
+				check_true(msg.find("removed array element") != std::string::npos,
+					"shrunk element write errors");
+				if (!use_vm) { first = msg; } else { check_eq(first, msg, "identical error text on both backends"); }
+			}
+		});
+
+		test("ref_param_recursive_pass_down", [this]() {
+			// pre-fix: green both backends (one fresh holder per hop); post-fix shares one holder
+			const char* src = R"(
+				function down(int& x, int n) { if (n > 0) { down(x, n - 1); } else { x = 99; } }
+				function go() -> int { var v = 0; down(v, 40); return v; }
+				go();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)99, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_decl_shares_env_ref", [this]() {
+			// pre-fix: green both backends (decl flatten re-targeted v directly)
+			const char* src = R"(
+				var v = 1;
+				auto& g = v;
+				auto& h = g;
+				h = h + 3;
+				v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)4, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_decl_element_constraint_dropped", [this]() {
+			// D4v pin: auto& over a typed-array element drops the element-type constraint
+			// (today's decl semantics), so the retyping write must keep succeeding
+			const char* src = R"(
+				array<int> arr = [1, 2, 3];
+				auto& x = arr[1];
+				x = "s";
+				type_of(arr[1]);
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				check_eq(std::string("string"), e->execute(src).as<std::string>());
+			}
+		});
+
+		test("ref_decl_element_ref_survives_realloc", [this]() {
+			// Sanctioned fix (b) at the decl site: pre-fix auto& flattened the element ref
+			// into a raw pointer, so the post-realloc write was lost (arr[1] stayed 8)
+			const char* src = R"(
+				var arr = [7, 8];
+				auto& x = arr[1];
+				for (int i = 0; i < 64; i = i + 1) { arr.push(0); }
+				x = 42;
+				arr[1];
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)42, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_param_type_of_stable_through_hops", [this]() {
+			// Wrapper-tag canary: sharing keeps the origin's reference tag; type_of must
+			// keep reporting the referent type at every hop
+			const char* src = R"(
+				function leaf(int& x) -> string { return type_of(x); }
+				function mid(int& y) -> string { return type_of(y) + ":" + leaf(y); }
+				var v = 5;
+				mid(v);
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				check_eq(std::string("int:int"), e->execute(src).as<std::string>());
+			}
+		});
+
+		test("ref_escape_via_lambda_after_frame_death", [this]() {
+			// pre-fix: "6|" both backends (the [&] capture snapshots the ref param's value,
+			// so the escaped lambda works on its own copy). Sharing must not change this.
+			const char* src = R"(
+				var f = null;
+				function trap(int& x) { f = [&]() { x = x + 1; return x; }; }
+				function run() -> int { var v = 5; trap(v); return v; }
+				run();
+				var msg = "";
+				var got = -1;
+				try { got = f(); } catch (e) { msg = e; }
+				to_string(got) + "|" + msg;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				check_eq(std::string("6|"), e->execute(src).as<std::string>());
+			}
+		});
+
+		test("ref_param_calls_inside_coroutine_across_yields", [this]() {
+			// Metadata invariant: inner ref-param calls complete before each yield, so the
+			// suspended fiber never holds in-flight arg metadata
+			const char* src = R"(
+				function bump(int& t) { t = t + 1; }
+				coroutine int co() {
+					var a = 0;
+					bump(a);
+					yield a;
+					bump(a);
+					yield a;
+					return a * 10;
+				}
+				auto c = co();
+				auto r1 = c.resume();
+				auto r2 = c.resume();
+				auto r3 = c.resume();
+				r1 * 100 + r2 * 10 + r3;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				check_eq((int64_t)140, e->execute(src).as_int());
+			}
+		});
+
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
 			e->add_variadic_function("sum_all", [](const std::vector<script_value>& args) -> checked_result<script_value> {

@@ -7202,7 +7202,9 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	rec.caller = &caller;
 	rec.return_type = function.return_type;
 	rec.callee_pin = std::move(callee);
-	rec.prev_env = environment_;
+	// Moved, not copied: every branch below either overwrites environment_ or copies
+	// rec.prev_env back (lazy no-closure); the catch restores it on setup failure
+	rec.prev_env = std::move(environment_);
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
@@ -7225,6 +7227,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 				environment_ = function.closure_env;
 			} else {
 				rec.locals.closure_env = rec.prev_env;   // ref-param frames_ scan needs it
+				environment_ = rec.prev_env;   // callee runs in the caller's env
 			}
 		} else {
 			setup_callee_env(function, rec.locals, rec.prev_env);
@@ -7236,7 +7239,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 		}
 		rec.callee_pin = make_null();
 		rec.return_type = nullptr;
-		rec.prev_env = nullptr;
+		environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
 		--call_records_top_;
 		throw;
 	}
@@ -7359,7 +7362,9 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload
 	rec.method_result_anchor = true;
 	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
-	rec.prev_env = environment_;
+	// Moved, not copied: the method scope env always replaces environment_ below; the
+	// catch restores it on setup failure
+	rec.prev_env = std::move(environment_);
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
@@ -7389,7 +7394,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		rec.locals.this_object_ptr.reset();
 		rec.locals.is_method = false;
 		rec.locals.closure_env = nullptr;
-		rec.prev_env = nullptr;
+		environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
 		--call_records_top_;
 		throw;
 	}
@@ -7755,12 +7760,13 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				}
 			}
 		} else {
-			// auto (inferred) parameter + primitive argument: copy IS clone for
-			// primitives and carries the same type_info the inference locks onto,
-			// so the conversion machinery has nothing to do. var (any-typed) and
-			// explicitly typed parameters take the full path.
+			// auto (inferred) or var (any-typed) parameter + primitive argument: copy IS
+			// clone for primitives and carries the arg's type_info verbatim - exactly what
+			// the full path (identity try_convert + clone) produces, so the conversion
+			// machinery has nothing to do. Explicitly typed parameters take the full path.
 			const size_t ri = arg.raw_storage_index();
-			if (!param.type && !arg.is_cpp_bound() &&
+			if ((!param.type || param.type->base_type == script_value_type::jai_any_type) &&
+			    !arg.is_cpp_bound() &&
 			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT ||
 			     ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR)) {
 				locals.set_local(param.slot_index, script_value(arg));

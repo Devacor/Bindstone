@@ -1971,6 +1971,345 @@ public:
 			check_eq(lhs.to_string(), rhs.to_string(), "include-inside-function differential");
 			std::filesystem::remove(file_path);
 		});
+
+		// Tier-1 reference args x coroutines x deep recursion: dual-backend differentials
+		// (parity is checked as interp == vm; absolute values pin sanctioned semantics)
+
+		auto run_both_backends = [](const char* src) {
+			std::string out[2];
+			int idx = 0;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->execution_budget(0);
+				try { out[idx] = e->execute(src).to_string(); }
+				catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+				++idx;
+			}
+			return std::make_pair(out[0], out[1]);
+		};
+
+		test("tier1_field_ref_call_inside_coroutine_body", [this, run_both_backends]() {
+			const char* src = R"(
+				class Box { int v = 0; }
+				function bump(int& x) { x = x + 1; }
+				coroutine int gen(var b) {
+					bump(b.v);
+					yield b.v;
+					bump(b.v);
+					yield b.v;
+					bump(b.v);
+					return b.v;
+				}
+				var box = Box();
+				auto g = gen(box);
+				auto r1 = g.resume();
+				auto r2 = g.resume();
+				auto r3 = g.resume();
+				r1 * 1000 + r2 * 100 + r3 * 10 + box.v;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("1230"), i_out, "interp: tier1 field ref inside coroutine body");
+			check_eq(std::string("1230"), v_out, "vm: tier1 field ref inside coroutine body");
+		});
+
+		test("tier1_global_refs_across_resumes_with_mutation", [this, run_both_backends]() {
+			const char* src = R"(
+				class Box { int v = 10; }
+				var box = Box();
+				var arr = [1, 2, 3];
+				function bump(int& x) { x = x + 100; }
+				coroutine int gen() {
+					bump(arr[1]);
+					yield arr[1];
+					bump(box.v);
+					yield box.v;
+					return arr[1] + box.v;
+				}
+				auto g = gen();
+				auto r1 = g.resume();
+				arr.push(4); arr.push(5); arr.push(6); arr.push(7);
+				box.v = 50;
+				auto r2 = g.resume();
+				auto r3 = g.resume();
+				r1 * 100000 + r2 * 100 + r3;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("10215252"), i_out, "interp: global tier1 refs across resumes");
+			check_eq(std::string("10215252"), v_out, "vm: global tier1 refs across resumes");
+		});
+
+		// Coroutine parameters always bind by VALUE (both backends): resume runs far from
+		// the creation-site lvalues, so int& behaves as a value param here
+		test("coroutine_ref_param_lvalue_binds_by_value", [this, run_both_backends]() {
+			const char* src = R"(
+				class Box { int v = 7; }
+				var box = Box();
+				coroutine int gen(int& x) { x = x + 1; yield x; x = x + 1; return x; }
+				auto g = gen(box.v);
+				auto r1 = g.resume();
+				auto r2 = g.resume();
+				r1 * 1000 + r2 * 10 + box.v;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("8097"), i_out, "interp: coroutine int& binds the creation-time value");
+			check_eq(std::string("8097"), v_out, "vm: coroutine int& binds the creation-time value");
+		});
+
+		test("coroutine_ref_param_identifier_binds_by_value", [this, run_both_backends]() {
+			const char* src = R"(
+				var y = 7;
+				coroutine int gen(int& x) { x = x + 1; yield x; x = x + 1; return x; }
+				auto g = gen(y);
+				auto r1 = g.resume();
+				auto r2 = g.resume();
+				r1 * 1000 + r2 * 10 + y;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("8097"), i_out, "interp: coroutine int& binds the identifier's value");
+			check_eq(std::string("8097"), v_out, "vm: coroutine int& binds the identifier's value");
+		});
+
+		test("stale_metadata_first_resume_lvalue", [this, run_both_backends]() {
+			// resume() during argument evaluation of an enclosing call: the enclosing
+			// call's arg metadata must NOT leak into the coroutine's first-resume bind
+			const char* src = R"(
+				class Box { int v = 7; }
+				var box = Box();
+				coroutine int gen(int& x) { x = 99; yield 1; return 2; }
+				function take(var a, var b) -> int { return a + b; }
+				auto g = gen(555);
+				take(box.v, g.resume());
+				box.v;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("7"), i_out, "interp: stale lvalue metadata must not leak into first resume");
+			check_eq(std::string("7"), v_out, "vm: stale lvalue metadata must not leak into first resume");
+		});
+
+		test("stale_metadata_first_resume_identifier", [this, run_both_backends]() {
+			const char* src = R"(
+				var y = 7;
+				coroutine int gen(int& x) { x = 99; yield 1; return 2; }
+				function take(var a, var b) -> int { return a + b; }
+				auto g = gen(555);
+				take(y, g.resume());
+				y;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("7"), i_out, "interp: stale identifier metadata must not leak into first resume");
+			check_eq(std::string("7"), v_out, "vm: stale identifier metadata must not leak into first resume");
+		});
+
+		test("deep_tier1_bst_sequential", [this, run_both_backends]() {
+			// Worst-case (right-spine) ref-BST: 200 sequential inserts = ~20k calls with a
+			// Tier-1 lvalue arg per hop; superlinear per-call cost turns this into minutes
+			const char* src = R"(
+				class TreeNode { int value = 0; TreeNode left = null; TreeNode right = null; TreeNode(int v) { value = v; } }
+				function insertNode(var& node, int val) {
+					if (node == null) { node = TreeNode(val); return; }
+					if (val < node.value) { insertNode(node.left, val); } else { insertNode(node.right, val); }
+				}
+				var root = null;
+				for (int i = 1; i <= 200; ++i) { insertNode(root, i); }
+				var cur = root;
+				var count = 0;
+				var last = 0;
+				while (cur != null) { count = count + 1; last = cur.value; cur = cur.right; }
+				count * 10000 + last;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("2000200"), i_out, "interp: 200-deep tier1 ref BST");
+			check_eq(std::string("2000200"), v_out, "vm: 200-deep tier1 ref BST");
+		});
+
+		test("deep_tier2_passthrough_800", [this, run_both_backends]() {
+			const char* src = R"(
+				class Box { int v = 0; }
+				function deep(int& x, int d) { if (d == 0) { x = 42; return; } deep(x, d - 1); }
+				var b = Box();
+				deep(b.v, 800);
+				b.v;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("42"), i_out, "interp: 800-hop tier2 ref pass-through");
+			check_eq(std::string("42"), v_out, "vm: 800-hop tier2 ref pass-through");
+		});
+
+		test("yield_in_nested_ref_param_call", [this, run_both_backends]() {
+			const char* src = R"(
+				class Box { int v = 1; }
+				var box = Box();
+				function pumpYield(int& x) { x = x + 1; yield x; x = x + 1; }
+				coroutine int gen() { pumpYield(box.v); return box.v; }
+				auto g = gen();
+				auto r1 = g.resume();
+				auto r2 = g.resume();
+				r1 * 100 + r2 * 10 + box.v;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(i_out, v_out, "yield below a ref-param frame must agree across backends");
+		});
+
+		test("tier1_ref_call_in_loop_yield_replay", [this, run_both_backends]() {
+			const char* src = R"(
+				class Box { int v = 0; }
+				var box = Box();
+				function bump(int& x) { x = x + 1; }
+				coroutine int gen() {
+					for (int i = 0; i < 3; ++i) {
+						bump(box.v);
+						yield box.v;
+					}
+					return 0;
+				}
+				auto g = gen();
+				auto a = g.resume();
+				auto b = g.resume();
+				auto c = g.resume();
+				a * 1000 + b * 100 + c * 10 + box.v;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("1233"), i_out, "interp: tier1 ref call replayed inside loop+yield");
+			check_eq(std::string("1233"), v_out, "vm: tier1 ref call replayed inside loop+yield");
+		});
+
+		// The generic-binary custom-operator consult used to walk the caller env chain,
+		// which grows with recursion depth for eager-env callees - per-call cost became
+		// O(depth) and the ref-BST superlinear. Scaling ratio, not absolute time: 8x the
+		// work must stay near 8x the time (the walk made it ~250x).
+		test("recursive_generic_binary_cost_stays_linear", [this]() {
+			auto descent_ms = [this](bool use_vm, int depth) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->execution_budget(0);
+				e->execute(
+					"class Box { int v = 0; }\nvar b = Box();\n"
+					"function f(var& x, int d) { if (d < -1) { return; } if (d == 0) { x = x + 1; return; } f(b.v, d - 1); }");
+				std::string run = "b.v = 0; for (int rep = 0; rep < 10; ++rep) { f(b.v, " + std::to_string(depth) + "); } b.v;";
+				auto t0 = std::chrono::steady_clock::now();
+				auto result = e->execute(run);
+				double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+				check_eq((int64_t)10, result.as_int(), "descent workload result");
+				return ms;
+			};
+			for (bool use_vm : {false, true}) {
+				double small = std::max(descent_ms(use_vm, 50), 1.0);
+				double big = descent_ms(use_vm, 400);
+				check_lt(big, small * 40.0, use_vm ? "vm: deep descent must scale linearly"
+				                                   : "interp: deep descent must scale linearly");
+			}
+		});
+
+		// Ref-store error catchability is uniform: a removed element/field surfaces as the
+		// same caller-frame-catchable throw whether or not the bound container was typed;
+		// constraint violations are checked errors, catchable in the throwing frame.
+		test("ref_store_error_catchability_uniform", [this, run_both_backends]() {
+			const char* plain_store = R"(
+				array<int> arr = [1, 2, 3];
+				function f(int& x) {
+					while (arr.size() > 0) { arr.pop(); }
+					try { x = 5; } catch (e) { return "inner:" + e; }
+					return "no-error";
+				}
+				var out = "";
+				try { out = f(arr[2]); } catch (e) { out = "outer:" + e; }
+				out;
+			)";
+			auto [i_plain, v_plain] = run_both_backends(plain_store);
+			check_true(i_plain.find("outer:") == 0, "interp: plain ref store escapes to caller");
+			check_true(i_plain.find("removed array element") != std::string::npos, "interp: plain ref store error text");
+			check_eq(i_plain, v_plain, "plain ref store catchability parity");
+
+			const char* compound_store = R"(
+				array<int> arr = [1, 2, 3];
+				function f(int& x) {
+					while (arr.size() > 0) { arr.pop(); }
+					try { x += 1; } catch (e) { return "inner:" + e; }
+					return "no-error";
+				}
+				var out = "";
+				try { out = f(arr[2]); } catch (e) { out = "outer:" + e; }
+				out;
+			)";
+			auto [i_comp, v_comp] = run_both_backends(compound_store);
+			check_eq(i_plain, i_comp, "interp: constrained compound matches plain store catchability");
+			check_eq(i_comp, v_comp, "constrained compound catchability parity");
+
+			const char* type_error = R"(
+				array<int> arr = [1, 2, 3];
+				function f(int& x) {
+					try { x = "nope"; } catch (e) { return "inner:" + e; }
+					return "no-error";
+				}
+				var out = "";
+				try { out = f(arr[1]); } catch (e) { out = "outer:" + e; }
+				out;
+			)";
+			auto [i_type, v_type] = run_both_backends(type_error);
+			check_true(i_type.find("inner:") == 0, "interp: constraint violations stay catchable in the throwing frame");
+			check_true(i_type.find("Cannot assign 'string' to element of type 'int'") != std::string::npos,
+				"interp: constraint violation error text");
+			check_eq(i_type, v_type, "constraint violation catchability parity");
+		});
+
+		// Derived-to-base through a Tier-1 field ref: the constraint accepts subtypes,
+		// like typed parameter conversion and every direct field-write path do
+		test("tier1_field_ref_accepts_subtype", [this, run_both_backends]() {
+			const char* src = R"(
+				class Animal { int id = 0; }
+				class Dog : Animal { int extra = 1; }
+				class Holder { Animal pet = null; Holder() { pet = Animal(); } }
+				function put(var& x, var val) { x = val; }
+				var h = Holder();
+				put(h.pet, Dog());
+				h.pet.extra;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("1"), i_out, "interp: Dog assigns through Animal-constrained field ref");
+			check_eq(std::string("1"), v_out, "vm: Dog assigns through Animal-constrained field ref");
+		});
+
+		// A var local's tag is 'any'; the constraint check resolves the actual instance
+		// class instead of rejecting on the declaration tag
+		test("tier1_field_ref_accepts_var_held_instance", [this, run_both_backends]() {
+			const char* src = R"(
+				class Node { int v = 1; }
+				class Holder { Node n = null; Holder() { n = Node(); } }
+				function put(var& x, var val) { x = val; }
+				var h = Holder();
+				var src = Node();
+				src.v = 42;
+				put(h.n, src);
+				var sp = shared_ptr<Node>();
+				sp.v = 7;
+				var h2 = Holder();
+				put(h2.n, sp);
+				h.n.v * 100 + h2.n.v;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("4207"), i_out, "interp: var-held Node and shared_ptr<Node> assign through Node field ref");
+			check_eq(std::string("4207"), v_out, "vm: var-held Node and shared_ptr<Node> assign through Node field ref");
+		});
+
+		// Genuinely incompatible classes still error, naming the ACTUAL class (never 'any')
+		test("tier1_field_ref_rejects_unrelated_class_with_actual_name", [this, run_both_backends]() {
+			const char* src = R"(
+				class Node { int v = 1; }
+				class Stranger { int s = 2; }
+				class Holder { Node n = null; Holder() { n = Node(); } }
+				function put(var& x, var val) { x = val; }
+				var h = Holder();
+				var wrong = Stranger();
+				var out = "";
+				try { put(h.n, wrong); } catch (e) { out = "" + e; }
+				out;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_true(i_out.find("Cannot assign 'Stranger' to field of type 'Node'") != std::string::npos,
+				"interp: rejection names the actual class");
+			check_eq(i_out, v_out, "rejection message parity");
+		});
 	}
 };
 

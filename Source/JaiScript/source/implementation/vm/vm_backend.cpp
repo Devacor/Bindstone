@@ -1822,18 +1822,23 @@ checked_result<script_value> vm_backend::binary_general(token_type op, const scr
 	}
 
 	// The interpreter's general path consults registered global operator functions
-	// regardless of has_custom_numeric_ops (quirk preserved deliberately)
-	if (op_symbol_id != 0 && environment_ && environment_->contains(op_symbol_id)) {
-		auto op_result = environment_->get(op_symbol_id);
-		if (op_result && op_result.value().is_function()) {
-			script_value opFunc = std::move(op_result.value());
-			const script_function& func = opFunc.as_function();
-			std::vector<script_value> args = {left, right};
-			auto result = func(args);
-			if (!result) {
-				return result.error_value();
+	// regardless of has_custom_numeric_ops (quirk preserved deliberately). Operator
+	// symbols are only definable in the global env (C++ add_function), so the consult
+	// probes it directly - a chain walk here is O(depth) in eager-env recursion.
+	if (op_symbol_id != 0 && engine_) {
+		auto global_env = engine_->get_global_environment();
+		if (global_env && global_env->contains(op_symbol_id)) {
+			auto op_result = global_env->get(op_symbol_id);
+			if (op_result && op_result.value().is_function()) {
+				script_value opFunc = std::move(op_result.value());
+				const script_function& func = opFunc.as_function();
+				std::vector<script_value> args = {left, right};
+				auto result = func(args);
+				if (!result) {
+					return result.error_value();
+				}
+				return std::move(result.value());
 			}
-			return std::move(result.value());
 		}
 	}
 
@@ -2761,8 +2766,9 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 					case compound_percent: op = token_type::percent; opName = "%"; break;
 					default: op = token_type::plus; opName = "+"; break;
 				}
+				auto global_env = engine_ ? engine_->get_global_environment() : environment_;
 				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
-					environment_.get(), engine_, symbolizer_,
+					global_env.get(), engine_, symbolizer_,
 					[this](const script_value& l, token_type o, const script_value& r) {
 						return evaluate_arithmetic(l, o, r);
 					});

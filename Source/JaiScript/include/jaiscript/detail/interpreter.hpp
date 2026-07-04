@@ -95,6 +95,10 @@ namespace jai {
             ast_node* node;   // which block/loop/if we were inside
             size_t index;     // statement index (blocks), iteration (range-for), branch (if: 0=then,1=else)
             std::shared_ptr<environment> saved_env;  // environment to restore on resume (may be null)
+            // range-for only: the evaluated container (array/map/inner coroutine handle),
+            // so resume continues the SAME iteration instead of re-evaluating the
+            // container expression (which would re-mint a fresh inner coroutine)
+            std::optional<script_value> saved_container;
         };
 
         std::shared_ptr<environment> saved_environment;
@@ -103,8 +107,9 @@ namespace jai {
         bool saved_has_return = false;
 
         void push_continuation(ast_node* node, size_t index,
-                               std::shared_ptr<environment> env = nullptr) {
-            continuations_.push_back({node, index, std::move(env)});
+                               std::shared_ptr<environment> env = nullptr,
+                               std::optional<script_value> container = std::nullopt) {
+            continuations_.push_back({node, index, std::move(env), std::move(container)});
         }
         continuation_point* peek_continuation(ast_node* node) {
             if (!continuations_.empty() && continuations_.back().node == node) {

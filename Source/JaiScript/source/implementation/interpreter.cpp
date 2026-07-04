@@ -8177,9 +8177,28 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
-    // Evaluate the container expression
-    JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
-    script_value container = pop_value();
+    // Coroutine resume replay: continue the SUSPENDED iteration - restoring the
+    // evaluated container and position - instead of re-evaluating the container
+    // (which would re-mint an inner coroutine or restart the sequence).
+    bool replaying = false;
+    size_t resume_index = 0;
+    script_value container = make_value();
+    if (active_coroutine_) {
+        auto& coro_state = coroutine_state(*active_coroutine_);
+        if (auto* cont = coro_state.peek_continuation(stmt)) {
+            if (cont->saved_container) {
+                replaying = true;
+                resume_index = cont->index;
+                container = *cont->saved_container;
+            }
+            coro_state.pop_continuation();
+        }
+    }
+    if (!replaying) {
+        // Evaluate the container expression
+        JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
+        container = pop_value();
+    }
 
     // Determine if we can use slot-based access (inside a function with an assigned slot)
     const bool use_slot = stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty();
@@ -8197,12 +8216,17 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
             if (use_slot) {
                 // Slot-based O(1) access: define the variable in the call frame's local slot
-                call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                // (on replay the restored frame already holds the current element - don't clobber)
+                if (!replaying || !call_stack_.back().get_local(stmt->variable_slot_index)) {
+                    call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                }
                 loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index);
             } else {
                 // OPTIMIZATION: Define loop variable ONCE, then use pointer for direct assignment
                 // Use pre-interned symbol ID from parser - no runtime string interning needed
-                environment_->define(stmt->variable_name_id, make_value());
+                if (!replaying || !environment_->get_value_ptr(stmt->variable_name_id)) {
+                    environment_->define(stmt->variable_name_id, make_value());
+                }
                 loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
             }
 
@@ -8210,13 +8234,17 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             // same array (arrays are shared strong_ptr storage) and shrink it
             // (clear/pop/erase). Trusting the cached array_size would index past
             // the end with unchecked operator[] -> OOB read / crash.
-            for (size_t i = 0; i < array_storage->size(); ++i) {
+            for (size_t i = resume_index; i < array_storage->size(); ++i) {
                 if (execution_budget_exhausted()) [[unlikely]] {
                     pop_scope();
                     return execution_budget_error();
                 }
 
-                if (stmt->is_reference) {
+                if (replaying) {
+                    // First replayed iteration: the loop variable is already restored;
+                    // the body dispatch below fast-forwards to the yield point
+                    replaying = false;
+                } else if (stmt->is_reference) {
                     // Reallocation-safe reference (container+index, not a raw element
                     // pointer): a push in the loop body can reallocate the vector, and a
                     // raw pointer would dangle -> heap corruption on write-through (#41).
@@ -8253,12 +8281,13 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     break;
                 }
 
-                // On yield: don't pop scope, let environment stay for coroutine to save
+                // On yield: don't pop scope, let environment stay for coroutine to save.
+                // Record the container and position so the resume replay continues THIS
+                // iteration instead of re-evaluating the container from scratch.
                 if (hasYieldRequest_) {
-                    // Note: range-for doesn't need its own continuation because we don't
-                    // re-enter visit_range_for_stmt on resume. The container iteration
-                    // state is implicit in the body block's continuation. On resume,
-                    // we re-enter through the block/for continuation chain above.
+                    if (active_coroutine_) {
+                        coroutine_state(*active_coroutine_).push_continuation(stmt, i, nullptr, container);
+                    }
                     return {};
                 }
             }
@@ -8288,41 +8317,56 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
             if (use_slot) {
                 // Slot-based O(1) access: define the variable in the call frame's local slot
-                call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                // (on replay the restored frame already holds the current element - don't clobber)
+                if (!replaying || !call_stack_.back().get_local(stmt->variable_slot_index)) {
+                    call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                }
                 loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index);
             } else {
                 // OPTIMIZATION: Define loop variable ONCE, then use pointer for direct assignment
                 // Use pre-interned symbol ID from parser - no runtime string interning needed
-                environment_->define(stmt->variable_name_id, make_value());
+                if (!replaying || !environment_->get_value_ptr(stmt->variable_name_id)) {
+                    environment_->define(stmt->variable_name_id, make_value());
+                }
                 loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
             }
 
-            for (auto it = map_storage->begin(); it != map_storage->end(); ++it) {
+            size_t entry_index = 0;
+            for (auto it = map_storage->begin(); it != map_storage->end(); ++it, ++entry_index) {
+                if (entry_index < resume_index) {
+                    continue;   // fast-forward to the suspended entry
+                }
                 if (execution_budget_exhausted()) [[unlikely]] {
                     pop_scope();
                     return execution_budget_error();
                 }
 
-                // Create pair args
-                std::vector<script_value> args;
-
-                if (stmt->is_reference) {
-                    // For references, create a pair with a reference to the map value
-                    script_value* value_ptr = const_cast<script_value*>(&it->second);
-                    args.push_back(it->first);  // Don't clone - just pass the key
-                    args.push_back(script_value::make_reference(value_ptr, environment_, engine_));
+                if (replaying) {
+                    // First replayed iteration: the loop variable is already restored;
+                    // the body dispatch below fast-forwards to the yield point
+                    replaying = false;
                 } else {
-                    // For copies, clone key and value
-                    args.push_back(it->first.clone());
-                    args.push_back(it->second.clone());
-                }
+                    // Create pair args
+                    std::vector<script_value> args;
 
-                auto result = pair_func(args);
-                if (!result) {
-                    pop_scope();
-                    return result.error_value();
+                    if (stmt->is_reference) {
+                        // For references, create a pair with a reference to the map value
+                        script_value* value_ptr = const_cast<script_value*>(&it->second);
+                        args.push_back(it->first);  // Don't clone - just pass the key
+                        args.push_back(script_value::make_reference(value_ptr, environment_, engine_));
+                    } else {
+                        // For copies, clone key and value
+                        args.push_back(it->first.clone());
+                        args.push_back(it->second.clone());
+                    }
+
+                    auto result = pair_func(args);
+                    if (!result) {
+                        pop_scope();
+                        return result.error_value();
+                    }
+                    *loop_var_ptr = std::move(result.value());
                 }
-                *loop_var_ptr = std::move(result.value());
 
                 // Execute loop body
                 auto body_result = dispatch_stmt(stmt->body.get());
@@ -8353,6 +8397,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
                 // On yield: don't pop scope, let environment stay for coroutine to save
                 if (hasYieldRequest_) {
+                    if (active_coroutine_) {
+                        coroutine_state(*active_coroutine_).push_continuation(stmt, entry_index, nullptr, container);
+                    }
                     return {};
                 }
             }
@@ -8366,22 +8413,32 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
             script_value* loop_var_ptr = nullptr;
             if (use_slot) {
-                call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                if (!replaying || !call_stack_.back().get_local(stmt->variable_slot_index)) {
+                    call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                }
                 loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index);
             } else {
-                environment_->define(stmt->variable_name_id, make_value());
+                if (!replaying || !environment_->get_value_ptr(stmt->variable_name_id)) {
+                    environment_->define(stmt->variable_name_id, make_value());
+                }
                 loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id);
             }
 
-            while (!handle->done()) {
-                auto resume_result = handle->resume(engine_);
-                if (!resume_result) {
-                    pop_scope();
-                    return resume_result.error_value();
-                }
-                if (handle->done()) break;
+            while (replaying || !handle->done()) {
+                if (replaying) {
+                    // First replayed iteration: the current element is already restored;
+                    // the body dispatch below fast-forwards to the yield point
+                    replaying = false;
+                } else {
+                    auto resume_result = handle->resume(engine_);
+                    if (!resume_result) {
+                        pop_scope();
+                        return resume_result.error_value();
+                    }
+                    if (handle->done()) break;
 
-                *loop_var_ptr = std::move(resume_result.value());
+                    *loop_var_ptr = std::move(resume_result.value());
+                }
 
                 auto body_result = dispatch_stmt(stmt->body.get());
                 if (!body_result) {
@@ -8393,7 +8450,12 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
                 if (hasContinueRequest_) { hasContinueRequest_ = false; continue; }
                 if (hasReturnValue_) break;
-                if (hasYieldRequest_) return {};
+                if (hasYieldRequest_) {
+                    if (active_coroutine_) {
+                        coroutine_state(*active_coroutine_).push_continuation(stmt, 0, nullptr, container);
+                    }
+                    return {};
+                }
             }
         } else {
             pop_scope();
@@ -10622,16 +10684,23 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             coro_state.push_continuation(function.body.get(), resume_idx);
             // Save interpreter state into the coroutine for later resume
             // The visit_* methods have already pushed continuations onto the coroutine
-            // and left the environment chain intact (no releases on yield path)
+            // and left the environment chain intact (no releases on yield path).
+            // Only the coroutine's OWN frames move into the suspended state - a resume
+            // made inside a running script function must leave the caller's frames on
+            // the live stack, or the rest of the caller's body executes frameless.
             coro_state.saved_environment = environment_;
-            coro_state.saved_call_stack = std::move(call_stack_);
+            coro_state.saved_call_stack.clear();
+            coro_state.saved_call_stack.reserve(call_stack_.size() - frame_index);
+            for (size_t fi = frame_index; fi < call_stack_.size(); ++fi) {
+                coro_state.saved_call_stack.push_back(std::move(call_stack_[fi]));
+            }
             coro_state.saved_return_value = std::move(returnValue_);
             coro_state.saved_has_return = hasReturnValue_;
         }
-        // Restore caller's environment and call stack WITHOUT releasing
-        // (the coroutine now owns the environment chain and call frame)
+        call_stack_.erase(call_stack_.begin() + frame_index, call_stack_.end());
+        // Restore caller's environment WITHOUT releasing
+        // (the coroutine now owns its environment chain and call frames)
         environment_ = previousEnv;
-        call_stack_.clear();  // We moved it, but ensure clean state
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
         return result;
@@ -11073,6 +11142,10 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         } else if (!call_result) {
             handle.set_status(coroutine_handle::status::failed);
             error_result.emplace(std::move(call_result));
+        } else if (is_unwinding_) {
+            // Script throw escaped the body: the handle is failed, the throw itself
+            // keeps propagating to the caller through the unwinding flag
+            handle.set_status(coroutine_handle::status::failed);
         } else {
             handle.set_status(coroutine_handle::status::completed);
             handle.yield_value_ = std::move(call_result.value());
@@ -11118,13 +11191,19 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 }
             }
 
-            if (hasReturnValue_ || hasYieldRequest_) {
+            if (hasReturnValue_ || hasYieldRequest_ || is_unwinding_) {
                 break;
             }
         }
 
         if (!had_error) {
-            if (hasYieldRequest_) {
+            if (is_unwinding_) {
+                // Script throw escaped the resumed segment: fail the handle; the throw
+                // keeps propagating to the caller through the unwinding flag
+                handle.set_status(coroutine_handle::status::failed);
+                state.saved_environment.reset();
+                state.saved_call_stack.clear();
+            } else if (hasYieldRequest_) {
                 // Record where to resume in the function body.
                 // If inner constructs pushed continuations, re-enter this statement.
                 // If no inner continuations, the yield was a direct child, skip it.

@@ -625,6 +625,15 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 					handle.set_status(coroutine_handle::status::failed);
 					return dr.error_value();
 				}
+				if (is_unwinding_) {
+					// Uncaught throw inside the default expression: bind null over a
+					// possibly partial stack; the unwinding propagates to the resumer
+					if (stack_.size() > df.stack_base) {
+						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
+					}
+					state.locals.set_local(param.slot_index, make_null());
+					continue;
+				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();
 				state.locals.set_local(param.slot_index, std::move(default_val));
@@ -6750,12 +6759,22 @@ checked_result<void> vm_backend::run(frame& entry) {
 		try {
 			return run_dispatch(fp, records_base);
 		} catch (const script_exception& e) {
-			if (call_records_top_ == records_base) { throw; }
-			convert_cpp_exception_at_frame(fp, e);
+			if (ip_in_call_arg_zone(*fp)) {
+				convert_cpp_exception_in_frame(e);
+			} else if (call_records_top_ == records_base) {
+				throw;
+			} else {
+				convert_cpp_exception_at_frame(fp, e);
+			}
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (const std::exception& e) {
-			if (call_records_top_ == records_base) { throw; }
-			convert_cpp_exception_at_frame(fp, script_exception(e.what()));
+			if (ip_in_call_arg_zone(*fp)) {
+				convert_cpp_exception_in_frame(script_exception(e.what()));
+			} else if (call_records_top_ == records_base) {
+				throw;
+			} else {
+				convert_cpp_exception_at_frame(fp, script_exception(e.what()));
+			}
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (...) {
 			pop_records_to(records_base, fp);
@@ -7528,6 +7547,24 @@ checked_result<void> vm_backend::fall_off_script_frame(frame*& fp) {
 	return {};
 }
 
+bool vm_backend::ip_in_call_arg_zone(const frame& f) const {
+	for (const auto& zone : f.code->call_arg_zones) {
+		if (f.ip >= zone.first && f.ip < zone.second) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Interpreter parity: visit_call converts C++ throws during argument evaluation in the
+// frame making the call (no pop, no result push - the call never happened), so the same
+// frame's try/catch can fire; handle_throw_unwind takes it from here.
+void vm_backend::convert_cpp_exception_in_frame(const script_exception& e) {
+	active_exception_value_ = script_value(std::string(e.what()), engine_);
+	current_exception_ = e;
+	is_unwinding_ = true;
+}
+
 void vm_backend::convert_cpp_exception_at_frame(frame*& fp, const script_exception& e) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	assert(fp == &rec.f);
@@ -7654,6 +7691,15 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				auto dr = run(df);
 				if (!dr) {
 					return dr;
+				}
+				if (is_unwinding_) {
+					// Uncaught throw inside the default expression: the stack may hold
+					// partial values; bind null and let the frame unwind before its first op
+					if (stack_.size() > df.stack_base) {
+						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
+					}
+					locals.set_local(param.slot_index, make_null());
+					continue;
 				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();

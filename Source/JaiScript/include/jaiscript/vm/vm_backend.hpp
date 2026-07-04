@@ -253,6 +253,9 @@ namespace jai::vm {
         checked_result<void> return_from_script_frame(frame*& fp, const vm_instruction& ins);
         checked_result<void> fall_off_script_frame(frame*& fp);
         void convert_cpp_exception_at_frame(frame*& fp, const script_exception& e);
+        // Interpreter parity: arg-eval throws convert at the frame MAKING the call
+        bool ip_in_call_arg_zone(const frame& f) const;
+        void convert_cpp_exception_in_frame(const script_exception& e);
         void pop_records_to(size_t records_base, frame*& fp);
         script_value run_program(std::shared_ptr<chunk> program);
         checked_result<script_value> call_script_function(const script_defined_function& function,

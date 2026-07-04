@@ -174,6 +174,29 @@ namespace {
 		return value.clone();
 	}
 
+	// Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: share the
+	// holder, except constrained element refs re-derive an unconstrained alias (auto&
+	// drops the element-type constraint - pinned decl semantics)
+	checked_result<script_value> vm_decl_ref_alias(const script_value& source, engine* eng) {
+		auto refHolder = source.get_reference_holder();
+		if (!refHolder) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+		}
+		if (!refHolder->container && refHolder->sourceEnv.expired()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
+		}
+		if (refHolder->container_element_type) {
+			if (refHolder->container) {
+				if (refHolder->container_index >= refHolder->container->size()) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
+				}
+				return script_value::make_element_reference(refHolder->container, refHolder->container_index, refHolder->sourceEnv.lock(), eng, nullptr);
+			}
+			return script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock(), eng);
+		}
+		return script_value(source);
+	}
+
 	checked_result<void> vm_validate_container_homogeneous(const script_value& container, const std::string& path);
 
 	checked_result<void> vm_validate_map_homogeneous(const script_value& map_value, const std::string& path) {
@@ -3742,14 +3765,11 @@ checked_result<void> vm_backend::exec_decl_ref_ident(frame& f, const vm_instruct
 	}
 
 	if (targetPtr->is_reference()) {
-		auto refHolder = targetPtr->get_reference_holder();
-		targetPtr = refHolder->target;
-		auto target_env = refHolder->sourceEnv.lock();
-		if (!target_env) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
+		auto aliased = vm_decl_ref_alias(*targetPtr, engine_);
+		if (!aliased) {
+			return aliased.error_value();
 		}
-		script_value refValue = script_value::make_reference(targetPtr, target_env);
-		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(refValue));
+		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
 	}
 	script_value refValue = script_value::make_reference(targetPtr, environment_);
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(refValue));
@@ -3761,14 +3781,11 @@ checked_result<void> vm_backend::exec_decl_ref_value(frame& f, const vm_instruct
 	stack_.pop_back();
 
 	if (result.is_reference()) {
-		auto refHolder = result.get_reference_holder();
-		script_value* targetPtr = refHolder->target;
-		auto target_env = refHolder->sourceEnv.lock();
-		if (!target_env) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
+		auto aliased = vm_decl_ref_alias(result, engine_);
+		if (!aliased) {
+			return aliased.error_value();
 		}
-		script_value refValue = script_value::make_reference(targetPtr, target_env);
-		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(refValue));
+		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
 	}
 	return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Cannot take reference of non-lvalue expression");
 }
@@ -7657,14 +7674,14 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 					script_value* slotPtr = meta.caller_locals->get_local(meta.slot);
 					if (slotPtr) {
 						if (slotPtr->is_reference()) {
-							auto refHolder = slotPtr->get_reference_holder();
-							if (!refHolder || !refHolder->target) {
+							if (!slotPtr->get_reference_holder()) {
 								return checked_result<void>(
 									make_error_code(runtime_error_code::invalid_reference),
 									"Reference target is null");
 							}
-							locals.set_local(param.slot_index,
-								script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock()));
+							// Share the holder: zero alloc, and element refs keep their
+							// container re-resolution instead of a stale flattened pointer
+							locals.set_local(param.slot_index, script_value(*slotPtr));
 						} else {
 							locals.set_local(param.slot_index,
 								script_value::make_reference(slotPtr, meta.caller_locals->ensure_ref_anchor(symbolizer_)));
@@ -7682,14 +7699,12 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 					}
 
 					if (argPtr->is_reference()) {
-						auto refHolder = argPtr->get_reference_holder();
-						if (!refHolder || !refHolder->target) {
+						if (!argPtr->get_reference_holder()) {
 							return checked_result<void>(
 								make_error_code(runtime_error_code::invalid_reference),
 								"Reference target is null");
 						}
-						script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-						locals.set_local(param.slot_index, std::move(refValue));
+						locals.set_local(param.slot_index, script_value(*argPtr));   // share the holder
 					} else {
 						// Recover the env's shared_ptr: the caller env chain covers block,
 						// method and elided-frame scopes (the metadata env is the caller's

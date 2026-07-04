@@ -2507,6 +2507,29 @@ public:
 			check_true(i_out.find("int:6|") == 0, std::string("int arg binds unconverted, got: ") + i_out);
 		});
 
+		// Tier 3(b): the exact-class-match conversion skip must keep value semantics -
+		// exact match still deep-clones, subclass and shared_ptr args keep the full path
+		test("tier3_exact_class_param_still_clones", [this, run_both_backends]() {
+			const char* src = R"(
+				class P { int v = 1; }
+				class Q : P { int w = 2; }
+				function bump(P p) -> int { p.v = p.v + 10; return p.v; }
+				var a = P(); a.v = 5;
+				var r1 = bump(a);
+				var q = Q(); q.v = 3;
+				var r2 = bump(q);
+				var sp = shared_ptr<P>(); sp.v = 4;
+				var r3 = bump(sp);
+				function share(shared_ptr<P> p) { p.v = p.v + 100; }
+				auto sh = shared_ptr<P>(); sh.v = 7;
+				share(sh);
+				"" + r1 + "," + a.v + "|" + r2 + "," + q.v + "|" + r3 + "," + sp.v + "|" + sh.v;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_eq(std::string("15,5|13,3|14,4|107"), i_out, "interp exact-class clone semantics");
+			check_eq(i_out, v_out, "exact-class clone parity");
+		});
+
 		// Tier 3(c): a throw during callee setup (default-arg eval / param conversion)
 		// restores the caller environment - script keeps running and sees caller locals
 		test("tier3_env_restored_after_throwing_bind", [this, run_both_backends]() {

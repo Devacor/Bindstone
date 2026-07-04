@@ -7886,6 +7886,22 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			// Shallow copy shields the conversion: it can reenter script (conversion
 			// ctors / to_* methods) and reallocate stack_ under an on-stack arg
 			script_value arg_shield(arg);
+
+			// Exact-class match: a pointer-identical interned type_info (with the
+			// non-empty name the identity branch requires) replicates try_convert's
+			// exact-name branch (which returns the derefed arg) without the conversion
+			// machinery; should_share is false for objects, so the clone matches the
+			// full path
+			{
+				const script_value& derefed = arg_shield.deref();
+				if (param.type && param.type->base_type == script_value_type::jai_object_type &&
+				    derefed.storage_type() == script_value_type::jai_object_type &&
+				    derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
+					locals.set_local(param.slot_index, derefed.clone());
+					continue;
+				}
+			}
+
 			auto converted_result = try_convert_for_parameter(arg_shield, param.type);
 			if (!converted_result) {
 				return converted_result.error_value();

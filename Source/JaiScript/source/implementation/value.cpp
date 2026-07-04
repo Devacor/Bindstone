@@ -259,6 +259,28 @@ script_value script_value::make_element_reference(const strong_ptr<std::vector<s
     return v;
 }
 
+script_value script_value::make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,
+                                                engine* eng, type_info_ptr field_type) {
+    if (!owner) {
+        throw runtime_error("Cannot create reference to null");
+    }
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    script_value* field_value = owner->find_field_value(field_id);
+    if (!field_value) {
+        throw runtime_error("Reference to a removed field");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(field_value->get_type_info());
+    auto ref = make_strong<reference_holder>();
+    ref->owner_instance = owner;          // pins the instance for the reference's lifetime
+    ref->field_id = field_id;
+    ref->container_element_type = field_type;
+    v.storage_ = ref;
+    return v;
+}
+
 script_value script_value::make_function(const script_function& func, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create function with null engine pointer");
@@ -547,6 +569,15 @@ const script_value& script_value::deref() const {
             }
             return (*refHolder->container)[refHolder->container_index].deref();
         }
+        if (refHolder->owner_instance) {
+            // Field reference: re-resolve by id (no lazy default insert, no sourceEnv
+            // check - the pinned instance IS the lifetime)
+            const script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
+            if (!field_value) {
+                throw runtime_error("Reference to a removed field");
+            }
+            return field_value->deref();
+        }
         if (!refHolder->target) {
             throw runtime_error("Null reference");
         }
@@ -575,6 +606,13 @@ script_value& script_value::deref() {
             }
             return (*refHolder->container)[refHolder->container_index].deref();
         }
+        if (refHolder->owner_instance) {
+            script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
+            if (!field_value) {
+                throw runtime_error("Reference to a removed field");
+            }
+            return field_value->deref();
+        }
         if (!refHolder->target) {
             throw runtime_error("Null reference");
         }
@@ -600,6 +638,14 @@ void script_value::assign_through(const script_value& value) {
                 throw runtime_error("Assignment to a removed array element");
             }
             (*refHolder->container)[refHolder->container_index] = value;
+            return;
+        }
+        if (refHolder->owner_instance) {
+            script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
+            if (!field_value) {
+                throw runtime_error("Reference to a removed field");
+            }
+            *field_value = value;
             return;
         }
         if (!refHolder->target) {
@@ -666,6 +712,14 @@ void script_value::assign_through(script_value&& value) {
                 throw runtime_error("Assignment to a removed array element");
             }
             (*refHolder->container)[refHolder->container_index] = std::move(value);
+            return;
+        }
+        if (refHolder->owner_instance) {
+            script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
+            if (!field_value) {
+                throw runtime_error("Reference to a removed field");
+            }
+            *field_value = std::move(value);
             return;
         }
         if (!refHolder->target) {

@@ -7,6 +7,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
+#include <jaiscript/detail/ref_lvalue.hpp>
 #include <cassert>
 #include <cmath>
 #include <fstream>
@@ -182,7 +183,7 @@ namespace {
 		if (!refHolder) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 		}
-		if (!refHolder->container && refHolder->sourceEnv.expired()) {
+		if (!refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
 		}
 		if (refHolder->container_element_type) {
@@ -191,6 +192,12 @@ namespace {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
 				}
 				return script_value::make_element_reference(refHolder->container, refHolder->container_index, refHolder->sourceEnv.lock(), eng, nullptr);
+			}
+			if (refHolder->owner_instance) {
+				if (!refHolder->owner_instance->find_field_value(refHolder->field_id)) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
+				}
+				return script_value::make_field_reference(refHolder->owner_instance, refHolder->field_id, eng, nullptr);
 			}
 			return script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock(), eng);
 		}
@@ -2442,7 +2449,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* frameLocal = f.locals->get_local(ins.b)) {
 			if (frameLocal->is_reference()) {
-				frameLocal->deref() = std::move(value.deref().clone());
+				JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
 			} else {
 				*frameLocal = std::move(value.clone());
 			}
@@ -2454,7 +2461,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 	if (environment_->contains(sym)) {
 		script_value* currentVal = environment_->get_value_ptr(sym);
 		if (currentVal && currentVal->is_reference()) {
-			currentVal->deref() = std::move(value.deref().clone());
+			JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_));
 			stack_.push_back(std::move(value));
 			return {};
 		}
@@ -2740,6 +2747,32 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 
 	script_value* varPtr = resolve_local_or_env(f, ins.b, sym);
 	if (varPtr) {
+		// Constrained element/field ref (Tier 1 bind): route through the shared helper
+		// so the compound result honors the constraint like subscript compounds do
+		if (varPtr->is_reference()) {
+			const auto* refHolder = varPtr->get_reference_holder();
+			if (refHolder && refHolder->container_element_type) {
+				token_type op;
+				const char* opName;
+				switch (kind) {
+					case compound_minus: op = token_type::minus; opName = "-"; break;
+					case compound_star: op = token_type::star; opName = "*"; break;
+					case compound_slash: op = token_type::slash; opName = "/"; break;
+					case compound_percent: op = token_type::percent; opName = "%"; break;
+					default: op = token_type::plus; opName = "+"; break;
+				}
+				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
+					environment_.get(), engine_, symbolizer_,
+					[this](const script_value& l, token_type o, const script_value& r) {
+						return evaluate_arithmetic(l, o, r);
+					});
+				if (!result) {
+					return result.error_value();
+				}
+				if (!no_result) { stack_.push_back(std::move(result.value())); }
+				return {};
+			}
+		}
 		script_value& target = varPtr->deref();
 		auto leftType = target.type();
 		script_value& derefRight = rightValue.deref();
@@ -3830,7 +3863,15 @@ void vm_backend::build_call_arg_metadata(frame& f, const call_site& site, size_t
 			}
 			current_arg_metadata_.push_back(meta);
 		} else {
-			current_arg_metadata_.emplace_back();
+			const uint32_t lvalue_node = i < site.arg_lvalue_nodes.size() ? site.arg_lvalue_nodes[i] : k_invalid_u32;
+			if (lvalue_node != k_invalid_u32 && f.code) {
+				arg_ref_metadata meta(UINT64_MAX, environment_.get());
+				meta.caller_locals = f.locals;
+				meta.lvalue_expr = static_cast<const expression*>(f.code->nodes[lvalue_node].get());
+				current_arg_metadata_.push_back(meta);
+			} else {
+				current_arg_metadata_.emplace_back();
+			}
 		}
 	}
 }
@@ -7739,6 +7780,18 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 						}
 						continue;
 					}
+				}
+
+				// Field/subscript/chain lvalue argument: resolve through the shared
+				// helper into an owner-pinned reference (Tier 1)
+				if (meta.lvalue_expr) {
+					auto resolved = detail::resolve_ref_lvalue(meta.lvalue_expr, meta.caller_locals,
+					                                           env, caller_env, engine_, symbolizer_);
+					if (!resolved) {
+						return resolved.error_value();
+					}
+					locals.set_local(param.slot_index, std::move(resolved.value()));
+					continue;
 				}
 
 				if (symbol_id != UINT64_MAX && env != nullptr) {

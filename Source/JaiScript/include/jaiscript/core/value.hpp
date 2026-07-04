@@ -23,6 +23,7 @@ namespace jai {
     // Forward declaration
     class environment;
     class engine;
+    class class_instance;
     
     // Forward declaration for conversion registry helper
     namespace conversions {
@@ -190,6 +191,10 @@ namespace jai {
         // address each time and bounds-check it (see reference_holder::container).
         static script_value make_element_reference(const strong_ptr<std::vector<script_value>>& container, size_t index,
                                                    const std::shared_ptr<environment>& env, engine* eng, type_info_ptr element_type);
+        // Instance-pinned reference to a class field: deref/assign-through re-resolve the
+        // field node by id (never a cached address), so hot reload cannot dangle it.
+        static script_value make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,
+                                                 engine* eng, type_info_ptr field_type);
         static script_value make_function(const script_function& func, engine* eng);
 
         // Mints an unregistered object holder wrapping a coroutine_handle; bypasses the
@@ -1429,7 +1434,7 @@ namespace jai {
         struct reference_holder {
             script_value* target = nullptr;  // Points to the referenced value (when container is null)
             std::weak_ptr<environment> sourceEnv;  // environment that owns the target
-            type_info_ptr container_element_type = nullptr;  // For array/map subscript refs: the element type constraint
+            type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
 
             // For references into a std::vector element (range-for `auto&`, `arr[i]`
             // lvalue): hold the OWNING container + index instead of a raw element
@@ -1441,6 +1446,13 @@ namespace jai {
             // The strong_ptr also keeps the vector alive for the reference's lifetime.
             strong_ptr<std::vector<script_value>> container;
             size_t container_index = SIZE_MAX;
+
+            // Field reference (ref-param bind of f(obj.field)): pins the owning instance
+            // and re-resolves the field node by id on every deref/assign-through, so it
+            // survives hot-reload field migration (a removed field errors instead of
+            // dangling). target stays null for the holder's whole lifetime.
+            std::shared_ptr<class_instance> owner_instance;
+            uint64_t field_id = UINT64_MAX;
         };
         
         

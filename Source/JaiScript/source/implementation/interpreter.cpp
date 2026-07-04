@@ -5,6 +5,7 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
+#include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <stdexcept>
 #include <sstream>
 #include <cmath>
@@ -35,7 +36,7 @@ namespace {
         if (!refHolder) {
             return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
         }
-        if (!refHolder->container && refHolder->sourceEnv.expired()) {
+        if (!refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
         }
         if (refHolder->container_element_type) {
@@ -44,6 +45,12 @@ namespace {
                     return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
                 }
                 return script_value::make_element_reference(refHolder->container, refHolder->container_index, refHolder->sourceEnv.lock(), eng, nullptr);
+            }
+            if (refHolder->owner_instance) {
+                if (!refHolder->owner_instance->find_field_value(refHolder->field_id)) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
+                }
+                return script_value::make_field_reference(refHolder->owner_instance, refHolder->field_id, eng, nullptr);
             }
             return script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock(), eng);
         }
@@ -3630,6 +3637,39 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Slot-based O(1) first, then environment fallback
             script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id);
             if (varPtr) {
+                // Constrained element/field ref (Tier 1 bind): route through the shared
+                // helper so the compound result honors the constraint like subscript
+                // compounds do (vm parity)
+                if (varPtr->is_reference()) {
+                    const auto* refHolder = varPtr->get_reference_holder();
+                    if (refHolder && refHolder->container_element_type) {
+                        JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+                        if (is_unwinding_) {
+                            push_value(make_value());
+                            return {};
+                        }
+                        script_value rightValue = pop_value();
+                        token_type op;
+                        const char* opName;
+                        switch (expr->op.type) {
+                            case token_type::minus_equal: op = token_type::minus; opName = "-"; break;
+                            case token_type::star_equal: op = token_type::star; opName = "*"; break;
+                            case token_type::slash_equal: op = token_type::slash; opName = "/"; break;
+                            case token_type::percent_equal: op = token_type::percent; opName = "%"; break;
+                            default: op = token_type::plus; opName = "+"; break;
+                        }
+                        auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
+                            environment_.get(), engine_, string_symbolizer_,
+                            [this](const script_value& l, token_type o, const script_value& r) {
+                                return evaluate_arithmetic(l, o, r);
+                            });
+                        if (!result) {
+                            return result.error_value();
+                        }
+                        push_value(std::move(result.value()));
+                        return {};
+                    }
+                }
                 // Fast path: direct in-place mutation for local variables
                 script_value& target = varPtr->deref();
                 auto leftType = target.type();
@@ -4278,7 +4318,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 if (frameLocal) {
                     // Handle reference parameters
                     if (frameLocal->is_reference()) {
-                        frameLocal->deref() = std::move(value.deref().clone());
+                        JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_));
                     } else {
                         // Direct assignment to call frame local
                         *frameLocal = std::move(value.clone());
@@ -4293,7 +4333,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 script_value* currentVal = environment_->get_value_ptr(identifier->symbol_id);
                 if (currentVal && currentVal->is_reference()) {
                     // This is a reference - assign through it (deep copy the value)
-                    currentVal->deref() = std::move(value.deref().clone());
+                    JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_));
                 } else if (currentVal && currentVal->is_cpp_bound()) {
                     // This is a C++ bound value - use assign_through
                     currentVal->assign_through(value);
@@ -5796,6 +5836,15 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                     meta.caller_frame_index = call_stack_.size() - 1;
                     meta.slot = identExpr->slot_index;
                 }
+                current_arg_metadata_.push_back(meta);
+            } else if (detail::is_ref_bindable_lvalue(argExpr.get())) {
+                // Field/subscript/chain lvalue: record the arg AST for bind-time
+                // resolution (only consumed by reference parameters)
+                arg_ref_metadata meta(UINT64_MAX, environment_.get());
+                if (!call_stack_.empty()) {
+                    meta.caller_frame_index = call_stack_.size() - 1;
+                }
+                meta.lvalue_expr = argExpr.get();
                 current_arg_metadata_.push_back(meta);
             } else {
                 // Not an identifier - can't take reference
@@ -10444,6 +10493,21 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             }
             return {};
         }
+    }
+
+    // Field/subscript/chain lvalue argument: resolve through the shared helper into
+    // an owner-pinned reference (Tier 1). Frame pointer re-resolved at bind time -
+    // call_stack_ frames move when the vector grows.
+    if (meta.lvalue_expr) {
+        call_frame* caller_locals = meta.caller_frame_index < call_stack_.size()
+            ? &call_stack_[meta.caller_frame_index] : nullptr;
+        auto resolved = detail::resolve_ref_lvalue(meta.lvalue_expr, caller_locals,
+                                                   meta.env, caller_env, engine_, string_symbolizer_);
+        if (!resolved) {
+            return resolved.error_value();
+        }
+        call_stack_[frame_index].set_local(param.slot_index, std::move(resolved.value()));
+        return {};
     }
 
     if (meta.symbol_id == UINT64_MAX || meta.env == nullptr) {

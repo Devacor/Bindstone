@@ -326,6 +326,10 @@ namespace jai {
         call_frame* caller_locals = nullptr;
         size_t caller_frame_index = SIZE_MAX;
         size_t slot = SIZE_MAX;
+        // Ref-bindable lvalue argument (f(obj.field), f(arr[i]), chains): the arg's AST,
+        // resolved at bind time by detail::resolve_ref_lvalue (pinned by chunk::nodes /
+        // the live function body)
+        const expression* lvalue_expr = nullptr;
 
         arg_ref_metadata() = default;
         arg_ref_metadata(uint64_t symbol, environment* environment_ptr)

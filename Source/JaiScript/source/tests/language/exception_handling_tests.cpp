@@ -290,6 +290,86 @@ public:
             check_false(trace.empty());
             check_eq((size_t)1, trace[0].line);
         });
+
+        // A throw during argument evaluation must propagate the thrown value; it must not
+        // leak into the outer call's parameter binding and get replaced by a binding error.
+        test("throw_during_argument_evaluation_caught", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                auto h() { throw "argfail"; }
+                auto g(int a, int b) { return "g"; }
+                auto caller() {
+                    try { return g(1, h()); } catch (e) { return "c:" + e; }
+                }
+                return caller() + "|" + caller();
+            )");
+            check_eq(std::string("c:argfail|c:argfail"), result.as_string());
+        });
+
+        test("throw_during_argument_evaluation_native_callee", [this]() {
+            auto engine = make_engine();
+            engine->add_function("gn", [](int a, int b) { return std::string("gn"); });
+            script_value result = engine->execute(R"(
+                auto h() { throw "argfail"; }
+                try { return "r:" + gn(1, h()); } catch (e) { return "c:" + e; }
+            )");
+            check_eq(std::string("c:argfail"), result.as_string());
+        });
+
+        test("throw_during_argument_evaluation_method_callee", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                auto h() { throw "argfail"; }
+                class M { auto m(int a, int b) { return "m"; } }
+                var o = M();
+                try { return "r:" + o.m(1, h()); } catch (e) { return "c:" + e; }
+            )");
+            check_eq(std::string("c:argfail"), result.as_string());
+        });
+
+        test("throw_during_argument_evaluation_indirect_callee", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                auto h() { throw "argfail"; }
+                auto g(int a, int b) { return "g"; }
+                var hv = h;
+                try { return "r:" + g(1, hv()); } catch (e) { return "c:" + e; }
+            )");
+            check_eq(std::string("c:argfail"), result.as_string());
+        });
+
+        test("throw_during_argument_evaluation_uncaught_text", [this]() {
+            auto engine = make_engine();
+            std::string got;
+            try {
+                engine->execute(
+                    "auto h() { throw \"argfail\"; }\n"
+                    "auto g(int a, int b) { return \"g\"; }\n"
+                    "g(1, h());\n");
+            } catch (const std::exception& e) {
+                got = e.what();
+            }
+            check_eq(std::string("argfail"), got);
+        });
+
+        test("throw_during_callee_evaluation", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                auto h() { throw "calleefail"; }
+                try { h()(); } catch (e) { return "c:" + e; }
+            )");
+            check_eq(std::string("c:calleefail"), result.as_string());
+        });
+
+        test("throw_during_string_method_argument", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                auto h() { throw "strfail"; }
+                var s = "abc";
+                try { var n = s.find(h()); return "r:found"; } catch (e) { return "c:" + e; }
+            )");
+            check_eq(std::string("c:strfail"), result.as_string());
+        });
     }
 };
 

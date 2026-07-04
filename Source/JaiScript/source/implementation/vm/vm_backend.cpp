@@ -3792,6 +3792,23 @@ checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction
 	return {};
 }
 
+void vm_backend::build_call_arg_metadata(frame& f, const call_site& site, size_t argc) {
+	for (size_t i = 0; i < argc; ++i) {
+		uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
+		if (symbol_id != UINT64_MAX) {
+			arg_ref_metadata meta(symbol_id, environment_.get());
+			const uint32_t slot = i < site.arg_slots.size() ? site.arg_slots[i] : k_invalid_u32;
+			if (slot != k_invalid_u32 && f.locals && f.locals->get_local(slot) != nullptr) {
+				meta.caller_locals = f.locals;
+				meta.slot = slot;
+			}
+			current_arg_metadata_.push_back(meta);
+		} else {
+			current_arg_metadata_.emplace_back();
+		}
+	}
+}
+
 checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
@@ -3808,19 +3825,12 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 			const script_defined_function& fn = *thunk->payload.fn;
 			// Ref-free callees never read arg metadata, so skip the build entirely
 			const bool has_metadata = argc > 0 && fn.has_reference_parameters;
-			std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+			std::vector<arg_ref_metadata> saved_metadata;
 			if (has_metadata) {
 				saved_metadata = std::move(current_arg_metadata_);
 				current_arg_metadata_.clear();
 				current_arg_metadata_.reserve(argc);
-				for (size_t i = 0; i < argc; ++i) {
-					uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
-					if (symbol_id != UINT64_MAX) {
-						current_arg_metadata_.emplace_back(symbol_id, environment_.get());
-					} else {
-						current_arg_metadata_.emplace_back(UINT64_MAX, nullptr);
-					}
-				}
+				build_call_arg_metadata(f, site, argc);
 			}
 			// push_script_frame owns saved_metadata restoration on every exit path
 			try {
@@ -3864,19 +3874,12 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	// Inline the invoke tail: an extra callee frame per script call would blow the
 	// native stack before JAI_MAX_CALL_DEPTH is reached in Debug builds
 	const bool has_args = argc > 0;
-	std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+	std::vector<arg_ref_metadata> saved_metadata;
 	if (has_args) {
 		saved_metadata = std::move(current_arg_metadata_);
 		current_arg_metadata_.clear();
 		current_arg_metadata_.reserve(argc);
-		for (size_t i = 0; i < argc; ++i) {
-			uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
-			if (symbol_id != UINT64_MAX) {
-				current_arg_metadata_.emplace_back(symbol_id, environment_.get());
-			} else {
-				current_arg_metadata_.emplace_back(UINT64_MAX, nullptr);
-			}
-		}
+		build_call_arg_metadata(f, site, argc);
 	}
 
 	const script_function& func = callee.as_function();
@@ -3936,19 +3939,12 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 
 	// Ref-free in-loop callees never read arg metadata, so skip the build entirely
 	const bool has_args = argc > 0 && !(in_loop && !thunk->payload.fn->has_reference_parameters);
-	std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+	std::vector<arg_ref_metadata> saved_metadata;
 	if (has_args) {
 		saved_metadata = std::move(current_arg_metadata_);
 		current_arg_metadata_.clear();
 		current_arg_metadata_.reserve(argc);
-		for (size_t i = 0; i < argc; ++i) {
-			uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
-			if (symbol_id != UINT64_MAX) {
-				current_arg_metadata_.emplace_back(symbol_id, environment_.get());
-			} else {
-				current_arg_metadata_.emplace_back(UINT64_MAX, nullptr);
-			}
-		}
+		build_call_arg_metadata(f, site, argc);
 	}
 
 	if (in_loop) {
@@ -7128,7 +7124,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
                                                    const script_defined_function& function,
                                                    const std::vector<script_value>& args,
                                                    size_t args_base, size_t argc,
-                                                   std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
+                                                   std::vector<arg_ref_metadata>& saved_metadata,
                                                    bool has_args) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
 		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
@@ -7224,7 +7220,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(function.parameters, args, args_base, argc, rec.locals, *rec.f.code);
+		bound = bind_parameters(function.parameters, args, args_base, argc, rec.locals, *rec.f.code, rec.prev_env);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -7250,19 +7246,12 @@ checked_result<void> vm_backend::enter_script_method(frame& caller, script_value
                                                      const call_site& site) {
 	const size_t argc = arguments.size();
 	const bool has_args = argc > 0;
-	std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+	std::vector<arg_ref_metadata> saved_metadata;
 	if (has_args) {
 		saved_metadata = std::move(current_arg_metadata_);
 		current_arg_metadata_.clear();
 		current_arg_metadata_.reserve(argc);
-		for (size_t i = 0; i < argc; ++i) {
-			uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
-			if (symbol_id != UINT64_MAX) {
-				current_arg_metadata_.emplace_back(symbol_id, environment_.get());
-			} else {
-				current_arg_metadata_.emplace_back(UINT64_MAX, nullptr);
-			}
-		}
+		build_call_arg_metadata(caller, site, argc);
 	}
 	// push_method_frame owns saved_metadata restoration on every exit path
 	try {
@@ -7288,7 +7277,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
                                                    const std::shared_ptr<function_decl>& ast,
                                                    script_value&& receiver,
                                                    const std::vector<script_value>& arguments,
-                                                   std::vector<std::pair<uint64_t, environment*>>& saved_metadata,
+                                                   std::vector<arg_ref_metadata>& saved_metadata,
                                                    bool has_args) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
 		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
@@ -7376,7 +7365,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.locals, *rec.f.code);
+		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.locals, *rec.f.code, rec.prev_env);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -7439,6 +7428,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		rec.f.entry_env = nullptr;
 	}
 	rec.locals.locals.clear();   // destroy callee locals now, keep capacity
+	rec.locals.ref_anchor.reset();   // expire references into this frame's slots
 	rec.locals.closure_env = nullptr;
 	rec.locals.this_object_ptr.reset();
 	rec.locals.is_method = false;
@@ -7597,7 +7587,8 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const std::vector<script_value>& args,
                                                  size_t args_base, size_t argc,
-                                                 call_frame& locals, chunk& body_chunk) {
+                                                 call_frame& locals, chunk& body_chunk,
+                                                 const std::shared_ptr<environment>& caller_env) {
 	for (size_t i = 0; i < parameters.size(); ++i) {
 		const auto& param = parameters[i];
 
@@ -7632,8 +7623,32 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 
 		if (param.is_reference) {
 			if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
-				auto symbol_id = current_arg_metadata_[i].first;
-				auto env = current_arg_metadata_[i].second;
+				const arg_ref_metadata& meta = current_arg_metadata_[i];
+				auto symbol_id = meta.symbol_id;
+				auto env = meta.env;
+
+				// Caller frame-slot local: bind straight to the slot storage, anchored to
+				// the caller frame's lifetime (env lookup can't see slot locals and would
+				// walk to an unrelated same-named outer variable)
+				if (meta.caller_locals && meta.slot != SIZE_MAX) {
+					script_value* slotPtr = meta.caller_locals->get_local(meta.slot);
+					if (slotPtr) {
+						if (slotPtr->is_reference()) {
+							auto refHolder = slotPtr->get_reference_holder();
+							if (!refHolder || !refHolder->target) {
+								return checked_result<void>(
+									make_error_code(runtime_error_code::invalid_reference),
+									"Reference target is null");
+							}
+							locals.set_local(param.slot_index,
+								script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock()));
+						} else {
+							locals.set_local(param.slot_index,
+								script_value::make_reference(slotPtr, meta.caller_locals->ensure_ref_anchor(symbolizer_)));
+						}
+						continue;
+					}
+				}
 
 				if (symbol_id != UINT64_MAX && env != nullptr) {
 					script_value* argPtr = env->get_value_ptr(symbol_id);
@@ -7653,10 +7668,20 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 						script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
 						locals.set_local(param.slot_index, std::move(refValue));
 					} else {
+						// Recover the env's shared_ptr: the caller env chain covers block,
+						// method and elided-frame scopes (the metadata env is the caller's
+						// environment at the call op); frames and global remain fallbacks
 						std::shared_ptr<environment> env_shared;
-						if (env == environment_.get()) {
+						for (auto p = caller_env; p; p = p->get_parent()) {
+							if (p.get() == env) {
+								env_shared = p;
+								break;
+							}
+						}
+						if (!env_shared && env == environment_.get()) {
 							env_shared = environment_;
-						} else {
+						}
+						if (!env_shared) {
 							for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
 								frame* fr = *it;
 								if (fr->locals && fr->locals->closure_env.get() == env) {
@@ -7811,7 +7836,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	};
 
 	{
-		auto bind_result = bind_parameters(function.parameters, args, 0, args.size(), locals, *body_chunk);
+		auto bind_result = bind_parameters(function.parameters, args, 0, args.size(), locals, *body_chunk, previousEnv);
 		if (!bind_result) {
 			cleanup();
 			return bind_result.error_value();

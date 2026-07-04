@@ -5700,7 +5700,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     const bool has_args = !expr->arguments.empty();
 
     // Save previous metadata for nested call support (raw pointers - no shared_ptr overhead)
-    std::vector<std::pair<uint64_t, environment*>> saved_metadata;
+    std::vector<arg_ref_metadata> saved_metadata;
     if (has_args) {
         saved_metadata = std::move(current_arg_metadata_);
         current_arg_metadata_.clear();
@@ -5718,10 +5718,19 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                     symbol_id = string_symbolizer_->intern(identExpr->name);
                     identExpr->symbol_id = symbol_id;
                 }
-                current_arg_metadata_.emplace_back(symbol_id, environment_.get());
+                arg_ref_metadata meta(symbol_id, environment_.get());
+                // Frame-slot local: record its coordinates so a reference parameter can
+                // bind to the slot itself (env lookup would miss it and walk to an
+                // unrelated same-named outer variable)
+                if (identExpr->slot_index != SIZE_MAX && !call_stack_.empty() &&
+                    call_stack_.back().get_local(identExpr->slot_index) != nullptr) {
+                    meta.caller_frame_index = call_stack_.size() - 1;
+                    meta.slot = identExpr->slot_index;
+                }
+                current_arg_metadata_.push_back(meta);
             } else {
                 // Not an identifier - can't take reference
-                current_arg_metadata_.emplace_back(UINT64_MAX, nullptr);
+                current_arg_metadata_.emplace_back();
             }
 
             // Evaluate argument with exception handling
@@ -10216,6 +10225,102 @@ script_value interpreter::bind_parameter(
     return (semantics == parameter_semantics::value) ? arg.clone() : arg;
 }
 
+// Reference-parameter binding from the recorded arg metadata. Kept out of call_function
+// so its locals stay off the per-recursion-level native frame (Debug stack ceiling).
+checked_result<void> interpreter::bind_reference_parameter(const parameter& param, size_t frame_index,
+                                                           size_t arg_index, const std::shared_ptr<environment>& caller_env) {
+    const arg_ref_metadata& meta = get_current_arg_metadata()[arg_index];
+
+    // Caller frame-slot local: bind straight to the slot storage, anchored to the
+    // caller frame's lifetime (env lookup can't see slot locals and would walk to an
+    // unrelated same-named outer variable)
+    if (meta.caller_frame_index < call_stack_.size() && meta.slot != SIZE_MAX) {
+        auto& caller_frame = call_stack_[meta.caller_frame_index];
+        script_value* slotPtr = caller_frame.get_local(meta.slot);
+        if (slotPtr) {
+            if (slotPtr->is_reference()) {
+                auto refHolder = slotPtr->get_reference_holder();
+                if (!refHolder || !refHolder->target) {
+                    return checked_result<void>(
+                        make_error_code(runtime_error_code::invalid_reference),
+                        "Reference target is null"
+                    );
+                }
+                script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
+                call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
+            } else {
+                script_value refValue = script_value::make_reference(slotPtr, caller_frame.ensure_ref_anchor(string_symbolizer_));
+                call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
+            }
+            return {};
+        }
+    }
+
+    if (meta.symbol_id == UINT64_MAX || meta.env == nullptr) {
+        // No metadata - can't create reference
+        return checked_result<void>(
+            make_error_code(runtime_error_code::invalid_reference),
+            "Cannot pass non-lvalue to reference parameter"
+        );
+    }
+
+    // Get pointer to the argument (env is raw pointer from metadata)
+    environment* env = meta.env;
+    script_value* argPtr = env->get_value_ptr(meta.symbol_id);
+    if (!argPtr) {
+        return checked_result<void>(
+            make_error_code(runtime_error_code::undefined_variable),
+            "Cannot take reference of undefined variable"
+        );
+    }
+
+    // If the argument is itself a reference, get the final target
+    if (argPtr->is_reference()) {
+        auto refHolder = argPtr->get_reference_holder();
+        if (!refHolder || !refHolder->target) {
+            return checked_result<void>(
+                make_error_code(runtime_error_code::invalid_reference),
+                "Reference target is null"
+            );
+        }
+        script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
+        call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
+        return {};
+    }
+
+    // Recover the env's shared_ptr: the caller env chain covers block, method and
+    // function-body scopes (the metadata env is the caller's environment at the call
+    // site); call frames and global remain fallbacks
+    std::shared_ptr<environment> env_shared;
+    for (auto p = caller_env; p; p = p->get_parent()) {
+        if (p.get() == env) {
+            env_shared = p;
+            break;
+        }
+    }
+    if (!env_shared && env == environment_.get()) {
+        env_shared = environment_;
+    }
+    if (!env_shared) {
+        for (size_t fi = frame_index; fi > 0; --fi) {
+            auto& frame = call_stack_[fi - 1];
+            if (frame.closure_env.get() == env) {
+                env_shared = frame.closure_env;
+                break;
+            }
+        }
+        if (!env_shared) {
+            auto global_env = get_global_environment();
+            if (global_env.get() == env) {
+                env_shared = global_env;
+            }
+        }
+    }
+    script_value refValue = script_value::make_reference(argPtr, env_shared);
+    call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
+    return {};
+}
+
 // Function call implementation - returns checked_result for consistent error handling
 // Uses stack-based call frames for fast parameter access instead of hash map environments
 checked_result<script_value> interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args) {
@@ -10367,64 +10472,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             // References still go into environment since they need special tracking
             const auto& current_arg_metadata = get_current_arg_metadata();
             if (!current_arg_metadata.empty() && i < current_arg_metadata.size()) {
-                auto symbol_id = current_arg_metadata[i].first;
-                auto env = current_arg_metadata[i].second;
-
-                if (symbol_id != UINT64_MAX && env != nullptr) {
-                    // Get pointer to the argument (env is raw pointer from metadata)
-                    script_value* argPtr = env->get_value_ptr(symbol_id);
-                    if (!argPtr) {
-                        cleanup();
-                        return checked_result<script_value>(
-                            make_error_code(runtime_error_code::undefined_variable),
-                            "Cannot take reference of undefined variable"
-                        );
-                    }
-
-                    // If the argument is itself a reference, get the final target
-                    if (argPtr->is_reference()) {
-                        auto refHolder = argPtr->get_reference_holder();
-                        if (!refHolder || !refHolder->target) {
-                            cleanup();
-                            return checked_result<script_value>(
-                                make_error_code(runtime_error_code::invalid_reference),
-                                "Reference target is null"
-                            );
-                        }
-                        // Create reference to the final target - add to call frame using slot
-                        script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-                        call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
-                    } else {
-                        // Create reference to the argument - add to call frame using slot
-                        // Get shared_ptr for env: search current env, then call stack frames
-                        std::shared_ptr<environment> env_shared;
-                        if (env == environment_.get()) {
-                            env_shared = environment_;
-                        } else {
-                            for (size_t fi = frame_index; fi > 0; --fi) {
-                                auto& frame = call_stack_[fi - 1];
-                                if (frame.closure_env.get() == env) {
-                                    env_shared = frame.closure_env;
-                                    break;
-                                }
-                            }
-                            if (!env_shared) {
-                                auto global_env = get_global_environment();
-                                if (global_env.get() == env) {
-                                    env_shared = global_env;
-                                }
-                            }
-                        }
-                        script_value refValue = script_value::make_reference(argPtr, env_shared);
-                        call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
-                    }
-                } else {
-                    // No metadata - can't create reference
+                auto bound = bind_reference_parameter(param, frame_index, i, previousEnv);
+                if (!bound) {
                     cleanup();
-                    return checked_result<script_value>(
-                        make_error_code(runtime_error_code::invalid_reference),
-                        "Cannot pass non-lvalue to reference parameter"
-                    );
+                    return bound.error_value();
                 }
             } else {
                 // No metadata: external (C++) invocation. Object values are handles, so a

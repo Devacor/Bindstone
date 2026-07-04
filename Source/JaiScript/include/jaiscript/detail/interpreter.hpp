@@ -373,8 +373,8 @@ namespace jai {
         string_symbolizer* get_string_symbolizer() const { return string_symbolizer_; }
         
         // Access to current argument metadata for reference parameter support
-        // Returns symbol_id and raw environment pointer (safe since metadata only lives during call)
-        const std::vector<std::pair<uint64_t, environment*>>& get_current_arg_metadata() const {
+        // (raw pointers/indices - safe since metadata only lives during call)
+        const std::vector<arg_ref_metadata>& get_current_arg_metadata() const {
             return current_arg_metadata_;
         }
 
@@ -502,11 +502,11 @@ namespace jai {
         std::shared_ptr<environment> environment_;
 
         // Current argument metadata for reference parameter passing
-        // Uses raw pointers - safe since metadata only lives during call scope
-        std::vector<std::pair<uint64_t, environment*>> current_arg_metadata_;
+        // Uses raw pointers/indices - safe since metadata only lives during call scope
+        std::vector<arg_ref_metadata> current_arg_metadata_;
 
         // Saved metadata of in-flight script calls, shelved across external (C++) invocations
-        std::vector<std::vector<std::pair<uint64_t, environment*>>> external_metadata_stack_;
+        std::vector<std::vector<arg_ref_metadata>> external_metadata_stack_;
         
         // Optimized stack for expression evaluation results
         class script_valueStack {
@@ -906,6 +906,10 @@ namespace jai {
         // Function call helpers
         // Returns checked_result - exceptions only thrown at execute() boundary
         checked_result<script_value> call_function(const script_defined_function& function, const std::vector<script_value>& args);
+        // Reference-parameter binding from arg metadata, factored out of call_function so
+        // its locals don't sit in the per-recursion-level frame (Debug stack ceiling)
+        checked_result<void> bind_reference_parameter(const parameter& param, size_t frame_index,
+                                                      size_t arg_index, const std::shared_ptr<environment>& caller_env);
         void validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args);
 
         // Type conversion helpers (constructor-based conversions)

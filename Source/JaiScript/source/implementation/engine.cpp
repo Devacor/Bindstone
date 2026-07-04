@@ -1669,7 +1669,8 @@ script_value engine::try_create_reference(size_t arg_index, const script_value& 
         return fallback; // Index out of bounds, use fallback
     }
     
-    auto [symbol_id, env] = metadata[arg_index];
+    auto symbol_id = metadata[arg_index].symbol_id;
+    auto* env = metadata[arg_index].env;
     if (symbol_id == UINT64_MAX || !env) {
         return fallback; // No valid metadata for this argument, use fallback
     }

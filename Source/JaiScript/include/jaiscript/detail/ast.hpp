@@ -549,6 +549,14 @@ namespace jai {
         bool is_coroutine = false;
         size_t local_count = 0;   // Total slots needed (params + locals) for stack allocation
 
+        // Enclosing-frame slot locals a nested COROUTINE body references, as
+        // (symbol_id, outer slot). Interpreter-owned: built on the first declaration
+        // execution, which also patches those body identifiers' slot_index to SIZE_MAX
+        // (mirrors lambda_expr::outer_slot_plan); the vm derives its own compile-time
+        // plan and never reads these.
+        mutable std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
+        mutable bool outer_slot_plan_built = false;
+
         function_decl(const source_location& loc, std::string_view n, uint64_t id = UINT64_MAX)
             : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false), is_coroutine(false), local_count(0) {}
     };

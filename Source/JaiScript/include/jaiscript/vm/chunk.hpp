@@ -28,6 +28,9 @@ namespace jai::vm {
         std::shared_ptr<script_defined_function> fn;
         std::shared_ptr<function_decl> decl;
         bool is_coroutine = false;
+        // Coroutines only: enclosing-frame slot locals the body references (compiler-
+        // derived, like closure_proto::outer_slot_plan) - snapshot at declaration
+        std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
     };
 
     struct closure_proto {

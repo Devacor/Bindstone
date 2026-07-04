@@ -4016,6 +4016,29 @@ checked_result<void> vm_backend::exec_func_decl(frame& f, const vm_instruction& 
 		// interpreter) and does NOT run the body; resume drives it.
 		auto func_decl_ptr = proto.decl;
 		auto closure_env = environment_;
+		// Nested (function-local) coroutine: the resumed body runs on its own frame,
+		// so enclosing-frame slot locals are snapshot by value into a capture env
+		// (closure-style; the chain also pins the declaration env against pool reuse)
+		if (!proto.outer_slot_plan.empty() && f.locals && !f.top_level) {
+			const size_t outer_slot_count = f.locals->local_count();
+			std::shared_ptr<environment> captureEnv;
+			for (const auto& [sym, slot] : proto.outer_slot_plan) {
+				if (slot < outer_slot_count) {
+					if (script_value* slot_val = f.locals->get_local(slot)) {
+						if (!captureEnv) {
+							// Parent = global (interpreter parity + the lambda-documented
+							// pooled-env recycle hazard for escaping handles)
+							auto global = engine_ ? engine_->get_global_environment() : nullptr;
+							captureEnv = std::make_shared<environment>(global, symbolizer_);
+						}
+						captureEnv->define(sym, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+					}
+				}
+			}
+			if (captureEnv) {
+				closure_env = captureEnv;
+			}
+		}
 		uint64_t coroutine_type_id = coroutine_handle_type_id_;
 		script_value functionValue = script_value::make_function(
 			[eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {

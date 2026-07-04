@@ -3,7 +3,37 @@
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace jai {
+
+namespace detail {
+
+// True when the current thread's remaining native stack is below the safety margin.
+// Guards the recursive native call paths (constructor bodies in particular stack
+// 20-25KB per level in Debug), converting an imminent 0xC00000FD process kill into
+// the catchable max_recursion_depth error. Per-thread OS query - no static state.
+bool native_stack_low() noexcept {
+#if defined(_WIN32)
+    static constexpr uintptr_t k_stack_margin = 256 * 1024;
+    ULONG_PTR low = 0, high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    char probe;
+    return reinterpret_cast<uintptr_t>(&probe) - static_cast<uintptr_t>(low) < k_stack_margin;
+#else
+    return false;
+#endif
+}
+
+} // namespace detail
 
 void environment::define(const std::string& name, const script_value& value) {
     uint64_t id = symbolizer_->intern(name);

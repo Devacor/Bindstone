@@ -21,6 +21,13 @@ namespace jai {
     class class_definition;
     class class_instance;
 
+    namespace detail {
+        // True when the current thread's remaining native stack is under the safety
+        // margin - recursive native call paths raise the catchable recursion error
+        // instead of dying on a hardware stack overflow (implemented in environment.cpp)
+        bool native_stack_low() noexcept;
+    }
+
     // environment for storing variables in a scope
     // Environment kind - replaces virtual dispatch with simple enum check
     enum class env_kind {

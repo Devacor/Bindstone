@@ -415,6 +415,26 @@ public:
 		// Stage 3 (method flattening): method self-recursion no longer stacks native
 		// frames, but the depth-10000 error must still be raised and stay catchable
 		// through the flattened path on both backends.
+		test("ctor_self_recursion_raises_catchable_error", [this]() {
+			// Constructor recursion runs on the native entry path with wide frames; it
+			// used to hard-crash (0xC00000FD) in Debug before reaching the depth cap.
+			// Either guard (depth cap or native-stack headroom) must fire catchably.
+			const char* src = R"(
+				class C { C() { var c = C(); } }
+				var msg = "";
+				try { var root = C(); } catch (err) { msg = err; }
+				msg;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->execution_budget(0);
+				auto msg = e->execute(src).as<std::string>();
+				check_true(msg.find("recursion") != std::string::npos,
+					"ctor self-recursion raises a catchable recursion error");
+			}
+		});
+
 		test("method_recursion_depth_error_catchable", [this]() {
 			const char* src = R"(
 				class R { int spin(int n) { return this.spin(n + 1); } }

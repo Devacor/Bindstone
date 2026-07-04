@@ -7786,6 +7786,14 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 			"Maximum recursion depth ({0}) exceeded - possible infinite recursion",
 			static_cast<uint64_t>(JAI_MAX_CALL_DEPTH));
 	}
+	// The native entry path (constructor chains especially) stacks wide frames per
+	// level and can exhaust the native stack long before the depth cap - fail
+	// catchably instead of dying on 0xC00000FD (in-loop frames never recurse natively)
+	if (detail::native_stack_low()) [[unlikely]] {
+		return checked_result<script_value>(
+			make_error_code(runtime_error_code::max_recursion_depth),
+			"Native stack exhausted - possible infinite recursion");
+	}
 
 	if (execution_budget_exhausted()) [[unlikely]] {
 		return checked_result<script_value>(

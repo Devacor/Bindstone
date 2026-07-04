@@ -10454,6 +10454,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             static_cast<uint64_t>(JAI_MAX_CALL_DEPTH)
         );
     }
+    // Wide native frames (constructor chains especially) can exhaust the native stack
+    // long before the depth cap - fail catchably instead of dying on 0xC00000FD
+    if (detail::native_stack_low()) [[unlikely]] {
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::max_recursion_depth),
+            "Native stack exhausted - possible infinite recursion");
+    }
 
     if (execution_budget_exhausted()) [[unlikely]] {
         return execution_budget_error<script_value>();

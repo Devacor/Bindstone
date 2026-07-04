@@ -10762,6 +10762,21 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 }
             }
         } else {
+            // Exact-class match: a pointer-identical interned type_info (with the
+            // non-empty name the identity branch requires) replicates try_convert's
+            // exact-name branch (which returns the derefed arg) without the conversion
+            // machinery; should_share is false for objects, so the clone matches the
+            // full path
+            {
+                const script_value& derefed = arg.deref();
+                if (param.type && param.type->base_type == script_value_type::jai_object_type &&
+                    derefed.storage_type() == script_value_type::jai_object_type &&
+                    derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
+                    call_stack_[frame_index].set_local(param.slot_index, derefed.clone());
+                    continue;
+                }
+            }
+
             // Non-reference parameter - try to convert the argument to the parameter type if needed
             script_value converted_arg = make_value();
             JAISCRIPT_TRY_ASSIGN(converted_arg, try_convert_for_parameter(arg, param.type));

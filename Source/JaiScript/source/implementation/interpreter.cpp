@@ -10692,6 +10692,11 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     auto cleanup = [&](bool clear_this = true) {
         // capture before pop_back: deeper frames are still present
         if (is_unwinding_ && !trace_captured_) capture_stack_trace();
+        // Move the frame out and destroy it LAST: releasing its locals can fire script
+        // destructors that reenter call_function and grow call_stack_, which must never
+        // happen mid-pop_back (vector reentrancy UB). Mirrors the VM's stable-record
+        // teardown: destructors fire after the caller env/state is restored.
+        call_frame dying_frame = std::move(call_stack_.back());
         call_stack_.pop_back();
 
         auto function_env = environment_;

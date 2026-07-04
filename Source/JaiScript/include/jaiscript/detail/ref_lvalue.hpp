@@ -10,6 +10,7 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
@@ -288,11 +289,17 @@ namespace jai::detail {
 	}
 
 	inline std::string ref_value_type_name(const script_value& val) {
-		auto type_info = val.get_type_info();
-		if (type_info && !type_info->type_name.empty()) {
+		const script_value& actual = val.is_reference() ? val.deref() : val;
+		auto type_info = actual.get_type_info();
+		if (type_info && !type_info->type_name.empty() &&
+		    type_info->base_type != script_value_type::jai_any_type) {
 			return type_info->type_name;
 		}
-		return ref_type_name_of(val.type());
+		// Dynamic (var) tags say 'any': name the actual instance class instead
+		if (auto holder = actual.get_object_holder(); holder && !holder->type_name.empty()) {
+			return holder->type_name;
+		}
+		return ref_type_name_of(actual.current_type());
 	}
 
 	inline std::string ref_type_info_name(type_info_ptr info) {
@@ -305,21 +312,67 @@ namespace jai::detail {
 		return "unknown";
 	}
 
-	inline bool ref_constraint_compatible(const script_value& element, type_info_ptr element_type) {
+	// Object constraints resolve the ACTUAL instance class (a var local's tag is 'any';
+	// shared_ptr values wrap the same object_holder) and accept subtypes - mirrors
+	// try_convert_for_parameter's acceptance for typed class parameters.
+	inline bool ref_object_constraint_accepts(const script_value& actual, type_info_ptr constraint, engine* eng) {
+		auto holder = actual.get_object_holder();
+		if (!holder) {
+			return false;
+		}
+		if (constraint->type_name.empty()) {
+			return true;
+		}
+		const class_definition* class_def = nullptr;
+		std::shared_ptr<class_definition> engine_def;
+		if (holder->is_class_instance_wrapper && holder->data) {
+			auto instance = std::static_pointer_cast<class_instance>(holder->data);
+			class_def = instance->get_class_definition();
+		} else if (eng) {
+			engine_def = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id)
+			                                           : eng->get_class_definition(holder->type_name);
+			class_def = engine_def.get();
+		}
+		if (class_def && class_def->is_subtype_of(constraint->type_name)) {
+			return true;
+		}
+		if (holder->type_name == constraint->type_name) {
+			return true;
+		}
+		auto tag = actual.get_type_info();
+		return tag && tag->base_type != script_value_type::jai_any_type &&
+		       tag->type_name == constraint->type_name;
+	}
+
+	inline bool ref_constraint_compatible(const script_value& element, type_info_ptr element_type, engine* eng) {
 		const script_value& actual_element = element.is_reference() ? element.deref() : element;
 		if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
 			return true;
 		}
 		auto elem_type = actual_element.type();
 		auto target_type = element_type->base_type;
-		if (elem_type == target_type) {
-			if (target_type == script_value_type::jai_object_type) {
-				auto elem_type_info = actual_element.get_type_info();
-				if (elem_type_info && !element_type->type_name.empty()) {
-					return elem_type_info->type_name == element_type->type_name;
-				}
+		if (target_type == script_value_type::jai_object_type) {
+			if (ref_object_constraint_accepts(actual_element, element_type, eng)) {
+				return true;
 			}
+			if (elem_type == target_type) {
+				// Preserve the permissive fallback for untagged/unnamed values
+				auto elem_type_info = actual_element.get_type_info();
+				return !elem_type_info || element_type->type_name.empty();
+			}
+			return false;
+		}
+		if (elem_type == target_type) {
 			return true;
+		}
+		if (target_type == script_value_type::jai_shared_ptr_type) {
+			// Dynamic (var) tags hide the shared_ptr marker behind current_type();
+			// the holder is the ground truth (name laxity matches the tagged path)
+			auto tag = actual_element.get_type_info();
+			if ((!tag || tag->base_type == script_value_type::jai_any_type) &&
+			    actual_element.get_object_holder() != nullptr) {
+				return true;
+			}
 		}
 		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
 			return true;
@@ -413,7 +466,7 @@ namespace jai::detail {
 			refLocal.deref() = std::move(value.deref().clone());
 			return {};
 		}
-		if (!ref_constraint_compatible(value, constraint)) {
+		if (!ref_constraint_compatible(value, constraint, eng)) {
 			return ref_constraint_error(symbolizer, value, constraint, is_field);
 		}
 		script_value converted = ref_convert_for_constraint(eng, value, constraint);
@@ -422,21 +475,22 @@ namespace jai::detail {
 	}
 
 	// Constrained-ref compound assignment (x op= v where x is bound to a typed element
-	// or field): mirrors the subscript-compound semantics - env custom operator first,
-	// then arithmetic, then constraint check + convert + write-through. `arith` is the
+	// or field): mirrors the subscript-compound semantics - custom operator first, then
+	// arithmetic, then constraint check + convert + write-through. `arith` is the
 	// backend's evaluate_arithmetic. Returns the (pre-conversion) expression result.
+	// Operator symbols are only definable in the global env (C++ add_function), so the
+	// consult takes the GLOBAL env - a caller-chain walk is O(depth) in deep recursion.
 	template <typename Arith>
 	inline checked_result<script_value> ref_compound_store_constrained(
 			script_value& refLocal, const script_value& rightArg, token_type op, const char* opName,
-			environment* env, engine* eng, string_symbolizer* symbolizer, Arith&& arith) {
-		auto current = ref_checked_deref(refLocal);
-		if (!current) {
-			return current;
-		}
-		script_value currentValue = std::move(current.value());
+			environment* global_env, engine* eng, string_symbolizer* symbolizer, Arith&& arith) {
+		// Current-value read raw-derefs exactly like the unconstrained compound path: a
+		// removed element/field surfaces as the same caller-frame-catchable throw whether
+		// or not the bound container was typed
+		script_value currentValue = refLocal.deref();
 		const script_value& rightValue = rightArg.deref();
 		script_value resultValue(std::monostate{}, eng);
-		auto op_result = env->get(opName);
+		auto op_result = global_env->get(opName);
 		if (op_result && op_result.value().is_function()) {
 			script_value opFunc = std::move(op_result.value());
 			const script_function& func = opFunc.as_function();
@@ -492,7 +546,7 @@ namespace jai::detail {
 		}
 		const auto* holder = refLocal.get_reference_holder();
 		type_info_ptr constraint = holder ? holder->container_element_type : nullptr;
-		if (!ref_constraint_compatible(resultValue, constraint)) {
+		if (!ref_constraint_compatible(resultValue, constraint, eng)) {
 			auto err = ref_constraint_error(symbolizer, resultValue, constraint, holder && holder->owner_instance != nullptr);
 			return err.error_value();
 		}

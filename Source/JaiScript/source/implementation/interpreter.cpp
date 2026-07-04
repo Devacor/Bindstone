@@ -3242,20 +3242,25 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
         default: break;
     }
 
-    // Check for custom operator function (excluding subscript)
-    if (op_symbol_id != 0 && environment_ && environment_->contains(op_symbol_id)) {
-        auto op_result = environment_->get(op_symbol_id);
-        if (op_result && op_result.value().is_function()) {
-            script_value opFunc = std::move(op_result.value());
-            const script_function& func = opFunc.as_function();
-            std::vector<script_value> args = {left, right};
-            auto result = func(args);
-            if (!result) {
-                // Function returned error - propagate it up
-                return result.error_value();
+    // Check for custom operator function (excluding subscript). Operator symbols are
+    // only definable in the global env (C++ add_function), so the consult probes it
+    // directly - a chain walk here is O(depth) in recursive callees.
+    if (op_symbol_id != 0) {
+        auto global_env = get_global_environment();
+        if (global_env && global_env->contains(op_symbol_id)) {
+            auto op_result = global_env->get(op_symbol_id);
+            if (op_result && op_result.value().is_function()) {
+                script_value opFunc = std::move(op_result.value());
+                const script_function& func = opFunc.as_function();
+                std::vector<script_value> args = {left, right};
+                auto result = func(args);
+                if (!result) {
+                    // Function returned error - propagate it up
+                    return result.error_value();
+                }
+                push_value(std::move(result.value()));
+                return {};
             }
-            push_value(std::move(result.value()));
-            return {};
         }
     }
 
@@ -3659,7 +3664,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             default: op = token_type::plus; opName = "+"; break;
                         }
                         auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
-                            environment_.get(), engine_, string_symbolizer_,
+                            get_global_environment().get(), engine_, string_symbolizer_,
                             [this](const script_value& l, token_type o, const script_value& r) {
                                 return evaluate_arithmetic(l, o, r);
                             });
@@ -11264,16 +11269,25 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         // On yield, call_function saves environment/call_stack into this coroutine
         // (via active_coroutine_) and returns the yield value WITHOUT running cleanup;
         // on normal return it cleans up and returns the result.
+        // Coroutine parameters always bind by VALUE (VM parity): resume runs far from
+        // the creation-site lvalues, so reference binding is meaningless here.
+        std::vector<parameter> value_params = function->parameters;
+        for (auto& p : value_params) { p.is_reference = false; }
         script_defined_function scriptFunc(
             function->name,
-            function->parameters,
+            value_params,
             function->return_type,
             function->body,
             handle.get_closure_env(),
             function->local_count
         );
 
+        // A first resume nested inside another call's argument list must not see that
+        // call's in-flight arg metadata (a zero-arg .resume() never saves/clears it)
+        auto enclosing_metadata = std::move(current_arg_metadata_);
+        current_arg_metadata_.clear();
         auto call_result = call_function(scriptFunc, handle.get_args());
+        current_arg_metadata_ = std::move(enclosing_metadata);
 
         if (hasYieldRequest_) {
             // call_function already saved state into this coroutine

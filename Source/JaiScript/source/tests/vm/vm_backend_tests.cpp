@@ -807,6 +807,111 @@ public:
 			}
 		});
 
+		test("element_ref_arg_error_script_catchable_parity", [this]() {
+			// OOB element-ref deref during call-ARGUMENT evaluation must be script-catchable
+			// in the calling frame on BOTH backends (interpreter converts at visit_call; the
+			// VM converts in-frame inside call-arg zones instead of popping the frame or
+			// rethrowing at records_base).
+			const char* srcs[] = {
+				// top-level ref-param call, decl-ref arg (pre-fix: VM escaped execute() entirely)
+				R"(
+					var arr = [1, 2, 3];
+					auto& x = arr[2];
+					arr.pop();
+					var msg = "";
+					function f(int& t) { }
+					try { f(x); } catch (e) { msg = e; }
+					msg;
+				)",
+				// top-level value-param call
+				R"(
+					var arr = [1, 2, 3];
+					auto& x = arr[2];
+					arr.pop();
+					var msg = "";
+					function g(int t) { }
+					try { g(x); } catch (e) { msg = e; }
+					msg;
+				)",
+				// in-function range-for element arg (pre-fix: VM popped driver's frame, its try never fired)
+				R"(
+					var arr = [1, 2, 3];
+					var msg = "";
+					function readIt(int& x) { return x; }
+					function driver() { for (auto& el : arr) { arr.pop(); arr.pop(); arr.pop(); try { readIt(el); } catch (e) { msg = e; } break; } }
+					driver();
+					msg;
+				)",
+				// method-call argument zone
+				R"(
+					var arr = [1, 2, 3];
+					var msg = "";
+					class C { int take(int v) { return v; } }
+					function driver() { auto c = C(); for (auto& el : arr) { arr.pop(); arr.pop(); arr.pop(); try { c.take(el); } catch (e) { msg = e; } break; } }
+					driver();
+					msg;
+				)",
+			};
+			for (const char* src : srcs) {
+				std::string first;
+				for (bool use_vm : {false, true}) {
+					auto e = jai::engine::make();
+					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					auto msg = e->execute(src).as<std::string>();
+					check_true(msg.find("removed array element") != std::string::npos,
+						"arg-position OOB element ref caught by the calling frame's try");
+					if (!use_vm) { first = msg; } else { check_eq(first, msg, "identical error text on both backends"); }
+				}
+			}
+		});
+
+		test("element_ref_callee_error_caught_at_depth2", [this]() {
+			// Mid-call shrink two hops down a shared-holder chain: the store's re-resolve
+			// error must unwind to the outermost script try identically on both backends.
+			const char* src = R"(
+				var arr = [1, 2, 3];
+				var msg = "";
+				function w(int& x) { arr.pop(); arr.pop(); arr.pop(); x = 5; }
+				function relay(int& x) { w(x); }
+				function driver() { for (auto& el : arr) { try { relay(el); } catch (e) { msg = e; } break; } }
+				driver();
+				msg;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				auto msg = e->execute(src).as<std::string>();
+				check_true(msg.find("removed array element") != std::string::npos,
+					"depth-2 write error unwinds to driver's try");
+				if (!use_vm) { first = msg; } else { check_eq(first, msg, "identical error text on both backends"); }
+			}
+		});
+
+		test("unwinding_skips_typed_return_conversion", [this]() {
+			// An exception in flight across a typed-return frame must keep its text: the
+			// interpreter's call epilogue used to run the -> int conversion on the junk
+			// return slot and replace the error with "Type mismatch: expected int but got this".
+			const char* src = R"(
+				var arr = [1, 2, 3];
+				var msg = "";
+				function readIt(int& x) -> int { return x; }
+				function wipeThenRead(int& x) -> int { arr.pop(); arr.pop(); arr.pop(); return readIt(x); }
+				function driver() { for (auto& el : arr) { try { wipeThenRead(el); } catch (e) { msg = e; } break; } }
+				driver();
+				msg;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				auto msg = e->execute(src).as<std::string>();
+				check_true(msg.find("removed array element") != std::string::npos,
+					"typed-return frame does not mangle the in-flight error");
+				if (!use_vm) { first = msg; } else { check_eq(first, msg, "identical error text on both backends"); }
+			}
+		});
+
 		test("ref_param_recursive_pass_down", [this]() {
 			// pre-fix: green both backends (one fresh holder per hop); post-fix shares one holder
 			const char* src = R"(

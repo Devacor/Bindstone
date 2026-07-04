@@ -99,6 +99,10 @@ namespace jai::vm {
         std::vector<const ast_node*> stmt_nodes;
 
         std::vector<script_value> constants;               // engine-less AST-literal templates
+        // Instruction ranges [begin, end) evaluating call arguments; consulted only on the
+        // C++-exception path (interpreter parity: visit_call converts arg-eval throws into
+        // script unwinding at the frame making the call, so its own try/catch can fire)
+        std::vector<std::pair<uint32_t, uint32_t>> call_arg_zones;
         std::vector<uint64_t> symbols;
         std::deque<std::string> messages;                  // stable storage: checked_result keeps string_views
         std::vector<std::shared_ptr<ast_node>> nodes;      // pins referenced AST nodes alive

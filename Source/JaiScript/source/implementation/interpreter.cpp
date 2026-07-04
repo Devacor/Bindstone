@@ -10779,7 +10779,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         return result;
     }
 
-    if (hasReturnValue_) {
+    // Unwinding through a return statement leaves a junk return slot: running the typed
+    // return conversion on it would replace the in-flight exception (VM parity: unwinding
+    // frames complete with their implicit result, conversion skipped)
+    if (hasReturnValue_ && !is_unwinding_) {
         // IMPORTANT: Dereference any references before cleanup destroys the call frame.
         // References to call frame locals (e.g., map[key] on a parameter) would become
         // dangling after the call frame is popped.

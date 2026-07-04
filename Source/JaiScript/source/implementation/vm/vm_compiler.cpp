@@ -1268,6 +1268,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			}
 			site.arg_symbols.reserve(expr->arguments.size());
 			site.arg_slots.reserve(expr->arguments.size());
+			const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 			for (const auto& arg : expr->arguments) {
 				if (arg->get_type() == node_type::identifier_expr) {
 					auto* arg_ident = static_cast<identifier_expr*>(arg.get());
@@ -1278,6 +1279,9 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 					site.arg_slots.push_back(k_invalid_u32);
 				}
 				compile_expression(arg);
+			}
+			if (!expr->arguments.empty()) {
+				chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
 			}
 			chunk_->call_sites.push_back(std::move(site));
 			emit(opcode::op_call_method, static_cast<uint32_t>(expr->arguments.size()),
@@ -1293,6 +1297,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	call_site site;
 	site.arg_symbols.reserve(expr->arguments.size());
 	site.arg_slots.reserve(expr->arguments.size());
+	const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 	for (const auto& arg : expr->arguments) {
 		if (arg->get_type() == node_type::identifier_expr) {
 			auto* arg_ident = static_cast<identifier_expr*>(arg.get());
@@ -1303,6 +1308,9 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			site.arg_slots.push_back(k_invalid_u32);
 		}
 		compile_expression(arg);
+	}
+	if (!expr->arguments.empty()) {
+		chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
 	}
 	chunk_->call_sites.push_back(std::move(site));
 	emit(opcode::op_call, static_cast<uint32_t>(expr->arguments.size()),

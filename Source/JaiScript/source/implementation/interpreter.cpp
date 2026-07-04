@@ -5651,6 +5651,10 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                     for (const auto& argExpr : expr->arguments) {
                         JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
                         arguments.emplace_back(std::move(pop_value()));
+                        if (is_unwinding_) {
+                            push_value(make_value());
+                            return {};
+                        }
                     }
 
                     // Call method directly on the variable reference
@@ -5669,6 +5673,10 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     // Evaluate the callee expression
     JAISCRIPT_TRY(dispatch_expr(expr->callee.get()));
     script_value callee = pop_value();
+    if (is_unwinding_) {
+        push_value(make_value());
+        return {};
+    }
 
     // Handle null-safe method calls: obj?.method() returns null if obj was null
     if (callee.is_null() && expr->callee->get_type() == node_type::member_expr) {
@@ -5720,6 +5728,11 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             try {
                 JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
                 arguments.emplace_back(std::move(pop_value()));
+                if (is_unwinding_) {
+                    current_arg_metadata_ = std::move(saved_metadata);
+                    push_value(make_value());
+                    return {};
+                }
             } catch (const script_exception& e) {
                 // Restore metadata before returning
                 current_arg_metadata_ = std::move(saved_metadata);

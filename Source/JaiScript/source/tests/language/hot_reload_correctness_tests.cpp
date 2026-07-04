@@ -213,6 +213,62 @@ public:
             check_eq(eng->execute("w.extra").as<int>(), 3);             // existing data kept
             check_eq(ReloadCppBase::live_instances - base_live, 1);     // not destructed, not rebuilt
         });
+
+        // A reentrant execute (host callback firing mid-script) must define at TOP level:
+        // redefining a function that is currently on the call stack replaces the global
+        // binding (old frames finish with their old bodies) and the binding persists.
+        test("function_redefined_mid_call_persists", [&]() {
+            auto eng = make_engine();
+            jai::engine* raw = eng.get();
+            eng->add_function("swap_fn", [raw]() {
+                raw->execute("function f(n) { return 1000; }");
+            });
+            eng->add_function("swap_other", [raw]() {
+                raw->execute("function g(n) { return 2000; }");
+            });
+            // A different, not-on-stack function defined mid-call persists
+            eng->execute("function fo(n) { if (n == 2) { swap_other(); } if (n <= 0) { return 0; } return fo(n - 1) + 1; }");
+            check_eq((int64_t)4, eng->execute("fo(4)").as_int());
+            check_eq((int64_t)2000, eng->execute("g(1)").as_int());
+            // Redefining the RUNNING function replaces the global binding: old frames
+            // finish with their old bodies, recursion resolves the new one, and the
+            // new definition persists
+            eng->execute("function f(n) { if (n == 2) { swap_fn(); } if (n <= 0) { return 0; } return f(n - 1) + 1; }");
+            check_eq((int64_t)1003, eng->execute("f(4)").as_int());
+            check_eq((int64_t)1000, eng->execute("f(1)").as_int());
+            check_eq((int64_t)1000, eng->execute("f(4)").as_int());
+        });
+
+        test("self_redefinition_mid_call_persists_after_return", [&]() {
+            auto eng = make_engine();
+            jai::engine* raw = eng.get();
+            eng->add_function("swap_min", [raw]() {
+                raw->execute("function m(n) { return 77; }");
+            });
+            eng->execute("function m(n) { if (n == 1) { swap_min(); return m(0); } return 5; }");
+            check_eq((int64_t)77, eng->execute("m(1)").as_int());
+            // The interpreter used to lose the global binding entirely here
+            check_eq((int64_t)77, eng->execute("m(0)").as_int());
+        });
+
+        // Class reloaded while one of its methods is mid-recursion: the continuing old
+        // frame consistently fails to resolve the sibling method (pinned quirk on both
+        // backends), but afterwards the instance, the class and new instances must all
+        // stay alive and resolve the NEW body.
+        test("class_reload_mid_recursion_keeps_globals_coherent", [&]() {
+            auto eng = make_engine();
+            jai::engine* raw = eng.get();
+            eng->add_function("swap_rec", [raw]() {
+                raw->execute("class R { int rec(int k) { if (k <= 0) { return 0; } return rec(k - 1) + 100; } }");
+            });
+            eng->execute(R"(
+                class R { int rec(int k) { if (k == 2) { swap_rec(); } if (k <= 0) { return 0; } return rec(k - 1) + 1; } }
+                auto r = R();
+            )");
+            try { eng->execute("r.rec(4)"); } catch (const std::exception&) {}
+            check_eq((int64_t)400, eng->execute("r.rec(4)").as_int());
+            check_eq((int64_t)100, eng->execute("auto r2 = R(); r2.rec(1);").as_int());
+        });
     }
 };
 

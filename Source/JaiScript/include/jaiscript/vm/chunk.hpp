@@ -20,6 +20,9 @@ namespace jai::vm {
     struct call_site {
         std::vector<uint64_t> arg_symbols;
         std::vector<uint32_t> arg_slots;           // caller frame slot per argument (k_invalid_u32 = env-resolved)
+        // chunk::nodes index per ref-bindable lvalue argument (k_invalid_u32 = none);
+        // lazily materialized - empty when no argument qualifies
+        std::vector<uint32_t> arg_lvalue_nodes;
         uint32_t member_node = k_invalid_u32;      // op_call_method: member_expr node index
         uint64_t receiver_symbol = UINT64_MAX;     // op_call_method: identifier receiver symbol id
     };

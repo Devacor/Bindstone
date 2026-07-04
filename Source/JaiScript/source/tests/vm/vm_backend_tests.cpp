@@ -1041,6 +1041,469 @@ public:
 			}
 		});
 
+		// Stage 2 (Tier 1): field/subscript/chain lvalue arguments bind to reference
+		// parameters through the shared resolver (detail/ref_lvalue.hpp). Field refs pin
+		// the instance, element refs pin the vector; typed fields/elements enforce their
+		// bind-time tag on assign-through.
+		test("tier1_bst_insert_by_ref", [this]() {
+			// The headline: recursive insert through field refs, no return-reassign
+			const char* src = R"(
+				class TreeNode { int value = 0; TreeNode left = null; TreeNode right = null; TreeNode(int val) { value = val; } }
+				function insertNode(var& node, int val) {
+					if (node == null) { node = TreeNode(val); return; }
+					if (val < node.value) { insertNode(node.left, val); } else { insertNode(node.right, val); }
+				}
+				function inorderSum(var node) -> int {
+					if (node == null) { return 0; }
+					return inorderSum(node.left) + node.value + inorderSum(node.right);
+				}
+				var root = null;
+				insertNode(root, 8);
+				insertNode(root, 4);
+				insertNode(root, 12);
+				insertNode(root, 2);
+				insertNode(root, 6);
+				insertNode(root, 10);
+				insertNode(root, 14);
+				inorderSum(root);
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)56, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_field_ref_write_through", [this]() {
+			const char* src = R"(
+				class Box { int v = 1; }
+				function set9(int& x) { x = 9; }
+				var b = Box();
+				set9(b.v);
+				b.v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)9, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_chain_and_mixed_lvalue_args", [this]() {
+			// a.b.c, arr[i].field, obj.arr[j] chains all resolve to the innermost node
+			const char* src = R"(
+				class Inner { int val = 1; }
+				class Outer { Inner inner = null; var arr = [0, 0]; Outer() { inner = Inner(); } }
+				function bump(int& x) { x = x + 10; }
+				var o = Outer();
+				bump(o.inner.val);
+				var boxes = [Inner(), Inner()];
+				bump(boxes[1].val);
+				var j = 0;
+				bump(o.arr[j]);
+				o.inner.val * 10000 + boxes[1].val * 100 + o.arr[0];
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)111110, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_subscript_literal_and_identifier_index", [this]() {
+			// Literal index, env-resolved identifier index, and slot-local identifier index
+			const char* src = R"(
+				function set(int& x, int val) { x = val; }
+				var arr = [1, 2, 3];
+				set(arr[0], 7);
+				var gi = 2;
+				set(arr[gi], 8);
+				function driver() { var li = 1; set(arr[li], 9); }
+				driver();
+				arr[0] * 100 + arr[1] * 10 + arr[2];
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)798, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_this_field_ref_from_method", [this]() {
+			// this.field as a ref arg: free-function callee and method callee. Results
+			// observed from outside m() - a method's OWN this/field lookups after any
+			// free-function call are broken at HEAD (pre-existing, both backends)
+			const char* src = R"(
+				function bump(int& x) { x = x + 1; }
+				class Svc { void put(int& x, int val) { x = val; } }
+				class C {
+					int v = 5;
+					int m() { bump(this.v); return 0; }
+					int n(var s) { s.put(this.v, 40); return this.v; }
+				}
+				var c = C();
+				c.m();
+				var first = c.v;
+				var second = c.n(Svc());
+				first * 100 + second;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)640, e->execute(src).as_int(), use_vm ? "vm" : "interp");
+			}
+		});
+
+		test("tier1_method_callee_field_ref_arg", [this]() {
+			// enter_script_method builds the same lvalue metadata as plain calls
+			const char* src = R"(
+				class Box { int v = 0; }
+				class Svc { void put(int& x, int val) { x = val; } }
+				var b = Box();
+				var s = Svc();
+				s.put(b.v, 42);
+				b.v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)42, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_shared_ptr_base_field_ref", [this]() {
+			const char* src = R"(
+				class N { int v = 1; N(int val) { v = val; } }
+				function bump(int& x) { x = x + 1; }
+				var sp = shared_ptr<N>(5);
+				bump(sp.v);
+				sp.v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)6, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_typed_field_wrong_type_errors", [this]() {
+			const char* src = R"(
+				class Box { int v = 1; }
+				function put(var& x) { x = "nope"; }
+				var b = Box();
+				var msg = "";
+				try { put(b.v); } catch (e) { msg = e; }
+				msg + "|" + to_string(b.v);
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto msg = e->execute(src).as<std::string>();
+				check_true(msg.find("Cannot assign 'string' to field of type 'int'") != std::string::npos,
+					"typed field rejects retype through the ref");
+				check_true(msg.find("|1") != std::string::npos, "field value untouched after rejected write");
+				if (!use_vm) { first = msg; } else { check_eq(first, msg, "identical error text on both backends"); }
+			}
+		});
+
+		test("tier1_typed_field_numeric_conversion_and_null", [this]() {
+			// float converts into an int field like elements do; typed object fields
+			// stay nullable through the ref (the `TreeNode left = null` idiom)
+			const char* src = R"(
+				class Node { int num = 1; Node next = null; }
+				function put(var& x, var val) { x = val; }
+				var n = Node();
+				put(n.num, 2.7);
+				n.next = Node();
+				put(n.next, null);
+				to_string(n.num) + "|" + type_of(n.next);
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto got = e->execute(src).as<std::string>();
+				check_eq(std::string("2|null"), got);
+				if (!use_vm) { first = got; } else { check_eq(first, got); }
+			}
+		});
+
+		test("tier1_field_constraint_is_value_carried", [this]() {
+			// Field typedness is value-carried (declared var/int both tag by the stored
+			// value): an int-tagged field constrains the ref exactly like the in-method
+			// identifier-assign path; an any-tagged field value binds unconstrained
+			const char* src = R"(
+				class Box { var v = 1; }
+				function put(var& x) { x = "str"; }
+				var b = Box();
+				var msg = "";
+				try { put(b.v); } catch (e) { msg = e; }
+				var anyTagged = 2;
+				b.v = anyTagged;
+				put(b.v);
+				to_string(b.v) + "|" + msg;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("str|") == 0, "any-tagged field value binds unconstrained");
+				check_true(got.find("Cannot assign 'string' to field of type 'int'") != std::string::npos,
+					"int-tagged field value constrains the ref");
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical error text on both backends"); }
+			}
+		});
+
+		test("tier1_typed_element_enforcement_through_param", [this]() {
+			// Typed array element bound by f(a[i]): wrong type errors with the element
+			// text; compound += goes through the same constraint machinery
+			const char* src = R"(
+				array<int> a = [1, 2, 3];
+				function put(var& x) { x = "bad"; }
+				function inc(var& x) { x += 10; }
+				var msg = "";
+				try { put(a[0]); } catch (e) { msg = e; }
+				inc(a[1]);
+				msg + "|" + to_string(a[0]) + "|" + to_string(a[1]);
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("Cannot assign 'string' to element of type 'int'") != std::string::npos,
+					"typed element rejects retype through the bound ref");
+				check_true(got.find("|1|12") != std::string::npos, "rejected write untouched, compound applied");
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical error text on both backends"); }
+			}
+		});
+
+		test("tier1_owner_pinned_past_caller_handle_drop", [this]() {
+			// The holder pins the instance/vector: dropping the caller's last handle
+			// mid-call must leave the ref writable (Debug 0xDD canary covers dangling)
+			const char* src = R"(
+				class Box { int v = 5; }
+				var g = Box();
+				var arr = [1, 2, 3];
+				function fldWrite(int& x) { g = null; x = x + 1; return x; }
+				function elemWrite(int& x) { arr = null; x = x + 1; return x; }
+				var a = fldWrite(g.v);
+				var b = elemWrite(arr[1]);
+				a * 10 + b;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)63, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_element_ref_realloc_and_shrink", [this]() {
+			// Tier-1-bound element refs re-resolve container+index: writes survive
+			// realloc, shrink errors instead of corrupting
+			const char* src = R"(
+				var arr = [7];
+				var msg = "";
+				function grow(int& x) { for (int i = 0; i < 64; i = i + 1) { arr.push(0); } x = 42; }
+				function wipe(int& x) { while (arr.size() > 0) { arr.pop(); } x = 5; }
+				grow(arr[0]);
+				var grown = arr[0];
+				try { wipe(arr[0]); } catch (e) { msg = e; }
+				to_string(grown) + "|" + msg;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("42|") == 0, "write through the ref survives realloc");
+				check_true(got.find("removed array element") != std::string::npos, "shrunk element write errors");
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical error text on both backends"); }
+			}
+		});
+
+		test("tier1_non_lvalue_exclusion_matrix", [this]() {
+			// Everything outside the sanctioned lvalue shapes keeps today's exact error
+			const char* setup = R"(
+				class Box { int v = 1; int _get_area() { return v * 2; } }
+				function f(int& x) { x = 0; }
+				var b = Box();
+				var arr = [1, 2, 3];
+				var m = {"k": 1};
+				var s = "hi";
+				var msg = "";
+			)";
+			const char* cases[] = {
+				"try { f(b.v + 1); } catch (e) { msg = e; } msg;",
+				"try { f(arr.size()); } catch (e) { msg = e; } msg;",
+				"try { f(5); } catch (e) { msg = e; } msg;",
+				"try { f(m[\"k\"]); } catch (e) { msg = e; } msg;",
+				"try { f(arr.size); } catch (e) { msg = e; } msg;",
+				"try { f(b.area); } catch (e) { msg = e; } msg;",   // computed property: no backing field
+			};
+			for (bool use_vm : {false, true}) {
+				for (const char* c : cases) {
+					auto e = jai::engine::make();
+					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					auto msg = e->execute(std::string(setup) + c).as<std::string>();
+					check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
+						std::string("non-lvalue arg keeps the exact error: ") + c + " got: " + msg);
+				}
+				// String subscript args fail during argument EVALUATION (strings have no
+				// [] operator) - pre-existing error, never reaches ref binding
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				auto msg = e->execute(std::string(setup) + "try { f(s[0]); } catch (e) { msg = e; } msg;").as<std::string>();
+				check_true(msg.find("Subscript can only be used on") != std::string::npos,
+					std::string("string subscript arg keeps the eval-time error, got: ") + msg);
+			}
+		});
+
+		test("tier1_bind_time_ordering_pinned", [this]() {
+			// Chain resolution happens at bind time, after ALL args evaluate: a later
+			// arg that swaps the chain spine changes what binds (identifier precedent)
+			const char* src = R"(
+				class B { int v = 1; }
+				class A { B b = null; A() { b = B(); } }
+				var a = A();
+				var keep = a.b;
+				function swapB() -> int { a.b = B(); return 0; }
+				function f(int& x, int ignored) { x = 50; }
+				f(a.b.v, swapB());
+				a.b.v * 10 + keep.v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)501, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_field_ref_pass_through_hop", [this]() {
+			// Tier 1 x Tier 2: the bound field ref shares its holder through further hops
+			const char* src = R"(
+				class Box { int v = 1; }
+				function leaf(int& x) { x = x + 1; }
+				function mid(int& x) { leaf(x); x = x + 10; }
+				var b = Box();
+				mid(b.v);
+				b.v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)12, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_ref_param_type_forms", [this]() {
+			// var&, auto&, int&, ClassName&, array<int>& all parse, bind, and write through
+			const char* src = R"(
+				class P { int v = 1; }
+				function f1(var& x) { x = x + 1; }
+				function f2(auto& x) { x = x + 2; }
+				function f3(int& x) { x = x + 3; }
+				function f4(P& p) { p = P(); p.v = 99; }
+				function f5(array<int>& a) { a[0] = 9; }
+				class H { int n = 10; P p = null; var arr = null; H() { p = P(); arr = [0]; } }
+				var h = H();
+				f1(h.n);
+				f2(h.n);
+				f3(h.n);
+				f4(h.p);
+				f5(h.arr);
+				h.n * 1000 + h.p.v * 10 + h.arr[0];
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)16999, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_hot_reload_field_ref", [this]() {
+			// Field refs re-resolve by (pinned instance, field id): a kept field stays
+			// writable across a mid-call reload; a removed field errors on write
+			const char* src = R"(
+				class Box { int v = 1; }
+				var b = Box();
+				var msg = "";
+				function keepWrite(var& x) { reloadKeep(); x = 42; }
+				function dropWrite(var& x) { reloadDrop(); x = 43; }
+				keepWrite(b.v);
+				var kept = b.v;
+				b2 = Box();
+				try { dropWrite(b2.v); } catch (e) { msg = e; }
+				to_string(kept) + "|" + msg;
+			)";
+			std::string first;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				jai::engine* raw = e.get();
+				e->add_function("reloadKeep", [raw]() -> jai::script_int {
+					raw->execute("class Box { int v = 1; float extra = 0.0; }");
+					return 0;
+				});
+				e->add_function("reloadDrop", [raw]() -> jai::script_int {
+					raw->execute("class Box { float other = 0.0; }");
+					return 0;
+				});
+				e->execute("var b2 = null;");
+				auto got = e->execute(src).as<std::string>();
+				check_true(got.find("42|") == 0, "kept field writable through the live ref after reload");
+				check_true(got.find("Reference to a removed field") != std::string::npos,
+					"removed field errors on write through the ref");
+				if (!use_vm) { first = got; } else { check_eq(first, got, "identical error text on both backends"); }
+			}
+		});
+
+		test("tier1_member_args_to_ref_free_functions_unaffected", [this]() {
+			// R5: member/subscript args to REF-FREE callees consume no lvalue metadata
+			// and stay pure rvalue reads, surrounded by live ref-param calls
+			const char* src = R"(
+				class Box { int v = 3; }
+				int plain(int a) { return a + 1; }
+				function bump(int& t) { t = t + 1; }
+				var b = Box();
+				var arr = [5];
+				var r1 = plain(b.v);
+				bump(b.v);
+				var r2 = plain(arr[0]);
+				bump(b.v);
+				r1 * 1000 + r2 * 10 + b.v;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)4065, e->execute(src).as_int());
+			}
+		});
+
+		test("tier1_type_of_and_read_back_through_bound_field_ref", [this]() {
+			// Reads through the bound ref see live field state; type_of reports the referent
+			const char* src = R"(
+				class Box { int v = 7; }
+				function probe(int& x) -> string { var t = type_of(x); x = x + 1; return t + ":" + to_string(x); }
+				var b = Box();
+				probe(b.v) + ":" + to_string(b.v);
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				check_eq(std::string("int:8:8"), e->execute(src).as<std::string>());
+			}
+		});
+
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
 			e->add_variadic_function("sum_all", [](const std::vector<script_value>& args) -> checked_result<script_value> {

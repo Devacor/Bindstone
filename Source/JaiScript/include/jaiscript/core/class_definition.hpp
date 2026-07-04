@@ -51,6 +51,18 @@ public:
         return fields_.find(id) != fields_.end();
     }
 
+    // Field node lookup WITHOUT lazy default insertion (field-reference resolution:
+    // a reload-removed field must error, not silently resurrect as a default)
+    script_value* find_field_value(uint64_t id) {
+        auto it = fields_.find(id);
+        return it != fields_.end() ? &it->second : nullptr;
+    }
+
+    const script_value* find_field_value(uint64_t id) const {
+        auto it = fields_.find(id);
+        return it != fields_.end() ? &it->second : nullptr;
+    }
+
     const std::string& get_class_name() const { return class_name_; }
 
     void migrate_fields(const std::set<uint64_t>& old_field_ids,

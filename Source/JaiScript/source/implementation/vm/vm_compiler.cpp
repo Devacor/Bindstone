@@ -1,6 +1,7 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/body_walker.hpp>
+#include <jaiscript/detail/ref_lvalue.hpp>
 #include <cassert>
 #include <functional>
 
@@ -1277,6 +1278,10 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				} else {
 					site.arg_symbols.push_back(UINT64_MAX);
 					site.arg_slots.push_back(k_invalid_u32);
+					if (jai::detail::is_ref_bindable_lvalue(arg.get())) {
+						site.arg_lvalue_nodes.resize(expr->arguments.size(), k_invalid_u32);
+						site.arg_lvalue_nodes[site.arg_symbols.size() - 1] = add_node(arg);
+					}
 				}
 				compile_expression(arg);
 			}
@@ -1306,6 +1311,10 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		} else {
 			site.arg_symbols.push_back(UINT64_MAX);
 			site.arg_slots.push_back(k_invalid_u32);
+			if (jai::detail::is_ref_bindable_lvalue(arg.get())) {
+				site.arg_lvalue_nodes.resize(expr->arguments.size(), k_invalid_u32);
+				site.arg_lvalue_nodes[site.arg_symbols.size() - 1] = add_node(arg);
+			}
 		}
 		compile_expression(arg);
 	}

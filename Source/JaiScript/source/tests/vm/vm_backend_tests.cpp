@@ -789,6 +789,24 @@ public:
 			}
 		});
 
+		test("ref_param_element_compound_store", [this]() {
+			// Compound stores on a ref param bound to an array element go through the
+			// re-resolving deref (the shared holder is container-based, not a pointer).
+			// (++ on a ref param is a separate pre-existing gap on both backends.)
+			const char* src = R"(
+				var arr = [5, 6];
+				function addTo(int& x) { x += 10; }
+				function driver() { for (auto& el : arr) { addTo(el); } }
+				driver();
+				arr[0] * 100 + arr[1];
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)1516, e->execute(src).as_int());
+			}
+		});
+
 		test("ref_param_recursive_pass_down", [this]() {
 			// pre-fix: green both backends (one fresh holder per hop); post-fix shares one holder
 			const char* src = R"(

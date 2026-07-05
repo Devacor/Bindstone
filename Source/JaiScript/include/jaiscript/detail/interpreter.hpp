@@ -813,9 +813,6 @@ namespace jai {
 
         // Binary operation helpers
         [[nodiscard]] checked_result<script_value> evaluate_arithmetic(const script_value& left, token_type op, const script_value& right);
-        [[nodiscard]] checked_result<script_value> evaluate_comparison(const script_value& left, token_type op, const script_value& right);
-        [[nodiscard]] checked_result<script_value> evaluate_logical(const script_value& left, token_type op, const script_value& right);
-        [[nodiscard]] checked_result<script_value> evaluate_bitwise(const script_value& left, token_type op, const script_value& right);
 
         // Strong types: Type enforcement for assignment
         // Returns error if value cannot be assigned to a variable with target_type

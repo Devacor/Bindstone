@@ -1568,7 +1568,15 @@ namespace jai {
             cpp_bound_holder(void* p, uint8_t ss, uint8_t sem) noexcept
                 : ptr(p), size_and_sign(ss), semantic_index(sem) {}
         };
-        
+
+        // Boxes the (never runtime-constructed) shared_ptr alternative 11 so the variant's
+        // max payload stays one pointer. The atomic inner std::shared_ptr is preserved for
+        // the original thread-safety intent; real cross-thread sharing is object_holder::data.
+        struct shared_value_holder {
+            std::shared_ptr<script_value> inner;
+            explicit shared_value_holder(std::shared_ptr<script_value> v) noexcept : inner(std::move(v)) {}
+        };
+
         // Reference wrapper for reference types
         struct reference_holder {
             script_value* target = nullptr;  // Points to the referenced value (when container is null)
@@ -1655,11 +1663,13 @@ namespace jai {
             strong_ptr<object_holder>,                    // 8 - Object<T>
             strong_ptr<script_function>,                  // 9 - Function (wrapped for cheap copies)
             strong_ptr<reference_holder>,                 // 10 - T&
-            std::shared_ptr<script_value>,                // 11 - shared_ptr<T> (user-level, keeps std::shared_ptr for thread safety)
+            strong_ptr<shared_value_holder>,              // 11 - shared_ptr<T> (boxed; never runtime-constructed - real shared_ptr values are alt 8 + type_info marker)
             jai::weaker_ptr<object_holder>,                 // 12 - weak_ptr<T>
             invalid_tag,                                  // 13 - Invalid value marker
             strong_ptr<cpp_bound_holder>                  // 14 - C++ primitive/string/opaque binding box
         >;
+        static_assert(std::is_nothrow_move_constructible_v<storage> && std::is_nothrow_move_assignable_v<storage>,
+                      "every alternative must stay nothrow-move (valueless_by_exception + noexcept move depend on it)");
 
         storage storage_;
 
@@ -1798,7 +1808,7 @@ namespace jai {
         // Direct shared_ptr assignment for interpreter use
         void set_shared_ptr(const std::shared_ptr<script_value>& shared) {
             if (type() == script_value_type::jai_shared_ptr_type) {
-                storage_ = shared;
+                storage_ = make_strong<shared_value_holder>(shared);
             } else {
                 throw runtime_error("Cannot set shared_ptr on non-shared_ptr script_value");
             }
@@ -1807,9 +1817,9 @@ namespace jai {
         // Get the wrapped value from a shared_ptr
         script_value get_shared_ptr_value() const {
             if (type() == script_value_type::jai_shared_ptr_type) {
-                auto wrapped = std::get<std::shared_ptr<script_value>>(storage_);
-                if (wrapped) {
-                    return *wrapped;
+                auto holder = std::get<strong_ptr<shared_value_holder>>(storage_);
+                if (holder && holder->inner) {
+                    return *holder->inner;
                 }
             }
             throw runtime_error("Cannot get wrapped value from non-shared_ptr script_value");
@@ -1844,9 +1854,10 @@ namespace jai {
         template<typename K, typename C, typename A> friend class std::set;
     };
 
-    // Rung-1 gate (temporary, replaced by ==32 at rung 2b): the cpp_bound side-members are
-    // folded into the storage variant.
-    static_assert(sizeof(script_value) == 40, "script_value must be 40 bytes (rung 1 of the thin-value fold)");
+    // Permanent thin-value gates: 8B type_info_ + 8B engine_ + 16B variant (8B max payload + index).
+    static_assert(sizeof(script_value) == 32 && alignof(script_value) == 8,
+                  "script_value must stay 32 bytes / 8-aligned (thin-value fold)");
+    static_assert(std::is_nothrow_move_constructible_v<script_value>);
 
 } // namespace jai
 

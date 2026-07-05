@@ -30,6 +30,33 @@ namespace {
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
 	}
 
+	// Twin-parity zero-divisor check for cpp-bound operands: index 14 skips the raw-index
+	// gates of binary_fast_shape/exec_binary_fused, which would move a bound-zero divisor's
+	// error from the fast-path surface onto the handlers' bare "Division by zero". Each shape
+	// passes the exact (op x type-pair) coverage of its own inline zero checks so bound
+	// operands keep the plain twin's error surface. Byte-parallel with interpreter.cpp's copy.
+	struct bound_zero_divisor_error { runtime_error_code code; const char* text; };
+	inline std::optional<bound_zero_divisor_error> bound_fastpath_zero_divisor(
+			token_type op, const script_value& left, const script_value& right,
+			bool float_div_covered, bool float_mod_covered) {
+		if (op != token_type::slash && op != token_type::percent) return std::nullopt;
+		if (left.is_int() && right.is_int()) {
+			if (right.unchecked_as_int() != 0) return std::nullopt;
+			return op == token_type::slash
+				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in integer operation"}
+				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in integer operation"};
+		}
+		if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
+			if (!(op == token_type::slash ? float_div_covered : float_mod_covered)) return std::nullopt;
+			const script_float rf = right.is_int() ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
+			if (rf != 0.0) return std::nullopt;
+			return op == token_type::slash
+				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in float operation"}
+				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in float operation"};
+		}
+		return std::nullopt;
+	}
+
 	std::string vm_type_name_of(script_value_type type) {
 		switch (type) {
 			case script_value_type::jai_null_type: return "null";
@@ -1951,6 +1978,14 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			out.emplace(script_value(left.unchecked_as_string() + right.unchecked_as_string(), engine_));
 			return true;
 		}
+		// cpp-bound operands (index 14) skip the gates above: keep the zero-divisor
+		// error surface identical to this shape's plain fast path (twin parity)
+		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
+			if (auto z = bound_fastpath_zero_divisor(op, left, right, true, true)) {
+				out.emplace(checked_result<script_value>(make_error_code(z->code), z->text));
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -1994,6 +2029,14 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			default: return false;
 			}
 		}
+		// twin parity for bound operands: float % falls to the handlers in this shape
+		// exactly like the plain fast path (no percent case above)
+		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
+			if (auto z = bound_fastpath_zero_divisor(op, left, right, true, false)) {
+				out.emplace(checked_result<script_value>(make_error_code(z->code), z->text));
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -2017,6 +2060,14 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation")); return true; }
 				out.emplace(script_value(ints::mod(a, b), engine_)); return true;
 			default: return false;
+			}
+		}
+		// twin parity for bound operands: int-only shape - float pairs fall to the
+		// handlers for plain and bound alike
+		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
+			if (auto z = bound_fastpath_zero_divisor(op, left, right, false, false)) {
+				out.emplace(checked_result<script_value>(make_error_code(z->code), z->text));
+				return true;
 			}
 		}
 		return false;
@@ -3465,6 +3516,11 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
 			stack_.push_back(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
 			return {};
+		} else if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
+			// twin parity: bound operands keep this fused shape's zero-divisor error surface
+			if (auto z = bound_fastpath_zero_divisor(op, *lp, *rp, true, true)) {
+				return checked_result<void>(make_error_code(z->code), z->text);
+			}
 		}
 	}
 

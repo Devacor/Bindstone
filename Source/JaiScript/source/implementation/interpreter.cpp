@@ -28,6 +28,33 @@ namespace {
         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
     }
 
+    // Twin-parity zero-divisor check for cpp-bound operands: index 14 skips the raw-index
+    // gates of visit_binary_expr's fast paths, which would move a bound-zero divisor's error
+    // from the fast-path surface onto the dispatch handlers' bare "Division by zero". Each
+    // shape passes the exact (op x type-pair) coverage of its own inline zero checks so bound
+    // operands keep the plain twin's error surface. Byte-parallel with vm_backend.cpp's copy.
+    struct bound_zero_divisor_error { runtime_error_code code; const char* text; };
+    inline std::optional<bound_zero_divisor_error> bound_fastpath_zero_divisor(
+            token_type op, const script_value& left, const script_value& right,
+            bool float_div_covered, bool float_mod_covered) {
+        if (op != token_type::slash && op != token_type::percent) return std::nullopt;
+        if (left.is_int() && right.is_int()) {
+            if (right.unchecked_as_int() != 0) return std::nullopt;
+            return op == token_type::slash
+                ? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in integer operation"}
+                : bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in integer operation"};
+        }
+        if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
+            if (!(op == token_type::slash ? float_div_covered : float_mod_covered)) return std::nullopt;
+            const script_float rf = right.is_int() ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
+            if (rf != 0.0) return std::nullopt;
+            return op == token_type::slash
+                ? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in float operation"}
+                : bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in float operation"};
+        }
+        return std::nullopt;
+    }
+
     // Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: share the
     // holder, except constrained element refs re-derive an unconstrained alias (auto&
     // drops the element-type constraint - pinned decl semantics)
@@ -2982,6 +3009,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 						push_value(make_value(leftStr + rightStr));
 						return {};
 					}
+					// cpp-bound operands (index 14) skip the gates above: keep the zero-divisor
+					// error surface identical to this shape's plain fast path (twin parity)
+					else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
+						if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
+							return checked_result<void>(make_error_code(z->code), z->text);
+						}
+					}
 				}
 
 				// Fast path didn't handle it - copy values for fallback dispatch
@@ -3084,6 +3118,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							break;
 						}
 					}
+					// twin parity for bound operands: float % falls to the handlers in this
+					// shape exactly like the plain fast path (no percent case above)
+					else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
+						if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, false)) {
+							return checked_result<void>(make_error_code(z->code), z->text);
+						}
+					}
 				}
 				// Fast path didn't fully handle - copy for slow path
 				pre_fetched_left = leftVal;
@@ -3148,6 +3189,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 							return {};
 						default:
 							break;
+						}
+					}
+					// twin parity for bound operands: int-only shape - float pairs fall to
+					// the handlers for plain and bound alike
+					else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
+						if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, false, false)) {
+							return checked_result<void>(make_error_code(z->code), z->text);
 						}
 					}
 				}

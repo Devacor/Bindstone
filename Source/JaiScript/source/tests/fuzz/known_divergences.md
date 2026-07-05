@@ -25,6 +25,17 @@ the fix ledger's job.
 | FZ-SPACESHIP-OVERFLOW-SWALLOW | checked integer overflow inside a `<=>` operand (minimized: `int v = ((-((1 + INT64_MAX))) <=> INT64_MAX);`): interpreter completes silently with null, VM raises `Integer overflow in unary '-'` | 9336 | interpreter (checked-overflow policy is "safe by default": the error must surface; note the VM's operator attribution is also wrong - the `+` overflowed) | NEW - found by fuzzer 2026-07-05 |
 | KD-ORDERING-THROW | `throw` inside a class `operator<` swallowed by one backend | none observed in pilot (fix may already be landed) | n/a | matcher retained defensively |
 
+## Engine findings that are not divergences
+
+- FZ-BUDGET-LIVELOCK (campaign seeds 436, 3507, 4860, 8285): the execution budget can be
+  defeated from script. The budget error raised at a loop back-edge is an ordinary catchable
+  error, so `for(...) { try { <infinite work> } catch (e) {} }` re-raises and re-catches it
+  forever - `execute()` NEVER returns (observed 2.3 GB memory growth while livelocked). Both
+  backends are equally affected, so it is not a parity divergence, but it is a
+  denial-of-service hole for any host embedding untrusted scripts, and it forces fuzz
+  campaigns to use a per-seed watchdog process (`--child` + `timeout`). A budget error
+  should arguably be uncatchable (or stop re-arming after the first escape).
+
 ## Harness lessons encoded (not engine bugs)
 
 - A script can CATCH the execution-budget error and keep going, making printed output

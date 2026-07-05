@@ -13,6 +13,19 @@
 #define JAI_MAX_CALL_DEPTH 10000
 #endif
 
+// One static recursion-limit message for BOTH backends and BOTH triggers (depth cap and
+// native-stack exhaustion): which limit fires first differs per backend (the vm's in-loop
+// frames never recurse natively), so byte-identical error text requires a single message.
+// The depth is baked in by stringification - checked_result messages are static string_views
+// and the old "{0}" form passed the depth as a SYMBOL id, printing an empty "()".
+// (vm_backend.cpp repeats this definition; both are #ifndef-guarded - keep them in sync.)
+#ifndef JAI_MAX_CALL_DEPTH_MESSAGE
+#define JAI_STRINGIFY_IMPL(x) #x
+#define JAI_STRINGIFY(x) JAI_STRINGIFY_IMPL(x)
+#define JAI_MAX_CALL_DEPTH_MESSAGE \
+	"Maximum recursion depth (" JAI_STRINGIFY(JAI_MAX_CALL_DEPTH) ") exceeded - possible infinite recursion"
+#endif
+
 // Portable force-inline (MSVC and clang-cl accept __forceinline; GCC/Clang need the attribute)
 #ifndef JAI_FORCEINLINE
 #if defined(_MSC_VER)

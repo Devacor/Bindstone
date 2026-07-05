@@ -10690,16 +10690,16 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::max_recursion_depth),
-            "Maximum recursion depth ({0}) exceeded - possible infinite recursion",
-            static_cast<uint64_t>(JAI_MAX_CALL_DEPTH)
-        );
+            JAI_MAX_CALL_DEPTH_MESSAGE);
     }
     // Wide native frames (constructor chains especially) can exhaust the native stack
-    // long before the depth cap - fail catchably instead of dying on 0xC00000FD
+    // long before the depth cap - fail catchably instead of dying on 0xC00000FD.
+    // Same message as the depth cap: the vm never trips this on script recursion
+    // (in-loop frames), so a distinct text here breaks backend error parity.
     if (detail::native_stack_low()) [[unlikely]] {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::max_recursion_depth),
-            "Native stack exhausted - possible infinite recursion");
+            JAI_MAX_CALL_DEPTH_MESSAGE);
     }
 
     if (execution_budget_exhausted()) [[unlikely]] {

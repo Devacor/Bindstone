@@ -600,6 +600,25 @@ public:
             expect_both("var z = 0.5; z % 0.0;", "Modulo by zero in float operation", "var/literal float modulo");
         });
 
+        // ---- fuzz FZ-RECURSION-MSG-TEXT (seed 137): interp hit the native-stack guard
+        // ("Native stack exhausted...") while the vm hit the depth cap, whose "{0}" was
+        // passed the depth as a SYMBOL id and printed an empty "()" ----
+        test("fuzz_recursion_limit_text_parity", [this]() {
+            std::string msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);   // deep recursion outruns the default budget in Debug
+                try { e->execute("function forever(int n) -> int { return n + forever(n - 1); } forever(3);"); }
+                catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                ++idx;
+            }
+            check_eq(msg[0], msg[1], "recursion-limit error text is byte-identical across backends");
+            check_true(msg[0].find("Maximum recursion depth (10000) exceeded") != std::string::npos,
+                "recursion-limit message carries the depth (got: " + msg[0] + ")");
+        });
+
         test("range_for_ref_realloc_no_corruption", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

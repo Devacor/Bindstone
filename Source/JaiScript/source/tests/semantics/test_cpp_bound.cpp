@@ -592,12 +592,25 @@ public:
             try { eng->execute("bump_i(b32);"); } catch (const jai::runtime_error&) { caughtCall = true; }
             check_true(caughtCall, "bound int32 -> script_int& param throws jai::runtime_error");
             check_eq(5, b32, "mismatched-width call target untouched");
-            // Plain (unbound) script array: the arg copy shares the strong_ptr storage, so a
-            // std::vector<script_value>& param mutates the caller's array (zero-copy contract).
+            // Plain (unbound) args keep copy isolation on the non-const T& route: the callee
+            // gets a private copy, so its writes never reach the caller - the S9/12.4
+            // aliasing delta stays confined to cpp-bound arguments.
             eng->add_function("push_seven", [rawEng](std::vector<script_value>& a) { a.push_back(script_value((script_int)7, rawEng)); });
             eng->execute("var pa = [1]; push_seven(pa);");
-            check_eq((int64_t)2, eng->execute("pa.size()").as_int(), "vector<script_value>& param writes through to the script array");
-            check_eq((int64_t)7, eng->execute("pa[1]").as_int(), "appended element visible in script");
+            check_eq((int64_t)1, eng->execute("pa.size()").as_int(), "plain vector<script_value>& writes stay in the callee's private copy");
+            std::string seenPlain;
+            eng->add_function("mut_ps", [&seenPlain](std::string& s) { seenPlain = s; s += "!"; });
+            eng->execute("var ps = \"a\"; var pt = ps; mut_ps(ps);");
+            check_eq(std::string("a"), seenPlain, "plain std::string& callee reads the value");
+            check_eq(std::string("a"), eng->execute("ps").template as<std::string>(), "plain std::string& writes never reach the caller");
+            check_eq(std::string("a"), eng->execute("pt").template as<std::string>(), "shared-storage sibling also untouched");
+            script_int seenPlainInt = 0;
+            eng->add_function("bump_pn", [&seenPlainInt](script_int& n) { seenPlainInt = n; n += 5; });
+            eng->execute("var pn = 3; bump_pn(pn);");
+            check_eq((int64_t)3, seenPlainInt, "plain script_int& callee reads the value");
+            check_eq((int64_t)3, eng->execute("pn").as_int(), "plain script_int& writes never reach the caller");
+            // ...while the bound route above stays live-aliased (fnv/bs2/bd asserts) - both
+            // shapes together pin the confinement boundary.
         });
 
         test("t2_bound_zero_rhs_divmod_error_surface", [this]() {
@@ -613,6 +626,56 @@ public:
                 check_true(divMsg.find("Division by zero") != std::string::npos, tag + "bound-zero /= keeps 'Division by zero' (got: " + divMsg + ")");
                 try { eng->execute("za[0] %= bz2;"); } catch (const jai::runtime_error& e) { modMsg = e.what(); }
                 check_true(modMsg.find("Modulo by zero") != std::string::npos, tag + "bound-zero %= keeps 'Modulo by zero' (got: " + modMsg + ")");
+            };
+            runMatrix(false);
+            runMatrix(true);
+        });
+
+        test("t2_bound_zero_divisor_binary_twin_parity", [this]() {
+            // Binary / and % with a bound-zero divisor must throw the SAME error (code message
+            // + text via what()) as the plain twin in the same expression shape, per backend.
+            auto runMatrix = [this](bool useVm) {
+                const std::string tag = useVm ? "vm: " : "interp: ";
+                auto eng = jai::engine::make();
+                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                script_int bi = 10, bz = 0;
+                script_float bf = 1.5, bfz = 0.0;
+                eng->add_global_ref("bi", bi);
+                eng->add_global_ref("bz", bz);
+                eng->add_global_ref("bf", bf);
+                eng->add_global_ref("bfz", bfz);
+                eng->execute("var qi = 10; var qz = 0; var qf = 1.5; var qfz = 0.0; var ba = [bz]; var qa = [0];");
+                auto msgOf = [&](const std::string& expr) -> std::string {
+                    try { eng->execute(expr); } catch (const jai::runtime_error& e) { return e.what(); }
+                    return "<no throw>";
+                };
+                auto twin = [&](const std::string& boundExpr, const std::string& plainExpr, const std::string& label) {
+                    check_eq(msgOf(plainExpr), msgOf(boundExpr), tag + label);
+                };
+                twin("bi / bz", "qi / qz", "ident/ident int /");
+                twin("bi % bz", "qi % qz", "ident/ident int %");
+                twin("10 / bz", "10 / qz", "literal/ident int /");
+                twin("10 % bz", "10 % qz", "literal/ident int %");
+                twin("bi / 0", "qi / 0", "ident/literal int /");
+                twin("bi % 0", "qi % 0", "ident/literal int %");
+                twin("bz / 0", "qz / 0", "bound-numerator ident/literal /");
+                twin("bz % 0", "qz % 0", "bound-numerator ident/literal %");
+                twin("bf / bz", "qf / qz", "ident/ident float /");
+                twin("bf % bz", "qf % qz", "ident/ident float %");
+                twin("bf / 0.0", "qf / 0.0", "ident/literal float /");
+                twin("bf % 0.0", "qf % 0.0", "ident/literal float %");
+                twin("10.0 / bfz", "10.0 / qfz", "literal/ident float /");
+                twin("10.0 % bfz", "10.0 % qfz", "literal/ident float %");
+                twin("10 / ba[0]", "10 / qa[0]", "complex-shape bound divisor /");
+                twin("10 % ba[0]", "10 % qa[0]", "complex-shape bound divisor %");
+                // Pin the restored fast-path surface itself (not just parity).
+                check_true(msgOf("bi / bz").find("Division by zero in integer operation") != std::string::npos, tag + "bound / keeps the integer fast-path text");
+                check_true(msgOf("bi % bz").find("Modulo by zero in integer operation") != std::string::npos, tag + "bound % keeps the modulo fast-path text and code");
+                check_true(msgOf("bf / bz").find("Division by zero in float operation") != std::string::npos, tag + "bound float / keeps the float fast-path text");
+                // Nonzero bound divisors still compute through the normal path.
+                check_eq((int64_t)5, eng->execute("bi / 2").as_int(), tag + "bound numerator / computes");
+                check_eq((int64_t)1, eng->execute("bi % 3").as_int(), tag + "bound numerator % computes");
+                check_eq((int64_t)2, eng->execute("20 / bi").as_int(), tag + "nonzero bound divisor computes");
             };
             runMatrix(false);
             runMatrix(true);

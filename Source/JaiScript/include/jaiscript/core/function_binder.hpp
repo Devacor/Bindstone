@@ -789,6 +789,15 @@ class engine;
             return std::apply(std::forward<F>(func), arg_tuple);
         }
         
+        // Non-const T& argument carrier: either a live lvalue (cpp-bound write-through
+        // target) or a private copy for plain args - converts to T& at the apply site.
+        template<typename T>
+        struct ref_or_copy_argument {
+            T* live = nullptr;
+            T owned{};
+            operator T&() { return live ? *live : owned; }
+        };
+
         // Create individual arguments, handling bound_array and bound_map types specially
         template<typename T>
         static auto create_argument(const script_value& arg, engine* eng) {
@@ -831,9 +840,17 @@ class engine;
                     // For script_value references, return directly - no conversion needed
                     return actual_arg;
                 } else if constexpr (!std::is_const_v<std::remove_reference_t<T>> && std::is_lvalue_reference_v<T>) {
-                    // std::ref survives make_tuple's decay (plain `auto` would copy), so the
-                    // callee aliases the real lvalue - S9/12.4 write-through incl. cpp-bound targets
-                    return std::ref(const_cast<script_value&>(actual_arg).as<T>());
+                    // Survives make_tuple's decay so the callee sees a real lvalue. Bound targets
+                    // alias the LIVE C++ variable (S9/12.4 write-through); plain values get a
+                    // private copy - the 12.4 aliasing delta stays confined to cpp-bound args.
+                    ref_or_copy_argument<base_type> holder;
+                    script_value& target = const_cast<script_value&>(actual_arg);
+                    if (target.is_cpp_bound()) {
+                        holder.live = &target.as<T>();
+                    } else {
+                        holder.owned = target.as<T>();
+                    }
+                    return holder;
                 } else {
                     // For built-in types and special types, use the non-const as<T&>() method
                     return const_cast<script_value&>(actual_arg).as<T>();

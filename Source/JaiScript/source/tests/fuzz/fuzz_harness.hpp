@@ -172,6 +172,7 @@ namespace jai::fuzz {
 
 		for (const auto& seg : p.segments) {
 			std::string r;
+			auto seg_start = std::chrono::steady_clock::now();
 			try {
 				script_value v = eng->execute(seg);
 				r = "VALUE " + describe_value(v);
@@ -179,6 +180,11 @@ namespace jai::fuzz {
 				r = std::string("ERROR ") + ex.what();
 				if (contains_ci(r, "budget exceeded")) out.budget_hit = true;
 			}
+			// A script can CATCH the budget error and keep going - then the two
+			// backends print wall-clock-dependent amounts of output. Any segment
+			// that consumed most of the budget is timing-sensitive: never a finding.
+			double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - seg_start).count();
+			if (cfg.budget_seconds > 0 && elapsed >= cfg.budget_seconds * 0.9) out.budget_hit = true;
 			out.segment_results.push_back(std::move(r));
 		}
 		try {
@@ -285,6 +291,20 @@ namespace jai::fuzz {
 			// Pilot seeds 66, 239.
 			{"FZ-TYPED-FN-NO-RETURN", "typed fn falls off end: interp bogus undefined-variable error",
 				{") -> "}, {"interp: ERROR Undefined variable"}},
+			// Same bug, caught variant: the bogus interpreter error is caught by a
+			// script-level try/catch, so it surfaces as printed "caught: Undefined
+			// variable 'x'" on the interpreter and silence on the VM.
+			// Campaign seeds 2529, 3657, 3784.
+			{"FZ-TYPED-FN-NO-RETURN-CAUGHT", "typed fn falls off end, bogus error caught in script",
+				{") -> "}, {"caught: Undefined variable '"}},
+			// Unary minus on 0.0: interpreter yields +0.0, VM yields IEEE -0.0.
+			// Campaign seeds 1985, 2148, 2255.
+			{"FZ-NEG-ZERO", "-(0.0): interp +0.0 vs vm -0.0",
+				{}, {"-0.000000"}},
+			// Integer-overflow error text names the wrong operator, and a different
+			// wrong operator per backend (e.g. interp '*' vs vm '+='). Seed 2706.
+			{"FZ-OVERFLOW-OP-NAME", "overflow error text: operator name differs per backend",
+				{}, {"Integer overflow in '"}},
 			// Float division-by-zero error text differs.
 			{"FZ-FLOAT-DIVZERO-TEXT", "\"Division by zero\" vs \"Division by zero in float operation\"",
 				{}, {"Division by zero in float operation"}},

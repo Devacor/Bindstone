@@ -219,11 +219,16 @@ public:
         // ===== INHERITANCE =====
 
         test("derived_to_base_conversion", [this]() {
+            // Single-pointer derivation forbids strong_ptr<Derived> -> strong_ptr<Base>
+            // (would adjust the pointer off the control-block storage head and slice ~T()).
+            static_assert(!std::is_constructible_v<strong_ptr<TestObject>, strong_ptr<DerivedObject>>);
+            static_assert(!std::is_constructible_v<strong_ptr<TestObject>, strong_ptr<DerivedObject>&&>);
+
             auto derived = make_strong<DerivedObject>(10, 20);
-            strong_ptr<TestObject> base = derived;
+            TestObject* base = derived.get();
 
             check_eq(base->value, 10);
-            check_eq(base.use_count(), size_t(2));
+            check_eq(derived.use_count(), size_t(1));
         });
 
         // ===== STRESS TEST =====

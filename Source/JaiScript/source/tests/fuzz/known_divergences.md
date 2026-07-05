@@ -34,7 +34,9 @@ All fixed on VM-perf, 2026-07-05. Regression tests live in
 
 ## Engine findings that are not divergences
 
-- FZ-BUDGET-LIVELOCK (campaign seeds 436, 3507, 4860, 8285): the execution budget can be
+- FZ-BUDGET-LIVELOCK (campaign seeds 436, 3507, 4860, 8285; +1213 since the 2026-07-05
+  fix pass — the `++`-on-ref-param fix lets that program run its full semantics, and its
+  in-loop `try/catch` now swallows the budget error): the execution budget can be
   defeated from script. The budget error raised at a loop back-edge is an ordinary catchable
   error, so `for(...) { try { <infinite work> } catch (e) {} }` re-raises and re-catches it
   forever - `execute()` NEVER returns (observed 2.3 GB memory growth while livelocked). Both

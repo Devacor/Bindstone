@@ -830,6 +830,10 @@ class engine;
                 } else if constexpr (std::is_same_v<base_type, script_value>) {
                     // For script_value references, return directly - no conversion needed
                     return actual_arg;
+                } else if constexpr (!std::is_const_v<std::remove_reference_t<T>> && std::is_lvalue_reference_v<T>) {
+                    // std::ref survives make_tuple's decay (plain `auto` would copy), so the
+                    // callee aliases the real lvalue - S9/12.4 write-through incl. cpp-bound targets
+                    return std::ref(const_cast<script_value&>(actual_arg).as<T>());
                 } else {
                     // For built-in types and special types, use the non-const as<T&>() method
                     return const_cast<script_value&>(actual_arg).as<T>();

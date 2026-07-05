@@ -3126,9 +3126,9 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 						}
 					}
 				}
-				// Fast path didn't fully handle - copy for slow path
+				// Fast path didn't fully handle - copy for slow path (literal needs hydration)
 				pre_fetched_left = leftVal;
-				pre_fetched_right = rightVal;
+				pre_fetched_right = rightVal.has_valid_engine() ? rightVal : hydrate_literal(rightVal);
 				already_have_values = true;
 			}
 		}
@@ -3199,8 +3199,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 						}
 					}
 				}
-				// Fast path didn't fully handle - save for slow path
-				pre_fetched_left = leftVal;
+				// Fast path didn't fully handle - save for slow path (literal needs hydration)
+				pre_fetched_left = leftVal.has_valid_engine() ? leftVal : hydrate_literal(leftVal);
 				pre_fetched_right = std::move(rightVal);
 				already_have_values = true;
 			}

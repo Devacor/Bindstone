@@ -10046,7 +10046,8 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
         ast->parameters,
         ast->return_type,
         ast->body,
-        method_env  // Method environment with 'this'
+        method_env,  // Method environment with 'this'
+        ast->local_count
     );
 
     // Execute method with the arguments - propagate errors to caller

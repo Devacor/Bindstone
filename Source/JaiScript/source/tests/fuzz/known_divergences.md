@@ -37,30 +37,36 @@ suppressed KD-CORO-RESUME-PAST-END shapes and the budget-livelock hangs listed b
 
 ## Engine findings that are not divergences
 
-- FZ-BUDGET-LIVELOCK (campaign seeds 436, 3507, 8285; +1213, 1462, 1788, 8356, 8391 since
-  the 2026-07-05 fix pass — the `++`-on-ref-param fix lets those programs run their full
-  semantics, and their in-loop `try/catch` now swallows the budget error; 4860 conversely
-  no longer hangs post-fix): the execution budget can be
-  defeated from script. The budget error raised at a loop back-edge is an ordinary catchable
-  error, so `for(...) { try { <infinite work> } catch (e) {} }` re-raises and re-catches it
-  forever - `execute()` NEVER returns (observed 2.3 GB memory growth while livelocked). Both
-  backends are equally affected, so it is not a parity divergence, but it is a
-  denial-of-service hole for any host embedding untrusted scripts, and it forces fuzz
-  campaigns to use a per-seed watchdog process (`--child` + `timeout`). A budget error
-  should arguably be uncatchable (or stop re-arming after the first escape).
-  **UNFIXED - needs a Dev semantics ruling (catchable vs uncatchable budget errors).**
-- PARSER-FOLD-WRAPS (found triaging FZ-SPACESHIP-OVERFLOW-SWALLOW, 2026-07-05): the parser's
-  constant folder (`parser.cpp try_constant_fold`) folds int literal arithmetic with RAW
-  `+ - *` — signed-overflow UB in the compiler binary AND a silent wrap that bypasses the
-  checked-overflow policy (`var a = 1 + 9223372036854775807;` wraps quietly on BOTH backends
-  while the same expression through variables raises). Not a parity divergence; unfixed
-  (parser is outside the 2026-07 fix pass surface). Should fold through `jai::ints` and
-  decline to fold on overflow so the runtime raises.
-- INCDEC-WRAPS-SILENTLY (2026-07-05): plain `a++`/`--a` on int VARIABLES wraps silently on
-  BOTH backends (the in-place fast paths don't consult the overflow policy; the bound-value
-  paths and now the counting-for update do). Agreed behavior, so not a divergence — but it
-  contradicts "safe by default" and disagrees with the checked `++` inside counting-for
-  updates. Worth a policy pass of its own.
+All three fixed on VM-perf, 2026-07-05 (Dev-ruled semantics). Regression tests:
+`execution_budget_tests.cpp` (terminal/memory-cap suites) and
+`review_regression_tests.cpp` (`parser_fold_*`, `incdec_overflow_*`).
+
+- FZ-BUDGET-LIVELOCK (campaign seeds 436, 3507, 8285; +1213, 1462, 1788, 8356, 8391):
+  **FIXED** — Dev ruling: budget/timeout errors are TERMINAL (a per-engine
+  `detail::execution_limits::terminal_error` latch makes EVERY script catch skip —
+  try/catch, nested, coroutines, lambdas, and across reentrant execute() boundaries —
+  so `execute()` returns the budget error to the host instead of livelocking).
+  Triaging the seeds surfaced two more root causes fixed alongside:
+  (a) a TOP-LEVEL script statement calling `h.resume()` ran at call depth 0 and was
+  mistaken for a host-level resume, re-arming the deadline every loop iteration
+  (seeds 3507/8285/1213/8356/8391 hung on this, not on catch-swallowing); the
+  host-level test is now `depth 0 && !executing` (interpreter) / `depth 0 &&
+  frames_.empty()` (vm);
+  (b) seed 8356 was a MEMORY bomb (exponential `s += s` — each append outlives the
+  budget's 1024-tick clock gate), addressed by the new `engine::memory_cap` (first
+  raise catchable, second terminal); the harness now runs every program with a 64 MB
+  cap. All 8 seeds re-verified terminating with 0 divergences / 0 crashes.
+- PARSER-FOLD-WRAPS (found triaging FZ-SPACESHIP-OVERFLOW-SWALLOW, 2026-07-05):
+  **FIXED** — `try_constant_fold` now folds int arithmetic through
+  `jai::ints::try_add/try_sub/try_mul/try_div` (and `ints::mod`); on overflow it
+  declines to fold so the runtime's checked path raises with the correct operator
+  name (`9223372036854775807 + 1` now raises `Integer overflow in '+'` at runtime on
+  both backends; wrap builds keep folding the wrapped value). This also corrects the
+  FZ-SPACESHIP attribution: the un-folded `+` raises before unary `-` ever runs.
+- INCDEC-WRAPS-SILENTLY (2026-07-05): **FIXED** — plain `a++`/`--a`/`++a`/`a--` on int
+  variables and this-fields now routes through `ints::try_add/try_sub` on both
+  backends, raising `Integer overflow in '++'` / `'--'` (same text as the checked
+  counting-for update). `JAISCRIPT_WRAP_ON_OVERFLOW` builds keep wrapping at zero cost.
 
 ## Harness lessons encoded (not engine bugs)
 
@@ -68,6 +74,12 @@ suppressed KD-CORO-RESUME-PAST-END shapes and the budget-livelock hangs listed b
   wall-clock dependent (campaign seed 324: a `var&` mutator resetting a for-loop variable
   produced an infinite loop whose `catch` swallowed the budget error). The harness now marks
   any segment consuming >=90% of the budget as budget-hit and skips the program.
+  (Historical: budget errors are terminal since 2026-07-05, so the swallow shape is gone,
+  but the >=90% skip stays — one-sided wall-clock timeouts are still never findings.)
+- The harness runs every program with `memory_cap(64 MB)` so memory bombs terminate
+  deterministically. Memory-cap accounting is approximate and backend-dependent (env and
+  clone charges differ per backend), so a memory-cap hit — including one CAUGHT by the
+  script's first allowed catch — is treated like a budget hit: skip, never a finding.
 
 ## Watched (no matcher)
 

@@ -3703,15 +3703,18 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                     }
                     switch (target.type()) {
                         case script_value_type::jai_int_type: {
-                            if (expr->is_postfix) {
-                                push_value(make_value(target.unchecked_as_int()));
-                                if (isIncrement) ++target.unchecked_as_int_ref();
-                                else --target.unchecked_as_int_ref();
+                            // Overflow policy applies to plain ++/-- like every other int
+                            // op (INCDEC-WRAPS-SILENTLY); wrap builds fold the check away.
+                            script_int& tref = target.unchecked_as_int_ref();
+                            const script_int oldVal = tref;
+                            script_int newVal;
+                            if (isIncrement) {
+                                if (!ints::try_add(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '++'");
                             } else {
-                                if (isIncrement) ++target.unchecked_as_int_ref();
-                                else --target.unchecked_as_int_ref();
-                                push_value(make_value(target.unchecked_as_int()));
+                                if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
                             }
+                            tref = newVal;
+                            push_value(make_value(expr->is_postfix ? oldVal : newVal));
                             return {};
                         }
                         case script_value_type::jai_float_type: {
@@ -3748,7 +3751,12 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
 
                             if (ti == script_value::TYPEID_INT) {
                                 script_int oldVal = currentVal.unchecked_as_int();
-                                script_int newVal = isIncrement ? oldVal + 1 : oldVal - 1;
+                                script_int newVal;
+                                if (isIncrement) {
+                                    if (!ints::try_add(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '++'");
+                                } else {
+                                    if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
+                                }
                                 instance->set_field(identifier->symbol_id, make_value(newVal));
                                 push_value(make_value(expr->is_postfix ? oldVal : newVal));
                                 return {};

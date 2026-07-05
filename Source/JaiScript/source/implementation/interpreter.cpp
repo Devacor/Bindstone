@@ -3571,8 +3571,9 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                     identifier->symbol_id = string_symbolizer_->intern(identifier->name);
                 }
 
-                // Try fast path: direct variable lookup
-                script_value* varPtr = environment_->get_value_ptr(identifier->symbol_id);
+                // Try fast path: slot-based locals first (function params and typed locals
+                // live in call-frame slots, not the environment), then environment
+                script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id);
                 if (varPtr) {
                     // Fast path: direct in-place mutation for local variables
                     script_value& target = varPtr->deref();

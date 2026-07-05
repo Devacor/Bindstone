@@ -6596,7 +6596,8 @@ checked_result<script_value> vm_backend::execute_method_ast(const std::shared_pt
 		ast->parameters,
 		ast->return_type,
 		ast->body,
-		std::move(method_env));
+		std::move(method_env),
+		ast->local_count);
 	return call_script_function(script_func, args);
 }
 
@@ -8095,8 +8096,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		if (dispatch.body_cache_key == ast->body.get()) {
 			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
 		} else {
-			// Native parity: execute_method_ast's temp function carries local_count 0
-			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, 0);
+			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count);
 			dispatch.body_cache = compiled;
 			dispatch.body_cache_key = ast->body.get();
 			body_chunk = compiled.get();
@@ -8127,7 +8127,9 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		rec.metadata_saved = true;
 	}
 	rec.locals.function_name = ast->name;
-	rec.locals.reserve_locals(body_chunk->local_count);
+	// Full-slot reserve: frame slot storage must NEVER reallocate mid-frame (counted-for
+	// state and references cache raw pointers into it)
+	rec.locals.reserve_locals(std::max(ast->local_count, body_chunk->local_count));
 	rec.env_lazy = false;   // method envs never elide (env-kind fallbacks gate precedence)
 	try {
 		// Net effect of the native wrapper-env round trip: a method scope parented on

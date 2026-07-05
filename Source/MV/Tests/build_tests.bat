@@ -26,4 +26,4 @@ cl /nologo /O2 /std:c++20 /EHsc /MD /DNDEBUG ^
   user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib advapi32.lib uuid.lib cfgmgr32.lib
 if errorlevel 1 (echo BUILD FAILED & exit /b 1)
 echo.
-mv_tests.exe --verbose
+"%~dp0mv_tests.exe" --verbose

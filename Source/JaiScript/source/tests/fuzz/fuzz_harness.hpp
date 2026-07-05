@@ -137,6 +137,10 @@ namespace jai::fuzz {
 		bool use_vm = false;
 		double budget_seconds = 0.25;
 		size_t print_cap = 32 * 1024;
+		// Memory bombs (e.g. seed 8356's exponential `s += s`) stall inside allocations
+		// where the wall-clock budget's 1024-tick gate never accumulates; the cap makes
+		// them terminate deterministically.
+		size_t memory_cap_bytes = 64 * 1024 * 1024;
 	};
 
 	inline bool contains_ci(const std::string& hay, const std::string& needle) {
@@ -149,6 +153,7 @@ namespace jai::fuzz {
 		auto eng = jai::engine::make();
 		if (cfg.use_vm) eng->set_backend(jai::backend_type::vm);
 		eng->execution_budget(cfg.budget_seconds);
+		eng->memory_cap(cfg.memory_cap_bytes);
 
 		auto printed = std::make_shared<std::string>();
 		const size_t cap = cfg.print_cap;
@@ -179,6 +184,9 @@ namespace jai::fuzz {
 			} catch (const std::exception& ex) {
 				r = std::string("ERROR ") + ex.what();
 				if (contains_ci(r, "budget exceeded")) out.budget_hit = true;
+				// Memory-cap accounting is approximate and backend-dependent (env/clone
+				// charges differ), so the trip point differs too: skip, never a finding.
+				if (contains_ci(r, "memory cap exceeded")) out.budget_hit = true;
 			}
 			// A script can CATCH the budget error and keep going - then the two
 			// backends print wall-clock-dependent amounts of output. Any segment

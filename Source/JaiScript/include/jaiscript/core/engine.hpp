@@ -35,6 +35,10 @@ namespace jai {
     class string_symbolizer;
     struct script_namespace_data;
 
+    namespace detail {
+        struct execution_limits;
+    }
+
     namespace serialization {
         class serialization_registry;
         // Note: serialization metadata structs (property_metadata, class_metadata, etc.)
@@ -161,12 +165,28 @@ namespace jai {
         bool throw_on_overflow() const;
 
         // Wall-clock budget in seconds for one execute()/resume() call (fractional is
-        // fine — e.g. 1.0/60 for a frame). A script exceeding it raises a catchable
-        // runtime error (execution_budget_exceeded). Zero disables the limit. Default 1.
-        // Checked at loop back-edges and call entry, so straight-line C++ bindings are
-        // never interrupted mid-call.
+        // fine — e.g. 1.0/60 for a frame). A script exceeding it raises a TERMINAL
+        // runtime error (execution_budget_exceeded): script catch handlers are skipped
+        // and execute() reports the failure to the host — a script can never swallow a
+        // timeout. Zero disables the limit. Default 1. Checked at loop back-edges and
+        // call entry, so straight-line C++ bindings are never interrupted mid-call.
         void execution_budget(double seconds);
         double execution_budget() const;
+
+        // Approximate script memory cap in bytes for one top-level execute()/resume()
+        // call. Accounting is a HIGH-WATER MARK charged at the heavy-value chokepoints
+        // (container growth, string concat, clone, environment growth); frees are not
+        // credited back. An allocation that would exceed the cap is DENIED and raises a
+        // memory_cap error: the FIRST raise per execute is an ordinary catchable script
+        // error (the counter re-arms so the script can free caches and continue); the
+        // SECOND raise in the same execute is TERMINAL like a budget overrun. Reentrant
+        // executes share the outer call's allowance. Zero disables the cap. Default 0.
+        void memory_cap(size_t bytes);
+        size_t memory_cap() const;
+
+        // Per-engine execution-limit state (terminal-error latch, memory accounting)
+        // shared by the backend and the builtin-method chokepoints. Internal.
+        detail::execution_limits& execution_limits() noexcept;
 
         using stack_frame = ::jai::stack_frame;
         std::vector<stack_frame> last_stack_trace() const;

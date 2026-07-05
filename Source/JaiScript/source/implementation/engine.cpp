@@ -3,6 +3,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
+#include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
 #include <iostream>
 #include <fstream>
@@ -126,6 +127,10 @@ struct engine::implementation {
 
     // Script execution budget in seconds (0 = unlimited); mirrored into the backend
     double execution_budget_seconds_ = 1.0;
+
+    // Per-engine execution-limit state (terminal latch, memory accounting): the active
+    // backend caches a pointer, so reentrant executes share one instance
+    detail::execution_limits limits_;
 
     // Custom output stream for print() - nullptr means use std::cout
     std::shared_ptr<std::ostream> output_stream;
@@ -1667,6 +1672,22 @@ void engine::execution_budget(double seconds) {
 
 double engine::execution_budget() const {
     return impl->execution_budget_seconds_;
+}
+
+void engine::memory_cap(size_t bytes) {
+    impl->limits_.memory_cap = bytes;
+    impl->limits_.memory_limit = bytes ? bytes : SIZE_MAX;
+    // Interned once here so the raise path stays allocation-free ({0} in the static
+    // error message resolves to this symbol)
+    impl->limits_.memory_cap_symbol_id = bytes ? impl->string_symbolizer_.intern(std::to_string(bytes)) : 0;
+}
+
+size_t engine::memory_cap() const {
+    return impl->limits_.memory_cap;
+}
+
+detail::execution_limits& engine::execution_limits() noexcept {
+    return impl->limits_;
 }
 
 std::vector<engine::stack_frame> engine::last_stack_trace() const {

@@ -63,7 +63,12 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
             return make_float_fast(lf + rf);
         }
         if (li_raw == script_value::TYPEID_STRING || ri_raw == script_value::TYPEID_STRING) {
-            return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
+            script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
+            // engine::memory_cap chokepoint: deny the concat result before it exists
+            if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+                return detail::raise_memory_cap(*limits_);
+            }
+            return make_value(std::move(joined));
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
     }
@@ -92,7 +97,12 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
 
     // String concatenation - check for to_string() method on objects
     if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
-        return make_value(value_to_string_with_method(unwrapped_left) + value_to_string_with_method(unwrapped_right));
+        script_string joined = value_to_string_with_method(unwrapped_left) + value_to_string_with_method(unwrapped_right);
+        // engine::memory_cap chokepoint: deny the concat result before it exists
+        if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+            return detail::raise_memory_cap(*limits_);
+        }
+        return make_value(std::move(joined));
     }
 
     // Check for custom operator+ method on objects (using original values for method lookup)

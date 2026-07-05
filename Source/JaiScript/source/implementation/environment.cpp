@@ -1,7 +1,9 @@
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
+#include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/core/engine.hpp>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -57,6 +59,11 @@ void environment::define(uint64_t id, const script_value& value) {
     }
 
     // New local variable - add to stable storage
+    // engine::memory_cap: environment growth counts toward the script's allowance
+    // (approximate slot cost; the raise happens at the next loop back-edge)
+    if (engine* eng = value.get_engine()) {
+        eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+    }
     local_storage_.push_back(value);
     flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
     local_ids_.insert(id);
@@ -75,6 +82,11 @@ void environment::define(uint64_t id, script_value&& value) {
     }
 
     // New local variable - add to stable storage
+    // engine::memory_cap: environment growth counts toward the script's allowance
+    // (approximate slot cost; the raise happens at the next loop back-edge)
+    if (engine* eng = value.get_engine()) {
+        eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+    }
     local_storage_.push_back(std::move(value));
     flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
     local_ids_.insert(id);

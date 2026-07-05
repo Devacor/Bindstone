@@ -76,6 +76,12 @@ namespace jai {
 
 		[[nodiscard]] inline id_type get_this_id() const noexcept { return this_id_; }
 
+		// Engine-wide environment shape epoch: environment construction/reset/clear, a new
+		// define, or a parent change bumps it, invalidating the vm's per-instruction
+		// env-lookup caches (keyed on {environment*, epoch}).
+		[[nodiscard]] inline std::uint64_t env_epoch() const noexcept { return env_epoch_; }
+		inline void bump_env_epoch() noexcept { ++env_epoch_; }
+
 		// Get/create getter ID for a member - caches to avoid repeated concatenation.
 		// Returns both ID and interned string_view for the "_get_<member>" name.
 		[[nodiscard]] std::pair<id_type, std::string_view> get_getter_id_with_view(id_type member_id) const noexcept {
@@ -133,6 +139,8 @@ namespace jai {
 		mutable std::vector<std::string_view> ids_;
 
 		mutable id_type this_id_{ std::numeric_limits<id_type>::max() };
+
+		std::uint64_t env_epoch_ = 1;
 
 		// Caches for getter/setter/class_var ID lookups (name_id -> derived_id)
 		mutable std::unordered_map<id_type, id_type> getter_cache_;

@@ -1188,6 +1188,48 @@ script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t
 	return environment_->get_value_ptr(symbol_id);
 }
 
+// resolve_local_or_env with the env path memoized per instruction (slot 2*ip); the
+// get_value_ptr tail still runs when the storage prefix misses (this/static fallbacks)
+script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id) {
+	if (slot != k_invalid_u32 && f.locals && !f.top_level) {
+		if (auto* ptr = f.locals->get_local(slot)) {
+			return ptr;
+		}
+	}
+	if (script_value* cached = env_lookup_cached(f, f.ip * 2, symbol_id)) {
+		return cached;
+	}
+	return environment_->get_value_ptr(symbol_id);
+}
+
+script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id) {
+	// Top-level frames only: their environments are stable across loop iterations, so
+	// entries actually hit. Call frames churn envs (binds/resets bump the epoch), which
+	// made the miss-path provenance work a pure tax on call-heavy code.
+	if (!f.top_level) {
+		return nullptr;   // callers fall through to their original full lookup
+	}
+	auto& cache = f.code->env_lookup_cache;
+	if (cache.size() < f.code->code.size() * 2) [[unlikely]] {
+		cache.resize(f.code->code.size() * 2);
+	}
+	env_lookup_cache_entry& entry = cache[cache_slot];
+	const uint64_t epoch = symbolizer_->env_epoch();
+	if (entry.env == environment_.get() && entry.epoch == epoch) {
+		return entry.ptr;
+	}
+	bool cacheable = false;
+	script_value* ptr = environment_->vm_storage_lookup(symbol_id, cacheable);
+	if (ptr && cacheable) {
+		entry.env = environment_.get();
+		entry.epoch = epoch;
+		entry.ptr = ptr;
+	} else {
+		entry.env = nullptr;
+	}
+	return ptr;
+}
+
 checked_result<void> vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value) {
 	if (slot_index != SIZE_MAX && f.locals && !f.top_level) {
 		f.locals->set_local(slot_index, std::move(value));
@@ -2518,6 +2560,10 @@ checked_result<void> vm_backend::exec_load(frame& f, const vm_instruction& ins) 
 			return {};
 		}
 	}
+	if (script_value* cached = env_lookup_cached(f, f.ip * 2, sym)) {
+		stack_.push_back(cached->deref());
+		return {};
+	}
 	auto ref_result = environment_->get_ref(sym);
 	if (ref_result) {
 		const script_value& val = ref_result.value().get();
@@ -2856,7 +2902,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 
-	script_value* varPtr = resolve_local_or_env(f, ins.b, sym);
+	script_value* varPtr = resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
 		// Constrained element/field ref (Tier 1 bind): route through the shared helper
 		// so the compound result honors the constraint like subscript compounds do
@@ -3233,7 +3279,7 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 	const bool postfix = (ins.c & incdec_flag_postfix) != 0;
 	const bool isIncrement = (ins.c & incdec_flag_increment) != 0;
 
-	script_value* varPtr = resolve_local_or_env(f, ins.b, sym);
+	script_value* varPtr = resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
 		script_value& target = varPtr->deref();
 		// §12.1 write-through: ++/-- on a bound VARIABLE decodes the live value and stores
@@ -3390,7 +3436,8 @@ checked_result<void> vm_backend::exec_binary(frame& f, const vm_instruction& ins
 }
 
 checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, const fused_operand& operand,
-                                                                  std::optional<script_value>& scratch) {
+                                                                  std::optional<script_value>& scratch,
+                                                                  size_t cache_slot) {
 	const uint64_t sym = f.code->symbols[operand.symbol];
 	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
 		scratch.emplace(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
@@ -3410,6 +3457,9 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 			scratch.emplace(std::move(ctor_result.value()));
 			return &scratch.value();
 		}
+	}
+	if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
+		return &cached->deref();
 	}
 	auto ref_result = environment_->get_ref(sym);
 	if (ref_result) {
@@ -3453,14 +3503,14 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 	if (p.left.const_index != k_invalid_u32) {
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
 	} else {
-		auto resolved = fused_ident_value(f, p.left, lscratch);
+		auto resolved = fused_ident_value(f, p.left, lscratch, f.ip * 2);
 		if (!resolved) return resolved.error_value();
 		lp = resolved.value();
 	}
 	if (p.right.const_index != k_invalid_u32) {
 		rp = &f.code->constants[p.right.const_index];
 	} else {
-		auto resolved = fused_ident_value(f, p.right, rscratch);
+		auto resolved = fused_ident_value(f, p.right, rscratch, f.ip * 2 + 1);
 		if (!resolved) return resolved.error_value();
 		rp = resolved.value();
 	}

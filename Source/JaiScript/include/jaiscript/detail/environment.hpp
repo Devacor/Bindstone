@@ -42,7 +42,9 @@ namespace jai {
         environment(string_symbolizer* symbolizer)
             : symbolizer_(symbolizer), kind_(env_kind::standard),
               this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
-              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {}
+              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
+            bump_env_epoch();
+        }
 
         // Standard environment with parent
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer)
@@ -50,6 +52,7 @@ namespace jai {
               this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
             validate_parent_chain(parent);
+            bump_env_epoch();
         }
 
         // Method environment constructor (with 'this' object)
@@ -58,6 +61,7 @@ namespace jai {
               this_object_(std::move(this_obj)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
             validate_parent_chain(parent);
+            bump_env_epoch();
         }
 
         // Static method environment constructor (with class definition)
@@ -67,6 +71,7 @@ namespace jai {
               this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
             validate_parent_chain(parent);
+            bump_env_epoch();
         }
 
         ~environment() = default;
@@ -166,12 +171,24 @@ namespace jai {
         void set_parent(std::shared_ptr<environment> new_parent) {
             validate_parent_chain(new_parent);
             parent_ = new_parent;
+            bump_env_epoch();
         }
+
+        // The pure env-storage prefix of get_ref/get_value_ptr (this special-case, flat
+        // caches, parent-chain walk) with provenance: cacheable is true only when the
+        // pointer is a found-env LOCAL (stable deque storage), so the vm's per-instruction
+        // lookup caches never memoize this/static-field fallbacks. nullptr = the prefix is
+        // exhausted; the caller runs its original full lookup for the fallback tails.
+        script_value* vm_storage_lookup(uint64_t id, bool& cacheable);
 
     protected:
         void validate_parent_chain(std::shared_ptr<environment> /*new_parent*/) const {
             // Intentionally empty - enable JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES for cycle detection
         }
+
+        // Invalidate the vm's env-lookup inline caches (defined in environment.cpp:
+        // symbolizer is forward-declared here)
+        void bump_env_epoch() noexcept;
 
     private:
         // === Lazy-Cached Flat Lookup ===

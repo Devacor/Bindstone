@@ -47,6 +47,20 @@ public:
             check_eq(static_cast<script_int>(2), final_val.as<script_int>());
         });
 
+        // Regression: end-of-execute reset_environment_pool() reset(nullptr)'d the suspended
+        // coroutine's saved env chain, so resuming in a later execute (with global redeclares
+        // in between) threw "Undefined variable 'g'"; vm fibers resumed fine.
+        test("coroutine_resume_across_executes_with_redeclare", [this]() {
+            auto engine = make_engine();
+            engine->execute("var g = 1; coroutine int co() { yield g; yield g; yield g; }");
+            engine->execute("var c = co();");
+            check_eq(static_cast<script_int>(1), engine->execute("c.resume();").as<script_int>());
+            engine->execute("var g = 2; var advnew_a = 10;");   // redeclare + fresh define
+            check_eq(static_cast<script_int>(2), engine->execute("c.resume();").as<script_int>());
+            engine->execute("g = 3;");
+            check_eq(static_cast<script_int>(3), engine->execute("c.resume();").as<script_int>());
+        });
+
         test("coroutine_done_check", [this]() {
             auto engine = make_engine();
             jai::stdlib::register_all(engine);

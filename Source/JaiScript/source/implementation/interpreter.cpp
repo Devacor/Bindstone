@@ -11545,6 +11545,13 @@ std::shared_ptr<environment> interpreter::get_pooled_method_environment(std::sha
 void interpreter::reset_environment_pool() {
     environment_pool_index_ = 0;
 
+    // A suspended coroutine keeps its env chain alive across executes; resetting those
+    // would orphan its variables (undefined variable on resume). Any env still referenced
+    // outside the pool escapes it - the holder owns it from now on (vm parity).
+    std::erase_if(environment_pool_, [](const std::shared_ptr<environment>& env) {
+        return env.use_count() > 1;
+    });
+
     // Clear all environments in the unified pool to release references
     for (auto& env : environment_pool_) {
         // Reset the environment by clearing its parent, values, and kind-specific fields

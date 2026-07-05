@@ -391,6 +391,11 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
     if (custom_result.has_value()) {
         return make_value(custom_result.value());
     }
+    // A script throw inside the operator method is in flight: don't replace it with
+    // the invalid-operands error (== parity; the value is discarded while unwinding)
+    if (is_unwinding_) {
+        return make_bool_fast(false);
+    }
 
     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
 }
@@ -445,6 +450,11 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
     auto custom_result = object_comparison_via_method(left, right, op_less_equal_id_);
     if (custom_result.has_value()) {
         return make_value(custom_result.value());
+    }
+    // A script throw inside the operator method is in flight: don't replace it with
+    // the invalid-operands error (== parity; the value is discarded while unwinding)
+    if (is_unwinding_) {
+        return make_bool_fast(false);
     }
 
     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
@@ -501,6 +511,11 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
     if (custom_result.has_value()) {
         return make_value(custom_result.value());
     }
+    // A script throw inside the operator method is in flight: don't replace it with
+    // the invalid-operands error (== parity; the value is discarded while unwinding)
+    if (is_unwinding_) {
+        return make_bool_fast(false);
+    }
 
     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
 }
@@ -555,6 +570,11 @@ checked_result<script_value> interpreter::handle_greater_equal(const script_valu
     auto custom_result = object_comparison_via_method(left, right, op_greater_equal_id_);
     if (custom_result.has_value()) {
         return make_value(custom_result.value());
+    }
+    // A script throw inside the operator method is in flight: don't replace it with
+    // the invalid-operands error (== parity; the value is discarded while unwinding)
+    if (is_unwinding_) {
+        return make_bool_fast(false);
     }
 
     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");

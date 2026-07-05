@@ -3834,6 +3834,7 @@ checked_result<void> vm_backend::exec_cfor_prep(frame& f, const vm_instruction& 
 	counted_for_state st;
 	st.cmp = p.cmp;
 	st.subtract = p.step_subtract;
+	st.incdec = p.step_incdec;
 
 	bool fast = !has_custom_numeric_ops_;
 	if (fast) {
@@ -3894,9 +3895,9 @@ checked_result<void> vm_backend::exec_cfor_back(frame& f, const vm_instruction& 
 	const script_int step = st.step_ptr ? *st.step_ptr : st.step_val;
 	script_int next;
 	if (st.subtract) {
-		if (!ints::try_sub(i, step, next)) return vm_int_overflow_v("Integer overflow in '-='");
+		if (!ints::try_sub(i, step, next)) return vm_int_overflow_v(st.incdec ? "Integer overflow in '--'" : "Integer overflow in '-='");
 	} else {
-		if (!ints::try_add(i, step, next)) return vm_int_overflow_v("Integer overflow in '+='");
+		if (!ints::try_add(i, step, next)) return vm_int_overflow_v(st.incdec ? "Integer overflow in '++'" : "Integer overflow in '+='");
 	}
 	st.var->unchecked_as_int_ref() = next;
 	const script_int end = st.end_ptr ? *st.end_ptr : st.end_val;

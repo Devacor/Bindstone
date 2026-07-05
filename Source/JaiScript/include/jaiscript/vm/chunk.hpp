@@ -89,6 +89,7 @@ namespace jai::vm {
         fused_operand step;                    // identifier or int literal
         uint8_t cmp = 0;                       // token_type of the comparison
         bool step_subtract = false;            // -= / -- update
+        bool step_incdec = false;              // ++/-- update (overflow error names the real op)
         // Jump targets patched at compile time
         uint32_t body_ip = k_invalid_u32;
         uint32_t exit_ip = k_invalid_u32;      // past the op_cfor_pop (fast exits pop in-op)

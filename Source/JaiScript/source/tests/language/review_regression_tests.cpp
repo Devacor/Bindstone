@@ -531,6 +531,52 @@ public:
             )").as_int());
         });
 
+        // ---- fuzz FZ-OVERFLOW-OP-NAME (seed 2706): the counting-for update overflow
+        // named the wrong operator, differently per backend (interp let i++ wrap and
+        // blamed a later '*'; vm blamed '+='). The update now applies the overflow
+        // policy on both backends and names the SOURCE operator. Found alongside:
+        // the interpreter fast path negated literal '-=' steps twice, so
+        // `for (...; i -= 2)` counted UP forever. ----
+        test("fuzz_cfor_minus_eq_literal_descends", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            check_eq(std::string("4;2;"), e->execute(R"(
+                var out = "";
+                for (int i = 4; i > 0; i -= 2) { out += to_string(i) + ";"; }
+                out;
+            )").as_string());
+        });
+        test("fuzz_cfor_update_overflow_names_plusplus", [this]() {
+            std::string msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                if (!e->throw_on_overflow()) { return; }  // wrap build: loop exits via wrap
+                try { e->execute("for (var i = 9223372036854775806; i > 0; i++) { }"); }
+                catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                ++idx;
+            }
+            check_eq(msg[0], msg[1], "cfor ++ overflow text is byte-identical across backends");
+            check_true(msg[0].find("Integer overflow in '++'") != std::string::npos,
+                "cfor ++ overflow names the increment (got: " + msg[0] + ")");
+        });
+        test("fuzz_cfor_update_overflow_names_minus_eq", [this]() {
+            std::string msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                if (!e->throw_on_overflow()) { return; }
+                try { e->execute("for (var i = -9223372036854775807; i < 0; i -= 2) { }"); }
+                catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                ++idx;
+            }
+            check_eq(msg[0], msg[1], "cfor -= overflow text is byte-identical across backends");
+            check_true(msg[0].find("Integer overflow in '-='") != std::string::npos,
+                "cfor -= overflow names the compound step (got: " + msg[0] + ")");
+        });
+
         test("range_for_ref_realloc_no_corruption", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

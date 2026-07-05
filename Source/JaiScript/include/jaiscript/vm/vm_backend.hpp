@@ -103,6 +103,7 @@ namespace jai::vm {
         string_symbolizer* symbolizer_;
         std::shared_ptr<environment> environment_;
         engine* engine_ = nullptr;
+        environment* cached_global_env_ = nullptr;   // env_lookup_cached gate (never dereferenced)
 
         vm_compiler compiler_;
         struct chunk_cache_entry {

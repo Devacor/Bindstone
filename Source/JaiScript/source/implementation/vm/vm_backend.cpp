@@ -399,6 +399,7 @@ struct vm_backend::frame_guard {
 
 vm_backend::vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env)
 	: symbolizer_(symbolizer), environment_(std::move(global_env)), compiler_(symbolizer) {
+	cached_global_env_ = environment_.get();
 	stack_.reserve(64);
 	frames_.reserve(64);
 }
@@ -409,6 +410,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		symbolizer_ = engine_->get_symbolizer();
 		if (auto global = engine_->get_global_environment()) {
 			environment_ = global;
+			cached_global_env_ = global.get();   // stable for the engine's lifetime
 		}
 		compiler_ = vm_compiler(symbolizer_);
 
@@ -1203,10 +1205,11 @@ script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, u
 }
 
 script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id) {
-	// Top-level frames only: their environments are stable across loop iterations, so
-	// entries actually hit. Call frames churn envs (binds/resets bump the epoch), which
+	// Top-level frames, or call frames running directly in the global env (lazy-elided
+	// plain functions - fib-style recursion): those environments are stable, so entries
+	// actually hit. Other call frames churn envs (binds/resets bump the epoch), which
 	// made the miss-path provenance work a pure tax on call-heavy code.
-	if (!f.top_level) {
+	if (!f.top_level && environment_.get() != cached_global_env_) {
 		return nullptr;   // callers fall through to their original full lookup
 	}
 	auto& cache = f.code->env_lookup_cache;
@@ -8115,6 +8118,21 @@ checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_i
 	script_value result = ins.a ? std::move(stack_.back()) : make_null();
 	if (ins.a) {
 		stack_.pop_back();
+	}
+	// Untyped/any returns take convert_return_value's no-op route inline (deref only,
+	// no conversion call, no checked_result round trip)
+	if (!rec.return_type || rec.return_type->base_type == script_value_type::jai_any_type) {
+		if (result.is_reference()) {
+			result = result.deref();
+		}
+		if (rec.method_result_anchor) {
+			anchor_method_result(result, rec.locals.get_this());
+		}
+		pop_script_frame_core(rec);
+		fp = rec.caller;
+		stack_.push_back(std::move(result));
+		++fp->ip;
+		return {};
 	}
 	// Deref + conversion run while the callee's env/frame are still live (native order)
 	auto conv = convert_return_value(std::move(result), rec.return_type);

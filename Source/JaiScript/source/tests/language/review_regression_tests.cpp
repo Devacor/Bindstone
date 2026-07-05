@@ -398,6 +398,54 @@ public:
             check_eq((int64_t)25, r.as_int());
         });
 
+        // ---- for-body shadow scoping: fresh scope per iteration (vm/while/C++ parity) ----
+        // The interpreter's counting-loop fast path reused one body env across iterations,
+        // so a body `var g` shadow leaked into the next iteration's reads.
+        test("for_body_shadow_fresh_per_iteration", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                var g = 1;
+                var out = "";
+                for (var i = 0; i < 3; ++i) {
+                    out += to_string(g) + ";";
+                    var g = 100;
+                }
+                out + to_string(g);
+            )");
+            check_eq(std::string("1;1;1;1"), r.as_string());
+        });
+        test("for_body_shadow_fn_call_variant", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function h() -> auto { return 1; }
+                var s = 0;
+                for (var i = 0; i < 3; ++i) {
+                    s += h();
+                    var h = 9;
+                    s += h;
+                }
+                s;
+            )");
+            check_eq((int64_t)30, r.as_int());
+        });
+        test("for_body_shadow_general_path_variant", [this]() {
+            // non-literal init keeps this off the counting fast path
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                var start = 0;
+                var g = 1;
+                var out = "";
+                for (var i = start; i < 3; ++i) {
+                    out += to_string(g) + ";";
+                    var g = 100;
+                }
+                out;
+            )");
+            check_eq(std::string("1;1;1;"), r.as_string());
+        });
+
         test("range_for_ref_realloc_no_corruption", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

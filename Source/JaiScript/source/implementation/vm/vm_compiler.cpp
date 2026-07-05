@@ -89,6 +89,7 @@ namespace {
 			case opcode::op_jump:
 			case opcode::op_jump_if_false:
 			case opcode::op_jump_if_true:
+			case opcode::op_fused_cmp_jump:
 			case opcode::op_loop_back:
 			case opcode::op_call:
 			case opcode::op_return:
@@ -140,6 +141,33 @@ size_t vm_compiler::emit(opcode op, uint32_t a, uint32_t b, uint32_t c) {
 	chunk_->code.push_back({op, a, b, c});
 	chunk_->stmt_nodes.push_back(current_stmt_);
 	return chunk_->code.size() - 1;
+}
+
+// Conditional exit jump for an already-compiled condition. When the condition's
+// result comes from a fused comparison, the pair collapses into op_fused_cmp_jump
+// (one dispatch, no bool through the stack). Returns the instruction to patch_jump.
+size_t vm_compiler::emit_cond_jump_false(const expression* cond_expr) {
+	const uint32_t proved = expression_returns_bool(cond_expr) ? 1u : 0u;
+	auto& code = chunk_->code;
+	if (!code.empty() && code.back().op == opcode::op_binary_fused) {
+		switch (static_cast<token_type>(chunk_->fused_binary_protos[code.back().a].op)) {
+			case token_type::less:
+			case token_type::less_equal:
+			case token_type::greater:
+			case token_type::greater_equal:
+			case token_type::equal_equal:
+			case token_type::bang_equal: {
+				vm_instruction& ins = code.back();
+				ins.op = opcode::op_fused_cmp_jump;
+				ins.b = ins.a;            // fused proto index
+				ins.a = k_invalid_u32;    // patched by the caller
+				ins.c = proved;
+				return code.size() - 1;
+			}
+			default: break;
+		}
+	}
+	return emit(opcode::op_jump_if_false, k_invalid_u32, proved);
 }
 
 void vm_compiler::patch_jump(size_t at, size_t target) {
@@ -489,9 +517,8 @@ void vm_compiler::compile_block(block_stmt* block) {
 }
 
 void vm_compiler::compile_if(if_stmt* stmt) {
-	const uint32_t proved = expression_returns_bool(stmt->condition.get()) ? 1u : 0u;
 	compile_expression(stmt->condition);
-	size_t jump_false = emit(opcode::op_jump_if_false, k_invalid_u32, proved);
+	size_t jump_false = emit_cond_jump_false(stmt->condition.get());
 	compile_statement(stmt->then_statement);
 	if (stmt->else_statement) {
 		size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
@@ -504,10 +531,9 @@ void vm_compiler::compile_if(if_stmt* stmt) {
 }
 
 void vm_compiler::compile_while(while_stmt* stmt) {
-	const uint32_t proved = expression_returns_bool(stmt->condition.get()) ? 1u : 0u;
 	const size_t top = chunk_->code.size();
 	compile_expression(stmt->condition);
-	size_t exit_jump = emit(opcode::op_jump_if_false, k_invalid_u32, proved);
+	size_t exit_jump = emit_cond_jump_false(stmt->condition.get());
 
 	loops_.push_back({});
 	loops_.back().continue_target = top;
@@ -540,9 +566,8 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	const size_t top = chunk_->code.size();
 	size_t exit_jump = k_invalid_u32;
 	if (stmt->condition) {
-		const uint32_t proved = expression_returns_bool(stmt->condition.get()) ? 1u : 0u;
 		compile_expression(stmt->condition);
-		exit_jump = emit(opcode::op_jump_if_false, k_invalid_u32, proved);
+		exit_jump = emit_cond_jump_false(stmt->condition.get());
 	}
 
 	loops_.push_back({});
@@ -659,9 +684,8 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 
 	const size_t generic_cond = chunk_->code.size();
 	{
-		const uint32_t proved = expression_returns_bool(stmt->condition.get()) ? 1u : 0u;
 		compile_expression(stmt->condition);
-		emit(opcode::op_jump_if_false, k_invalid_u32, proved);   // patched to exit_pop below
+		emit_cond_jump_false(stmt->condition.get());   // patched to exit_pop below
 	}
 	const size_t generic_exit_jump = chunk_->code.size() - 1;
 
@@ -991,9 +1015,8 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		return;
 	case node_type::ternary_expr: {
 		auto* t = static_cast<ternary_expr*>(expr.get());
-		const uint32_t proved = expression_returns_bool(t->condition.get()) ? 1u : 0u;
 		compile_expression(t->condition);
-		size_t jump_false = emit(opcode::op_jump_if_false, k_invalid_u32, proved);
+		size_t jump_false = emit_cond_jump_false(t->condition.get());
 		compile_expression(t->then_expression);
 		size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
 		patch_jump(jump_false, chunk_->code.size());

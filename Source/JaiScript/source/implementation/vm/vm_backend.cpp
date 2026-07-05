@@ -3588,6 +3588,94 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 	return {};
 }
 
+// Cheap-shape operand resolver for exec_fused_cmp_jump: constants, frame slots and
+// (top-level) cached env locals only. nullptr = bail to the verbatim pair semantics.
+// Kept OFF fused_ident_value so exec_binary_fused's inlining of it is undisturbed.
+const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot) {
+	if (operand.const_index != k_invalid_u32) {
+		return &f.code->constants[operand.const_index];
+	}
+	if (operand.load_flags & load_flag_type_ctor) {
+		return nullptr;
+	}
+	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
+		if (auto* local = f.locals->get_local(operand.slot)) {
+			return &local->deref();
+		}
+		return nullptr;
+	}
+	return env_lookup_cached(f, cache_slot, f.code->symbols[operand.symbol]);
+}
+
+// BINARY_FUSED(comparison)+JUMP_IF_FALSE superinstruction. Contract: on success ip is
+// retargeted (fall-through = ip+1, jump = ins.a); on error or script unwinding ip is
+// left on this instruction (and the unwinding case leaves the result pushed, exactly
+// like the unfused pair did before its jump executed).
+checked_result<void> vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
+	const fused_binary_proto& p = f.code->fused_binary_protos[ins.b];
+	const token_type op = static_cast<token_type>(p.op);
+
+	// Numeric fast path: mirrors exec_binary_fused's comparison rows without the bool
+	// round-trip through the value stack. Any non-trivial shape bails to the pair.
+	if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0) {
+		const script_value* lp = fused_cmp_operand(f, p.left, f.ip * 2);
+		const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 2 + 1) : nullptr;
+		if (rp) {
+			const size_t li = lp->raw_storage_index();
+			const size_t ri = rp->raw_storage_index();
+			if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+				const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+				bool truthy;
+				switch (op) {
+				case token_type::less: truthy = a < b; break;
+				case token_type::less_equal: truthy = a <= b; break;
+				case token_type::greater: truthy = a > b; break;
+				case token_type::greater_equal: truthy = a >= b; break;
+				case token_type::equal_equal: truthy = a == b; break;
+				default: truthy = a != b; break;   // compiler fuses exactly the six comparisons
+				}
+				f.ip = truthy ? f.ip + 1 : ins.a;
+				return {};
+			}
+			if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+				const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(lp->unchecked_as_int()) : lp->unchecked_as_float();
+				const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(rp->unchecked_as_int()) : rp->unchecked_as_float();
+				bool truthy;
+				switch (op) {
+				case token_type::less: truthy = a < b; break;
+				case token_type::less_equal: truthy = a <= b; break;
+				case token_type::greater: truthy = a > b; break;
+				case token_type::greater_equal: truthy = a >= b; break;
+				case token_type::equal_equal: truthy = a == b; break;
+				default: truthy = a != b; break;
+				}
+				f.ip = truthy ? f.ip + 1 : ins.a;
+				return {};
+			}
+		}
+	}
+
+	// Verbatim pair semantics: the original fused compare pushes its result, then
+	// JUMP_IF_FALSE's pop/branch runs (parity by construction)
+	vm_instruction fused = ins;
+	fused.a = ins.b;   // exec_binary_fused reads the proto index from a
+	auto result = exec_binary_fused(f, fused);
+	if (!result) {
+		return result;
+	}
+	if (is_unwinding_) [[unlikely]] {
+		// Pair parity: result stays pushed; the dispatch case handles the unwind
+		// before any jump runs
+		return {};
+	}
+	script_value cond = std::move(stack_.back());
+	stack_.pop_back();
+	const bool truthy = ins.c ? cond.unchecked_as_bool() : is_truthy(cond);
+	f.ip = truthy ? f.ip + 1 : ins.a;
+	return {};
+}
+
 namespace {
 	inline bool cfor_compare(uint8_t cmp, script_int a, script_int b) {
 		switch (static_cast<token_type>(cmp)) {
@@ -7228,6 +7316,17 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;
 			case opcode::op_cfor_back: VM_TRY_OP_SHARED(exec_cfor_back(f, ins)); continue;
+
+			// Retargets f.ip on success; on script unwinding (custom comparison threw)
+			// ip stays parked here and the loop-bottom unwind handling is replicated
+			case opcode::op_fused_cmp_jump:
+				VM_TRY_OP_SHARED(exec_fused_cmp_jump(f, ins));
+				if (is_unwinding_) [[unlikely]] {
+					if (!handle_throw_unwind(fp, records_base)) {
+						return {};
+					}
+				}
+				continue;
 			case opcode::op_cfor_pop:
 				if (!cfor_states_.empty()) { cfor_states_.pop_back(); }
 				break;

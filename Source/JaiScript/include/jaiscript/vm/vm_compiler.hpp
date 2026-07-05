@@ -57,6 +57,8 @@ namespace jai::vm {
         const ast_node* current_stmt_ = nullptr;
 
         size_t emit(opcode op, uint32_t a = 0, uint32_t b = 0, uint32_t c = 0);
+        // Fuses a trailing fused-comparison condition with its jump_if_false
+        size_t emit_cond_jump_false(const expression* cond_expr);
         void patch_jump(size_t at, size_t target);
         uint32_t add_constant(const script_value& v);
         uint32_t add_symbol(uint64_t id);

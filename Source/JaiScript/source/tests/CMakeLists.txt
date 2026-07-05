@@ -284,3 +284,32 @@ if(JAISCRIPT_ENABLE_BENCHMARKS)
     # Add verbose benchmark test target
     add_test(NAME BenchmarkTests COMMAND jaiscript_tests "-verbose")
 endif()
+
+# ============================================
+# BEGIN differential fuzzer (fuzz/) block
+# ============================================
+# jaiscript_fuzz: standalone differential fuzzer exe (interpreter vs VM oracle).
+# The seeded smoke suite joins the normal test exe via target_sources (fuzz/ is
+# deliberately NOT in the test glob so fuzz_main.cpp stays out of jaiscript_tests).
+target_sources(jaiscript_tests PRIVATE
+    fuzz/fuzz_smoke_tests.cpp
+)
+
+add_executable(jaiscript_fuzz
+    fuzz/fuzz_main.cpp
+)
+target_link_libraries(jaiscript_fuzz PRIVATE jaiscript)
+target_include_directories(jaiscript_fuzz PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+    target_compile_options(jaiscript_fuzz PRIVATE /W3 /EHsc /permissive- /bigobj)
+    set_property(TARGET jaiscript_fuzz PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+    # Same deep-recursion headroom as jaiscript_tests (catchable depth-limit errors).
+    target_link_options(jaiscript_fuzz PRIVATE /STACK:134217728)
+else()
+    target_compile_options(jaiscript_fuzz PRIVATE -Wall -Wextra)
+endif()
+# ============================================
+# END differential fuzzer (fuzz/) block
+# ============================================

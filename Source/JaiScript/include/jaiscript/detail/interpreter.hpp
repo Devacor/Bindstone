@@ -894,6 +894,14 @@ namespace jai {
                     return map && !map->empty();
                 }
                 case script_value::TYPEID_OBJECT: return object_to_bool_via_method(value); // object - check for to_bool() method
+                case script_value::TYPEID_CPP_BOUND:
+                    // KEEP BYTE-PARALLEL with vm_backend::is_truthy (vm_backend.cpp) - the VM has its own copy
+                    if (value.is_bool()) return value.unchecked_as_bool();
+                    if (value.is_int()) return value.unchecked_as_int() != 0;
+                    if (value.is_float()) return value.unchecked_as_float() != 0.0;
+                    if (value.is_string()) return !value.unchecked_as_string().empty();
+                    if (value.is_char()) return true;
+                    return false;                 // opaque bound: preserves the old index-0 falsy observable
                 default: return true;                         // functions, other complex types
             }
         }

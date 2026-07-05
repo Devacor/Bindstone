@@ -294,10 +294,8 @@ script_value script_value::make_function(const script_function& func, engine* en
 script_value::script_value(const script_value& other)
     : type_info_(other.type_info_),
       engine_(other.engine_),
-      storage_(other.storage_),
-      cpp_bound_ptr_(other.cpp_bound_ptr_),
-      cpp_bound_type_size_(other.cpp_bound_type_size_) {
-    // cpp_bound_ptr_ is also copied so copies of bound values remain bound
+      storage_(other.storage_) {
+    // The variant copy bumps the (immutable) binding box refcount, so copies of bound values remain aliases
     // NOTE: Raw engine* is much faster to copy than weak_ptr (no atomic ops)
 }
 
@@ -307,8 +305,6 @@ script_value& script_value::operator=(const script_value& other) {
         type_info_ = other.type_info_;
         engine_ = other.engine_;
         storage_ = other.storage_;
-        cpp_bound_ptr_ = other.cpp_bound_ptr_;
-        cpp_bound_type_size_ = other.cpp_bound_type_size_;
     }
     return *this;
 }
@@ -367,7 +363,6 @@ script_value script_value::clone() const {
 
     script_value result(std::monostate{}, engine_);  // Preserve engine pointer!
     result.type_info_ = type_info_;
-    result.cpp_bound_ptr_ = cpp_bound_ptr_;  // Preserve C++ binding
 
     // Use current_type() to check what's actually stored, not the declared type
     switch (current_type()) {
@@ -411,9 +406,9 @@ script_value script_value::clone() const {
                     auto class_def = engine_->get_class_definition(obj_holder->type_id);
                     if (class_def && class_def->has_copy_function()) {
                         // cpp_bound references own nothing (data null) - the live object is
-                        // cpp_bound_ptr_. Deep copy from it and drop the binding so the
+                        // bound_ptr. Deep copy from it and drop the binding so the
                         // clone is an independent owned object, not an alias.
-                        const void* copy_src = obj_holder->data ? obj_holder->data.get() : cpp_bound_ptr_;
+                        const void* copy_src = obj_holder->data ? obj_holder->data.get() : obj_holder->bound_ptr;
                         auto new_cpp_obj = copy_src ? class_def->copy_object(copy_src) : nullptr;
                         if (new_cpp_obj) {
                             auto new_holder = make_strong<object_holder>();
@@ -421,8 +416,7 @@ script_value script_value::clone() const {
                             new_holder->type_id = obj_holder->type_id;
                             new_holder->data = new_cpp_obj;
                             new_holder->is_class_instance_wrapper = false;
-                            result.storage_ = new_holder;
-                            result.cpp_bound_ptr_ = nullptr;
+                            result.storage_ = new_holder;  // fresh holder: bound_ptr stays null (clone detaches)
                             copied = true;
                         }
                     }
@@ -456,24 +450,19 @@ script_value script_value::clone() const {
             // For cpp_bound values, we need to read the actual value and create an independent copy
             if (is_cpp_bound()) {
                 // Read the actual value from the C++ variable and create a new independent value
-                // This breaks the binding - the clone is no longer bound to the C++ variable
+                // Assigning fresh storage inherently detaches the clone from the C++ variable
                 if (is_int()) {
                     result.storage_ = as_int();
-                    result.cpp_bound_ptr_ = nullptr;  // Not bound
                 } else if (is_float()) {
                     result.storage_ = as_float();
-                    result.cpp_bound_ptr_ = nullptr;
                 } else if (is_bool()) {
                     result.storage_ = as_bool();
-                    result.cpp_bound_ptr_ = nullptr;
                 } else if (is_char()) {
                     result.storage_ = as_char();
-                    result.cpp_bound_ptr_ = nullptr;
                 } else if (is_string()) {
                     result.storage_ = make_strong<script_string>(as_string());
-                    result.cpp_bound_ptr_ = nullptr;
                 } else {
-                    // For other cpp_bound types, fall back to shallow copy
+                    // For other cpp_bound types, fall back to shallow copy (opaque bounds stay bound)
                     result.storage_ = storage_;
                 }
             } else {
@@ -655,42 +644,44 @@ void script_value::assign_through(const script_value& value) {
             throw runtime_error("Reference target environment has been destroyed");
         }
         *refHolder->target = value;
-    } else if (cpp_bound_ptr_ != nullptr) {
+    } else if (is_cpp_bound()) {
+        void* boundPtr = bound_target_ptr();
+        const uint8_t sizeAndSign = bound_size_and_sign();
         switch (type()) {
             case script_value_type::jai_int_type: {
                 auto v = value.as<script_int>();
-                const uint8_t size = cpp_bound_type_size_ & 0x7F;
-                if (cpp_bound_type_size_ & 0x80) {
+                const uint8_t size = sizeAndSign & 0x7F;
+                if (sizeAndSign & 0x80) {
                     switch (size) {
-                        case 1: *static_cast<uint8_t*>(cpp_bound_ptr_) = static_cast<uint8_t>(v); break;
-                        case 2: *static_cast<uint16_t*>(cpp_bound_ptr_) = static_cast<uint16_t>(v); break;
-                        case 4: *static_cast<uint32_t*>(cpp_bound_ptr_) = static_cast<uint32_t>(v); break;
-                        default: *static_cast<uint64_t*>(cpp_bound_ptr_) = static_cast<uint64_t>(v); break;
+                        case 1: *static_cast<uint8_t*>(boundPtr) = static_cast<uint8_t>(v); break;
+                        case 2: *static_cast<uint16_t*>(boundPtr) = static_cast<uint16_t>(v); break;
+                        case 4: *static_cast<uint32_t*>(boundPtr) = static_cast<uint32_t>(v); break;
+                        default: *static_cast<uint64_t*>(boundPtr) = static_cast<uint64_t>(v); break;
                     }
                 } else {
                     switch (size) {
-                        case 1: *static_cast<int8_t*>(cpp_bound_ptr_) = static_cast<int8_t>(v); break;
-                        case 2: *static_cast<int16_t*>(cpp_bound_ptr_) = static_cast<int16_t>(v); break;
-                        case 4: *static_cast<int32_t*>(cpp_bound_ptr_) = static_cast<int32_t>(v); break;
-                        default: *static_cast<script_int*>(cpp_bound_ptr_) = v; break;
+                        case 1: *static_cast<int8_t*>(boundPtr) = static_cast<int8_t>(v); break;
+                        case 2: *static_cast<int16_t*>(boundPtr) = static_cast<int16_t>(v); break;
+                        case 4: *static_cast<int32_t*>(boundPtr) = static_cast<int32_t>(v); break;
+                        default: *static_cast<script_int*>(boundPtr) = v; break;
                     }
                 }
                 break;
             }
             case script_value_type::jai_float_type:
-                if ((cpp_bound_type_size_ & 0x7F) == sizeof(float))
-                    *static_cast<float*>(cpp_bound_ptr_) = static_cast<float>(value.as<script_float>());
+                if ((sizeAndSign & 0x7F) == sizeof(float))
+                    *static_cast<float*>(boundPtr) = static_cast<float>(value.as<script_float>());
                 else
-                    *static_cast<script_float*>(cpp_bound_ptr_) = value.as<script_float>();
+                    *static_cast<script_float*>(boundPtr) = value.as<script_float>();
                 break;
             case script_value_type::jai_string_type:
-                *static_cast<std::string*>(cpp_bound_ptr_) = value.as<script_string>();
+                *static_cast<std::string*>(boundPtr) = value.as<script_string>();
                 break;
             case script_value_type::jai_bool_type:
-                *static_cast<bool*>(cpp_bound_ptr_) = value.as<script_bool>();
+                *static_cast<bool*>(boundPtr) = value.as<script_bool>();
                 break;
             case script_value_type::jai_char_type:
-                *static_cast<char*>(cpp_bound_ptr_) = value.as<script_char>();
+                *static_cast<char*>(boundPtr) = value.as<script_char>();
                 break;
             default:
                 // For complex types, we'll need to use the conversion registry
@@ -729,7 +720,7 @@ void script_value::assign_through(script_value&& value) {
             throw runtime_error("Reference target environment has been destroyed");
         }
         *refHolder->target = std::move(value);
-    } else if (cpp_bound_ptr_ != nullptr) {
+    } else if (is_cpp_bound()) {
         // can't move into a C++ variable — fall back to copy
         assign_through(value);
     } else {

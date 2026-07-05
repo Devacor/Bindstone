@@ -13,6 +13,7 @@ namespace {
 			case script_value::TYPEID_STRING: return "\"" + std::string(v.unchecked_as_string()) + "\"";
 			case script_value::TYPEID_BOOL: return v.unchecked_as_bool() ? "true" : "false";
 			case script_value::TYPEID_CHAR: return std::string("'") + v.unchecked_as_char() + "'";
+			case script_value::TYPEID_CPP_BOUND: return "<cpp_bound>";  // constants are never bound; label for safety
 			default: return "<value>";
 		}
 	}

@@ -242,7 +242,8 @@ namespace jai::detail {
 					}
 					auto index_derefed = ref_checked_deref(*index_ptr);
 					if (!index_derefed) { return index_derefed; }
-					if (index_derefed.value().raw_storage_index() != script_value::TYPEID_INT) {
+					// is_int (not raw index) so a bound-int index stays a valid lvalue index (§7.27)
+					if (!index_derefed.value().is_int()) {
 						return ref_non_lvalue_error();
 					}
 					index = index_derefed.value().unchecked_as_int();
@@ -569,7 +570,12 @@ namespace jai::detail {
 		// removed element/field surfaces as the same caller-frame-catchable throw whether
 		// or not the bound container was typed
 		script_value currentValue = refLocal.deref();
-		const script_value& rightValue = rightArg.deref();
+		const script_value& rightDeref = rightArg.deref();
+		// S8 (NEW-C): a bound rhs decodes up front so the /= and %= zero pre-checks below keep
+		// today's error codes/texts (shared by both backends; `arith` normalizes bound lhs)
+		const bool rightBound = rightDeref.raw_storage_index() == script_value::TYPEID_CPP_BOUND;
+		const script_value rightNorm = rightBound ? rightDeref.bound_decoded_temp() : script_value(std::monostate{}, eng);
+		const script_value& rightValue = rightBound ? rightNorm : rightDeref;
 		script_value resultValue(std::monostate{}, eng);
 		auto op_result = global_env->get(opName);
 		if (op_result && op_result.value().is_function()) {

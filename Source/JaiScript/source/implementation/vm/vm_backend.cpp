@@ -952,6 +952,14 @@ bool vm_backend::is_truthy(const script_value& value) {
 			return map && !map->empty();
 		}
 		case script_value::TYPEID_OBJECT: return object_to_bool_via_method(value);
+		case script_value::TYPEID_CPP_BOUND:
+			// KEEP BYTE-PARALLEL with interpreter is_truthy (detail/interpreter.hpp) - this is the VM's copy
+			if (value.is_bool()) return value.unchecked_as_bool();
+			if (value.is_int()) return value.unchecked_as_int() != 0;
+			if (value.is_float()) return value.unchecked_as_float() != 0.0;
+			if (value.is_string()) return !value.unchecked_as_string().empty();
+			if (value.is_char()) return true;
+			return false;   // opaque bound: preserves the old index-0 falsy observable
 		default: return true;
 	}
 }
@@ -1169,6 +1177,10 @@ checked_result<void> vm_backend::define_decl_value(frame& f, uint64_t name_id, s
 checked_result<script_value> vm_backend::handle_add(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_add(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1225,6 +1237,10 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 checked_result<script_value> vm_backend::handle_subtract(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_subtract(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1274,6 +1290,10 @@ checked_result<script_value> vm_backend::handle_subtract(const script_value& lef
 checked_result<script_value> vm_backend::handle_multiply(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_multiply(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1323,6 +1343,10 @@ checked_result<script_value> vm_backend::handle_multiply(const script_value& lef
 checked_result<script_value> vm_backend::handle_divide(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_divide(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1384,6 +1408,10 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 checked_result<script_value> vm_backend::handle_modulo(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_modulo(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1441,6 +1469,10 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 checked_result<script_value> vm_backend::handle_less(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_less(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1489,6 +1521,10 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 checked_result<script_value> vm_backend::handle_less_equal(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_less_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1537,6 +1573,10 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 checked_result<script_value> vm_backend::handle_greater(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_greater(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1585,6 +1625,10 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 checked_result<script_value> vm_backend::handle_greater_equal(const script_value& left, const script_value& right) {
 	const size_t li_raw = left.raw_storage_index();
 	const size_t ri_raw = right.raw_storage_index();
+	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return handle_greater_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1987,6 +2031,11 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 
 	const size_t li = left.raw_storage_index();
 	const size_t ri = right.raw_storage_index();
+
+	// S8: bound operands normalize to detached temps (byte-parallel with interpreter::evaluate_arithmetic)
+	if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
+		                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
 		return script_value(value_to_string_with_method(left) + value_to_string_with_method(right), engine_);
@@ -2787,6 +2836,11 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 		}
 		script_value& target = varPtr->deref();
 		auto leftType = target.type();
+		// S8: a bound rhs decodes to a detached temp (the old shadow-index operand behavior)
+		if (rightValue.deref().raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+			script_value decoded = rightValue.deref().bound_decoded_temp();
+			rightValue = std::move(decoded);
+		}
 		script_value& derefRight = rightValue.deref();
 
 		if (has_custom_numeric_ops_) [[unlikely]] {
@@ -2832,6 +2886,100 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 					return {};
 				}
 			}
+		}
+
+		// §12.1 write-through: compound on a bound VARIABLE reads the live value, computes,
+		// and stores back through assign_through (was a silent dead-shadow no-op).
+		// KEEP BYTE-PARALLEL with the interpreter identifier-compound bound branch.
+		if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+			const size_t rIdx = derefRight.raw_storage_index();
+			switch (kind) {
+				case compound_plus: {
+					if (target.is_int()) {
+						if (rIdx == script_value::TYPEID_INT) {
+							script_int rr;
+							if (!ints::try_add(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '+='");
+							target.assign_through(script_value(rr, engine_));
+						} else if (rIdx == script_value::TYPEID_FLOAT) {
+							target.assign_through(script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_));
+						} else {
+							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+						}
+					} else if (target.is_float()) {
+						target.assign_through(script_value(target.unchecked_as_float() + derefRight.as_float(), engine_));
+					} else if (target.is_string() && rIdx == script_value::TYPEID_STRING) {
+						target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+					} else {
+						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					}
+					break;
+				}
+				case compound_minus: {
+					if (target.is_int()) {
+						if (rIdx == script_value::TYPEID_INT) {
+							script_int rr;
+							if (!ints::try_sub(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '-='");
+							target.assign_through(script_value(rr, engine_));
+						} else if (rIdx == script_value::TYPEID_FLOAT) {
+							target.assign_through(script_value(target.unchecked_as_int() - derefRight.unchecked_as_float(), engine_));
+						} else {
+							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+						}
+					} else if (target.is_float()) {
+						target.assign_through(script_value(target.unchecked_as_float() - derefRight.as_float(), engine_));
+					} else {
+						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					}
+					break;
+				}
+				case compound_star: {
+					if (target.is_int()) {
+						if (rIdx == script_value::TYPEID_INT) {
+							script_int rr;
+							if (!ints::try_mul(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '*='");
+							target.assign_through(script_value(rr, engine_));
+						} else if (rIdx == script_value::TYPEID_FLOAT) {
+							target.assign_through(script_value(target.unchecked_as_int() * derefRight.unchecked_as_float(), engine_));
+						} else {
+							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+						}
+					} else if (target.is_float()) {
+						target.assign_through(script_value(target.unchecked_as_float() * derefRight.as_float(), engine_));
+					} else {
+						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					}
+					break;
+				}
+				case compound_slash: {
+					if (rIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
+						return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+					}
+					if (rIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
+						return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+					}
+					if (target.is_int()) {
+						if (rIdx == script_value::TYPEID_INT) {
+							script_int rr;
+							if (!ints::try_div(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '/='");
+							target.assign_through(script_value(rr, engine_));
+						} else if (rIdx == script_value::TYPEID_FLOAT) {
+							target.assign_through(script_value(target.unchecked_as_int() / derefRight.unchecked_as_float(), engine_));
+						} else {
+							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+						}
+					} else if (target.is_float()) {
+						target.assign_through(script_value(target.unchecked_as_float() / derefRight.as_float(), engine_));
+					} else {
+						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					}
+					break;
+				}
+				default:
+					// %= matches the interpreter's in-place switch, which has no percent case
+					return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+			}
+			if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
+			return {};
 		}
 
 		const size_t leftIdx = target.raw_storage_index();
@@ -2952,6 +3100,13 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 		}
 	}
 
+	// S8: bound-alias class fields decode-read LIVE; set_field stores the detached result (§12.5).
+	// KEEP BYTE-PARALLEL with the interpreter implicit-this compound normalization.
+	if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		currentValue = currentValue.bound_decoded_temp();
+	if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		rightValue = rightValue.bound_decoded_temp();
+
 	const size_t ci = currentValue.raw_storage_index();
 	const size_t ri = rightValue.raw_storage_index();
 	script_value resultValue = make_null();
@@ -3030,6 +3185,31 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 	script_value* varPtr = resolve_local_or_env(f, ins.b, sym);
 	if (varPtr) {
 		script_value& target = varPtr->deref();
+		// §12.1 write-through: ++/-- on a bound VARIABLE decodes the live value and stores
+		// back through assign_through (the type() switch below would mutate a dead shadow).
+		// KEEP BYTE-PARALLEL with the interpreter ++/-- bound branch.
+		if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+			if (target.is_int()) {
+				const script_int oldVal = target.unchecked_as_int();
+				script_int newVal;
+				if (isIncrement) {
+					if (!ints::try_add(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '++'");
+				} else {
+					if (!ints::try_sub(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '--'");
+				}
+				target.assign_through(script_value(newVal, engine_));
+				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
+				return {};
+			}
+			if (target.is_float()) {
+				const script_float oldVal = target.unchecked_as_float();
+				const script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
+				target.assign_through(script_value(newVal, engine_));
+				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
+				return {};
+			}
+			return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+		}
 		switch (target.type()) {
 			case script_value_type::jai_int_type: {
 				if (postfix) {
@@ -3066,6 +3246,9 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 		std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 		if (instance && instance->has_field(sym)) {
 			script_value currentVal = instance->get_field(sym);
+			// S8: a bound-alias field decodes live; set_field stores the detached result (§12.5)
+			if (currentVal.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+				currentVal = currentVal.bound_decoded_temp();
 			const size_t ti = currentVal.raw_storage_index();
 			if (ti == script_value::TYPEID_INT) {
 				script_int oldVal = currentVal.unchecked_as_int();
@@ -3092,7 +3275,12 @@ checked_result<void> vm_backend::exec_unary(frame& f, const vm_instruction& ins)
 	script_value operand = std::move(stack_.back());
 	stack_.pop_back();
 
-	const size_t oi = operand.raw_storage_index();
+	size_t oi = operand.raw_storage_index();
+	// S8: bound operand decodes in place to a detached temp (byte-parallel with the interpreter unary switch)
+	if (oi == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+		operand = operand.bound_decoded_temp();
+		oi = operand.raw_storage_index();
+	}
 	switch (static_cast<token_type>(ins.a)) {
 		case token_type::minus: {
 			if (oi == script_value::TYPEID_INT) {
@@ -3603,6 +3791,10 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 		}
 		resultValue = std::move(result.value());
 	} else {
+		// S8 (NEW-C): a bound rhs decodes before the zero pre-checks so /= and %= keep
+		// today's error codes/texts (byte-parallel with the interpreter compound path)
+		if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+			rightValue = rightValue.bound_decoded_temp();
 		switch (op) {
 			case token_type::plus: {
 				if (currentValue.is_string() || rightValue.is_string()) {
@@ -4591,6 +4783,13 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 			script_value self_val = capturedValue.deref();
 			script_value other_val = const_cast<script_value&>(other_raw).deref();
 
+			// S8: bound values decode-compare like the old shadow indices (two aliases of one
+			// C++ int stay same_as-true). KEEP BYTE-PARALLEL with the interpreter same_as lambda.
+			if (self_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+				self_val = self_val.bound_decoded_temp();
+			if (other_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+				other_val = other_val.bound_decoded_temp();
+
 			if (self_val.is_null() && other_val.is_null()) {
 				return script_value(true, eng);
 			}
@@ -5057,6 +5256,13 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 			}
 		}
 	}
+
+	// S8: a bound-alias member decode-reads LIVE and assign_member stores the detached
+	// result (§12.5). KEEP BYTE-PARALLEL with the interpreter member-compound normalization.
+	if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		currentValue = currentValue.bound_decoded_temp();
+	if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		rightValue = rightValue.bound_decoded_temp();
 
 	const size_t ci = currentValue.raw_storage_index();
 	const size_t ri = rightValue.raw_storage_index();

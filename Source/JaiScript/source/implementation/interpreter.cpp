@@ -3476,8 +3476,13 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     // Generic path - evaluate operand and use existing logic
     JAISCRIPT_TRY(dispatch_expr(expr->operand.get()));
     script_value operand = pop_value();
-    
-    const size_t oi = operand.raw_storage_index();
+
+    size_t oi = operand.raw_storage_index();
+    // S8: bound operand decodes in place to a detached temp (byte-parallel with vm_backend::exec_unary)
+    if (oi == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+        operand = operand.bound_decoded_temp();
+        oi = operand.raw_storage_index();
+    }
     switch (expr->op.type) {
         case token_type::minus: {
             if (oi == script_value::TYPEID_INT) {
@@ -3525,6 +3530,31 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                     script_value& target = varPtr->deref();
 
                     const bool isIncrement = (expr->op.type == token_type::plus_plus);
+                    // §12.1 write-through: ++/-- on a bound VARIABLE decodes the live value and
+                    // stores back through assign_through (the type() switch below would mutate a
+                    // dead shadow). KEEP BYTE-PARALLEL with the VM exec_incdec bound branch.
+                    if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                        if (target.is_int()) {
+                            const script_int oldVal = target.unchecked_as_int();
+                            script_int newVal;
+                            if (isIncrement) {
+                                if (!ints::try_add(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '++'");
+                            } else {
+                                if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
+                            }
+                            target.assign_through(make_value(newVal));
+                            push_value(make_value(expr->is_postfix ? oldVal : newVal));
+                            return {};
+                        }
+                        if (target.is_float()) {
+                            const script_float oldVal = target.unchecked_as_float();
+                            const script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
+                            target.assign_through(make_value(newVal));
+                            push_value(make_value(expr->is_postfix ? oldVal : newVal));
+                            return {};
+                        }
+                        return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+                    }
                     switch (target.type()) {
                         case script_value_type::jai_int_type: {
                             if (expr->is_postfix) {
@@ -3564,6 +3594,10 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                         if (instance && instance->has_field(identifier->symbol_id)) {
                             script_value currentVal = instance->get_field(identifier->symbol_id);
                             const bool isIncrement = (expr->op.type == token_type::plus_plus);
+                            // S8: a bound-alias field decodes live; set_field stores the detached
+                            // result (§12.5). KEEP BYTE-PARALLEL with the VM this-field fallback.
+                            if (currentVal.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+                                currentVal = currentVal.bound_decoded_temp();
                             const size_t ti = currentVal.raw_storage_index();
 
                             if (ti == script_value::TYPEID_INT) {
@@ -3807,6 +3841,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Evaluate the right-hand side (general path)
                 JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
                 script_value rightValue = pop_value();
+                // S8: a bound rhs decodes to a detached temp (the old shadow-index operand behavior)
+                if (rightValue.deref().raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                    script_value decoded = rightValue.deref().bound_decoded_temp();
+                    rightValue = std::move(decoded);
+                }
                 auto& derefRight = rightValue.deref();
 
                 // Get type for RHS
@@ -3857,6 +3896,99 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             return {};
                         }
                     }
+                }
+
+                // §12.1 write-through: compound on a bound VARIABLE reads the live value, computes,
+                // and stores back through assign_through (was a silent dead-shadow no-op).
+                // KEEP BYTE-PARALLEL with the VM exec_compound_store bound branch.
+                if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                    const size_t rIdx = derefRight.raw_storage_index();
+                    switch (expr->op.type) {
+                        case token_type::plus_equal: {
+                            if (target.is_int()) {
+                                if (rIdx == script_value::TYPEID_INT) {
+                                    script_int rr;
+                                    if (!ints::try_add(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='");
+                                    target.assign_through(make_value(rr));
+                                } else if (rIdx == script_value::TYPEID_FLOAT) {
+                                    target.assign_through(make_value(target.unchecked_as_int() + derefRight.unchecked_as_float()));
+                                } else {
+                                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                }
+                            } else if (target.is_float()) {
+                                target.assign_through(make_value(target.unchecked_as_float() + derefRight.as_float()));
+                            } else if (target.is_string() && rIdx == script_value::TYPEID_STRING) {
+                                target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+                            } else {
+                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            }
+                            break;
+                        }
+                        case token_type::minus_equal: {
+                            if (target.is_int()) {
+                                if (rIdx == script_value::TYPEID_INT) {
+                                    script_int rr;
+                                    if (!ints::try_sub(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='");
+                                    target.assign_through(make_value(rr));
+                                } else if (rIdx == script_value::TYPEID_FLOAT) {
+                                    target.assign_through(make_value(target.unchecked_as_int() - derefRight.unchecked_as_float()));
+                                } else {
+                                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                }
+                            } else if (target.is_float()) {
+                                target.assign_through(make_value(target.unchecked_as_float() - derefRight.as_float()));
+                            } else {
+                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            }
+                            break;
+                        }
+                        case token_type::star_equal: {
+                            if (target.is_int()) {
+                                if (rIdx == script_value::TYPEID_INT) {
+                                    script_int rr;
+                                    if (!ints::try_mul(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='");
+                                    target.assign_through(make_value(rr));
+                                } else if (rIdx == script_value::TYPEID_FLOAT) {
+                                    target.assign_through(make_value(target.unchecked_as_int() * derefRight.unchecked_as_float()));
+                                } else {
+                                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                }
+                            } else if (target.is_float()) {
+                                target.assign_through(make_value(target.unchecked_as_float() * derefRight.as_float()));
+                            } else {
+                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            }
+                            break;
+                        }
+                        case token_type::slash_equal: {
+                            if (rIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
+                                return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+                            }
+                            if (rIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
+                                return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+                            }
+                            if (target.is_int()) {
+                                if (rIdx == script_value::TYPEID_INT) {
+                                    script_int rr;
+                                    if (!ints::try_div(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '/='");
+                                    target.assign_through(make_value(rr));
+                                } else if (rIdx == script_value::TYPEID_FLOAT) {
+                                    target.assign_through(make_value(target.unchecked_as_int() / derefRight.unchecked_as_float()));
+                                } else {
+                                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                                }
+                            } else if (target.is_float()) {
+                                target.assign_through(make_value(target.unchecked_as_float() / derefRight.as_float()));
+                            } else {
+                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                            }
+                            break;
+                        }
+                        default:
+                            return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+                    }
+                    push_value(expression_result_needed_ ? target.clone() : target);
+                    return {};
                 }
 
                 // === IN-PLACE MUTATION (ChaiScript-style) ===
@@ -3991,6 +4123,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
 
                 // Perform the compound operation (using standard path, no in-place mutation for fields)
+                // S8: bound-alias class fields decode-read LIVE; set_field stores the detached
+                // result (§12.5). KEEP BYTE-PARALLEL with the VM implicit-this compound normalization.
+                if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+                    currentValue = currentValue.bound_decoded_temp();
+                if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+                    rightValue = rightValue.bound_decoded_temp();
                 // Cache type indices for fast checking
                 const size_t ci = currentValue.raw_storage_index();
                 const size_t ri = rightValue.raw_storage_index();
@@ -4097,6 +4235,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
 
             // Perform the compound operation
+            // S8: a bound-alias member decode-reads LIVE and assign_member_value stores the
+            // detached result (§12.5). KEEP BYTE-PARALLEL with the VM exec_member_compound.
+            if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+                currentValue = currentValue.bound_decoded_temp();
+            if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+                rightValue = rightValue.bound_decoded_temp();
             // Cache type indices for fast checking
             const size_t ci = currentValue.raw_storage_index();
             const size_t ri = rightValue.raw_storage_index();
@@ -4221,6 +4365,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
                 resultValue = std::move(result.value());
             } else {
+                // S8 (NEW-C): a bound rhs decodes before the zero pre-checks so /= and %= keep
+                // today's error codes/texts (byte-parallel with the VM exec_index_compound)
+                if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+                    rightValue = rightValue.bound_decoded_temp();
                 // Fall back to built-in operators
                 switch (expr->op.type) {
                     case token_type::plus_equal: {
@@ -4282,6 +4430,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         }
                         resultValue = std::move(enforced.value());
                     }
+                }
+
+                // §12.1: identifier compound on a bound VARIABLE stays write-through instead of
+                // silently replacing the binding with a detached value
+                if (currentVal && currentVal->is_cpp_bound()) {
+                    currentVal->assign_through(resultValue);
+                    push_value(std::move(resultValue));
+                    return {};
                 }
 
                 // FIX #3/#4: Save result before moving to avoid returning moved-from value
@@ -5429,6 +5585,11 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
 
+    // S8: bound operands normalize to detached temps (byte-parallel with vm_backend::evaluate_arithmetic)
+    if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
+                                   ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+
     // Special case for string concatenation (use move to avoid copying the temporary)
     // Check for to_string() method on objects before falling back to default
     if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
@@ -6438,6 +6599,13 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             // Deref both values to follow reference chains to the root object
             script_value self_val = capturedValue.deref();
             script_value other_val = const_cast<script_value&>(other_raw).deref();
+
+            // S8: bound values decode-compare like the old shadow indices (two aliases of one
+            // C++ int stay same_as-true). KEEP BYTE-PARALLEL with the VM same_as lambda.
+            if (self_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+                self_val = self_val.bound_decoded_temp();
+            if (other_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+                other_val = other_val.bound_decoded_temp();
 
             // Both null -> same
             if (self_val.is_null() && other_val.is_null()) {

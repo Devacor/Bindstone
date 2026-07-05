@@ -277,50 +277,15 @@ namespace jai::fuzz {
 			// final-return fix territory. Pilot seeds 4, 7, 38, 116, 195, 216.
 			{"KD-CORO-RESUME-PAST-END", "resume past final yield: interp repeats last value, vm nulls",
 				{"coroutine ", ".resume()"}, {"null"}},
-			// Undefined-variable error text: interpreter decorates with
-			// "(no 'this' in scope)" in compound-assign paths, VM does not.
-			// (Also masks the compound-assign eval-order aspect of seed 28:
-			// interp reports the lhs first, VM the rhs.) Pilot seeds 34, 28.
-			// Ordered before FZ-TYPED-FN-NO-RETURN: this text needle is the
-			// more specific discriminator.
-			{"FZ-UNDEF-VAR-THIS-DECORATION", "interp-only \"(no 'this' in scope)\" error decoration",
-				{}, {"(no 'this' in scope)"}},
-			// Typed function (-> T) falling off the end without a return: the
-			// interpreter's typed-return epilogue raises a bogus
-			// "Undefined variable '<function-local>'" while the VM returns null.
-			// Pilot seeds 66, 239.
-			{"FZ-TYPED-FN-NO-RETURN", "typed fn falls off end: interp bogus undefined-variable error",
-				{") -> "}, {"interp: ERROR Undefined variable"}},
-			// Same bug, caught variant: the bogus interpreter error is caught by a
-			// script-level try/catch, so it surfaces as printed "caught: Undefined
-			// variable 'x'" on the interpreter and silence on the VM.
-			// Campaign seeds 2529, 3657, 3784.
-			{"FZ-TYPED-FN-NO-RETURN-CAUGHT", "typed fn falls off end, bogus error caught in script",
-				{") -> "}, {"caught: Undefined variable '"}},
-			// Unary minus on 0.0: interpreter yields +0.0, VM yields IEEE -0.0.
-			// Campaign seeds 1985, 2148, 2255.
-			{"FZ-NEG-ZERO", "-(0.0): interp +0.0 vs vm -0.0",
-				{}, {"-0.000000"}},
-			// Integer-overflow error text names the wrong operator, and a different
-			// wrong operator per backend (e.g. interp '*' vs vm '+='). Seed 2706.
-			{"FZ-OVERFLOW-OP-NAME", "overflow error text: operator name differs per backend",
-				{}, {"Integer overflow in '"}},
-			// Checked-overflow error raised inside a <=> operand: the interpreter
-			// swallows it entirely (program completes, null result) while the VM
-			// raises it (with its own wrong-operator text). Campaign seed 9336.
-			{"FZ-SPACESHIP-OVERFLOW-SWALLOW", "overflow inside <=> operand: interp swallows, vm raises",
-				{"<=>"}, {"Integer overflow"}},
-			// Float division-by-zero error text differs.
-			{"FZ-FLOAT-DIVZERO-TEXT", "\"Division by zero\" vs \"Division by zero in float operation\"",
-				{}, {"Division by zero in float operation"}},
-			// Deep-recursion error text differs (and the VM's message has an
-			// empty "()" where the depth should be). Pilot seed 137.
-			{"FZ-RECURSION-MSG-TEXT", "native-stack vs max-recursion-depth message mismatch",
-				{}, {"Native stack exhausted", "Maximum recursion depth"}},
 			// throw inside a class ordering operator swallowed by one backend
 			// (fix in flight; not observed since - matcher kept for the campaign).
 			{"KD-ORDERING-THROW", "throw inside operator< swallowed by one backend",
 				{"operator<"}, {"op-lt-boom"}},
+			// The 2026-07 FZ-* matchers (typed-fn-no-return, undef-var eval order,
+			// neg-zero, overflow op names, float divzero text, recursion text,
+			// spaceship overflow swallow) were removed when their fixes landed on
+			// VM-perf; recorded seeds re-verified agreeing with --no-suppressions.
+			// See known_divergences.md "Fixed" for the root causes.
 		};
 		return list;
 	}

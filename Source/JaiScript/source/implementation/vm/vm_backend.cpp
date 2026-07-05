@@ -7594,12 +7594,16 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	// In-loop dispatch invariant: results travel on stack_, never through return_value_
 	assert(!has_return_value_);
 
-	std::shared_ptr<chunk> body_chunk;
+	// Raw chunk*: every body chunk is pinned for the backend's lifetime by chunk_cache_
+	// (chunk_for_body inserts, nothing erases), so the per-call shared_ptr pin was
+	// two redundant atomic refcounts per call
+	chunk* body_chunk;
 	try {
-		body_chunk = std::static_pointer_cast<chunk>(function.backend_body_cache);
+		body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
 		if (!body_chunk) {
-			body_chunk = chunk_for_body(function.name, function.parameters, function.body, function.local_count);
-			function.backend_body_cache = body_chunk;
+			auto compiled = chunk_for_body(function.name, function.parameters, function.body, function.local_count);
+			function.backend_body_cache = compiled;
+			body_chunk = compiled.get();
 		}
 		if (call_records_top_ == call_records_.size()) {
 			call_records_.push_back(std::make_unique<call_record>());
@@ -7656,8 +7660,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 		throw;
 	}
 	++current_call_depth_;
-	rec.f.code = body_chunk.get();
-	rec.f.pin = std::move(body_chunk);
+	rec.f.code = body_chunk;
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;
 	if (rec.env_lazy) {
@@ -7749,15 +7752,17 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	}
 	assert(!has_return_value_);
 
-	std::shared_ptr<chunk> body_chunk;
+	// Raw chunk*: pinned for the backend's lifetime by chunk_cache_ (see push_script_frame)
+	chunk* body_chunk;
 	try {
 		if (dispatch.body_cache_key == ast->body.get()) {
-			body_chunk = std::static_pointer_cast<chunk>(dispatch.body_cache);
+			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
 		} else {
 			// Native parity: execute_method_ast's temp function carries local_count 0
-			body_chunk = chunk_for_body(ast->name, ast->parameters, ast->body, 0);
-			dispatch.body_cache = body_chunk;
+			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, 0);
+			dispatch.body_cache = compiled;
 			dispatch.body_cache_key = ast->body.get();
+			body_chunk = compiled.get();
 		}
 		if (call_records_top_ == call_records_.size()) {
 			call_records_.push_back(std::make_unique<call_record>());
@@ -7811,8 +7816,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		throw;
 	}
 	++current_call_depth_;
-	rec.f.code = body_chunk.get();
-	rec.f.pin = std::move(body_chunk);
+	rec.f.code = body_chunk;
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;
 	rec.f.entry_env = environment_;
@@ -7895,8 +7899,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	rec.return_type = nullptr;
 	rec.ast_pin.reset();
 	rec.method_result_anchor = false;
-	rec.f.pin.reset();
-	rec.f.code = nullptr;
+	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
 	if (rec.metadata_saved) {
 		current_arg_metadata_ = std::move(rec.saved_metadata);
 		rec.metadata_saved = false;
@@ -7908,9 +7911,8 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 
 checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
-	script_value result = make_null();
+	script_value result = ins.a ? std::move(stack_.back()) : make_null();
 	if (ins.a) {
-		result = std::move(stack_.back());
 		stack_.pop_back();
 	}
 	// Deref + conversion run while the callee's env/frame are still live (native order)
@@ -8046,10 +8048,12 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 		// References into this call frame would dangle once the frame dies
 		result = result.deref();
 	}
-	if (return_type && !return_type->type_name.empty() &&
+	// base_type first: the common any/auto return rejects on one enum compare
+	// instead of three string compares (same conjunction, reordered)
+	if (return_type && return_type->base_type != script_value_type::jai_any_type &&
+	    !return_type->type_name.empty() &&
 	    return_type->type_name != "void" &&
-	    return_type->type_name != "auto" &&
-	    return_type->base_type != script_value_type::jai_any_type) {
+	    return_type->type_name != "auto") {
 		auto conv = try_convert_for_parameter(result, return_type);
 		if (!conv) {
 			return conv.error_value();

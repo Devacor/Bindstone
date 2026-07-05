@@ -106,9 +106,19 @@ namespace jai::vm {
         script_value* ptr = nullptr;
     };
 
+    // op_compound_fused: `target op= <fused binary rhs>` in one dispatch. The rhs proto
+    // must have at least one constant operand (cache-slot budget: left/right/target).
+    struct compound_fused_proto {
+        uint32_t rhs_proto = 0;         // fused_binary_protos index
+        uint32_t symbol = 0;            // chunk::symbols index (store target)
+        uint32_t slot = k_invalid_u32;  // target frame slot (k_invalid_u32 = env)
+        uint32_t kind_flags = 0;        // compound kind | compound_flag_*
+    };
+
     struct chunk {
         std::vector<vm_instruction> code;
-        // Lazily sized to 2*code.size(): slot 2*ip (+1 for a fused right operand)
+        // Lazily sized to 3*code.size(): role slots per ip (0=left/load, 1=fused right,
+        // 2=store target) so fused superinstructions never collide
         mutable std::vector<env_lookup_cache_entry> env_lookup_cache;
         // Per instruction: the statement node in effect (raw pointer into the pinned tree)
         std::vector<const ast_node*> stmt_nodes;
@@ -127,6 +137,7 @@ namespace jai::vm {
         std::vector<destructure_proto> destructure_protos;
         std::vector<iter_proto> iter_protos;
         std::vector<fused_binary_proto> fused_binary_protos;
+        std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<counted_for_proto> counted_for_protos;
 
         // Default-argument expressions compiled per parameter (function-body chunks only)

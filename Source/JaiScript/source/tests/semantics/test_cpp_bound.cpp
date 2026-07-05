@@ -561,9 +561,9 @@ public:
             check_true(caughtF, "float -> as<script_float&> throws jai::runtime_error");
             check_eq(1.5f, bf4, "mismatched-width float target untouched");
 
-            // Typed add_function detaches args in the conversion layer BEFORE the binder's
-            // zero-copy T& converter runs: the callee reads the live value but its writes land
-            // on the detached temp (same as before the fold). Pinned as-is.
+            // engine.add_function with non-const T& params (the S9/12.4 zero-copy route):
+            // create_argument preserves the S9 lvalue via std::ref, so exact-width bound
+            // arguments alias the LIVE C++ variable - reads AND writes are real.
             script_int fnv = 10;
             eng->add_global_ref("fnv", fnv);
             engine* rawEng = eng.get();
@@ -575,7 +575,29 @@ public:
             eng->add_function("bump_i", [&seen](script_int& n) { seen = n; n += 5; });
             eng->execute("bump_i(fnv);");
             check_eq((int64_t)10, seen, "typed add_function callee reads the live value");
-            check_eq((int64_t)10, fnv, "typed add_function writes land on the detached temp (pinned as-is)");
+            check_eq((int64_t)15, fnv, "typed add_function script_int& writes through to the C++ variable");
+            std::string seenStr;
+            eng->add_function("bump_s", [&seenStr](std::string& s) { seenStr = s; s += "!"; });
+            eng->execute("bump_s(bs2);");
+            check_eq(std::string("abc!"), seenStr, "typed add_function std::string& reads the live string");
+            check_eq(std::string("abc!!"), bs2, "typed add_function std::string& writes through");
+            double seenF = 0.0;
+            eng->add_function("bump_f", [&seenF](script_float& f) { seenF = f; f += 0.25; });
+            eng->execute("bump_f(bd);");
+            check_eq(2.0, seenF, "typed add_function script_float& reads the live double");
+            check_eq(2.25, bd, "typed add_function script_float& writes through");
+            // Width-mismatched binding through the call route: catchable jai::runtime_error
+            // (surfaced via the binder's cpp_exception wrapper) - never bad_variant_access.
+            bool caughtCall = false;
+            try { eng->execute("bump_i(b32);"); } catch (const jai::runtime_error&) { caughtCall = true; }
+            check_true(caughtCall, "bound int32 -> script_int& param throws jai::runtime_error");
+            check_eq(5, b32, "mismatched-width call target untouched");
+            // Plain (unbound) script array: the arg copy shares the strong_ptr storage, so a
+            // std::vector<script_value>& param mutates the caller's array (zero-copy contract).
+            eng->add_function("push_seven", [rawEng](std::vector<script_value>& a) { a.push_back(script_value((script_int)7, rawEng)); });
+            eng->execute("var pa = [1]; push_seven(pa);");
+            check_eq((int64_t)2, eng->execute("pa.size()").as_int(), "vector<script_value>& param writes through to the script array");
+            check_eq((int64_t)7, eng->execute("pa[1]").as_int(), "appended element visible in script");
         });
 
         test("t2_bound_zero_rhs_divmod_error_surface", [this]() {

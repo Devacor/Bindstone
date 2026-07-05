@@ -424,6 +424,19 @@ public:
             }
         )");
 
+        // By-ref BST: reference params mutate the tree in place (matches Squirrel's
+        // reference-type instances, which never deep-copy)
+        jai_engine->execute(R"(
+            function insertRef(TreeNode& node, int val) {
+                if (node == null) { node = TreeNode(val); return; }
+                if (val < node.value) { insertRef(node.left, val); } else { insertRef(node.right, val); }
+            }
+            function sumRef(TreeNode& node) -> int {
+                if (node == null) { return 0; }
+                return sumRef(node.left) + node.value + sumRef(node.right);
+            }
+        )");
+
         // Bind C++ TreeNode class to JaiScript for fair comparison
         dynamic_binder<CppTreeNode>(*jai_engine, "CppTreeNode")
             .constructor<int>()
@@ -857,6 +870,65 @@ public:
                     local tree_height = treeHeight(tree_root);
                     tree_root = rotateRight(tree_root);
                     tree_sum = inorderSum(tree_root);
+                )");
+            });
+        });
+
+        // ===== Binary Search Tree (By-Ref Script) =====
+        test("JaiScript vs Squirrel: Binary Search Tree (By-Ref Script)", [this]() {
+            // Apples-to-apples: Squirrel instances are reference types (insertNode
+            // mutates one tree, zero deep copies), so the JaiScript side uses explicit
+            // by-ref parameters for the same in-place mutation. The Pure Script pair
+            // above keeps the value-semantics JaiScript side for historical
+            // comparability (that number is the value-semantics feature cost).
+            const char* jai_ref_bst = R"(
+                var ref_root = null;
+                insertRef(ref_root, 8);
+                insertRef(ref_root, 4);
+                insertRef(ref_root, 12);
+                insertRef(ref_root, 2);
+                insertRef(ref_root, 6);
+                insertRef(ref_root, 10);
+                insertRef(ref_root, 14);
+                insertRef(ref_root, 1);
+                insertRef(ref_root, 3);
+                insertRef(ref_root, 5);
+                insertRef(ref_root, 7);
+                insertRef(ref_root, 9);
+                insertRef(ref_root, 11);
+                insertRef(ref_root, 13);
+                insertRef(ref_root, 15);
+
+                var ref_sum = sumRef(ref_root);
+                ref_sum;
+            )";
+
+            // One-shot correctness gate: same insertion sequence as the value BST
+            check_eq((int64_t)120, jai_engine->execute(jai_ref_bst).as_int());
+
+            benchmark("JaiScript - BST by-ref (15 nodes)", [this, jai_ref_bst]() {
+                jai_engine->execute(jai_ref_bst);
+            });
+
+            benchmark("Squirrel - BST insert/sum (15 nodes)", [this]() {
+                sq_vm->execute(R"(
+                    local tree_root = TreeNode(8);
+                    tree_root = insertNode(tree_root, 4);
+                    tree_root = insertNode(tree_root, 12);
+                    tree_root = insertNode(tree_root, 2);
+                    tree_root = insertNode(tree_root, 6);
+                    tree_root = insertNode(tree_root, 10);
+                    tree_root = insertNode(tree_root, 14);
+                    tree_root = insertNode(tree_root, 1);
+                    tree_root = insertNode(tree_root, 3);
+                    tree_root = insertNode(tree_root, 5);
+                    tree_root = insertNode(tree_root, 7);
+                    tree_root = insertNode(tree_root, 9);
+                    tree_root = insertNode(tree_root, 11);
+                    tree_root = insertNode(tree_root, 13);
+                    tree_root = insertNode(tree_root, 15);
+
+                    local tree_sum = inorderSum(tree_root);
                 )");
             });
         });

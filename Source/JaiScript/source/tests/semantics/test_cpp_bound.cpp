@@ -370,6 +370,237 @@ public:
             check_true(eng->execute("function rc12(int& t) { return t >= 100; } rc12(bg)").as_bool(), "comparison through by-ref param");
         });
 
+        // ---- T2 (rung 1, thin_value spec section 13): ruled write-through/live-read
+        // ---- semantics for bound values (section 12 deltas), both backends.
+
+        test("t2_compound_writethrough_matrix", [this]() {
+            auto runMatrix = [this](bool useVm) {
+                const std::string tag = useVm ? "vm: " : "interp: ";
+                auto eng = jai::engine::make();
+                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+
+                int8_t   mi8 = 0;  uint8_t  mu8 = 0;  int16_t mi16 = 0; int32_t mi32 = 0;
+                uint32_t mu32 = 0; int64_t mi64 = 0;  uint64_t mu64 = 0;
+                eng->add_global_ref("mi8", mi8);   eng->add_global_ref("mu8", mu8);
+                eng->add_global_ref("mi16", mi16); eng->add_global_ref("mi32", mi32);
+                eng->add_global_ref("mu32", mu32); eng->add_global_ref("mi64", mi64);
+                eng->add_global_ref("mu64", mu64);
+
+                auto intRow = [&](auto& var, const char* name) {
+                    using T = std::decay_t<decltype(var)>;
+                    const std::string n = name;
+                    var = static_cast<T>(10);
+                    eng->execute(n + " += 7;");
+                    check_eq(static_cast<T>(17), var, tag + n + " += writes through");
+                    eng->execute(n + " -= 2;");
+                    check_eq(static_cast<T>(15), var, tag + n + " -= writes through");
+                    eng->execute(n + " *= 2;");
+                    check_eq(static_cast<T>(30), var, tag + n + " *= writes through");
+                    eng->execute(n + " /= 3;");
+                    check_eq(static_cast<T>(10), var, tag + n + " /= writes through");
+                    check_eq((int64_t)11, eng->execute("++" + n).as_int(), tag + n + " ++pre returns new");
+                    check_eq(static_cast<T>(11), var, tag + n + " ++pre writes through");
+                    check_eq((int64_t)11, eng->execute(n + "++").as_int(), tag + n + " ++post returns old");
+                    check_eq(static_cast<T>(12), var, tag + n + " ++post writes through");
+                    check_eq((int64_t)12, eng->execute(n + "--").as_int(), tag + n + " --post returns old");
+                    check_eq(static_cast<T>(11), var, tag + n + " --post writes through");
+                    check_eq((int64_t)10, eng->execute("--" + n).as_int(), tag + n + " --pre returns new");
+                    check_eq(static_cast<T>(10), var, tag + n + " --pre writes through");
+                    check_eq((int64_t)10, eng->execute(n).as_int(), tag + n + " script view reads live");
+                };
+                intRow(mi8, "mi8"); intRow(mu8, "mu8"); intRow(mi16, "mi16"); intRow(mi32, "mi32");
+                intRow(mu32, "mu32"); intRow(mi64, "mi64"); intRow(mu64, "mu64");
+
+                float mf32 = 0.0f; double mf64 = 0.0;
+                eng->add_global_ref("mf32", mf32); eng->add_global_ref("mf64", mf64);
+                auto floatRow = [&](auto& var, const char* name) {
+                    using T = std::decay_t<decltype(var)>;
+                    const std::string n = name;
+                    var = static_cast<T>(2.0);
+                    eng->execute(n + " += 0.5;");
+                    check_eq(static_cast<T>(2.5), var, tag + n + " += writes through");
+                    eng->execute(n + " -= 1.0;");
+                    check_eq(static_cast<T>(1.5), var, tag + n + " -= writes through");
+                    eng->execute(n + " *= 4.0;");
+                    check_eq(static_cast<T>(6.0), var, tag + n + " *= writes through");
+                    eng->execute(n + " /= 3.0;");
+                    check_eq(static_cast<T>(2.0), var, tag + n + " /= writes through");
+                    check_eq(3.0, eng->execute("++" + n).as_float(), tag + n + " ++pre returns new");
+                    check_eq(static_cast<T>(3.0), var, tag + n + " ++pre writes through");
+                    check_eq(3.0, eng->execute(n + "++").as_float(), tag + n + " ++post returns old");
+                    check_eq(static_cast<T>(4.0), var, tag + n + " ++post writes through");
+                    check_eq(3.0, eng->execute("--" + n).as_float(), tag + n + " --pre returns new");
+                    check_eq(static_cast<T>(3.0), var, tag + n + " --pre writes through");
+                    check_eq(3.0, eng->execute(n).as_float(), tag + n + " script view reads live");
+                };
+                floatRow(mf32, "mf32"); floatRow(mf64, "mf64");
+
+                std::string mstr = "ab";
+                eng->add_global_ref("mstr", mstr);
+                eng->execute("mstr += \"c\";");
+                check_eq(std::string("abc"), mstr, tag + "string += writes through");
+                check_eq(std::string("abc"), eng->execute("mstr").as_string(), tag + "string script view reads live");
+
+                // section 12.3: int target += float rhs converts and writes through, binding kept
+                script_int mconv = 10;
+                eng->add_global_ref("mconv", mconv);
+                eng->execute("mconv += 2.5;");
+                check_eq((int64_t)12, mconv, tag + "int += float converts and writes through");
+                mconv = 100;
+                check_eq((int64_t)100, eng->execute("mconv").as_int(), tag + "binding kept after float-converting compound");
+            };
+            runMatrix(false);
+            runMatrix(true);
+        });
+
+        test("t2_bound_string_live_semantics", [this]() {
+            auto runMatrix = [this](bool useVm) {
+                const std::string tag = useVm ? "vm: " : "interp: ";
+                auto eng = jai::engine::make();
+                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                std::string bstr = "content";
+                std::string bemp = "";
+                std::string sharedStr = "shared";
+                eng->add_global_ref("bstr", bstr);
+                eng->add_global_ref("bemp", bemp);
+                eng->add_global_ref("ssa", sharedStr);
+                eng->add_global_ref("ssb", sharedStr);
+                check_true(eng->execute("bstr == \"content\"").as_bool(), tag + "== compares the live string");
+                check_false(eng->execute("bstr == \"\"").as_bool(), tag + "not the old empty shadow");
+                check_true(eng->execute("bstr != \"other\"").as_bool(), tag + "!= live");
+                check_true(eng->execute("bstr < \"x\"").as_bool(), tag + "< orders live");
+                check_true(eng->execute("bstr <= \"content\"").as_bool(), tag + "<= live");
+                check_true(eng->execute("bstr > \"aaa\"").as_bool(), tag + "> live");
+                check_eq((int64_t)0, eng->execute("bstr <=> \"content\"").as_int(), tag + "<=> live");
+                check_eq(std::string("contentx"), eng->execute("bstr + \"x\"").as_string(), tag + "concat reads live");
+                check_false(eng->execute("!bstr").as_bool(), tag + "non-empty bound string truthy");
+                check_true(eng->execute("!bemp").as_bool(), tag + "empty bound string falsy");
+                check_eq((int64_t)1, eng->execute("var rs = 0; if (bstr) { rs = 1; } rs").as_int(), tag + "bound string in if");
+                check_eq((int64_t)5, eng->execute("var msk = {}; msk[bstr] = 5; msk[\"content\"]").as_int(), tag + "bound string as map key");
+                // same_as is not a string method (string receivers hit the builtin registry
+                // first) - a bound string errors byte-identically to a plain string
+                auto sameAsError = [&](const char* code) -> std::string {
+                    try { eng->execute(code); } catch (const jai::runtime_error& e) { return e.what(); }
+                    return std::string();
+                };
+                const std::string boundSame = sameAsError("ssa.same_as(ssb)");
+                const std::string plainSame = sameAsError("var pss = \"shared\"; pss.same_as(pss)");
+                check_true(boundSame.find("same_as") != std::string::npos, tag + "bound string same_as errors (got: " + boundSame + ")");
+                check_eq(plainSame, boundSame, tag + "bound string same_as error matches plain string");
+                bstr = "swapped";
+                check_true(eng->execute("bstr == \"swapped\"").as_bool(), tag + "C++ change visible to ==");
+            };
+            runMatrix(false);
+            runMatrix(true);
+        });
+
+        test("t2_writethrough_through_refs", [this]() {
+            auto runMatrix = [this](bool useVm) {
+                const std::string tag = useVm ? "vm: " : "interp: ";
+                auto eng = jai::engine::make();
+                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                script_int bg2 = 100;
+                eng->add_global_ref("bg2", bg2);
+                eng->execute("auto& rr1 = bg2; rr1 += 5;");
+                check_eq((int64_t)105, bg2, tag + "compound through ref decl writes through");
+                eng->execute("auto& rr2 = bg2; ++rr2;");
+                check_eq((int64_t)106, bg2, tag + "++ through ref decl writes through");
+                eng->execute("var fcap = [&bg2]() { bg2 += 4; }; fcap();");
+                check_eq((int64_t)110, bg2, tag + "compound through by-ref capture writes through");
+                // Plain '=' THROUGH a ref replaces the slot with a detached value (ref_store_through
+                // clones into the target) - the binding drops and C++ stays put. Pinned as-is.
+                eng->execute("auto& rr3 = bg2; rr3 = rr3 + 4;");
+                check_eq((int64_t)110, bg2, tag + "plain assign through ref detaches (C++ untouched)");
+                check_eq((int64_t)114, eng->execute("bg2").as_int(), tag + "slot holds the detached result");
+                check_false(eng->execute("bg2").is_cpp_bound(), tag + "binding dropped by ref-mediated plain assign");
+            };
+            runMatrix(false);
+            runMatrix(true);
+        });
+
+        test("t2_byref_cpp_extraction", [this]() {
+            auto eng = jai::foundry::make_engine();
+            script_int big = 10;
+            std::string bs2 = "abc";
+            int32_t b32 = 5;
+            double bd = 1.5;
+            float bf4 = 1.5f;
+            bool bb1 = false;
+            eng->add_global_ref("big", big);
+            eng->add_global_ref("bs2", bs2);
+            eng->add_global_ref("b32", b32);
+            eng->add_global_ref("bd", bd);
+            eng->add_global_ref("bf4", bf4);
+            eng->add_global_ref("bb1", bb1);
+
+            // S9 direct route: non-const as<T&> on a bound value aliases the LIVE C++ variable
+            // when the binding's width/signedness exactly matches the script type.
+            auto vbig = eng->execute("big");
+            vbig.template as<script_int&>() += 5;
+            check_eq((int64_t)15, big, "as<script_int&> aliases the live int64 (zero-copy write-through)");
+            auto vs = eng->execute("bs2");
+            vs.template as<std::string&>() += "!";
+            check_eq(std::string("abc!"), bs2, "as<std::string&> aliases the live string");
+            auto vbd = eng->execute("bd");
+            vbd.template as<script_float&>() += 0.5;
+            check_eq(2.0, bd, "as<script_float&> aliases the live double");
+            auto vbb = eng->execute("bb1");
+            vbb.template as<script_bool&>() = true;
+            check_true(bb1, "as<script_bool&> aliases the live bool");
+
+            // Width/sign-mismatched bindings throw a catchable jai::runtime_error - NEVER
+            // std::bad_variant_access (the D12/S9 ruling).
+            auto v32 = eng->execute("b32");
+            bool caught32 = false;
+            try { v32.template as<script_int&>(); } catch (const jai::runtime_error&) { caught32 = true; }
+            check_true(caught32, "int32 -> as<script_int&> throws jai::runtime_error");
+            check_eq(5, b32, "mismatched-width target untouched");
+            auto vf4 = eng->execute("bf4");
+            bool caughtF = false;
+            try { vf4.template as<script_float&>(); } catch (const jai::runtime_error&) { caughtF = true; }
+            check_true(caughtF, "float -> as<script_float&> throws jai::runtime_error");
+            check_eq(1.5f, bf4, "mismatched-width float target untouched");
+
+            // Typed add_function detaches args in the conversion layer BEFORE the binder's
+            // zero-copy T& converter runs: the callee reads the live value but its writes land
+            // on the detached temp (same as before the fold). Pinned as-is.
+            script_int fnv = 10;
+            eng->add_global_ref("fnv", fnv);
+            engine* rawEng = eng.get();
+            eng->add_variadic_function("probe_bound", [rawEng](const std::vector<script_value>& a) -> checked_result<script_value> {
+                return script_value(!a.empty() && a[0].is_cpp_bound(), rawEng);
+            });
+            check_true(eng->execute("probe_bound(fnv)").as_bool(), "variadic native call arg stays a bound alias");
+            script_int seen = 0;
+            eng->add_function("bump_i", [&seen](script_int& n) { seen = n; n += 5; });
+            eng->execute("bump_i(fnv);");
+            check_eq((int64_t)10, seen, "typed add_function callee reads the live value");
+            check_eq((int64_t)10, fnv, "typed add_function writes land on the detached temp (pinned as-is)");
+        });
+
+        test("t2_bound_zero_rhs_divmod_error_surface", [this]() {
+            auto runMatrix = [this](bool useVm) {
+                const std::string tag = useVm ? "vm: " : "interp: ";
+                auto eng = jai::engine::make();
+                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                script_int bz2 = 0;
+                eng->add_global_ref("bz2", bz2);
+                eng->execute("var za = [10];");
+                std::string divMsg, modMsg;
+                try { eng->execute("za[0] /= bz2;"); } catch (const jai::runtime_error& e) { divMsg = e.what(); }
+                check_true(divMsg.find("Division by zero") != std::string::npos, tag + "bound-zero /= keeps 'Division by zero' (got: " + divMsg + ")");
+                try { eng->execute("za[0] %= bz2;"); } catch (const jai::runtime_error& e) { modMsg = e.what(); }
+                check_true(modMsg.find("Modulo by zero") != std::string::npos, tag + "bound-zero %= keeps 'Modulo by zero' (got: " + modMsg + ")");
+            };
+            runMatrix(false);
+            runMatrix(true);
+        });
+
+        test("t2_static_gate_sizeof", [this]() {
+            static_assert(sizeof(jai::script_value) == 40, "rung-1 gate");
+            check_eq((size_t)40, sizeof(jai::script_value), "script_value is 40 bytes after rung 1");
+        });
+
         test("pin_unregistered_class_bound", [this]() {
             auto eng = jai::foundry::make_engine();
             t1_opaque_probe probe;

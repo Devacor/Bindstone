@@ -3,6 +3,9 @@
 #ifndef __JAISCRIPT_CORE_STRONG_PTR_HPP__
 #define __JAISCRIPT_CORE_STRONG_PTR_HPP__
 
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <new>
 #include <type_traits>
@@ -14,6 +17,11 @@ template<typename T> class strong_ptr;
 template<typename T> class weaker_ptr;
 
 namespace detail {
+
+#ifndef NDEBUG
+inline constexpr uint32_t cb_magic_live = 0x5B0CB10C;
+inline constexpr uint32_t cb_magic_dead = 0x0DEADCB0;
+#endif
 
 /**
  * @brief Base control block with reference counts and type-erased deallocation
@@ -29,6 +37,9 @@ struct control_block_base {
     size_t strong_count = 1;
     size_t weak_count = 1;  // Strong family's collective weak ref prevents premature CB deletion
     void (*dealloc_fn)(control_block_base*) = nullptr;
+#ifndef NDEBUG
+    uint32_t magic = cb_magic_live;  // asserted at every cb derivation, scrambled in dealloc (D8)
+#endif
 
     control_block_base() = default;
     control_block_base(const control_block_base&) = delete;
@@ -64,6 +75,9 @@ struct control_block : control_block_base {
 
     control_block() {
         dealloc_fn = [](control_block_base* base) {
+#ifndef NDEBUG
+            base->magic = cb_magic_dead;
+#endif
             delete static_cast<control_block<T>*>(base);
         };
     }
@@ -71,6 +85,29 @@ struct control_block : control_block_base {
     T* ptr() noexcept { return std::launder(reinterpret_cast<T*>(storage)); }
     const T* ptr() const noexcept { return std::launder(reinterpret_cast<const T*>(storage)); }
 };
+
+// Conditionally-supported offsetof on a non-standard-layout type: fine on MSVC/clang/gcc.
+// NEVER hardcode this — over-aligned T (align > 8) shifts storage past the counts, and the
+// Debug-only magic member changes the base size between configs.
+template<typename T>
+inline constexpr size_t cb_storage_offset = offsetof(control_block<T>, storage);
+
+// Derive the control block from an object pointer. Sound because make_strong is the ONLY
+// producer of a non-null handle (raw ctor deleted, converting ctors deleted, no aliasing
+// ctor; lock() copies an existing ptr_), and it sets ptr_ = &control_block<T>::storage.
+// A live weaker_ptr holds weak_count >= 1 and dealloc runs only when weak_count -> 0, so
+// the combined block outlives every non-null handle — the derivation stays valid for the
+// handle's whole life, including expired weaks (which touch only counts, never object bytes).
+template<typename T>
+inline control_block_base* cb_from_object(T* p) noexcept {
+    if (!p) return nullptr;
+    auto* cb = static_cast<control_block_base*>(reinterpret_cast<control_block<T>*>(
+        reinterpret_cast<unsigned char*>(p) - cb_storage_offset<T>));
+    assert(cb->magic == cb_magic_live && "strong_ptr control-block derivation hit a dead or foreign block");
+    return cb;
+}
+
+struct adopt_tag {};
 
 } // namespace detail
 
@@ -82,6 +119,13 @@ struct control_block : control_block_base {
  *
  * Objects are created via make_strong<T>() which uses combined allocation
  * (object + control block in single allocation) for optimal cache locality.
+ * The handle is a SINGLE object pointer; the control block lives at a fixed
+ * negative offset from the object (derived, never stored).
+ *
+ * There is deliberately NO Derived -> Base converting constructor: single-pointer
+ * derivation requires ptr_ to be exactly control_block<T>::storage's head, and a
+ * base conversion would both adjust the pointer and slice the static-type destroy.
+ * Cross-type sharing goes through object_holder / std::shared_ptr instead (D7).
  *
  * Thread safety is the caller's responsibility (critical sections, partitioning, etc.)
  * For cross-thread object sharing, extract std::shared_ptr<T> from script_value instead.
@@ -104,55 +148,40 @@ public:
     strong_ptr(T*) = delete;
 
     strong_ptr(const strong_ptr& other) noexcept
-        : ptr_(other.ptr_), cb_(other.cb_) {
-        if (cb_) {
-            cb_->add_strong();
+        : ptr_(other.ptr_) {
+        if (ptr_) {
+            cb()->add_strong();
         }
     }
 
     strong_ptr(strong_ptr&& other) noexcept
-        : ptr_(other.ptr_), cb_(other.cb_) {
+        : ptr_(other.ptr_) {
         other.ptr_ = nullptr;
-        other.cb_ = nullptr;
-    }
-
-    template<typename U>
-    requires std::is_convertible_v<U*, T*>
-    strong_ptr(const strong_ptr<U>& other) noexcept
-        : ptr_(other.ptr_), cb_(other.cb_) {
-        if (cb_) {
-            cb_->add_strong();
-        }
-    }
-
-    template<typename U>
-    requires std::is_convertible_v<U*, T*>
-    strong_ptr(strong_ptr<U>&& other) noexcept
-        : ptr_(other.ptr_), cb_(other.cb_) {
-        other.ptr_ = nullptr;
-        other.cb_ = nullptr;
     }
 
     // ===== Destructor =====
 
     ~strong_ptr() {
-        // CRITICAL: Save to locals before any operations that might
+        // CRITICAL: Save to a local before any operations that might
         // trigger re-entrant destruction via variant storage reuse.
-        auto* local_cb = cb_;
         auto* local_ptr = ptr_;
 
-        // Null out members FIRST to prevent re-entrancy issues
-        cb_ = nullptr;
+        // Null out the member FIRST to prevent re-entrancy issues
         ptr_ = nullptr;
 
-        if (local_cb && local_cb->release_strong()) {
-            // Last strong reference - destroy object (but don't free memory yet)
-            local_ptr->~T();
+        if (local_ptr) {
+            // Derive from the local: ~T() never changes the address, and the memory is
+            // still allocated because this handle held live strong+weak counts.
+            auto* local_cb = detail::cb_from_object(local_ptr);
+            if (local_cb->release_strong()) {
+                // Last strong reference - destroy object (but don't free memory yet)
+                local_ptr->~T();
 
-            // Release the strong family's collective weak reference.
-            // Memory is only freed when all weaker_ptrs are also gone.
-            if (local_cb->release_weak()) {
-                local_cb->dealloc_fn(local_cb);
+                // Release the strong family's collective weak reference.
+                // Memory is only freed when all weaker_ptrs are also gone.
+                if (local_cb->release_weak()) {
+                    local_cb->dealloc_fn(local_cb);
+                }
             }
         }
     }
@@ -188,7 +217,6 @@ public:
 
     void swap(strong_ptr& other) noexcept {
         std::swap(ptr_, other.ptr_);
-        std::swap(cb_, other.cb_);
     }
 
     // ===== Observers =====
@@ -200,7 +228,7 @@ public:
     [[nodiscard]] explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
     [[nodiscard]] size_t use_count() const noexcept {
-        return cb_ ? cb_->get_strong_count() : 0;
+        return ptr_ ? cb()->get_strong_count() : 0;
     }
 
     [[nodiscard]] bool unique() const noexcept {
@@ -221,11 +249,13 @@ public:
 
 private:
     T* ptr_ = nullptr;
-    detail::control_block_base* cb_ = nullptr;
 
-    strong_ptr(T* ptr, detail::control_block_base* cb) noexcept : ptr_(ptr), cb_(cb) {}
+    detail::control_block_base* cb() const noexcept { return detail::cb_from_object(ptr_); }
 
-    template<typename U> friend class strong_ptr;
+    // Adopts a count already established by the caller (make_strong's initial 1,
+    // or weaker_ptr::lock()'s try_add_strong).
+    strong_ptr(T* ptr, detail::adopt_tag) noexcept : ptr_(ptr) {}
+
     template<typename U> friend class weaker_ptr;
     template<typename U, typename... Args> friend strong_ptr<U> make_strong(Args&&...);
 };
@@ -238,7 +268,8 @@ private:
  *
  * Note: With combined allocation, the memory (including destroyed object's storage)
  * remains allocated until all weaker_ptrs are gone. This is the same behavior as
- * std::weak_ptr with std::make_shared.
+ * std::weak_ptr with std::make_shared — and it is what keeps the negative-offset
+ * control-block derivation valid even for expired weaks.
  */
 template<typename T>
 class weaker_ptr {
@@ -250,35 +281,36 @@ public:
     constexpr weaker_ptr() noexcept = default;
 
     weaker_ptr(const weaker_ptr& other) noexcept
-        : ptr_(other.ptr_), cb_(other.cb_) {
-        if (cb_) {
-            cb_->add_weak();
+        : ptr_(other.ptr_) {
+        if (ptr_) {
+            cb()->add_weak();
         }
     }
 
     weaker_ptr(weaker_ptr&& other) noexcept
-        : ptr_(other.ptr_), cb_(other.cb_) {
+        : ptr_(other.ptr_) {
         other.ptr_ = nullptr;
-        other.cb_ = nullptr;
     }
 
     weaker_ptr(const strong_ptr<T>& other) noexcept
-        : ptr_(other.ptr_), cb_(other.cb_) {
-        if (cb_) {
-            cb_->add_weak();
+        : ptr_(other.get()) {
+        if (ptr_) {
+            cb()->add_weak();
         }
     }
 
     // ===== Destructor =====
 
     ~weaker_ptr() {
-        // Save to local and null out first (consistent with strong_ptr pattern)
-        auto* local_cb = cb_;
-        cb_ = nullptr;
+        // Save to a local and null out first (consistent with strong_ptr pattern)
+        auto* local_ptr = ptr_;
         ptr_ = nullptr;
 
-        if (local_cb && local_cb->release_weak()) {
-            local_cb->dealloc_fn(local_cb);
+        if (local_ptr) {
+            auto* local_cb = detail::cb_from_object(local_ptr);
+            if (local_cb->release_weak()) {
+                local_cb->dealloc_fn(local_cb);
+            }
         }
     }
 
@@ -310,13 +342,12 @@ public:
 
     void swap(weaker_ptr& other) noexcept {
         std::swap(ptr_, other.ptr_);
-        std::swap(cb_, other.cb_);
     }
 
     // ===== Observers =====
 
     [[nodiscard]] size_t use_count() const noexcept {
-        return cb_ ? cb_->get_strong_count() : 0;
+        return ptr_ ? cb()->get_strong_count() : 0;
     }
 
     [[nodiscard]] bool expired() const noexcept {
@@ -328,18 +359,16 @@ public:
      * @return strong_ptr<T> if object is still alive, empty strong_ptr otherwise
      */
     [[nodiscard]] strong_ptr<T> lock() const noexcept {
-        if (cb_ && cb_->try_add_strong()) {
-            strong_ptr<T> result;
-            result.ptr_ = ptr_;
-            result.cb_ = cb_;
-            return result;
+        if (ptr_ && cb()->try_add_strong()) {
+            return strong_ptr<T>(ptr_, detail::adopt_tag{});
         }
         return strong_ptr<T>();
     }
 
 private:
     T* ptr_ = nullptr;
-    detail::control_block_base* cb_ = nullptr;
+
+    detail::control_block_base* cb() const noexcept { return detail::cb_from_object(ptr_); }
 };
 
 /**
@@ -351,6 +380,9 @@ private:
  * - Single allocation instead of two
  * - Reduced memory fragmentation
  *
+ * make_strong is the ONLY producer of a non-null strong_ptr — the single-pointer
+ * control-block derivation depends on that (see detail::cb_from_object).
+ *
  * @tparam T The type of object to create
  * @tparam Args Constructor argument types
  * @param args Arguments forwarded to T's constructor
@@ -361,7 +393,7 @@ template<typename T, typename... Args>
     auto* cb = new detail::control_block<T>();
     T* ptr = new (cb->storage) T(std::forward<Args>(args)...);
 
-    return strong_ptr<T>(ptr, cb);
+    return strong_ptr<T>(ptr, detail::adopt_tag{});
 }
 
 // ===== Free functions =====
@@ -375,6 +407,12 @@ template<typename T>
 void swap(weaker_ptr<T>& lhs, weaker_ptr<T>& rhs) noexcept {
     lhs.swap(rhs);
 }
+
+namespace detail { struct sp_layout_probe { void* a; }; }
+static_assert(sizeof(strong_ptr<detail::sp_layout_probe>) == sizeof(void*),
+              "strong_ptr must stay a single object pointer (rung 2a of the thin-value fold)");
+static_assert(sizeof(weaker_ptr<detail::sp_layout_probe>) == sizeof(void*),
+              "weaker_ptr must stay a single object pointer (rung 2a of the thin-value fold)");
 
 } // namespace jai
 

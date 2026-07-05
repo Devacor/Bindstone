@@ -682,8 +682,8 @@ public:
         });
 
         test("t2_static_gate_sizeof", [this]() {
-            static_assert(sizeof(jai::script_value) == 40, "rung-1 gate");
-            check_eq((size_t)40, sizeof(jai::script_value), "script_value is 40 bytes after rung 1");
+            static_assert(sizeof(jai::script_value) == 32 && alignof(jai::script_value) == 8, "rung-2b gate");
+            check_eq((size_t)32, sizeof(jai::script_value), "script_value is 32 bytes after rung 2b");
         });
 
         test("pin_unregistered_class_bound", [this]() {

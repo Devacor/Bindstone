@@ -791,7 +791,7 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
                     case TYPEID_MAP:        return std::get_if<TYPEID_MAP>(&v.storage_)->get();
                     case TYPEID_OBJECT:     return std::get_if<TYPEID_OBJECT>(&v.storage_)->get();
                     case TYPEID_FUNCTION:   return std::get_if<TYPEID_FUNCTION>(&v.storage_)->get();
-                    case TYPEID_SHARED_PTR: return std::get_if<TYPEID_SHARED_PTR>(&v.storage_)->get();
+                    case TYPEID_SHARED_PTR: return std::get_if<TYPEID_SHARED_PTR>(&v.storage_)->get();  // holder identity; runtime-unreachable (alt 11 never constructed)
                     case TYPEID_REFERENCE:  return std::get_if<TYPEID_REFERENCE>(&v.storage_)->get();
                     default:                return nullptr;  // invalid/weak_ptr: treated as one equivalence class
                 }

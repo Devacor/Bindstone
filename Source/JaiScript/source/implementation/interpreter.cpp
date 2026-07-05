@@ -4179,6 +4179,16 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 push_value(expression_result_needed_ ? target.clone() : target);
             } else {
+                // VM parity (C++17 sequencing): the rhs of a compound assignment is
+                // evaluated BEFORE the target resolves, so rhs errors and side effects
+                // (e.g. an undefined rhs identifier) surface first
+                JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+                if (is_unwinding_) {
+                    push_value(make_value());
+                    return {};
+                }
+                script_value rightValue = pop_value();
+
                 // Fallback: identifier is an implicit this.member access
                 // Check if 'this' exists and has this field
                 auto this_result = environment_->get(string_symbolizer_->get_this_id());
@@ -4197,10 +4207,6 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 // Get current field value
                 script_value currentValue = instance->get_field(identifier->symbol_id);
-
-                // Evaluate the right-hand side
-                JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
-                script_value rightValue = pop_value();
 
                 // Check for custom arithmetic operators on class instances
                 if (currentValue.is_object()) {

@@ -74,3 +74,5 @@ Tools/LocalServer/pgdata/
 Tools/LocalServer/pg.log
 Tools/LocalServer/postgresql-binaries.zip
 Source/JaiScript/squirrel/
+Source/JaiScript/sol2/
+Source/JaiScript/lua/

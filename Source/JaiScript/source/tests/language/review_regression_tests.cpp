@@ -480,6 +480,30 @@ public:
             check_eq((int64_t)2, e->execute("1 + 1").as_int());
         });
 
+        // ---- fuzz FZ-NEG-ZERO (seeds 1985/2148/2255): the interpreter's cached-zero
+        // float fast path matched -0.0 (IEEE -0.0 == 0.0) and handed back +0.0 ----
+        test("fuzz_neg_zero_preserved", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            check_eq(std::string("-0.000000"), e->execute(R"(
+                double x = 0.0;
+                to_string(-x);
+            )").as_string());
+            check_eq(std::string("-0.000000"), e->execute("to_string(-(0.0))").as_string());
+            check_eq(std::string("-0.000000"), e->execute("to_string(0.0 * -1.0)").as_string());
+        });
+        test("fuzz_neg_zero_map_key_ordering", [this]() {
+            // strong_order keys: -0.0 and +0.0 stay DISTINCT map keys on both backends
+            auto e = make_engine();
+            check_eq((int64_t)2, e->execute(R"(
+                double z = 0.0;
+                var m = {};
+                m[-z] = "neg";
+                m[z] = "pos";
+                m.size();
+            )").as_int());
+        });
+
         test("range_for_ref_realloc_no_corruption", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

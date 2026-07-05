@@ -217,8 +217,9 @@ namespace jai {
 
         script_value make_value(script_float f) const {
             if (engine_) {
-                // Return cached common values to avoid allocations
-                if (f == 0.0 && cached_zero_float_.has_value()) return *cached_zero_float_;
+                // Return cached common values to avoid allocations. IEEE -0.0 == 0.0, so the
+                // zero cache must exclude the negative sign or -0.0 collapses to +0.0 (vm parity)
+                if (f == 0.0 && !std::signbit(f) && cached_zero_float_.has_value()) return *cached_zero_float_;
                 if (f == 1.0 && cached_one_float_.has_value()) return *cached_one_float_;
                 return script_value(f, engine_);
             }

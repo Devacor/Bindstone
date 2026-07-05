@@ -402,6 +402,42 @@ public:
             check_eq((int64_t)3, engine->execute("takes(3);").as_int());
         });
 
+        // Regression: a script throw inside operator< / <= / > / >= was replaced by
+        // "Invalid operands for < operator" on both backends; == already propagated.
+        test("throw_in_ordering_operator_propagates", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw "boom"; } }
+                var a = S(1); var lim = S(5); var out = "";
+                try { if (a < lim) { out = "T"; } } catch (e) { out = "C[" + e + "]"; }
+                out;
+            )");
+            check_eq(std::string("C[boom]"), result.as_string());
+        });
+
+        test("throw_in_ordering_operator_plain_expression", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                class S { int v = 0; S(int n) { v = n; } function operator>=(S o) { throw "ge-boom"; } }
+                var a = S(1); var lim = S(5); var out = "";
+                try { var b = (a >= lim); out = "got:" + b; } catch (e) { out = "C[" + e + "]"; }
+                out;
+            )");
+            check_eq(std::string("C[ge-boom]"), result.as_string());
+        });
+
+        test("throw_in_ordering_operator_across_call_frame", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw "deep"; } }
+                function spin(var t, var lim) -> string { var c = 0; while (t < lim) { c += 1; } return "exited:" + c; }
+                var out = "";
+                try { out = spin(S(1), S(9)); } catch (e) { out = "C[" + e + "]"; }
+                out + ":alive";
+            )");
+            check_eq(std::string("C[deep]:alive"), result.as_string());
+        });
+
         test("throw_during_string_method_argument", [this]() {
             auto engine = make_engine();
             script_value result = engine->execute(R"(

@@ -7856,6 +7856,8 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
         script_int step_value = 1;  // Default for ++i
         uint64_t step_var_id = UINT64_MAX;  // For dynamic step (i += j)
         bool valid_update = false;
+        // Overflow attribution: the update error names the SOURCE operator (vm cfor parity)
+        const char* update_overflow_msg = "Integer overflow in '+='";
 
         if (update_unary && update_unary->op.type == token_type::plus_plus) {
             // Pattern: ++i or i++
@@ -7864,6 +7866,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 update_var_id = update_id->symbol_id;
                 step_value = 1;
                 valid_update = true;
+                update_overflow_msg = "Integer overflow in '++'";
             }
         } else if (update_unary && update_unary->op.type == token_type::minus_minus) {
             // Pattern: --i or i-- (step = -1, but this is unusual for counting up)
@@ -7872,6 +7875,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 update_var_id = update_id->symbol_id;
                 step_value = -1;
                 valid_update = true;
+                update_overflow_msg = "Integer overflow in '--'";
             }
         } else if (update_assign && update_assign->op.type == token_type::plus_equal) {
             // Pattern: i += step (literal or variable)
@@ -7900,13 +7904,16 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             }
         } else if (update_assign && update_assign->op.type == token_type::minus_equal) {
             // Pattern: i -= step (literal or variable)
+            update_overflow_msg = "Integer overflow in '-='";
             if (update_assign->target->get_type() == node_type::identifier_expr) {
                 auto* update_id = static_cast<identifier_expr*>(update_assign->target.get());
                 update_var_id = update_id->symbol_id;
                 if (update_assign->value->get_type() == node_type::literal_expr) {
                     auto* step_lit = static_cast<literal_expr*>(update_assign->value.get());
                     if (step_lit->value.raw_storage_index() == script_value::TYPEID_INT) {
-                        step_value = -step_lit->value.unchecked_as_int();
+                        // Direction comes from step_subtract below; negating here too made
+                        // `i -= <literal>` ASCEND (i -= -step), an infinite counting loop
+                        step_value = step_lit->value.unchecked_as_int();
                         valid_update = true;
                     }
                 }
@@ -8113,11 +8120,19 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                 i = var_ptr->unchecked_as_int();
 
                                 script_int step = step_ptr ? *step_ptr : step_value;
-                                if (step_subtract) {
-                                    i -= step;
-                                } else {
-                                    i += step;
+                                script_int next;
+                                const bool step_overflow = step_subtract
+                                    ? !ints::try_sub(i, step, next)
+                                    : !ints::try_add(i, step, next);
+                                if (step_overflow) [[unlikely]] {
+                                    // vm cfor parity: the update applies the overflow policy and
+                                    // names the source operator
+                                    if (body_env) { release_environment(body_env); }
+                                    release_environment(loop_env);
+                                    environment_ = previous;
+                                    return int_overflow_v(update_overflow_msg);
                                 }
+                                i = next;
                             }
 
                             // Release body environment if we allocated it

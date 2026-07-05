@@ -664,6 +664,7 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 
 	// Update: ++var / --var / var += x / var -= x  (x = int literal | identifier)
 	bool subtract = false;
+	bool incdec = false;
 	const expression* step_expr = nullptr;   // null = literal 1
 	if (stmt->update->get_type() == node_type::unary_expr) {
 		auto* un = static_cast<unary_expr*>(stmt->update.get());
@@ -671,6 +672,7 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 		if (un->operand->get_type() != node_type::identifier_expr) return false;
 		if (static_cast<identifier_expr*>(un->operand.get())->symbol_id != var_id) return false;
 		subtract = un->op.type == token_type::minus_minus;
+		incdec = true;
 	} else if (stmt->update->get_type() == node_type::assignment_expr) {
 		auto* assign = static_cast<assignment_expr*>(stmt->update.get());
 		if (assign->op.type != token_type::plus_equal && assign->op.type != token_type::minus_equal) return false;
@@ -703,6 +705,7 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	}
 	proto.cmp = static_cast<uint8_t>(cond->op.type);
 	proto.step_subtract = subtract;
+	proto.step_incdec = incdec;
 	chunk_->counted_for_protos.push_back(proto);
 	const uint32_t proto_idx = static_cast<uint32_t>(chunk_->counted_for_protos.size() - 1);
 

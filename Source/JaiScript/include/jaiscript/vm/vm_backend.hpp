@@ -165,6 +165,7 @@ namespace jai::vm {
             script_int step_val = 1;
             uint8_t cmp = 0;
             bool subtract = false;
+            bool incdec = false; // ++/-- update: overflow error names the real op
             bool fast = false;   // false: run the loop's generic cond/update bytecode
         };
         std::vector<counted_for_state> cfor_states_;

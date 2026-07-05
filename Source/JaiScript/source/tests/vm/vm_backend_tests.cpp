@@ -1831,7 +1831,7 @@ public:
 
 			std::string listing = jai::vm::disassemble(*compiled, symbolizer);
 			check_true(listing.find("LOOP_BACK") != std::string::npos, "loop back edge present");
-			check_true(listing.find("JUMP_IF_FALSE") != std::string::npos, "conditional jump present");
+			check_true(listing.find("FUSED_CMP_JUMP") != std::string::npos, "fused conditional jump present");
 			check_true(listing.find("DECL_VAR") != std::string::npos, "variable declaration present");
 			check_true(listing.find("STORE") != std::string::npos, "store present");
 			check_true(listing.find("IMPLICIT_RETURN") != std::string::npos, "implicit return present");

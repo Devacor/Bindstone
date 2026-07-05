@@ -391,6 +391,9 @@ namespace jai::vm {
         checked_result<void> exec_decl_ref_value(frame& f, const vm_instruction& ins);
         checked_result<void> exec_binary(frame& f, const vm_instruction& ins);
         checked_result<void> exec_binary_fused(frame& f, const vm_instruction& ins);
+        // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
+        checked_result<void> exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
+        const script_value* fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot);
         // Counted-for ops: both always retarget f.ip (run() must `continue` after them)
         checked_result<void> exec_cfor_prep(frame& f, const vm_instruction& ins);
         checked_result<void> exec_cfor_back(frame& f, const vm_instruction& ins);

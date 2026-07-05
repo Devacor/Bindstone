@@ -80,6 +80,12 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_unary:
 				out << " op=" << ins.a;
 				break;
+			case opcode::op_fused_cmp_jump:
+				if (ins.b < ch.fused_binary_protos.size()) {
+					out << " op=" << static_cast<uint32_t>(ch.fused_binary_protos[ins.b].op);
+				}
+				out << " proto=" << ins.b << " -> " << ins.a << " proved=" << ins.c;
+				break;
 			case opcode::op_jump:
 			case opcode::op_jump_if_false:
 			case opcode::op_jump_if_true:

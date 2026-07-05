@@ -348,11 +348,112 @@ public:
 			)");
 		}
 #endif
+
+		// ===== [precompiled] setup: both sides parse/compile ONCE here =====
+		// The per-iteration pairs measure execute(src)/script(src): JaiScript's
+		// 64-entry source cache skips re-parsing there while lua->script recompiles
+		// every call, so those numbers mix Lua compile cost into the ratio. These
+		// variants remove the asymmetry: jaibite vs a loaded protected_function,
+		// execution only.
+		jai_pre_int_add = jai_engine->jaibite("42 + 58;");
+		jai_pre_func_call = jai_engine->jaibite("add(10, 20);");
+		jai_pre_method = jai_engine->jaibite("auto calc = Calculator(); calc.add(5, 3);");
+		jai_pre_fib = jai_engine->jaibite("fib(15);");
+		jai_pre_hot_loop = jai_engine->jaibite(R"(
+			auto sum = 0;
+			for (auto i = 0; i < 1000; ++i) { sum += i; }
+		)");
+		jai_pre_bst = jai_engine->jaibite(R"(
+			var ref_root = null;
+			insertRef(ref_root, 8);
+			insertRef(ref_root, 4);
+			insertRef(ref_root, 12);
+			insertRef(ref_root, 2);
+			insertRef(ref_root, 6);
+			insertRef(ref_root, 10);
+			insertRef(ref_root, 14);
+			insertRef(ref_root, 1);
+			insertRef(ref_root, 3);
+			insertRef(ref_root, 5);
+			insertRef(ref_root, 7);
+			insertRef(ref_root, 9);
+			insertRef(ref_root, 11);
+			insertRef(ref_root, 13);
+			insertRef(ref_root, 15);
+
+			var ref_sum = sumRef(ref_root);
+			ref_sum;
+		)");
+
+		// Correctness gates: each precompiled script produces the same value its
+		// per-iteration sibling does
+		check_eq((int64_t)100, jai_pre_int_add.execute().as_int());
+		check_eq((int64_t)30, jai_pre_func_call.execute().as_int());
+		check_eq((int64_t)8, jai_pre_method.execute().as_int());
+		check_eq((int64_t)610, jai_pre_fib.execute().as_int());
+		jai_pre_hot_loop.execute();
+		check_eq((int64_t)499500, jai_engine->execute("sum;").as_int());
+		check_eq((int64_t)120, jai_pre_bst.execute().as_int());
+
+#ifdef HAVE_SOL2
+		if (lua) {
+			auto lua_precompile = [this](const char* src) {
+				sol::load_result loaded = lua->load(src);
+				if (!loaded.valid()) {
+					sol::error err = loaded;
+					throw std::runtime_error(std::string("Lua precompile failed: ") + err.what());
+				}
+				return loaded.get<sol::protected_function>();
+			};
+			lua_pre_int_add = lua_precompile("local _ = 42 + 58");
+			lua_pre_func_call = lua_precompile("add(10, 20)");
+			lua_pre_method = lua_precompile("local calc = Calculator.new() calc:add(5, 3)");
+			lua_pre_fib = lua_precompile("fib(15)");
+			lua_pre_hot_loop = lua_precompile(R"(
+					local sum = 0
+					for i = 0, 999 do sum = sum + i end
+				)");
+			lua_pre_bst = lua_precompile(R"(
+					local tree_root = TreeNode.new(8)
+					tree_root = insertNode(tree_root, 4)
+					tree_root = insertNode(tree_root, 12)
+					tree_root = insertNode(tree_root, 2)
+					tree_root = insertNode(tree_root, 6)
+					tree_root = insertNode(tree_root, 10)
+					tree_root = insertNode(tree_root, 14)
+					tree_root = insertNode(tree_root, 1)
+					tree_root = insertNode(tree_root, 3)
+					tree_root = insertNode(tree_root, 5)
+					tree_root = insertNode(tree_root, 7)
+					tree_root = insertNode(tree_root, 9)
+					tree_root = insertNode(tree_root, 11)
+					tree_root = insertNode(tree_root, 13)
+					tree_root = insertNode(tree_root, 15)
+
+					local tree_sum = inorderSum(tree_root)
+					return tree_sum
+				)");
+
+			// Gates: one-shot `return` variants of the same sources (locals are not
+			// observable after the chunk), plus the BST function's own return value
+			check_eq(100, (int)lua->script("return 42 + 58"));
+			check_eq(30, (int)lua->script("return add(10, 20)"));
+			check_eq(8, (int)lua->script("local calc = Calculator.new() return calc:add(5, 3)"));
+			check_eq(610, (int)lua->script("return fib(15)"));
+			check_eq(499500, (int)lua->script("local sum = 0 for i = 0, 999 do sum = sum + i end return sum"));
+			sol::protected_function_result bst_result = lua_pre_bst();
+			check_true(bst_result.valid(), "precompiled Lua BST call failed");
+			check_eq((int64_t)120, bst_result.get<int64_t>());
+		}
+#endif
 	}
 
 	std::shared_ptr<jai::engine> jai_engine;
+	jai::jaibite jai_pre_int_add, jai_pre_func_call, jai_pre_method, jai_pre_fib, jai_pre_hot_loop, jai_pre_bst;
 #ifdef HAVE_SOL2
 	std::unique_ptr<sol::state> lua;
+	// Declared after lua so they release their registry refs before the state closes
+	sol::protected_function lua_pre_int_add, lua_pre_func_call, lua_pre_method, lua_pre_fib, lua_pre_hot_loop, lua_pre_bst;
 #endif
 
 	void forge_tests() override {
@@ -375,6 +476,19 @@ public:
 
 			benchmark("Lua(sol2) - Integer Addition", [this]() {
 				lua->script("local _ = 42 + 58");
+			}, 5000);
+		});
+
+		// Same pair with the compile cost removed on BOTH sides (jaibite vs loaded
+		// protected_function); the plain pair above keeps measuring the realistic
+		// script(src) path.
+		test("JaiScript vs Lua(sol2): Integer Addition [precompiled]", [this]() {
+			benchmark("JaiScript - Integer Addition [precompiled]", [this]() {
+				jai_pre_int_add.execute();
+			}, 5000);
+
+			benchmark("Lua(sol2) - Integer Addition [precompiled]", [this]() {
+				lua_pre_int_add();
 			}, 5000);
 		});
 
@@ -408,6 +522,16 @@ public:
 
 			benchmark("Lua(sol2) - Function Calls", [this]() {
 				lua->script("add(10, 20)");
+			});
+		});
+
+		test("JaiScript vs Lua(sol2): Function Calls [precompiled]", [this]() {
+			benchmark("JaiScript - Function Calls [precompiled]", [this]() {
+				jai_pre_func_call.execute();
+			});
+
+			benchmark("Lua(sol2) - Function Calls [precompiled]", [this]() {
+				lua_pre_func_call();
 			});
 		});
 
@@ -475,6 +599,16 @@ public:
 			});
 		});
 
+		test("JaiScript vs Lua(sol2): Method Invocation [precompiled]", [this]() {
+			benchmark("JaiScript - Method Invocation [precompiled]", [this]() {
+				jai_pre_method.execute();
+			});
+
+			benchmark("Lua(sol2) - Method Invocation [precompiled]", [this]() {
+				lua_pre_method();
+			});
+		});
+
 		// ===== For Loop =====
 		test("JaiScript vs Lua(sol2): For Loop (100 iterations)", [this]() {
 			benchmark("JaiScript - For Loop", [this]() {
@@ -511,6 +645,16 @@ public:
 
 			benchmark("Lua(sol2) - Fibonacci(15)", [this]() {
 				lua->script("fib(15)");
+			});
+		});
+
+		test("JaiScript vs Lua(sol2): Fibonacci (Deep Recursion) [precompiled]", [this]() {
+			benchmark("JaiScript - Fibonacci(15) [precompiled]", [this]() {
+				jai_pre_fib.execute();
+			});
+
+			benchmark("Lua(sol2) - Fibonacci(15) [precompiled]", [this]() {
+				lua_pre_fib();
 			});
 		});
 
@@ -597,6 +741,16 @@ public:
 					local sum = 0
 					for i = 0, 999 do sum = sum + i end
 				)");
+			});
+		});
+
+		test("JaiScript vs Lua(sol2): Hot Loop (1000 iterations) [precompiled]", [this]() {
+			benchmark("JaiScript - Hot Loop (1000 iter) [precompiled]", [this]() {
+				jai_pre_hot_loop.execute();
+			});
+
+			benchmark("Lua(sol2) - Hot Loop (1000 iter) [precompiled]", [this]() {
+				lua_pre_hot_loop();
 			});
 		});
 
@@ -716,6 +870,16 @@ public:
 
 			benchmark("Lua(sol2) - BST insert/sum (15 nodes)", [this, lua_ref_bst]() {
 				lua->script(lua_ref_bst);
+			});
+		});
+
+		test("JaiScript vs Lua(sol2): Binary Search Tree (By-Ref Script) [precompiled]", [this]() {
+			benchmark("JaiScript - BST by-ref (15 nodes) [precompiled]", [this]() {
+				jai_pre_bst.execute();
+			});
+
+			benchmark("Lua(sol2) - BST insert/sum (15 nodes) [precompiled]", [this]() {
+				lua_pre_bst();
 			});
 		});
 

@@ -156,6 +156,45 @@ float SquirrelVM::eval<float>(const char* script) {
     return static_cast<float>(result);
 }
 
+// Closure compiled once (sq_compilebuffer) and retained via sq_addref; call() is the
+// per-iteration body of the [precompiled] benchmark variants: push closure + root
+// table, sq_call, pop. Mirrors jaibite on the JaiScript side.
+class SquirrelClosure {
+public:
+    SquirrelClosure() { sq_resetobject(&closure); }
+    SquirrelClosure(const SquirrelClosure&) = delete;
+    SquirrelClosure& operator=(const SquirrelClosure&) = delete;
+
+    ~SquirrelClosure() {
+        if (vm && !sq_isnull(closure)) {
+            sq_release(vm, &closure);
+        }
+    }
+
+    void compile(HSQUIRRELVM v, const char* script, const char* name) {
+        vm = v;
+        if (SQ_FAILED(sq_compilebuffer(vm, script, strlen(script), name, SQTrue))) {
+            throw std::runtime_error(std::string("Squirrel precompile failed: ") + name);
+        }
+        sq_getstackobj(vm, -1, &closure);
+        sq_addref(vm, &closure);
+        sq_pop(vm, 1);
+    }
+
+    void call() {
+        sq_pushobject(vm, closure);
+        sq_pushroottable(vm); // 'this'
+        SQRESULT r = sq_call(vm, 1, SQFalse, SQTrue);
+        sq_pop(vm, 1); // sq_call pops the args, the closure stays
+        if (SQ_FAILED(r)) {
+            throw std::runtime_error("Squirrel precompiled call failed");
+        }
+    }
+
+    HSQUIRRELVM vm = nullptr;
+    HSQOBJECT closure;
+};
+
 // ===== Squirrel C++ Binding for CppTreeNode =====
 // Type tag for CppTreeNode (unique identifier)
 static SQUserPointer CppTreeNodeTag = (SQUserPointer)"CppTreeNode";
@@ -565,11 +604,105 @@ public:
         // Pre-declare variables for Squirrel BST benchmark
         sq_vm->execute("tree_root <- null; tree_sum <- 0; tree_height <- 0;");
 #endif
+
+        // ===== [precompiled] setup: both sides parse/compile ONCE here =====
+        // The per-iteration pairs measure execute(src): JaiScript's 64-entry source
+        // cache skips re-parsing there while Squirrel recompiles every call, so those
+        // numbers mix Squirrel compile cost into the ratio. These variants remove the
+        // asymmetry: jaibite vs a retained compiled closure, execution only.
+        jai_pre_int_add = jai_engine->jaibite("42 + 58;");
+        jai_pre_func_call = jai_engine->jaibite("add(10, 20);");
+        jai_pre_method = jai_engine->jaibite("auto calc = Calculator(); calc.add(5, 3);");
+        jai_pre_fib = jai_engine->jaibite("fib(15);");
+        jai_pre_hot_loop = jai_engine->jaibite(R"(
+            auto sum = 0;
+            for (auto i = 0; i < 1000; ++i) { sum += i; }
+        )");
+        jai_pre_bst = jai_engine->jaibite(R"(
+            var ref_root = null;
+            insertRef(ref_root, 8);
+            insertRef(ref_root, 4);
+            insertRef(ref_root, 12);
+            insertRef(ref_root, 2);
+            insertRef(ref_root, 6);
+            insertRef(ref_root, 10);
+            insertRef(ref_root, 14);
+            insertRef(ref_root, 1);
+            insertRef(ref_root, 3);
+            insertRef(ref_root, 5);
+            insertRef(ref_root, 7);
+            insertRef(ref_root, 9);
+            insertRef(ref_root, 11);
+            insertRef(ref_root, 13);
+            insertRef(ref_root, 15);
+
+            var ref_sum = sumRef(ref_root);
+            ref_sum;
+        )");
+
+        // Correctness gates: each precompiled script produces the same value its
+        // per-iteration sibling does
+        check_eq((int64_t)100, jai_pre_int_add.execute().as_int());
+        check_eq((int64_t)30, jai_pre_func_call.execute().as_int());
+        check_eq((int64_t)8, jai_pre_method.execute().as_int());
+        check_eq((int64_t)610, jai_pre_fib.execute().as_int());
+        jai_pre_hot_loop.execute();
+        check_eq((int64_t)499500, jai_engine->execute("sum;").as_int());
+        check_eq((int64_t)120, jai_pre_bst.execute().as_int());
+
+#ifdef HAVE_SQUIRREL
+        if (sq_vm) {
+            const char* sq_hot_loop_src = R"(
+                    local sum = 0;
+                    for (local i = 0; i < 1000; i += 1) { sum += i; }
+                )";
+            const char* sq_bst_src = R"(
+                    local tree_root = TreeNode(8);
+                    tree_root = insertNode(tree_root, 4);
+                    tree_root = insertNode(tree_root, 12);
+                    tree_root = insertNode(tree_root, 2);
+                    tree_root = insertNode(tree_root, 6);
+                    tree_root = insertNode(tree_root, 10);
+                    tree_root = insertNode(tree_root, 14);
+                    tree_root = insertNode(tree_root, 1);
+                    tree_root = insertNode(tree_root, 3);
+                    tree_root = insertNode(tree_root, 5);
+                    tree_root = insertNode(tree_root, 7);
+                    tree_root = insertNode(tree_root, 9);
+                    tree_root = insertNode(tree_root, 11);
+                    tree_root = insertNode(tree_root, 13);
+                    tree_root = insertNode(tree_root, 15);
+
+                    local tree_sum = inorderSum(tree_root);
+                )";
+            sq_pre_int_add.compile(sq_vm->vm, "42 + 58;", "pre_int_add");
+            sq_pre_func_call.compile(sq_vm->vm, "add(10, 20);", "pre_func_call");
+            sq_pre_method.compile(sq_vm->vm, "local calc = Calculator(); calc.add(5, 3);", "pre_method");
+            sq_pre_fib.compile(sq_vm->vm, "fib(15);", "pre_fib");
+            sq_pre_hot_loop.compile(sq_vm->vm, sq_hot_loop_src, "pre_hot_loop");
+            sq_pre_bst.compile(sq_vm->vm, sq_bst_src, "pre_bst");
+
+            // Gates: locals die with the main closure, so observable results go
+            // through a root-table slot in one-shot variants of the same sources
+            check_eq(100, sq_vm->eval<int>("42 + 58"));
+            check_eq(30, sq_vm->eval<int>("add(10, 20)"));
+            sq_vm->execute("local calc = Calculator(); pre_gate <- calc.add(5, 3);");
+            check_eq(8, sq_vm->eval<int>("pre_gate"));
+            check_eq(610, sq_vm->eval<int>("fib(15)"));
+            sq_vm->execute((std::string(sq_hot_loop_src) + "\npre_gate <- sum;").c_str());
+            check_eq(499500, sq_vm->eval<int>("pre_gate"));
+            sq_vm->execute((std::string(sq_bst_src) + "\npre_gate <- tree_sum;").c_str());
+            check_eq(120, sq_vm->eval<int>("pre_gate"));
+        }
+#endif
     }
 
     std::shared_ptr<jai::engine> jai_engine;
+    jai::jaibite jai_pre_int_add, jai_pre_func_call, jai_pre_method, jai_pre_fib, jai_pre_hot_loop, jai_pre_bst;
 #ifdef HAVE_SQUIRREL
     std::shared_ptr<SquirrelVM> sq_vm;
+    // Declared after sq_vm so they release their closures before the VM closes
+    SquirrelClosure sq_pre_int_add, sq_pre_func_call, sq_pre_method, sq_pre_fib, sq_pre_hot_loop, sq_pre_bst;
 #endif
 
     void forge_tests() override {
@@ -589,6 +722,18 @@ public:
 
             benchmark("Squirrel - Integer Addition", [this]() {
                 sq_vm->execute("42 + 58;");
+            }, 5000);
+        });
+
+        // Same pair with the compile cost removed on BOTH sides (jaibite vs retained
+        // closure); the plain pair above keeps measuring the realistic execute(src) path.
+        test("JaiScript vs Squirrel: Integer Addition [precompiled]", [this]() {
+            benchmark("JaiScript - Integer Addition [precompiled]", [this]() {
+                jai_pre_int_add.execute();
+            }, 5000);
+
+            benchmark("Squirrel - Integer Addition [precompiled]", [this]() {
+                sq_pre_int_add.call();
             }, 5000);
         });
 
@@ -622,6 +767,16 @@ public:
 
             benchmark("Squirrel - Function Calls", [this]() {
                 sq_vm->execute("add(10, 20);");
+            });
+        });
+
+        test("JaiScript vs Squirrel: Function Calls [precompiled]", [this]() {
+            benchmark("JaiScript - Function Calls [precompiled]", [this]() {
+                jai_pre_func_call.execute();
+            });
+
+            benchmark("Squirrel - Function Calls [precompiled]", [this]() {
+                sq_pre_func_call.call();
             });
         });
 
@@ -689,6 +844,16 @@ public:
             });
         });
 
+        test("JaiScript vs Squirrel: Method Invocation [precompiled]", [this]() {
+            benchmark("JaiScript - Method Invocation [precompiled]", [this]() {
+                jai_pre_method.execute();
+            });
+
+            benchmark("Squirrel - Method Invocation [precompiled]", [this]() {
+                sq_pre_method.call();
+            });
+        });
+
         // ===== For Loop =====
         test("JaiScript vs Squirrel: For Loop (100 iterations)", [this]() {
             benchmark("JaiScript - For Loop", [this]() {
@@ -725,6 +890,16 @@ public:
 
             benchmark("Squirrel - Fibonacci(15)", [this]() {
                 sq_vm->execute("fib(15);");
+            });
+        });
+
+        test("JaiScript vs Squirrel: Fibonacci (Deep Recursion) [precompiled]", [this]() {
+            benchmark("JaiScript - Fibonacci(15) [precompiled]", [this]() {
+                jai_pre_fib.execute();
+            });
+
+            benchmark("Squirrel - Fibonacci(15) [precompiled]", [this]() {
+                sq_pre_fib.call();
             });
         });
 
@@ -811,6 +986,16 @@ public:
                     local sum = 0;
                     for (local i = 0; i < 1000; i += 1) { sum += i; }
                 )");
+            });
+        });
+
+        test("JaiScript vs Squirrel: Hot Loop (1000 iterations) [precompiled]", [this]() {
+            benchmark("JaiScript - Hot Loop (1000 iter) [precompiled]", [this]() {
+                jai_pre_hot_loop.execute();
+            });
+
+            benchmark("Squirrel - Hot Loop (1000 iter) [precompiled]", [this]() {
+                sq_pre_hot_loop.call();
             });
         });
 
@@ -930,6 +1115,16 @@ public:
 
                     local tree_sum = inorderSum(tree_root);
                 )");
+            });
+        });
+
+        test("JaiScript vs Squirrel: Binary Search Tree (By-Ref Script) [precompiled]", [this]() {
+            benchmark("JaiScript - BST by-ref (15 nodes) [precompiled]", [this]() {
+                jai_pre_bst.execute();
+            });
+
+            benchmark("Squirrel - BST insert/sum (15 nodes) [precompiled]", [this]() {
+                sq_pre_bst.call();
             });
         });
 

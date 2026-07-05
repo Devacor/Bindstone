@@ -154,6 +154,28 @@ public:
             }, "Float division by zero should throw");
         });
         
+        // Regression: identifier+literal binary fast path fed the engine-less AST literal to the
+        // operator-method arg path -> uncatchable "Cannot clone script_value: missing engine pointer"
+        test("script_class_operator_primitive_rhs", [this]() {
+            auto eng = make_engine();
+            check_eq(3, eng->execute(
+                "class S { int value = 0; S(int v) { value = v; } function operator+(var o) -> S { return S(value + o); } }\n"
+                "var a = S(2); var c = a + 1; c.value;").as<int>());
+            check_eq(true, eng->execute(
+                "class T { int value = 0; T(int v) { value = v; } bool operator<(var o) { return value < o; } }\n"
+                "var a = T(1); a < 5;").as<bool>());
+            check_eq(true, eng->execute(
+                "class U { int value = 0; U(int v) { value = v; } bool operator<(var o) { return value < o; } }\n"
+                "var a = U(1); var lim = 5; a < lim;").as<bool>());
+            check_eq(std::string("T"), eng->execute(
+                "class V { int value = 0; V(int v) { value = v; } bool operator<(var o) { return value < o; } }\n"
+                "var a = V(1); var out = \"\"; if (a < 5) { out = \"T\"; } else { out = \"F\"; } out;").as<std::string>());
+            // untyped operator return, plain int result (w4 shape)
+            check_eq(7, eng->execute(
+                "class W { int value = 0; W(int v) { value = v; } function operator+(var o) { return value + o; } }\n"
+                "var a = W(3); var r = a + 4; r;").as<int>());
+        });
+
         test("operator_overloading_with_custom_types", [this]() {
             auto eng = make_engine();
 

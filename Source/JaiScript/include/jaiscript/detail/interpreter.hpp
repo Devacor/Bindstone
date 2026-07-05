@@ -266,6 +266,21 @@ namespace jai {
             throw runtime_error("Engine pointer is null - cannot create script_value");
         }
 
+        // AST literals carry no engine/type_info; rebuild a real value before any slow-path
+        // consumer sees them (operator-method args get cloned during param bind).
+        script_value hydrate_literal(const script_value& lit) const {
+            const auto& storage = lit.get_storage();
+            switch (storage.index()) {
+                case 1: return make_value(std::get<script_int>(storage));
+                case 2: return make_value(std::get<script_float>(storage));
+                case 3: return make_value(*std::get<strong_ptr<script_string>>(storage));
+                case 4: return make_value(std::get<script_char>(storage));
+                case 5: return make_value(std::get<script_bool>(storage));
+                case 0: return make_value();
+                default: { script_value v = lit; v.set_engine(engine_); return v; }
+            }
+        }
+
         // Helper to create namespace-related objects with both type_name and type_id for fast comparison
         template<typename T>
         script_value make_namespace_object(uint64_t type_id, const char* type_name, std::shared_ptr<T> data) const {

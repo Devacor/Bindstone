@@ -3500,7 +3500,13 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
         switch (expr->op.type) {
             case token_type::minus:
                 if (val.is_int()) {
-                    push_value(make_value(-val.unchecked_as_int()));
+                    // -INT64_MIN is UB; apply the overflow policy exactly like the generic
+                    // path below (a parse-folded literal INT64_MIN reaches here; vm parity)
+                    script_int neg;
+                    if (!ints::try_neg(val.unchecked_as_int(), neg)) {
+                        return int_overflow_v("Integer overflow in unary '-'");
+                    }
+                    push_value(make_value(neg));
                     return {};
                 } else if (val.is_float()) {
                     push_value(make_value(-val.unchecked_as_float()));

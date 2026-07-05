@@ -479,6 +479,15 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         // Convert element if needed (e.g., int -> float for array<float>)
         script_value converted = convert_array_element(ctx.get_engine(), args[0], element_type);
 
+        // engine::memory_cap chokepoint: deny the growth before it exists
+        if (engine* eng = ctx.get_engine()) {
+            auto& limits = eng->execution_limits();
+            const size_t bytes = sizeof(script_value) + (converted.is_string() ? converted.unchecked_as_string().size() : 0);
+            if (!limits.memory_charge(bytes)) [[unlikely]] {
+                return detail::raise_memory_cap(limits);
+            }
+        }
+
         auto& arrayPtr = self.unchecked_get_array_storage();
         arrayPtr->push_back(std::move(converted));
         return ctx.make_value();
@@ -1697,6 +1706,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (pos < 0) pos = 0;
             if (pos > len) pos = len;
 
+            // engine::memory_cap chokepoint: deny the growth before it exists
+            if (engine* eng = ctx.get_engine()) {
+                auto& limits = eng->execution_limits();
+                if (!limits.memory_charge(text.size())) [[unlikely]] {
+                    return detail::raise_memory_cap(limits);
+                }
+            }
+
             str.insert(static_cast<size_t>(pos), text);
             return self;
         }},
@@ -1793,6 +1810,15 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
 
             auto& str = self.unchecked_as_string_ref();
+            // engine::memory_cap chokepoint: deny the growth before it exists
+            if (count > 1) {
+                if (engine* eng = ctx.get_engine()) {
+                    auto& limits = eng->execution_limits();
+                    if (!limits.memory_charge(str.size() * static_cast<size_t>(count - 1))) [[unlikely]] {
+                        return detail::raise_memory_cap(limits);
+                    }
+                }
+            }
             std::string original = str;
             str.clear();
             str.reserve(original.size() * static_cast<size_t>(count));
@@ -2511,6 +2537,12 @@ std::shared_ptr<environment> interpreter::get_global_environment() const {
 void interpreter::prepare_for_execution() {
     arm_execution_deadline();
 
+    // Share the engine's limit state: reentrant executes see the outer run's terminal
+    // latch, so a terminal error crosses the reentrant boundary uncaught
+    if (auto eng = engine_) {
+        limits_ = &eng->execution_limits();
+    }
+
     // Clear exception state even when re-entered: the engine's catch path relies on
     // this scrub to strip a nested run's uncaught throw before the suspended outer
     // run resumes (vm backend ordering — clears before its reentrancy early-return).
@@ -2528,6 +2560,10 @@ void interpreter::prepare_for_execution() {
     if (executing_) {
         return;
     }
+
+    // Terminal latch (and memory allowance) reset only at a NON-reentrant entry: a
+    // nested execute must not grant the outer run's unwinding error a second life
+    limits_->reset_for_execute();
 
     // Clear execution state
     valueStack_.clear();
@@ -3006,6 +3042,10 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
 						rightIdx == script_value::TYPEID_STRING) {
 						const script_string& leftStr = leftVal.unchecked_as_string();
 						const script_string& rightStr = rightVal.unchecked_as_string();
+						// engine::memory_cap chokepoint: deny the concat result before it exists
+						if (!limits_->memory_charge(sizeof(script_value) + leftStr.size() + rightStr.size())) [[unlikely]] {
+							return detail::raise_memory_cap(*limits_);
+						}
 						push_value(make_value(leftStr + rightStr));
 						return {};
 					}
@@ -3419,7 +3459,12 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     if (!key.has_valid_engine()) {
                         key.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
                     }
+                    const size_t prior_map_size = map.size();
                     script_value& value_ref = map[key];
+                    // engine::memory_cap: count NEW-entry growth (raised at the next back-edge)
+                    if (map.size() != prior_map_size) {
+                        limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
+                    }
 
                     // If this created a new entry with default constructor, it has invalid engine reference
                     if (!value_ref.has_valid_engine()) {
@@ -4019,6 +4064,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             } else if (target.is_float()) {
                                 target.assign_through(make_value(target.unchecked_as_float() + derefRight.as_float()));
                             } else if (target.is_string() && rIdx == script_value::TYPEID_STRING) {
+                                // engine::memory_cap chokepoint: deny the append before it exists
+                                if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
+                                    return detail::raise_memory_cap(*limits_);
+                                }
                                 target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
                             } else {
                                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -4111,6 +4160,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
                             target = make_value(target.unchecked_as_int() + derefRight.unchecked_as_float());
                         } else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
+                            // engine::memory_cap chokepoint: deny the append before it exists
+                            if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
+                                return detail::raise_memory_cap(*limits_);
+                            }
                             target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -4250,6 +4303,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
                             resultValue = make_value(cf + rf);
                         } else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+                            // engine::memory_cap chokepoint: deny the concat result before it exists
+                            if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
+                                return detail::raise_memory_cap(*limits_);
+                            }
                             resultValue = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -4363,6 +4420,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
                         resultValue = make_value(cf + rf);
                     } else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+                        // engine::memory_cap chokepoint: deny the concat result before it exists
+                        if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
+                            return detail::raise_memory_cap(*limits_);
+                        }
                         resultValue = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
@@ -5700,7 +5761,12 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     // Special case for string concatenation (use move to avoid copying the temporary)
     // Check for to_string() method on objects before falling back to default
     if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
-        return make_value(value_to_string_with_method(left) + value_to_string_with_method(right));
+        script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
+        // engine::memory_cap chokepoint: deny the concat result before it exists
+        if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+            return detail::raise_memory_cap(*limits_);
+        }
+        return make_value(std::move(joined));
     }
 
     // Fast path for pure integer arithmetic (avoid float conversion)
@@ -7813,8 +7879,8 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
     }
 
     while (true) {
-        if (execution_budget_exhausted()) [[unlikely]] {
-            return execution_budget_error();
+        if (execution_limit_exhausted()) [[unlikely]] {
+            return execution_limit_failure();
         }
 
         if (skip_first_condition) {
@@ -8097,11 +8163,11 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             }
 
                             while (true) {
-                                if (execution_budget_exhausted()) [[unlikely]] {
+                                if (execution_limit_exhausted()) [[unlikely]] {
                                     if (body_env) { release_environment(body_env); }
                                     release_environment(loop_env);
                                     environment_ = previous;
-                                    return execution_budget_error();
+                                    return execution_limit_failure();
                                 }
 
                                 script_int current_end = end_ptr ? *end_ptr : end_val;
@@ -8332,12 +8398,12 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
     // Native C++ for-loop structure
     while (true) {
-        if (execution_budget_exhausted()) [[unlikely]] {
+        if (execution_limit_exhausted()) [[unlikely]] {
             if (owns_scope) {
                 release_environment(environment_);
             }
             environment_ = previous;
-            return execution_budget_error();
+            return execution_limit_failure();
         }
 
         if (skip_condition) {
@@ -8468,9 +8534,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             // (clear/pop/erase). Trusting the cached array_size would index past
             // the end with unchecked operator[] -> OOB read / crash.
             for (size_t i = resume_index; i < array_storage->size(); ++i) {
-                if (execution_budget_exhausted()) [[unlikely]] {
+                if (execution_limit_exhausted()) [[unlikely]] {
                     pop_scope();
-                    return execution_budget_error();
+                    return execution_limit_failure();
                 }
 
                 if (replaying) {
@@ -8569,9 +8635,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 if (entry_index < resume_index) {
                     continue;   // fast-forward to the suspended entry
                 }
-                if (execution_budget_exhausted()) [[unlikely]] {
+                if (execution_limit_exhausted()) [[unlikely]] {
                     pop_scope();
-                    return execution_budget_error();
+                    return execution_limit_failure();
                 }
 
                 if (replaying) {
@@ -8746,6 +8812,17 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
 
     // Execute try block
     auto try_result = dispatch_stmt(stmt->try_block.get());
+
+    // Terminal errors (budget overrun, escalated memory cap) can NEVER be caught from
+    // script: restore the catch-var and let the failure keep unwinding to the host
+    // execute() boundary (KEEP BYTE-PARALLEL with vm_backend::unwind_to_handler).
+    if (limits_->terminal_error && (!try_result || (is_unwinding_ && current_exception_))) [[unlikely]] {
+        current_catch_var_id_ = saved_catch_var_id;
+        if (!try_result) {
+            return try_result;
+        }
+        return {};
+    }
 
     // Check if an error occurred (either checked_result error or exception unwinding)
     bool caught_error = false;
@@ -10708,8 +10785,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             JAI_MAX_CALL_DEPTH_MESSAGE);
     }
 
-    if (execution_budget_exhausted()) [[unlikely]] {
-        return execution_budget_error<script_value>();
+    if (execution_limit_exhausted()) [[unlikely]] {
+        return execution_limit_failure();
     }
 
     // RAII guard for call depth tracking - ensures decrement even on early return
@@ -11393,9 +11470,13 @@ script_value interpreter::make_coroutine_object(engine* eng, uint64_t type_id, s
 
 checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& handle) {
     // Host-level resume is its own budgeted entry; a resume nested inside an
-    // executing script keeps the outer deadline.
-    if (current_call_depth_ == 0) {
+    // executing script keeps the outer deadline (and the outer limit state).
+    // Depth alone is not enough: a TOP-LEVEL script statement calling resume() also
+    // runs at call depth 0, and re-arming there let `for(..){ h.resume(); }` push the
+    // deadline forever (fuzz livelock seeds 3507/8285/1213/8356/8391).
+    if (current_call_depth_ == 0 && !executing_) {
         arm_execution_deadline();
+        limits_->reset_for_execute();
     }
 
     auto& state = coroutine_state(handle);

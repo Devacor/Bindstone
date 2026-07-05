@@ -18,6 +18,8 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Maximum environment recursion depth exceeded";
         case runtime_error_code::execution_budget_exceeded:
             return "Script execution budget exceeded";
+        case runtime_error_code::memory_cap_exceeded:
+            return "Script memory cap exceeded";
 
         // Type errors
         case runtime_error_code::type_mismatch:

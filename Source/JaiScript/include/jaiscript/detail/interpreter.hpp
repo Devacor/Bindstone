@@ -47,6 +47,7 @@
 #include "string_symbolizer.hpp"
 #include "environment.hpp"
 #include "builtin_methods.hpp"
+#include "execution_limits.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -671,6 +672,12 @@ namespace jai {
         uint32_t budget_tick_ = 0;
         bool budget_active_ = false;
 
+        // Execution-limit state (terminal-error latch). Engine-less fallback storage;
+        // prepare_for_execution repoints limits_ at the engine's per-engine instance so
+        // reentrant executes share it and terminal errors cross the reentrant boundary.
+        detail::execution_limits local_limits_;
+        detail::execution_limits* limits_ = &local_limits_;
+
         // ============================================================
         // CALL FRAME OPTIMIZATION
         // ============================================================
@@ -830,7 +837,10 @@ namespace jai {
         [[nodiscard]] JAI_FORCEINLINE bool execution_budget_exhausted() noexcept {
             if (!budget_active_ || ++budget_tick_ < 1024) { return false; }
             budget_tick_ = 0;
-            return std::chrono::steady_clock::now() >= execution_deadline_;
+            if (std::chrono::steady_clock::now() < execution_deadline_) { return false; }
+            // Budget overruns are TERMINAL: no script catch may swallow a timeout
+            limits_->terminal_error = true;
+            return true;
         }
 
         template<typename T = void>
@@ -838,6 +848,24 @@ namespace jai {
             return checked_result<T>(
                 make_error_code(runtime_error_code::execution_budget_exceeded),
                 "Script execution budget exceeded - raise engine::execution_budget or break up the work");
+        }
+
+        // Combined limit check at loop back-edges / call entry: the budget tick plus a
+        // one-compare memory high-water test (deferred raise point for charge sites
+        // that cannot deny in place). KEEP BYTE-PARALLEL with the vm twin.
+        [[nodiscard]] JAI_FORCEINLINE bool execution_limit_exhausted() noexcept {
+            return execution_budget_exhausted() || limits_->memory_tripped();
+        }
+
+        // Cold raise twin for execution_limit_exhausted (error_propagator converts to
+        // any checked_result<T> the site returns)
+        [[nodiscard]] error_propagator execution_limit_failure() {
+            if (limits_->memory_tripped()) {
+                return detail::raise_memory_cap(*limits_);
+            }
+            return error_propagator{
+                make_error_code(runtime_error_code::execution_budget_exceeded),
+                "Script execution budget exceeded - raise engine::execution_budget or break up the work"};
         }
 
         // Binary operation helpers

@@ -1,4 +1,5 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/detail/execution_limits.hpp>
 #include <sstream>
 
 namespace jai {
@@ -368,6 +369,9 @@ script_value script_value::clone() const {
     switch (current_type()) {
         case script_value_type::jai_array_type: {
             auto& other_array = *std::get<strong_ptr<std::vector<script_value>>>(storage_);
+            // engine::memory_cap: count the fresh container storage (raised at the next
+            // loop back-edge); element clones charge themselves recursively
+            engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (other_array.size() + 1));
             auto new_array = make_strong<std::vector<script_value>>();
             new_array->reserve(other_array.size());
             for (const auto& elem : other_array) {
@@ -378,6 +382,9 @@ script_value script_value::clone() const {
         }
         case script_value_type::jai_map_type: {
             auto& other_map = *std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
+            // engine::memory_cap: count the fresh container storage (raised at the next
+            // loop back-edge); key/value clones charge themselves recursively
+            engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (other_map.size() + 1));
             auto new_map = make_strong<std::map<script_value, script_value>>();
             for (const auto& [key, value] : other_map) {
                 new_map->emplace(key.clone(), value.clone());

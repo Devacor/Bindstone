@@ -81,6 +81,7 @@ namespace jai {
         cpp_exception = 123,
         internal_error = 124,
         execution_budget_exceeded = 125,
+        memory_cap_exceeded = 126,
     };
 
     class runtime_error_category_impl : public std::error_category {

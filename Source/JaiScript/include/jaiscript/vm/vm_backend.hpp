@@ -8,6 +8,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/execution_limits.hpp>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -189,6 +190,12 @@ namespace jai::vm {
         bool budget_active_ = false;
         int current_call_depth_ = 0;
 
+        // Execution-limit state (terminal-error latch). Engine-less fallback storage;
+        // prepare_for_execution repoints limits_ at the engine's per-engine instance so
+        // reentrant executes share it and terminal errors cross the reentrant boundary.
+        detail::execution_limits local_limits_;
+        detail::execution_limits* limits_ = &local_limits_;
+
         uint64_t op_plus_id_ = 0, op_minus_id_ = 0, op_star_id_ = 0, op_slash_id_ = 0, op_percent_id_ = 0;
         uint64_t op_less_id_ = 0, op_less_equal_id_ = 0, op_greater_id_ = 0, op_greater_equal_id_ = 0;
         uint64_t op_equal_equal_id_ = 0, op_bang_equal_id_ = 0, op_spaceship_id_ = 0;
@@ -218,6 +225,10 @@ namespace jai::vm {
 
         void arm_execution_deadline();
         bool execution_budget_exhausted();
+        // Combined limit check at loop back-edges / call entry (budget tick + memory
+        // high-water) and its cold raise twin. KEEP BYTE-PARALLEL with the interpreter.
+        bool execution_limit_exhausted();
+        error_propagator execution_limit_failure();
 
         std::shared_ptr<chunk> chunk_for_body(std::string_view name,
                                               const std::vector<parameter>& params,
@@ -438,7 +449,6 @@ namespace jai::vm {
         // Both walk outward over in-loop frames down to records_base, popping as they go
         bool handle_op_error(frame*& fp, size_t records_base, const checked_result<void>& result);
         bool handle_throw_unwind(frame*& fp, size_t records_base);
-        checked_result<void> budget_exceeded_error() const;
         checked_result<void> exec_this(frame& f, const vm_instruction& ins);
         checked_result<void> exec_super(frame& f, const vm_instruction& ins);
         checked_result<void> exec_from_this(frame& f, const vm_instruction& ins);

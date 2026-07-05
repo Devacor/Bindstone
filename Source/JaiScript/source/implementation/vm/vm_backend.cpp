@@ -474,7 +474,23 @@ void vm_backend::arm_execution_deadline() {
 bool vm_backend::execution_budget_exhausted() {
 	if (!budget_active_ || ++budget_tick_ < 1024) { return false; }
 	budget_tick_ = 0;
-	return std::chrono::steady_clock::now() >= execution_deadline_;
+	if (std::chrono::steady_clock::now() < execution_deadline_) { return false; }
+	// Budget overruns are TERMINAL: no script catch may swallow a timeout
+	limits_->terminal_error = true;
+	return true;
+}
+
+bool vm_backend::execution_limit_exhausted() {
+	return execution_budget_exhausted() || limits_->memory_tripped();
+}
+
+error_propagator vm_backend::execution_limit_failure() {
+	if (limits_->memory_tripped()) {
+		return detail::raise_memory_cap(*limits_);
+	}
+	return error_propagator{
+		make_error_code(runtime_error_code::execution_budget_exceeded),
+		"Script execution budget exceeded - raise engine::execution_budget or break up the work"};
 }
 
 void vm_backend::set_execution_budget(std::chrono::nanoseconds budget) {
@@ -484,6 +500,12 @@ void vm_backend::set_execution_budget(std::chrono::nanoseconds budget) {
 
 void vm_backend::prepare_for_execution() {
 	arm_execution_deadline();
+
+	// Share the engine's limit state: reentrant executes see the outer run's terminal
+	// latch, so a terminal error crosses the reentrant boundary uncaught
+	if (engine_) {
+		limits_ = &engine_->execution_limits();
+	}
 
 	// A re-entrant execute (include/import, or a host callback calling execute() mid-run)
 	// stacks a fresh frame above the live ones — leave the outer frames' value/try/iter
@@ -505,6 +527,9 @@ void vm_backend::prepare_for_execution() {
 		try_records_.clear();
 		iter_states_.clear();
 		cfor_states_.clear();
+		// Terminal latch (and memory allowance) reset only at a NON-reentrant entry: a
+		// nested execute must not grant the outer run's unwinding error a second life
+		limits_->reset_for_execute();
 	}
 
 	// Preserve a running coroutine's fiber so its next yield still finds its handle;
@@ -603,10 +628,14 @@ vm_backend::vm_coroutine_state& vm_backend::coroutine_fiber_state(coroutine_hand
 }
 
 checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& handle) {
-	// A top-level resume (VM call-depth 0) arms a fresh deadline; a resume nested inside a
-	// running script inherits the outer deadline.
-	if (current_call_depth_ == 0) {
+	// A top-level resume (no live VM frames) arms a fresh deadline; a resume nested inside
+	// a running script inherits the outer deadline (and the outer limit state).
+	// Depth alone is not enough: a TOP-LEVEL script statement calling resume() also runs
+	// at call depth 0, and re-arming there let `for(..){ h.resume(); }` push the deadline
+	// forever (fuzz livelock seeds 3507/8285/1213/8356/8391).
+	if (current_call_depth_ == 0 && frames_.empty()) {
 		arm_execution_deadline();
+		limits_->reset_for_execute();
 	}
 
 	auto& state = coroutine_fiber_state(handle);
@@ -1277,7 +1306,12 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 			return script_value(lf + rf, engine_);
 		}
 		if (li_raw == script_value::TYPEID_STRING || ri_raw == script_value::TYPEID_STRING) {
-			return script_value(value_to_string_with_method(left) + value_to_string_with_method(right), engine_);
+			script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
+			// engine::memory_cap chokepoint: deny the concat result before it exists
+			if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+				return detail::raise_memory_cap(*limits_);
+			}
+			return script_value(std::move(joined), engine_);
 		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
 	}
@@ -1303,7 +1337,12 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 	}
 
 	if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
-		return script_value(value_to_string_with_method(unwrapped_left) + value_to_string_with_method(unwrapped_right), engine_);
+		script_string joined = value_to_string_with_method(unwrapped_left) + value_to_string_with_method(unwrapped_right);
+		// engine::memory_cap chokepoint: deny the concat result before it exists
+		if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+			return detail::raise_memory_cap(*limits_);
+		}
+		return script_value(std::move(joined), engine_);
 	}
 
 	auto custom_result = object_arithmetic_via_method(left, right, op_plus_id_);
@@ -2048,6 +2087,11 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 		if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
 		    !left.is_cpp_bound() && !right.is_cpp_bound()) {
 			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
+			// engine::memory_cap chokepoint: deny the concat result before it exists
+			if (!limits_->memory_charge(sizeof(script_value) + left.unchecked_as_string().size() + right.unchecked_as_string().size())) [[unlikely]] {
+				out.emplace(checked_result<script_value>(detail::raise_memory_cap(*limits_)));
+				return true;
+			}
 			out.emplace(script_value(left.unchecked_as_string() + right.unchecked_as_string(), engine_));
 			return true;
 		}
@@ -2186,7 +2230,12 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 		                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
 	if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
-		return script_value(value_to_string_with_method(left) + value_to_string_with_method(right), engine_);
+		script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
+		// engine::memory_cap chokepoint: deny the concat result before it exists
+		if (!limits_->memory_charge(sizeof(script_value) + joined.size())) [[unlikely]] {
+			return detail::raise_memory_cap(*limits_);
+		}
+		return script_value(std::move(joined), engine_);
 	}
 
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
@@ -3060,6 +3109,10 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 					} else if (target.is_float()) {
 						target.assign_through(script_value(target.unchecked_as_float() + derefRight.as_float(), engine_));
 					} else if (target.is_string() && rIdx == script_value::TYPEID_STRING) {
+						// engine::memory_cap chokepoint: deny the append before it exists
+						if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
+							return detail::raise_memory_cap(*limits_);
+						}
 						target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
 					} else {
 						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -3149,6 +3202,10 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
 					target = script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_);
 				} else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
+					// engine::memory_cap chokepoint: deny the append before it exists
+					if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
+						return detail::raise_memory_cap(*limits_);
+					}
 					target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
 				} else {
 					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -3274,6 +3331,10 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
 				resultValue = script_value(cf + rf, engine_);
 			} else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+				// engine::memory_cap chokepoint: deny the concat result before it exists
+				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
+					return detail::raise_memory_cap(*limits_);
+				}
 				resultValue = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
 			} else {
 				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
@@ -3619,6 +3680,10 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 		} else if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
 		           !lp->is_cpp_bound() && !rp->is_cpp_bound()) {
 			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
+			// engine::memory_cap chokepoint: deny the concat result before it exists
+			if (!limits_->memory_charge(sizeof(script_value) + lp->unchecked_as_string().size() + rp->unchecked_as_string().size())) [[unlikely]] {
+				return detail::raise_memory_cap(*limits_);
+			}
 			stack_.push_back(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
 			return {};
 		} else if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
@@ -3910,8 +3975,8 @@ checked_result<void> vm_backend::exec_cfor_back(frame& f, const vm_instruction& 
 	}
 	counted_for_state& st = cfor_states_.back();
 
-	if (execution_budget_exhausted()) [[unlikely]] {
-		return budget_exceeded_error();
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return execution_limit_failure();
 	}
 	if (!st.fast) {
 		f.ip = p.generic_update_ip;
@@ -3988,7 +4053,12 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 				if (!key.has_valid_engine()) {
 					key.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
 				}
+				const size_t prior_map_size = map.size();
 				script_value& value_ref = map[key];
+				// engine::memory_cap: count NEW-entry growth (raised at the next back-edge)
+				if (map.size() != prior_map_size) {
+					limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
+				}
 				if (!value_ref.has_valid_engine()) {
 					if (!left.has_valid_engine()) {
 						return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
@@ -5631,6 +5701,10 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
 				resultValue = script_value(cf + rf, engine_);
 			} else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+				// engine::memory_cap chokepoint: deny the concat result before it exists
+				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
+					return detail::raise_memory_cap(*limits_);
+				}
 				resultValue = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
 			} else {
 				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
@@ -6895,12 +6969,6 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 // Exceptions, switch dispatch, range-for iteration
 // ============================================================
 
-checked_result<void> vm_backend::budget_exceeded_error() const {
-	return checked_result<void>(
-		make_error_code(runtime_error_code::execution_budget_exceeded),
-		"Script execution budget exceeded - raise engine::execution_budget or break up the work");
-}
-
 checked_result<void> vm_backend::exec_throw(frame& f, const vm_instruction& ins) {
 	const ast_node* node = ins.b != k_invalid_u32 ? f.code->nodes[ins.b].get() : nullptr;
 	if (ins.a) {
@@ -6975,6 +7043,16 @@ checked_result<void> vm_backend::exec_catch_end(frame&, const vm_instruction&) {
 }
 
 bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
+	// Terminal errors (budget overrun, escalated memory cap) can NEVER be caught from
+	// script: pop this frame's records and keep unwinding to the host boundary
+	// (KEEP BYTE-PARALLEL with the interpreter visit_try_stmt terminal skip).
+	if (limits_->terminal_error) [[unlikely]] {
+		while (!try_records_.empty() && try_records_.back().owner == &f) {
+			current_catch_var_id_ = try_records_.back().saved_catch_var_id;
+			try_records_.pop_back();
+		}
+		return false;
+	}
 	while (!try_records_.empty()) {
 		try_record& rec = try_records_.back();
 		if (rec.owner != &f) {
@@ -7163,8 +7241,8 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 			stack_.push_back(script_value(false, engine_));
 			return {};
 		}
-		if (execution_budget_exhausted()) [[unlikely]] {
-			return budget_exceeded_error();
+		if (execution_limit_exhausted()) [[unlikely]] {
+			return execution_limit_failure();
 		}
 		if (proto.is_reference) {
 			// Reallocation-safe container+index reference, never a raw element pointer
@@ -7179,8 +7257,8 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 			stack_.push_back(script_value(false, engine_));
 			return {};
 		}
-		if (execution_budget_exhausted()) [[unlikely]] {
-			return budget_exceeded_error();
+		if (execution_limit_exhausted()) [[unlikely]] {
+			return execution_limit_failure();
 		}
 		std::vector<script_value> args;
 		if (proto.is_reference) {
@@ -7592,8 +7670,8 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			}
 
 			case opcode::op_loop_back:
-				if (execution_budget_exhausted()) [[unlikely]] {
-					VM_TRY_OP(budget_exceeded_error());
+				if (execution_limit_exhausted()) [[unlikely]] {
+					VM_TRY_OP(checked_result<void>(execution_limit_failure()));
 				}
 				f.ip = ins.a;
 				continue;
@@ -7841,11 +7919,9 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 			make_error_code(runtime_error_code::max_recursion_depth),
 			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
-	if (execution_budget_exhausted()) [[unlikely]] {
+	if (execution_limit_exhausted()) [[unlikely]] {
 		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
-		return checked_result<void>(
-			make_error_code(runtime_error_code::execution_budget_exceeded),
-			"Script execution budget exceeded - raise engine::execution_budget or break up the work");
+		return execution_limit_failure();
 	}
 	// In-loop dispatch invariant: results travel on stack_, never through return_value_
 	assert(!has_return_value_);
@@ -7999,11 +8075,9 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 			make_error_code(runtime_error_code::max_recursion_depth),
 			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
-	if (execution_budget_exhausted()) [[unlikely]] {
+	if (execution_limit_exhausted()) [[unlikely]] {
 		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
-		return checked_result<void>(
-			make_error_code(runtime_error_code::execution_budget_exceeded),
-			"Script execution budget exceeded - raise engine::execution_budget or break up the work");
+		return execution_limit_failure();
 	}
 	assert(!has_return_value_);
 
@@ -8563,10 +8637,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 
-	if (execution_budget_exhausted()) [[unlikely]] {
-		return checked_result<script_value>(
-			make_error_code(runtime_error_code::execution_budget_exceeded),
-			"Script execution budget exceeded - raise engine::execution_budget or break up the work");
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return execution_limit_failure();
 	}
 
 	struct call_depth_guard {

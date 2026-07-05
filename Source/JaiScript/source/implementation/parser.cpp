@@ -1,6 +1,7 @@
 #include "../../include/jaiscript/detail/parser.hpp"
 #include "../../include/jaiscript/core/engine.hpp"
 #include "../../include/jaiscript/detail/interpreter.hpp"  // For string_symbolizer
+#include "../../include/jaiscript/detail/integer_ops.hpp"  // checked constant folding
 #include <sstream>
 #include <iostream>
 #include <optional>
@@ -991,7 +992,11 @@ expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, e
     const script_value& leftVal = leftLit->value;
     const script_value& rightVal = rightLit->value;
 
-    // Fold integer arithmetic (most common case)
+    // Fold integer arithmetic (most common case) through the overflow policy: raw
+    // + - * here was signed-overflow UB in the compiler AND a silent wrap that
+    // bypassed the checked policy (PARSER-FOLD-WRAPS). On overflow DO NOT fold -
+    // the runtime's checked path raises with the correct operator name. Wrap builds
+    // still fold (jai::ints wraps UB-free there).
     if (leftVal.is_int() && rightVal.is_int()) {
         script_int leftInt = leftVal.as_int();
         script_int rightInt = rightVal.as_int();
@@ -999,27 +1004,32 @@ expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, e
 
         switch (op.type) {
             case token_type::plus:
-                result = leftInt + rightInt;
-                break;
-            case token_type::minus:
-                result = leftInt - rightInt;
-                break;
-            case token_type::star:
-                result = leftInt * rightInt;
-                break;
-            case token_type::slash:
-                if (rightInt == 0) {
-                    // Don't fold division by zero - let runtime handle it
+                if (!ints::try_add(leftInt, rightInt, result)) {
                     return std::make_shared<binary_expr>(op.location, left, op, right);
                 }
-                result = leftInt / rightInt;
+                break;
+            case token_type::minus:
+                if (!ints::try_sub(leftInt, rightInt, result)) {
+                    return std::make_shared<binary_expr>(op.location, left, op, right);
+                }
+                break;
+            case token_type::star:
+                if (!ints::try_mul(leftInt, rightInt, result)) {
+                    return std::make_shared<binary_expr>(op.location, left, op, right);
+                }
+                break;
+            case token_type::slash:
+                // Zero divisor and INT64_MIN/-1: let the runtime raise
+                if (rightInt == 0 || !ints::try_div(leftInt, rightInt, result)) {
+                    return std::make_shared<binary_expr>(op.location, left, op, right);
+                }
                 break;
             case token_type::percent:
                 if (rightInt == 0) {
                     // Don't fold modulo by zero - let runtime handle it
                     return std::make_shared<binary_expr>(op.location, left, op, right);
                 }
-                result = leftInt % rightInt;
+                result = ints::mod(leftInt, rightInt);   // -1 divisor: 0, no hardware trap
                 break;
             default:
                 // Unsupported operation for constant folding

@@ -277,9 +277,101 @@ public:
                 catch (const std::exception& ex) { msg[idx] = ex.what(); }
                 ++idx;
             }
-            check_eq(msg[0], msg[1], "unary '-' overflow error text is byte-identical across backends");
-            check_true(msg[0].find("Integer overflow in unary '-'") != std::string::npos,
-                "unary '-' overflow names the negation");
+            check_eq(msg[0], msg[1], "overflow error text is byte-identical across backends");
+            // PARSER-FOLD-WRAPS fix: the folder now declines to fold 1 + INT64_MAX, so
+            // the runtime '+' raises (correct attribution) before unary '-' ever runs.
+            check_true(msg[0].find("Integer overflow in '+'") != std::string::npos,
+                "the un-folded '+' raises with its own operator name");
+        });
+
+        // ---- PARSER-FOLD-WRAPS: the constant folder used raw + - * (signed-overflow UB
+        // and a silent wrap bypassing the checked policy). It now folds through
+        // jai::ints and declines to fold on overflow so the runtime raises. ----
+        test("parser_fold_overflow_defers_to_runtime", [this]() {
+            std::string msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                if (!e->throw_on_overflow()) {
+                    // Wrap build: folding the wrapped value IS the policy
+                    check_eq((int64_t)INT64_MIN, e->execute("9223372036854775807 + 1").as_int());
+                    continue;
+                }
+                try { e->execute("9223372036854775807 + 1"); }
+                catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                check_true(msg[idx].find("Integer overflow in '+'") != std::string::npos,
+                    "pure-literal INT64_MAX + 1 raises at runtime instead of wrapping at parse time");
+                ++idx;
+            }
+            if (idx == 2) {
+                check_eq(msg[0], msg[1], "fold-declined '+' text is byte-identical across backends");
+            }
+        });
+        test("parser_fold_div_min_by_neg1_defers_to_runtime", [this]() {
+            auto e = make_engine();
+            // Every operand folds to a literal; INT64_MIN / -1 must NOT fold (UB/trap)
+            const char* src = "(0 - 9223372036854775807 - 1) / (0 - 1)";
+            if (e->throw_on_overflow()) {
+                check_throws([&]() { e->execute(src); });
+            } else {
+                check_eq((int64_t)INT64_MIN, e->execute(src).as_int());
+            }
+        });
+
+        // ---- INCDEC-WRAPS-SILENTLY: plain ++/-- on int variables/fields now applies
+        // the overflow policy like every other int op (both backends, same text as the
+        // checked counting-for update). ----
+        test("incdec_overflow_checked_identifier", [this]() {
+            std::string msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                if (!e->throw_on_overflow()) {
+                    check_eq((int64_t)INT64_MIN, e->execute("var a = 9223372036854775807; a++; a;").as_int());
+                    continue;
+                }
+                try { e->execute("var a = 9223372036854775807; a++;"); }
+                catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                check_true(msg[idx].find("Integer overflow in '++'") != std::string::npos,
+                    "a++ at INT64_MAX raises and names '++'");
+                ++idx;
+            }
+            if (idx == 2) {
+                check_eq(msg[0], msg[1], "'++' overflow text is byte-identical across backends");
+            }
+        });
+        test("incdec_overflow_checked_prefix_decrement", [this]() {
+            auto e = make_engine();
+            const char* src = "var a = -9223372036854775807 - 1; --a;";
+            if (e->throw_on_overflow()) {
+                bool threw = false;
+                std::string msg;
+                try { e->execute(src); } catch (const std::exception& ex) { threw = true; msg = ex.what(); }
+                check_true(threw);
+                check_true(msg.find("Integer overflow in '--'") != std::string::npos, "--a at INT64_MIN names '--'");
+            } else {
+                check_eq((int64_t)INT64_MAX, e->execute("var a = -9223372036854775807 - 1; --a; a;").as_int());
+            }
+        });
+        test("incdec_overflow_checked_this_field", [this]() {
+            auto e = make_engine();
+            const char* src =
+                "class C { int f = 9223372036854775807; void bump() { f++; } }"
+                "auto c = C(); c.bump();";
+            if (e->throw_on_overflow()) {
+                bool threw = false;
+                std::string msg;
+                try { e->execute(src); } catch (const std::exception& ex) { threw = true; msg = ex.what(); }
+                check_true(threw);
+                check_true(msg.find("Integer overflow in '++'") != std::string::npos, "this-field f++ names '++'");
+            } else {
+                auto r = e->execute(
+                    "class C { int f = 9223372036854775807; void bump() { f++; } }"
+                    "auto c = C(); c.bump(); c.f;");
+                check_eq((int64_t)INT64_MIN, r.as_int());
+            }
         });
 
         // ---- #35 JSON float serialization round-trips at full precision ----

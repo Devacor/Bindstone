@@ -3425,15 +3425,18 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 		}
 		switch (target.type()) {
 			case script_value_type::jai_int_type: {
-				if (postfix) {
-					stack_.push_back(script_value(target.unchecked_as_int(), engine_));
-					if (isIncrement) ++target.unchecked_as_int_ref();
-					else --target.unchecked_as_int_ref();
+				// Overflow policy applies to plain ++/-- like every other int op
+				// (INCDEC-WRAPS-SILENTLY); wrap builds fold the check away.
+				script_int& tref = target.unchecked_as_int_ref();
+				const script_int oldVal = tref;
+				script_int newVal;
+				if (isIncrement) {
+					if (!ints::try_add(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '++'");
 				} else {
-					if (isIncrement) ++target.unchecked_as_int_ref();
-					else --target.unchecked_as_int_ref();
-					stack_.push_back(script_value(target.unchecked_as_int(), engine_));
+					if (!ints::try_sub(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '--'");
 				}
+				tref = newVal;
+				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
 				return {};
 			}
 			case script_value_type::jai_float_type: {
@@ -3465,7 +3468,12 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 			const size_t ti = currentVal.raw_storage_index();
 			if (ti == script_value::TYPEID_INT) {
 				script_int oldVal = currentVal.unchecked_as_int();
-				script_int newVal = isIncrement ? oldVal + 1 : oldVal - 1;
+				script_int newVal;
+				if (isIncrement) {
+					if (!ints::try_add(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '++'");
+				} else {
+					if (!ints::try_sub(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '--'");
+				}
 				instance->set_field(sym, script_value(newVal, engine_));
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
 				return {};

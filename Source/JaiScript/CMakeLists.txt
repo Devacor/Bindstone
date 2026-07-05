@@ -82,3 +82,9 @@ option(JAISCRIPT_BUILD_EXAMPLES "Build JaiScript example programs" ON)
 if(JAISCRIPT_BUILD_EXAMPLES)
     add_subdirectory(examples/roguelike)
 endif()
+
+# --- jai_demoreel (examples/demoreel): demoscene tech-demo reel in JaiScript ---
+if(JAISCRIPT_BUILD_EXAMPLES)
+    add_subdirectory(examples/demoreel)
+endif()
+# --- end jai_demoreel ---

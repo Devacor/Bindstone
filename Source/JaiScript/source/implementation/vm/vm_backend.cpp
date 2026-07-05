@@ -18,6 +18,14 @@
 #ifndef JAI_MAX_CALL_DEPTH
 #define JAI_MAX_CALL_DEPTH 10000
 #endif
+// Shared recursion-limit message (defined identically in detail/interpreter.hpp for the
+// interpreter): one text for both backends and both triggers keeps error parity byte-exact
+#ifndef JAI_MAX_CALL_DEPTH_MESSAGE
+#define JAI_STRINGIFY_IMPL(x) #x
+#define JAI_STRINGIFY(x) JAI_STRINGIFY_IMPL(x)
+#define JAI_MAX_CALL_DEPTH_MESSAGE \
+	"Maximum recursion depth (" JAI_STRINGIFY(JAI_MAX_CALL_DEPTH) ") exceeded - possible infinite recursion"
+#endif
 
 namespace jai::vm {
 
@@ -7831,8 +7839,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
 		return checked_result<void>(
 			make_error_code(runtime_error_code::max_recursion_depth),
-			"Maximum recursion depth ({0}) exceeded - possible infinite recursion",
-			static_cast<uint64_t>(JAI_MAX_CALL_DEPTH));
+			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 	if (execution_budget_exhausted()) [[unlikely]] {
 		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
@@ -7990,8 +7997,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
 		return checked_result<void>(
 			make_error_code(runtime_error_code::max_recursion_depth),
-			"Maximum recursion depth ({0}) exceeded - possible infinite recursion",
-			static_cast<uint64_t>(JAI_MAX_CALL_DEPTH));
+			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 	if (execution_budget_exhausted()) [[unlikely]] {
 		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
@@ -8544,16 +8550,17 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
 		return checked_result<script_value>(
 			make_error_code(runtime_error_code::max_recursion_depth),
-			"Maximum recursion depth ({0}) exceeded - possible infinite recursion",
-			static_cast<uint64_t>(JAI_MAX_CALL_DEPTH));
+			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 	// The native entry path (constructor chains especially) stacks wide frames per
 	// level and can exhaust the native stack long before the depth cap - fail
-	// catchably instead of dying on 0xC00000FD (in-loop frames never recurse natively)
+	// catchably instead of dying on 0xC00000FD (in-loop frames never recurse natively).
+	// Same message as the depth cap: which limit fires first differs per backend, so a
+	// distinct text here breaks backend error parity.
 	if (detail::native_stack_low()) [[unlikely]] {
 		return checked_result<script_value>(
 			make_error_code(runtime_error_code::max_recursion_depth),
-			"Native stack exhausted - possible infinite recursion");
+			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 
 	if (execution_budget_exhausted()) [[unlikely]] {

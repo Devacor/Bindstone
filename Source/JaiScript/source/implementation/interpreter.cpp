@@ -10760,7 +10760,11 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (i >= args.size()) {
             // Must have a default value (validated by argument count check above)
             if (param.default_value) {
-                JAISCRIPT_TRY(dispatch_expr(param.default_value.get()));
+                auto default_result = dispatch_expr(param.default_value.get());
+                if (!default_result) {
+                    cleanup();
+                    return default_result.error_value();
+                }
                 script_value default_val = pop_value();
                 call_stack_[frame_index].set_local(param.slot_index, std::move(default_val));
                 continue;
@@ -10813,8 +10817,16 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
 
             // Non-reference parameter - try to convert the argument to the parameter type if needed
+            // (cleanup before propagating: an early return here would leak the callee frame/env)
             script_value converted_arg = make_value();
-            JAISCRIPT_TRY_ASSIGN(converted_arg, try_convert_for_parameter(arg, param.type));
+            {
+                auto convert_result = try_convert_for_parameter(arg, param.type);
+                if (!convert_result) {
+                    cleanup();
+                    return convert_result.error_value();
+                }
+                converted_arg = std::move(convert_result.value());
+            }
 
             // Decide between value semantics (clone) or reference semantics (share)
             bool should_share = false;
@@ -10924,7 +10936,14 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             function.return_type->type_name != "void" &&
             function.return_type->type_name != "auto" &&
             function.return_type->base_type != script_value_type::jai_any_type) {
-            JAISCRIPT_TRY_ASSIGN(result, try_convert_for_parameter(result, function.return_type));
+            // cleanup before propagating: leaking hasReturnValue_/frame/env here poisons the
+            // rest of the run once the caller catches (vm pop_script_frame_core ordering)
+            auto convert_result = try_convert_for_parameter(result, function.return_type);
+            if (!convert_result) {
+                cleanup();
+                return convert_result.error_value();
+            }
+            result = std::move(convert_result.value());
         }
     } else {
         // Check if this is a constructor (method with no explicit return)

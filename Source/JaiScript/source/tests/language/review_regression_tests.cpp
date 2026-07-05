@@ -577,6 +577,29 @@ public:
                 "cfor -= overflow names the compound step (got: " + msg[0] + ")");
         });
 
+        // ---- fuzz FZ-FLOAT-DIVZERO-TEXT (seed 201): float zero-divisor on the
+        // literal/identifier shapes fell to the interpreter's generic handler (bare
+        // "Division by zero") while the vm's fused op raised the informative text ----
+        test("fuzz_float_divzero_text_parity", [this]() {
+            auto expect_both = [&](const char* src, const std::string& needle, const std::string& what) {
+                std::string msg[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    try { e->execute(src); }
+                    catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                    ++idx;
+                }
+                check_eq(msg[0], msg[1], what + " error text is byte-identical across backends");
+                check_true(msg[0].find(needle) != std::string::npos,
+                    what + " keeps the informative text (got: " + msg[0] + ")");
+            };
+            expect_both("var z = 0.0; 0.5 / z;", "Division by zero in float operation", "literal/var float divide");
+            expect_both("var z = 0.0; 0.5 % z;", "Modulo by zero in float operation", "literal/var float modulo");
+            expect_both("var z = 0.5; z % 0.0;", "Modulo by zero in float operation", "var/literal float modulo");
+        });
+
         test("range_for_ref_realloc_no_corruption", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

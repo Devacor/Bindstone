@@ -8068,8 +8068,9 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                         }
                                     }
                                     valueStack_.clear();
-                                    // Fresh body scope per iteration (vm/while parity: body shadow decls must not persist)
-                                    body_env->reset(loop_env);
+                                    // Fresh body scope per iteration (vm/while parity: body shadow decls must
+                                    // not persist); clear_values early-outs when the body defined nothing
+                                    body_env->clear_values();
                                     environment_ = loop_env;
                                 } else {
                                     auto result = dispatch_stmt(stmt->body.get());

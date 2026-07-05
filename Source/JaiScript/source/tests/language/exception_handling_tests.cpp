@@ -361,6 +361,47 @@ public:
             check_eq(std::string("c:calleefail"), result.as_string());
         });
 
+        // Regression: caught typed-return conversion error left the callee frame/env and
+        // hasReturnValue_ live - catch body truncated, post-try statements skipped
+        test("caught_return_conversion_error_full_recovery", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                function bad() -> int { return "nope"; }
+                var log = "";
+                try { bad(); log += "no"; } catch (e) { log += "a"; log += "b"; }
+                log += "c";
+                log;
+            )");
+            check_eq(std::string("abc"), result.as_string());
+        });
+
+        test("caught_return_conversion_error_enclosing_typed_return", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                function bad() -> int { return "nope"; }
+                function outer() -> int {
+                    var seen = 0;
+                    try { bad(); } catch (e) { seen = 1; }
+                    return 7 + seen;
+                }
+                outer();
+            )");
+            check_eq((int64_t)8, result.as_int());
+        });
+
+        test("caught_arg_conversion_error_full_recovery", [this]() {
+            auto engine = make_engine();
+            script_value result = engine->execute(R"(
+                function takes(int x) -> int { return x; }
+                var log = "";
+                try { takes([1, 2]); log += "no"; } catch (e) { log += "a"; }
+                log += "b";
+                log;
+            )");
+            check_eq(std::string("ab"), result.as_string());
+            check_eq((int64_t)3, engine->execute("takes(3);").as_int());
+        });
+
         test("throw_during_string_method_argument", [this]() {
             auto engine = make_engine();
             script_value result = engine->execute(R"(

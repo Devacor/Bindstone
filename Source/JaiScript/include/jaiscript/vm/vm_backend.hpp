@@ -324,6 +324,11 @@ namespace jai::vm {
         void exec_map(frame& f, const vm_instruction& ins);
 
         script_value* resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id);
+        script_value* resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id);
+        // Env-path lookup memoized per instruction (cache_slot = 2*ip [+1 for fused right]).
+        // Returns the same pointer environment::get_ref/get_value_ptr's storage prefix
+        // would; nullptr = caller must run its original full lookup (fallback tails).
+        script_value* env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id);
         checked_result<void> define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value);
 
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type);
@@ -394,7 +399,8 @@ namespace jai::vm {
         // type-ctor names, env, this-field/bound-method/static) without pushing;
         // values that must be materialized land in scratch.
         checked_result<const script_value*> fused_ident_value(frame& f, const fused_operand& operand,
-                                                              std::optional<script_value>& scratch);
+                                                              std::optional<script_value>& scratch,
+                                                              size_t cache_slot);
         checked_result<void> exec_index(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_assign(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_compound(frame& f, const vm_instruction& ins);

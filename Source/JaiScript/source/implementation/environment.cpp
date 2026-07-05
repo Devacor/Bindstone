@@ -60,6 +60,7 @@ void environment::define(uint64_t id, const script_value& value) {
     local_storage_.push_back(value);
     flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
     local_ids_.insert(id);
+    bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
 }
 
 void environment::define(uint64_t id, script_value&& value) {
@@ -77,6 +78,42 @@ void environment::define(uint64_t id, script_value&& value) {
     local_storage_.push_back(std::move(value));
     flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
     local_ids_.insert(id);
+    bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
+}
+
+void environment::bump_env_epoch() noexcept {
+    if (symbolizer_) {
+        symbolizer_->bump_env_epoch();
+    }
+}
+
+script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
+    cacheable = false;
+    // Byte-parallel with the get_ref/get_value_ptr prefix: 'this' special-case first
+    if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
+        return &this_object_;
+    }
+    auto it = flat_lookup_.find(id);
+    if (it != flat_lookup_.end()) {
+        cacheable = local_ids_.count(id) > 0;
+        return it->second;
+    }
+    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+        auto parent_it = p->flat_lookup_.find(id);
+        if (parent_it != p->flat_lookup_.end()) {
+            flat_lookup_[id] = parent_it->second;
+            cacheable = p->local_ids_.count(id) > 0;
+            return parent_it->second;
+        }
+    }
+    if (parent_) {
+        script_value* ptr = parent_->get_value_ptr(id);
+        if (ptr) {
+            flat_lookup_[id] = ptr;
+            return ptr;   // provenance unknown (may be a this/static-field fallback): not cacheable
+        }
+    }
+    return nullptr;
 }
 
 checked_result<script_value> environment::get(const std::string& name) const {
@@ -528,6 +565,9 @@ std::unordered_map<std::string_view, script_value> environment::get_local_variab
 }
 
 void environment::clear_values() {
+    if (local_ids_.empty() && local_storage_.empty()) {
+        return;   // nothing to destroy, nothing for vm lookup caches to go stale on
+    }
     // Remove local IDs from flat_lookup_
     for (uint64_t id : local_ids_) {
         flat_lookup_.erase(id);
@@ -540,6 +580,7 @@ void environment::clear_values() {
         local_storage_.pop_back();
     }
     local_ids_.clear();
+    bump_env_epoch();   // local storage died: stale vm lookup-cache pointers must miss
 }
 
 void environment::clear_parent_cache() {
@@ -552,6 +593,7 @@ void environment::clear_parent_cache() {
             ++it;
         }
     }
+    bump_env_epoch();
 }
 
 void environment::reset(std::shared_ptr<environment> new_parent) {
@@ -566,6 +608,7 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
     // This is critical for recursive functions - avoids re-walking parent chain
     if (parent_.get() != new_parent.get()) {
         flat_lookup_.clear();
+        bump_env_epoch();   // chain shape changed: vm lookup caches through this env are stale
     }
 
     parent_ = new_parent;
@@ -587,6 +630,7 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
     // Only clear cache if parent actually changed
     if (parent_.get() != parent.get()) {
         flat_lookup_.clear();
+        bump_env_epoch();   // chain shape changed: vm lookup caches through this env are stale
     }
 
     parent_ = parent;
@@ -608,6 +652,7 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
     // Only clear cache if parent actually changed
     if (parent_.get() != parent.get()) {
         flat_lookup_.clear();
+        bump_env_epoch();   // chain shape changed: vm lookup caches through this env are stale
     }
 
     parent_ = parent;

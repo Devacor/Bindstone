@@ -96,8 +96,20 @@ namespace jai::vm {
         uint32_t generic_update_ip = k_invalid_u32;
     };
 
+    // Per-instruction env-lookup inline cache: valid while the same environment is in
+    // effect and no environment anywhere was constructed/reset/cleared, gained a new
+    // define, or changed parent (string_symbolizer::env_epoch). Only pointers into an
+    // environment's own local_storage_ (stable deque) are ever stored.
+    struct env_lookup_cache_entry {
+        const environment* env = nullptr;
+        uint64_t epoch = 0;
+        script_value* ptr = nullptr;
+    };
+
     struct chunk {
         std::vector<vm_instruction> code;
+        // Lazily sized to 2*code.size(): slot 2*ip (+1 for a fused right operand)
+        mutable std::vector<env_lookup_cache_entry> env_lookup_cache;
         // Per instruction: the statement node in effect (raw pointer into the pinned tree)
         std::vector<const ast_node*> stmt_nodes;
 

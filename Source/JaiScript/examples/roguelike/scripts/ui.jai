@@ -149,6 +149,7 @@ function help_screen() -> void {
 	lines.push("  pick up       g");
 	lines.push("  inventory     i   (letter to inspect, then e=use/equip d=drop)");
 	lines.push("  quaff first   q   (first potion in pack)");
+	lines.push("  equip best    E   (best upgrade in pack)");
 	lines.push("  class skill   z");
 	lines.push("  descend       >   (on stairs)");
 	lines.push("  character     c");

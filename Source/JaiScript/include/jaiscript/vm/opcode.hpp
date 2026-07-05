@@ -88,6 +88,7 @@ namespace jai::vm {
 
         op_fused_cmp_jump,  // a=jump-if-false target, b=fused_binary_proto index (comparison),
                             // c=condition proved bool; BINARY_FUSED+JUMP_IF_FALSE superinstruction
+        op_compound_fused,  // a=compound_fused_proto index; BINARY_FUSED+COMPOUND_STORE superinstruction
 
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
         op_halt,
@@ -198,6 +199,7 @@ namespace jai::vm {
             case opcode::op_include: return "INCLUDE";
             case opcode::op_import: return "IMPORT";
             case opcode::op_fused_cmp_jump: return "FUSED_CMP_JUMP";
+            case opcode::op_compound_fused: return "COMPOUND_FUSED";
             case opcode::op_error: return "ERROR";
             case opcode::op_halt: return "HALT";
         }

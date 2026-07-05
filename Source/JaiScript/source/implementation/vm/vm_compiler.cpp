@@ -90,6 +90,7 @@ namespace {
 			case opcode::op_jump_if_false:
 			case opcode::op_jump_if_true:
 			case opcode::op_fused_cmp_jump:
+			case opcode::op_compound_fused:
 			case opcode::op_loop_back:
 			case opcode::op_call:
 			case opcode::op_return:
@@ -168,6 +169,31 @@ size_t vm_compiler::emit_cond_jump_false(const expression* cond_expr) {
 		}
 	}
 	return emit(opcode::op_jump_if_false, k_invalid_u32, proved);
+}
+
+// Compound store to an identifier whose RHS was just compiled. When the RHS is a fused
+// binary with at least one constant operand (the cache-slot budget: left/right/target),
+// the pair collapses into op_compound_fused.
+void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint32_t kind_flags) {
+	auto& code = chunk_->code;
+	if (!code.empty() && code.back().op == opcode::op_binary_fused) {
+		const fused_binary_proto& p = chunk_->fused_binary_protos[code.back().a];
+		if (p.left.const_index != k_invalid_u32 || p.right.const_index != k_invalid_u32) {
+			compound_fused_proto cp;
+			cp.rhs_proto = code.back().a;
+			cp.symbol = symbol_index;
+			cp.slot = slot;
+			cp.kind_flags = kind_flags;
+			chunk_->compound_fused_protos.push_back(cp);
+			vm_instruction& ins = code.back();
+			ins.op = opcode::op_compound_fused;
+			ins.a = static_cast<uint32_t>(chunk_->compound_fused_protos.size() - 1);
+			ins.b = 0;
+			ins.c = 0;
+			return;
+		}
+	}
+	emit(opcode::op_compound_store, symbol_index, slot, kind_flags);
 }
 
 void vm_compiler::patch_jump(size_t at, size_t target) {
@@ -970,7 +996,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 			if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
 			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 		} else {
-			emit(opcode::op_compound_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident),
+			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
 			     compound_kind_for(assign->op.type) | compound_flag_no_result);
 		}
 		return true;
@@ -1188,7 +1214,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			default: kind = compound_plus; break;
 			}
 			if (!as_statement) kind |= compound_flag_result_needed;
-			emit(opcode::op_compound_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind);
+			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind);
 		}
 		return;
 	}

@@ -1196,7 +1196,7 @@ script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, u
 			return ptr;
 		}
 	}
-	if (script_value* cached = env_lookup_cached(f, f.ip * 2, symbol_id)) {
+	if (script_value* cached = env_lookup_cached(f, f.ip * 3 + 2, symbol_id)) {
 		return cached;
 	}
 	return environment_->get_value_ptr(symbol_id);
@@ -1210,8 +1210,8 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 		return nullptr;   // callers fall through to their original full lookup
 	}
 	auto& cache = f.code->env_lookup_cache;
-	if (cache.size() < f.code->code.size() * 2) [[unlikely]] {
-		cache.resize(f.code->code.size() * 2);
+	if (cache.size() < f.code->code.size() * 3) [[unlikely]] {
+		cache.resize(f.code->code.size() * 3);
 	}
 	env_lookup_cache_entry& entry = cache[cache_slot];
 	const uint64_t epoch = symbolizer_->env_epoch();
@@ -2560,7 +2560,7 @@ checked_result<void> vm_backend::exec_load(frame& f, const vm_instruction& ins) 
 			return {};
 		}
 	}
-	if (script_value* cached = env_lookup_cached(f, f.ip * 2, sym)) {
+	if (script_value* cached = env_lookup_cached(f, f.ip * 3, sym)) {
 		stack_.push_back(cached->deref());
 		return {};
 	}
@@ -3503,14 +3503,14 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 	if (p.left.const_index != k_invalid_u32) {
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
 	} else {
-		auto resolved = fused_ident_value(f, p.left, lscratch, f.ip * 2);
+		auto resolved = fused_ident_value(f, p.left, lscratch, f.ip * 3);
 		if (!resolved) return resolved.error_value();
 		lp = resolved.value();
 	}
 	if (p.right.const_index != k_invalid_u32) {
 		rp = &f.code->constants[p.right.const_index];
 	} else {
-		auto resolved = fused_ident_value(f, p.right, rscratch, f.ip * 2 + 1);
+		auto resolved = fused_ident_value(f, p.right, rscratch, f.ip * 3 + 1);
 		if (!resolved) return resolved.error_value();
 		rp = resolved.value();
 	}
@@ -3618,8 +3618,8 @@ checked_result<void> vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruct
 	// Numeric fast path: mirrors exec_binary_fused's comparison rows without the bool
 	// round-trip through the value stack. Any non-trivial shape bails to the pair.
 	if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0) {
-		const script_value* lp = fused_cmp_operand(f, p.left, f.ip * 2);
-		const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 2 + 1) : nullptr;
+		const script_value* lp = fused_cmp_operand(f, p.left, f.ip * 3);
+		const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 3 + 1) : nullptr;
 		if (rp) {
 			const size_t li = lp->raw_storage_index();
 			const size_t ri = rp->raw_storage_index();
@@ -3674,6 +3674,107 @@ checked_result<void> vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruct
 	const bool truthy = ins.c ? cond.unchecked_as_bool() : is_truthy(cond);
 	f.ip = truthy ? f.ip + 1 : ins.a;
 	return {};
+}
+
+// BINARY_FUSED+COMPOUND_STORE superinstruction (`target op= <fused rhs>`). Fast path:
+// plain int target (slot or cached top-level env local) with all-int cheap-shape rhs,
+// arithmetic kinds only — error surfaces copied verbatim from the pair. Anything else
+// runs the pair's two exec bodies back to back (parity by construction). Never touches
+// f.ip: the dispatch case breaks, so the loop-bottom unwind check and ++ip run as usual.
+checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
+	const compound_fused_proto& cp = f.code->compound_fused_protos[ins.a];
+	const fused_binary_proto& p = f.code->fused_binary_protos[cp.rhs_proto];
+
+	if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0) {
+		script_value* varPtr = nullptr;
+		if (cp.slot != k_invalid_u32 && f.locals && !f.top_level) {
+			varPtr = f.locals->get_local(cp.slot);
+		}
+		if (!varPtr) {
+			varPtr = env_lookup_cached(f, f.ip * 3 + 2, f.code->symbols[cp.symbol]);
+		}
+		if (varPtr && varPtr->raw_storage_index() == script_value::TYPEID_INT) {
+			const script_value* lp = fused_cmp_operand(f, p.left, f.ip * 3);
+			const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 3 + 1) : nullptr;
+			if (rp && lp->raw_storage_index() == script_value::TYPEID_INT &&
+			    rp->raw_storage_index() == script_value::TYPEID_INT) {
+				const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+				script_int rhs = 0;
+				bool arithmetic = true;
+				switch (static_cast<token_type>(p.op)) {
+				case token_type::plus:
+					if (!ints::try_add(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '+'");
+					break;
+				case token_type::minus:
+					if (!ints::try_sub(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '-'");
+					break;
+				case token_type::star:
+					if (!ints::try_mul(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '*'");
+					break;
+				case token_type::slash:
+					if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+					if (!ints::try_div(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '/'");
+					break;
+				case token_type::percent:
+					if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+					rhs = ints::mod(a, b);
+					break;
+				default:
+					arithmetic = false;   // comparisons etc: pair semantics below
+					break;
+				}
+				if (arithmetic) {
+					const uint32_t kind = cp.kind_flags & compound_kind_mask;
+					script_int& tref = varPtr->unchecked_as_int_ref();
+					script_int rr = 0;
+					bool stored = true;
+					switch (kind) {
+					case compound_plus:
+						if (!ints::try_add(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '+='");
+						break;
+					case compound_minus:
+						if (!ints::try_sub(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '-='");
+						break;
+					case compound_star:
+						if (!ints::try_mul(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '*='");
+						break;
+					case compound_slash:
+						if (rhs == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+						if (!ints::try_div(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '/='");
+						break;
+					default:
+						stored = false;   // %=: the pair surfaces unknown_operator
+						break;
+					}
+					if (stored) {
+						tref = rr;
+						if (!(cp.kind_flags & compound_flag_no_result)) {
+							stack_.push_back((cp.kind_flags & compound_flag_result_needed) ? varPtr->clone() : *varPtr);
+						}
+						return {};
+					}
+				}
+			}
+		}
+	}
+
+	// Verbatim pair: the fused rhs pushes its result, then the compound store pops it
+	vm_instruction rhs_ins = ins;
+	rhs_ins.a = cp.rhs_proto;
+	auto rhs_result = exec_binary_fused(f, rhs_ins);
+	if (!rhs_result) {
+		return rhs_result;
+	}
+	if (is_unwinding_) [[unlikely]] {
+		// Pair parity: the store never ran; result stays pushed for the loop-bottom
+		// unwind handling (the dispatch case breaks into it)
+		return {};
+	}
+	vm_instruction store_ins = ins;
+	store_ins.a = cp.symbol;
+	store_ins.b = cp.slot;
+	store_ins.c = cp.kind_flags;
+	return exec_compound_store(f, store_ins);
 }
 
 namespace {
@@ -7302,6 +7403,7 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 				if (ins.c & store_flag_no_result) { stack_.pop_back(); }
 				break;
 			case opcode::op_compound_store: VM_TRY_OP(exec_compound_store(f, ins)); break;
+			case opcode::op_compound_fused: VM_TRY_OP_SHARED(exec_compound_fused(f, ins)); break;
 			case opcode::op_incdec:
 				VM_TRY_OP(exec_incdec(f, ins));
 				if (ins.c & incdec_flag_no_result) { stack_.pop_back(); }

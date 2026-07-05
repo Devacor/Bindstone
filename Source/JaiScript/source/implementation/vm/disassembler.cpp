@@ -86,6 +86,18 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				}
 				out << " proto=" << ins.b << " -> " << ins.a << " proved=" << ins.c;
 				break;
+			case opcode::op_compound_fused:
+				if (ins.a < ch.compound_fused_protos.size()) {
+					const auto& cp = ch.compound_fused_protos[ins.a];
+					out << " rhs_proto=" << cp.rhs_proto << " slot=";
+					if (cp.slot == k_invalid_u32) out << "env";
+					else out << cp.slot;
+					if (cp.symbol < ch.symbols.size() && symbolizer) {
+						out << " '" << symbolizer->get_string(ch.symbols[cp.symbol]) << "'";
+					}
+					out << " kind_flags=" << cp.kind_flags;
+				}
+				break;
 			case opcode::op_jump:
 			case opcode::op_jump_if_false:
 			case opcode::op_jump_if_true:

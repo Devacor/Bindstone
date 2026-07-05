@@ -33,6 +33,20 @@ public:
             check_eq(result.template as<script_int>(), static_cast<script_int>(10));
         });
 
+        // Regression: the interpreter's continuation-replay path skipped the typed-return
+        // conversion on the coroutine's FINAL return (2.5 leaked out as float; vm converts)
+        test("coroutine_final_typed_return_converts", [this]() {
+            auto engine = make_engine();
+            engine->execute(R"(
+                coroutine int g() { yield 1; return 2.5; }
+                var c = g();
+                var first = c.resume();
+            )");
+            auto final_val = engine->execute("c.resume();");
+            check_true(final_val.is_int());
+            check_eq(static_cast<script_int>(2), final_val.as<script_int>());
+        });
+
         test("coroutine_done_check", [this]() {
             auto engine = make_engine();
             jai::stdlib::register_all(engine);

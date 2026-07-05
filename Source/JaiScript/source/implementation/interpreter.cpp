@@ -11446,7 +11446,25 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
             } else if (hasReturnValue_) {
                 handle.set_status(coroutine_handle::status::completed);
                 if (returnValue_) {
-                    handle.yield_value_ = std::move(returnValue_.value());
+                    // call_function epilogue parity: deref, then apply the typed-return
+                    // conversion the replay used to skip (vm converts the final return)
+                    script_value final_result = returnValue_.value().is_reference()
+                        ? returnValue_.value().deref()
+                        : std::move(returnValue_.value());
+                    if (function->return_type && !function->return_type->type_name.empty() &&
+                        function->return_type->type_name != "void" &&
+                        function->return_type->type_name != "auto" &&
+                        function->return_type->base_type != script_value_type::jai_any_type) {
+                        auto convert_result = try_convert_for_parameter(final_result, function->return_type);
+                        if (!convert_result) {
+                            handle.set_status(coroutine_handle::status::failed);
+                            error_result.emplace(convert_result.error_value());
+                        } else {
+                            handle.yield_value_ = std::move(convert_result.value());
+                        }
+                    } else {
+                        handle.yield_value_ = std::move(final_result);
+                    }
                 }
                 state.saved_environment.reset();
                 state.saved_call_stack.clear();

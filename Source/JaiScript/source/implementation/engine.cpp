@@ -3,6 +3,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
+#include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -936,6 +937,59 @@ script_value jaibite::execute() {
         throw script_exception("jaibite: owning engine no longer exists");
     }
     return owner->execute(*this);
+}
+
+std::vector<uint8_t> jaibite::save_bytes() const {
+    auto owner = engine_.lock();
+    if (!owner) {
+        throw script_exception("jaibite: owning engine no longer exists");
+    }
+    return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint());
+}
+
+void jaibite::save(const std::string& path) const {
+    auto bytes = save_bytes();
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file.is_open()) {
+        throw runtime_error("jaibite: failed to open file for writing: " + path);
+    }
+    file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!file.good()) {
+        throw runtime_error("jaibite: failed to write file: " + path);
+    }
+}
+
+jai::jaibite engine::jaibite_load(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        throw runtime_error("jaibite: failed to open file: " + path);
+    }
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return jaibite_load_bytes(bytes.data(), bytes.size());
+}
+
+jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size) {
+    uint64_t saved_fingerprint = 0;
+    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint);
+    jai::jaibite bite(weak_from_this(), std::move(declarations));
+    bite.registration_mismatch_ = (saved_fingerprint != registration_fingerprint());
+    return bite;
+}
+
+uint64_t engine::registration_fingerprint() const {
+    std::vector<std::string_view> names;
+    names.reserve(impl->overloadedFunctions.size() + impl->class_registry_.cpp_classes_.size() +
+                  impl->registeredTemplateTypes.size());
+    for (const auto& [name, _] : impl->overloadedFunctions) names.push_back(name);
+    for (const auto& [name, _] : impl->class_registry_.cpp_classes_) names.push_back(name);
+    for (const auto& name : impl->registeredTemplateTypes) names.push_back(name);
+    std::sort(names.begin(), names.end());
+    uint64_t hash = 1469598103934665603ull;
+    for (auto name : names) {
+        for (unsigned char c : name) { hash ^= c; hash *= 1099511628211ull; }
+        hash ^= 0xFFu; hash *= 1099511628211ull;  // name separator
+    }
+    return hash;
 }
 
 script_value engine::execute_file(const std::string& scriptPath) {

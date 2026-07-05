@@ -446,6 +446,40 @@ public:
             check_eq(std::string("1;1;1;"), r.as_string());
         });
 
+        // ---- fuzz FZ-TYPED-FN-NO-RETURN (seeds 66/239/2529/3657/3784): ++/-- on a
+        // slot-based function local resolved only through the environment, so the
+        // interpreter raised a bogus "Undefined variable '<local>'" (VM ran fine) ----
+        test("fuzz_incdec_slot_local", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)1, e->execute(R"(
+                function f() { int g = 0; ++g; return g; }
+                f();
+            )").as_int());
+        });
+        test("fuzz_incdec_slot_param_in_while", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)4, e->execute(R"(
+                function f(int g) { while (++g < 4) {} return g; }
+                f(0);
+            )").as_int());
+        });
+        test("fuzz_incdec_postfix_slot_local", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)5, e->execute(R"(
+                function f() { int g = 0; while (g++ < 4) {} return g; }
+                f();
+            )").as_int());
+        });
+        test("fuzz_typed_fn_falls_off_end_returns_null", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function f(int p) -> string { int g = 0; while (++g < 4) {} }
+                f(1);
+            )");
+            check_true(r.is_null(), "typed fn falling off the end yields null (vm parity)");
+            check_eq((int64_t)2, e->execute("1 + 1").as_int());
+        });
+
         test("range_for_ref_realloc_no_corruption", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

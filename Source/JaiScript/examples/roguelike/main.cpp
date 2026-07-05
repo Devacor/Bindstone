@@ -1,0 +1,325 @@
+// jai_rogue host: a deliberately thin console shell around a JaiScript engine.
+// Everything that makes it a game (dungeon gen, combat, AI, items, UI text) lives
+// in scripts/*.jai. The host only provides: a terminal, a blocking keyboard,
+// a seeded rng class, file IO for saves, and command-line flags as globals.
+
+#include <jaiscript/jaiscript.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
+
+#include <cstdio>
+#include <cstdint>
+#include <deque>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <conio.h>
+#endif
+
+namespace {
+
+struct host_options {
+	int64_t seed = 1337;
+	std::string backend = "vm";
+	bool smoke = false;
+	bool dev = false;
+	bool god = false;
+	bool load = false;
+	bool quiet = false;          // suppress frame drawing (smoke implies quiet)
+	int64_t turns = 250;         // smoke turn budget
+	std::string scripted_input;  // keys fed to read_key(); empty = interactive
+	std::string scripts_dir;
+	std::string save_path = "jai_rogue_save.json";
+};
+
+struct console_host {
+	bool vt_enabled = false;
+	bool quiet = false;
+	std::deque<std::string> scripted;
+	bool input_was_scripted = false;
+
+	void init() {
+#ifdef _WIN32
+		HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+		DWORD mode = 0;
+		if (out != INVALID_HANDLE_VALUE && GetConsoleMode(out, &mode)) {
+			vt_enabled = SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
+		}
+		SetConsoleOutputCP(CP_UTF8);
+#endif
+		if (!quiet) {
+			std::fputs("\x1b[?25l\x1b[2J\x1b[H", stdout);
+			std::fflush(stdout);
+		}
+	}
+
+	void shutdown() {
+		if (!quiet) {
+			std::fputs("\x1b[0m\x1b[?25h\n", stdout);
+			std::fflush(stdout);
+		}
+	}
+
+	void draw(const std::string& frame) {
+		if (quiet) { return; }
+		std::string out;
+		out.reserve(frame.size() + 8);
+		out += "\x1b[H";
+		out += frame;
+		out += "\x1b[0m";
+		std::fwrite(out.data(), 1, out.size(), stdout);
+		std::fflush(stdout);
+	}
+
+	void clear() {
+		if (quiet) { return; }
+		std::fputs("\x1b[2J\x1b[H", stdout);
+		std::fflush(stdout);
+	}
+
+	std::string read_key() {
+		if (input_was_scripted) {
+			if (scripted.empty()) { return "Q"; }  // scripted run finished: hard quit
+			std::string k = scripted.front();
+			scripted.pop_front();
+			if (k == ";") { return "enter"; }  // scripted stand-ins for special keys
+			if (k == "^") { return "esc"; }
+			return k;
+		}
+#ifdef _WIN32
+		int c = _getch();
+		if (c == 0 || c == 0xE0) {
+			int c2 = _getch();
+			switch (c2) {
+				case 72: return "up";
+				case 80: return "down";
+				case 75: return "left";
+				case 77: return "right";
+				default: return "";
+			}
+		}
+		switch (c) {
+			case 13: return "enter";
+			case 27: return "esc";
+			case 8: return "backspace";
+			case 9: return "tab";
+			default: break;
+		}
+		if (c >= 32 && c < 127) { return std::string(1, static_cast<char>(c)); }
+		return "";
+#else
+		int c = std::getchar();
+		if (c == EOF) { return "Q"; }
+		if (c == '\n') { return "enter"; }
+		return std::string(1, static_cast<char>(c));
+#endif
+	}
+};
+
+// Deterministic xorshift64* — the ONLY randomness the game is allowed to touch.
+// Bound as script class `Rng` so dungeons replay exactly from a seed on both backends.
+struct rogue_rng {
+	uint64_t s;
+
+	explicit rogue_rng(jai::script_int seed)
+		: s(seed != 0 ? static_cast<uint64_t>(seed) : 0x9E3779B97F4A7C15ull) {
+		for (int i = 0; i < 4; ++i) { next_raw(); }
+	}
+
+	uint64_t next_raw() {
+		s ^= s >> 12;
+		s ^= s << 25;
+		s ^= s >> 27;
+		return s * 0x2545F4914F6CDD1Dull;
+	}
+
+	jai::script_int next(jai::script_int n) {
+		if (n <= 0) { return 0; }
+		return static_cast<jai::script_int>(next_raw() % static_cast<uint64_t>(n));
+	}
+
+	jai::script_int roll(jai::script_int lo, jai::script_int hi) {
+		if (hi <= lo) { return lo; }
+		return lo + next(hi - lo + 1);
+	}
+
+	bool chance(jai::script_int percent) { return next(100) < percent; }
+
+	// Masked to 62 bits so the value survives a script-side int64 round trip via JSON.
+	jai::script_int state() const { return static_cast<jai::script_int>(s & 0x3FFFFFFFFFFFFFFFull); }
+	void set_state(jai::script_int v) {
+		s = static_cast<uint64_t>(v);
+		if (s == 0) { s = 0x9E3779B97F4A7C15ull; }
+	}
+};
+
+std::string slurp_file(const std::string& path) {
+	std::ifstream in(path, std::ios::binary);
+	if (!in) { return ""; }
+	std::ostringstream ss;
+	ss << in.rdbuf();
+	return ss.str();
+}
+
+bool spill_file(const std::string& path, const std::string& content) {
+	std::ofstream out(path, std::ios::binary | std::ios::trunc);
+	if (!out) { return false; }
+	out.write(content.data(), static_cast<std::streamsize>(content.size()));
+	return out.good();
+}
+
+std::string locate_scripts_dir(const std::string& override_dir, const char* argv0) {
+	namespace fs = std::filesystem;
+	if (!override_dir.empty()) { return override_dir; }
+#ifdef JAI_ROGUE_SOURCE_SCRIPTS_DIR
+	if (fs::exists(fs::path(JAI_ROGUE_SOURCE_SCRIPTS_DIR) / "main.jai")) {
+		return JAI_ROGUE_SOURCE_SCRIPTS_DIR;
+	}
+#endif
+	fs::path exe_dir = fs::absolute(fs::path(argv0)).parent_path();
+	fs::path local = exe_dir / "rogue_scripts";
+	if (fs::exists(local / "main.jai")) { return local.string(); }
+	return "scripts";
+}
+
+void print_usage() {
+	std::puts(
+		"jai_rogue - an ASCII roguelike written in JaiScript\n"
+		"  --seed N        dungeon seed (default 1337)\n"
+		"  --backend B     vm | interpreter (default vm)\n"
+		"  --smoke         headless deterministic autoplay; prints a state hash\n"
+		"  --turns N       smoke turn budget (default 250)\n"
+		"  --input KEYS    scripted keys fed to read_key() (e.g. \"jjllg.>\"; ';'=enter '^'=esc)\n"
+		"  --quiet         suppress frame drawing (useful with --input)\n"
+		"  --dev           enable in-game script hot reload on 'R'\n"
+		"  --god           god mode (no damage, monstrous stats)\n"
+		"  --load          continue from the save file\n"
+		"  --save PATH     save file path (default jai_rogue_save.json)\n"
+		"  --scripts DIR   override the scripts directory\n");
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+	host_options opt;
+	for (int i = 1; i < argc; ++i) {
+		std::string a = argv[i];
+		auto next_arg = [&](const char* flag) -> std::string {
+			if (i + 1 >= argc) {
+				std::fprintf(stderr, "missing value for %s\n", flag);
+				std::exit(2);
+			}
+			return argv[++i];
+		};
+		if (a == "--seed") { opt.seed = std::stoll(next_arg("--seed")); }
+		else if (a == "--backend") { opt.backend = next_arg("--backend"); }
+		else if (a == "--smoke") { opt.smoke = true; }
+		else if (a == "--turns") { opt.turns = std::stoll(next_arg("--turns")); }
+		else if (a == "--input") { opt.scripted_input = next_arg("--input"); }
+		else if (a == "--quiet") { opt.quiet = true; }
+		else if (a == "--dev") { opt.dev = true; }
+		else if (a == "--god") { opt.god = true; }
+		else if (a == "--load") { opt.load = true; }
+		else if (a == "--save") { opt.save_path = next_arg("--save"); }
+		else if (a == "--scripts") { opt.scripts_dir = next_arg("--scripts"); }
+		else if (a == "--help" || a == "-h") { print_usage(); return 0; }
+		else { std::fprintf(stderr, "unknown flag: %s\n", a.c_str()); print_usage(); return 2; }
+	}
+
+	console_host console;
+	console.quiet = opt.smoke || opt.quiet;
+	if (!opt.scripted_input.empty()) {
+		console.input_was_scripted = true;
+		for (char c : opt.scripted_input) { console.scripted.emplace_back(1, c); }
+	}
+	console.init();
+
+	auto eng = jai::engine::make();
+	if (opt.backend == "vm") { eng->set_backend(jai::backend_type::vm); }
+	else if (opt.backend == "interpreter" || opt.backend == "interp") {
+		eng->set_backend(jai::backend_type::interpreter);
+	} else {
+		console.shutdown();
+		std::fprintf(stderr, "unknown backend: %s\n", opt.backend.c_str());
+		return 2;
+	}
+	eng->execution_budget(0.0);  // the game blocks on read_key(); wall-clock budgets don't apply
+	jai::stdlib::register_all(eng);
+
+	std::string scripts_dir = locate_scripts_dir(opt.scripts_dir, argv[0]);
+	eng->add_include_path(scripts_dir);
+	eng->set_import_behavior(jai::engine::import_behavior::always);
+
+	// --- console bindings ---
+	eng->add_function("draw", [&console](const std::string& frame) { console.draw(frame); });
+	eng->add_function("clear_screen", [&console]() { console.clear(); });
+	eng->add_function("read_key", [&console]() -> std::string { return console.read_key(); });
+	eng->add_function("chr", [](jai::script_int code) -> std::string {
+		return std::string(1, static_cast<char>(code & 0x7F));
+	});
+	eng->add_function("sleep_ms", [&console](jai::script_int ms) {
+		if (console.quiet || console.input_was_scripted) { return; }
+#ifdef _WIN32
+		Sleep(static_cast<DWORD>(ms));
+#endif
+	});
+	// stdout that works even while frames own the screen (smoke summaries, death dumps)
+	eng->add_function("host_log", [](const std::string& line) {
+		std::fputs(line.c_str(), stdout);
+		std::fputc('\n', stdout);
+		std::fflush(stdout);
+	});
+
+	// --- file IO for saves ---
+	eng->add_function("read_file", [](const std::string& path) -> std::string { return slurp_file(path); });
+	eng->add_function("write_file", [](const std::string& path, const std::string& content) -> bool {
+		return spill_file(path, content);
+	});
+	eng->add_function("file_exists", [](const std::string& path) -> bool {
+		return std::filesystem::exists(path);
+	});
+	eng->add_function("delete_file", [](const std::string& path) -> bool {
+		std::error_code ec;
+		return std::filesystem::remove(path, ec);
+	});
+
+	// --- deterministic rng ---
+	jai::dynamic_binder<rogue_rng>(*eng, "Rng")
+		.constructor<jai::script_int>()
+		.method("next", &rogue_rng::next)
+		.method("roll", &rogue_rng::roll)
+		.method("chance", &rogue_rng::chance)
+		.method("state", &rogue_rng::state)
+		.method("set_state", &rogue_rng::set_state)
+		.build();
+
+	// --- flags as globals ---
+	eng->add_global("ESC", eng->make_value(std::string("\x1b")));
+	eng->add_global("HOST_SEED", eng->make_value(opt.seed));
+	eng->add_global("HOST_SMOKE", eng->make_value(opt.smoke));
+	eng->add_global("HOST_TURNS", eng->make_value(opt.turns));
+	eng->add_global("HOST_DEV", eng->make_value(opt.dev));
+	eng->add_global("HOST_GOD", eng->make_value(opt.god));
+	eng->add_global("HOST_LOAD", eng->make_value(opt.load));
+	eng->add_global("HOST_SCRIPTED", eng->make_value(console.input_was_scripted));
+	eng->add_global("SAVE_PATH", eng->make_value(opt.save_path));
+	eng->add_global("HOST_BACKEND", eng->make_value(opt.backend));
+
+	int exit_code = 0;
+	try {
+		eng->execute("import \"main.jai\";");
+		eng->execute("rogue_main();");
+	} catch (const std::exception& ex) {
+		console.shutdown();
+		std::fprintf(stderr, "\njai_rogue: script error: %s\n", ex.what());
+		std::string trace = eng->format_stack_trace();
+		if (!trace.empty()) { std::fprintf(stderr, "%s\n", trace.c_str()); }
+		return 1;
+	}
+	console.shutdown();
+	return exit_code;
+}

@@ -108,6 +108,22 @@ namespace jai {
         jai::jaibite jaibite(const std::string& scriptContent);
         script_value execute(jai::jaibite& bite);
 
+        // Load a jaibite saved via jaibite::save()/save_bytes(). Symbols and type_info
+        // are re-interned into THIS engine, so a bite saved from another engine loads
+        // correctly. Throws jai::runtime_error on missing file / bad format / version
+        // mismatch / corrupt data. Check bite.registration_mismatch() for an advisory
+        // registered-class/function fingerprint difference.
+        jai::jaibite jaibite_load(const std::string& path);
+        jai::jaibite jaibite_load_bytes(const uint8_t* data, size_t size);
+        jai::jaibite jaibite_load_bytes(const std::vector<uint8_t>& bytes) {
+            return jaibite_load_bytes(bytes.data(), bytes.size());
+        }
+
+        // FNV-1a over the sorted registered function/class/template-type names — the
+        // parse-affecting registration surface. Stamped into saved jaibites; compared on
+        // load to set jaibite::registration_mismatch().
+        uint64_t registration_fingerprint() const;
+
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
         

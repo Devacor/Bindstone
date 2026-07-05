@@ -43,6 +43,10 @@ void interpreter::init_dispatch_table() {
 checked_result<script_value> interpreter::handle_add(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_add(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -103,6 +107,10 @@ checked_result<script_value> interpreter::handle_add(const script_value& left, c
 checked_result<script_value> interpreter::handle_subtract(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_subtract(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -153,6 +161,10 @@ checked_result<script_value> interpreter::handle_subtract(const script_value& le
 checked_result<script_value> interpreter::handle_multiply(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_multiply(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -203,6 +215,10 @@ checked_result<script_value> interpreter::handle_multiply(const script_value& le
 checked_result<script_value> interpreter::handle_divide(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_divide(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -265,6 +281,10 @@ checked_result<script_value> interpreter::handle_divide(const script_value& left
 checked_result<script_value> interpreter::handle_modulo(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_modulo(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -323,6 +343,10 @@ checked_result<script_value> interpreter::handle_modulo(const script_value& left
 checked_result<script_value> interpreter::handle_less(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_less(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -374,6 +398,10 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
 checked_result<script_value> interpreter::handle_less_equal(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_less_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -425,6 +453,10 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
 checked_result<script_value> interpreter::handle_greater(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_greater(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -476,6 +508,10 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
 checked_result<script_value> interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
     const size_t li_raw = left.raw_storage_index();
     const size_t ri_raw = right.raw_storage_index();
+    // S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
+    if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        return handle_greater_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
+                        ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
 
     if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
         ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {

@@ -254,6 +254,33 @@ public:
             auto e = make_engine();
             check_eq((int64_t)0, e->execute("auto x = -9223372036854775807 - 1; auto d = -1; x % d").as_int());
         });
+        // ---- fuzz FZ-SPACESHIP-OVERFLOW-SWALLOW (seed 9336): the parser wrap-folds
+        // 1 + INT64_MAX into a literal INT64_MIN; the interpreter's literal unary-minus
+        // fast path then negated it UNCHECKED (silent wrap) while the VM raised ----
+        test("fuzz_unary_minus_literal_overflow", [this]() {
+            auto e = make_engine();
+            const char* src = "(-((1 + 9223372036854775807))) <=> 9223372036854775807";
+            if (e->throw_on_overflow()) {
+                check_throws([&]() { e->execute(src); });
+            } else {
+                check_eq((int64_t)-1, e->execute(src).as_int());  // wraps: INT64_MIN <=> INT64_MAX
+            }
+        });
+        test("fuzz_unary_minus_overflow_text_parity", [this]() {
+            std::string msg[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                if (!e->throw_on_overflow()) { return; }  // wrap build: nothing to compare
+                try { e->execute("(-((1 + 9223372036854775807))) <=> 1;"); }
+                catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                ++idx;
+            }
+            check_eq(msg[0], msg[1], "unary '-' overflow error text is byte-identical across backends");
+            check_true(msg[0].find("Integer overflow in unary '-'") != std::string::npos,
+                "unary '-' overflow names the negation");
+        });
 
         // ---- #35 JSON float serialization round-trips at full precision ----
         test("json_float_roundtrip", [this]() {

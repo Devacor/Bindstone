@@ -26,14 +26,14 @@ Build the test target (`--target jaiscript_tests`). (The redundant standalone te
 
 ```bash
 # Configure Debug once (Ninja) if out/build/x64-Debug/CMakeCache.txt is missing:
-powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake -S . -B out/build/x64-Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=cl 2>&1'"
+powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 && cd /d C:\git\Bindstone\Source\JaiScript && cmake -S . -B out/build/x64-Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=cl 2>&1'"
 
 # Build the test target (Debug)
-powershell.exe -Command "& cmd /c '\"...\VsDevCmd.bat\" -arch=x64 && cd /d d:\git\Bindstone\Source\JaiScript && cmake --build out/build/x64-Debug --target jaiscript_tests 2>&1'"
+powershell.exe -Command "& cmd /c '\"...\VsDevCmd.bat\" -arch=x64 && cd /d C:\git\Bindstone\Source\JaiScript && cmake --build out/build/x64-Debug --target jaiscript_tests 2>&1'"
 
-# Build (Release)  — swap x64-Debug -> x64-Release
+# Build (Release)  — swap x64-Debug -> "x64-Release BENCHMARKS" (the configured Release dir)
 # Run all tests
-d:\git\Bindstone\Source\JaiScript\out\build\x64-Debug\bin\jaiscript_tests.exe
+C:\git\Bindstone\Source\JaiScript\out\build\x64-Debug\bin\jaiscript_tests.exe
 ```
 
 (Substitute the full `VsDevCmd.bat` path; `vswhere.exe not recognized` on the first line is
@@ -62,7 +62,7 @@ include paths use `$(SolutionDir)`, the only reason a naive build fails). Use th
 JaiScript header changes against MV without the IDE:
 
 ```bash
-powershell.exe -Command "& cmd /c '\"...\VsDevCmd.bat\" -arch=x64 && cd /d d:\git\Bindstone && msbuild \"VSProjects\MutedVision\MutedVision_Windows\MutedVision_Windows.vcxproj\" /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:SolutionDir=d:\git\Bindstone\ /m 2>&1'"
+powershell.exe -Command "& cmd /c '\"...\VsDevCmd.bat\" -arch=x64 && cd /d C:\git\Bindstone && msbuild \"VSProjects\MutedVision\MutedVision_Windows\MutedVision_Windows.vcxproj\" /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:SolutionDir=C:\git\Bindstone\ /m 2>&1'"
 ```
 
 ### Benchmarks
@@ -278,6 +278,14 @@ shrink, `switch` continue/break leakage, map-read auto-insert, `<=>`/NaN map-key
 int64 `==` precision, cpp-bound float/int reads, float→int UB, integer-overflow policy,
 JSON float precision + recursion depth, and a dangling-temporary in C++ method chaining.
 Regression tests live in `source/tests/language/review_regression_tests.cpp`.
+
+**Current status (2026-07):** both backends at full parity — 1443 tests Debug / 1474 Release
+BENCHMARKS, green on interpreter AND vm. VM-perf branch highlights: in-loop VM call frames
+(script calls no longer recurse natively), lvalue reference arguments (`f(obj.field)`,
+`f(arr[i])`) via the shared kernel `detail/ref_lvalue.hpp` (verbatim in both backends), and
+the thin-value fold — `script_value` is now 32 bytes with permanent static_assert gates.
+The invariants that make all this hold are in `docs/invariants.md`; read it before touching
+value layout, strong_ptr, raw-index dispatch, or the vm run loop.
 
 **Workflow:** edit → build Debug (`--target jaiscript_tests`) → run suite → fix → final Release
 pass. Reproduce a bug as a foundry test first, confirm it's red, then fix to green.

@@ -2091,13 +2091,16 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			case token_type::slash:
 				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation")); return true; }
 				out.emplace(script_value(a / b, engine_)); return true;
+			case token_type::percent:
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation")); return true; }
+				out.emplace(script_value(std::fmod(a, b), engine_)); return true;
 			default: return false;
 			}
 		}
-		// twin parity for bound operands: float % falls to the handlers in this shape
-		// exactly like the plain fast path (no percent case above)
+		// twin parity for bound operands: float / and % are covered inline in this shape
+		// (exec_binary_fused parity), so bound pairs keep the same error surface
 		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
-			if (auto z = bound_fastpath_zero_divisor(op, left, right, true, false)) {
+			if (auto z = bound_fastpath_zero_divisor(op, left, right, true, true)) {
 				out.emplace(checked_result<script_value>(make_error_code(z->code), z->text));
 				return true;
 			}
@@ -2127,10 +2130,31 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			default: return false;
 			}
 		}
-		// twin parity for bound operands: int-only shape - float pairs fall to the
-		// handlers for plain and bound alike
+		if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+		    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+			script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(left.unchecked_as_int()) : left.unchecked_as_float();
+			script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
+			switch (op) {
+			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
+			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
+			case token_type::greater: out.emplace(script_value(a > b, engine_)); return true;
+			case token_type::greater_equal: out.emplace(script_value(a >= b, engine_)); return true;
+			case token_type::plus: out.emplace(script_value(a + b, engine_)); return true;
+			case token_type::minus: out.emplace(script_value(a - b, engine_)); return true;
+			case token_type::star: out.emplace(script_value(a * b, engine_)); return true;
+			case token_type::slash:
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation")); return true; }
+				out.emplace(script_value(a / b, engine_)); return true;
+			case token_type::percent:
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation")); return true; }
+				out.emplace(script_value(std::fmod(a, b), engine_)); return true;
+			default: return false;
+			}
+		}
+		// twin parity for bound operands: float / and % are covered inline in this shape
+		// (exec_binary_fused parity), so bound pairs keep the same error surface
 		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
-			if (auto z = bound_fastpath_zero_divisor(op, left, right, false, false)) {
+			if (auto z = bound_fastpath_zero_divisor(op, left, right, true, true)) {
 				out.emplace(checked_result<script_value>(make_error_code(z->code), z->text));
 				return true;
 			}

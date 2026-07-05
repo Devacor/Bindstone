@@ -441,7 +441,8 @@ public:
 
         benchmark("BST shared_ptr insert/sum (15 nodes)", [this]() {
             // Reference-semantic variant: apples-to-apples with Squirrel/Lua instances
-            // (the value-semantic BST above deep-copies subtrees per by-value pass)
+            // (the value-semantic BST above deep-copies subtrees per by-value pass).
+            // var params preserve shared_ptr sharing; typed SNode params would clone.
             if (!bite) {
                 test_engine->execute(R"(
                     class SNode {
@@ -450,7 +451,7 @@ public:
                         SNode right = null;
                         SNode(int val) { value = val; }
                     }
-                    function sInsert(SNode root, int val) -> SNode {
+                    function sInsert(var root, int val) -> SNode {
                         if (root == null) { return shared_ptr<SNode>(val); }
                         if (val < root.value) {
                             root.left = sInsert(root.left, val);
@@ -459,7 +460,7 @@ public:
                         }
                         return root;
                     }
-                    function sSum(SNode node) -> int {
+                    function sSum(var node) -> int {
                         if (node == null) { return 0; }
                         return sSum(node.left) + node.value + sSum(node.right);
                     }
@@ -481,6 +482,69 @@ public:
                     s_root = sInsert(s_root, 13);
                     s_root = sInsert(s_root, 15);
                     auto s_total = sSum(s_root);
+                    if (s_total != 120) { throw "BST shared_ptr sum mismatch"; }
+                )");
+            }
+            bite->execute();
+        });
+
+        benchmark("BST by-ref insert/sum (15 nodes)", [this]() {
+            // Reference-parameter variant: field lvalues bind by ref, the tree is
+            // mutated in place with zero deep copies (the value-semantic BST above
+            // stays as the value-semantics feature-cost number)
+            if (!bite) {
+                test_engine->execute(R"(
+                    class RNode {
+                        int value = 0;
+                        RNode left = null;
+                        RNode right = null;
+                        RNode(int val) { value = val; }
+                    }
+                    function rInsert(RNode& node, int val) {
+                        if (node == null) { node = RNode(val); return; }
+                        if (val < node.value) { rInsert(node.left, val); } else { rInsert(node.right, val); }
+                    }
+                    function rSum(RNode& node) -> int {
+                        if (node == null) { return 0; }
+                        return rSum(node.left) + node.value + rSum(node.right);
+                    }
+                )");
+                bite = test_engine->jaibite(R"(
+                    var ref_root = null;
+                    rInsert(ref_root, 8);
+                    rInsert(ref_root, 4);
+                    rInsert(ref_root, 12);
+                    rInsert(ref_root, 2);
+                    rInsert(ref_root, 6);
+                    rInsert(ref_root, 10);
+                    rInsert(ref_root, 14);
+                    rInsert(ref_root, 1);
+                    rInsert(ref_root, 3);
+                    rInsert(ref_root, 5);
+                    rInsert(ref_root, 7);
+                    rInsert(ref_root, 9);
+                    rInsert(ref_root, 11);
+                    rInsert(ref_root, 13);
+                    rInsert(ref_root, 15);
+                    var ref_sum = rSum(ref_root);
+                    if (ref_sum != 120) { throw "BST by-ref sum mismatch"; }
+                )");
+            }
+            bite->execute();
+        });
+
+        benchmark("Ref Param Pass-Through relay->inc (x100)", [this]() {
+            // Tier 2 hop-cost sentinel: each relay hop shares the incoming holder
+            // (would have caught the old per-hop anchor-env allocation)
+            if (!bite) {
+                test_engine->execute(R"(
+                    function incRef(int& x) { x += 1; }
+                    function relayRef(int& x) { incRef(x); }
+                )");
+                bite = test_engine->jaibite(R"(
+                    var n = 0;
+                    for (auto i = 0; i < 100; ++i) { relayRef(n); }
+                    if (n != 100) { throw "ref relay sum mismatch"; }
                 )");
             }
             bite->execute();

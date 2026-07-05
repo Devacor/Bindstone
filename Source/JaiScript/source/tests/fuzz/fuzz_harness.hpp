@@ -305,6 +305,11 @@ namespace jai::fuzz {
 			// wrong operator per backend (e.g. interp '*' vs vm '+='). Seed 2706.
 			{"FZ-OVERFLOW-OP-NAME", "overflow error text: operator name differs per backend",
 				{}, {"Integer overflow in '"}},
+			// Checked-overflow error raised inside a <=> operand: the interpreter
+			// swallows it entirely (program completes, null result) while the VM
+			// raises it (with its own wrong-operator text). Campaign seed 9336.
+			{"FZ-SPACESHIP-OVERFLOW-SWALLOW", "overflow inside <=> operand: interp swallows, vm raises",
+				{"<=>"}, {"Integer overflow"}},
 			// Float division-by-zero error text differs.
 			{"FZ-FLOAT-DIVZERO-TEXT", "\"Division by zero\" vs \"Division by zero in float operation\"",
 				{}, {"Division by zero in float operation"}},

@@ -20,7 +20,10 @@ the fix ledger's job.
 ## Fixed (matchers removed; recorded seeds re-verified agreeing with --no-suppressions)
 
 All fixed on VM-perf, 2026-07-05. Regression tests live in
-`source/tests/language/review_regression_tests.cpp` (the `fuzz_*` tests).
+`source/tests/language/review_regression_tests.cpp` (the `fuzz_*` tests). After the fixes
+landed and the matchers were removed, a full seeds-0..9999 flush campaign (per-seed
+watchdog, 5s timeout) reported 0 new divergences and 0 crashes — the only reports were
+suppressed KD-CORO-RESUME-PAST-END shapes and the budget-livelock hangs listed below.
 
 | id | root cause | fix commit |
 |----|-----------|------------|
@@ -34,9 +37,10 @@ All fixed on VM-perf, 2026-07-05. Regression tests live in
 
 ## Engine findings that are not divergences
 
-- FZ-BUDGET-LIVELOCK (campaign seeds 436, 3507, 4860, 8285; +1213 since the 2026-07-05
-  fix pass — the `++`-on-ref-param fix lets that program run its full semantics, and its
-  in-loop `try/catch` now swallows the budget error): the execution budget can be
+- FZ-BUDGET-LIVELOCK (campaign seeds 436, 3507, 8285; +1213, 1462, 1788, 8356, 8391 since
+  the 2026-07-05 fix pass — the `++`-on-ref-param fix lets those programs run their full
+  semantics, and their in-loop `try/catch` now swallows the budget error; 4860 conversely
+  no longer hangs post-fix): the execution budget can be
   defeated from script. The budget error raised at a loop back-edge is an ordinary catchable
   error, so `for(...) { try { <infinite work> } catch (e) {} }` re-raises and re-catches it
   forever - `execute()` NEVER returns (observed 2.3 GB memory growth while livelocked). Both

@@ -19,7 +19,17 @@ the fix ledger's job.
 | FZ-UNDEF-VAR-THIS-DECORATION | undefined variable in compound-assign: interpreter error text carries `(no 'this' in scope)`, VM's does not. Same seeds also expose compound-assign *evaluation order*: `v1 += fn8()` with both sides undefined reports `v1` (lhs) on interpreter, `fn8` (rhs) on VM — C++17 sequences rhs first, so the interpreter order is the deviant one | 34, 28 | both texts must converge (invariant 6); order: interpreter | NEW - found by fuzzer 2026-07-05 |
 | FZ-FLOAT-DIVZERO-TEXT | float division by zero: interpreter `Division by zero`, VM `Division by zero in float operation` (same error code, different text) | 201 | text parity violation; either side may win, they must match | NEW - found by fuzzer 2026-07-05 |
 | FZ-RECURSION-MSG-TEXT | unbounded recursion: interpreter `Native stack exhausted - possible infinite recursion`, VM `Maximum recursion depth () exceeded - possible infinite recursion` (note the VM's empty `()` where the depth should be) | 137 | text parity violation + VM message formatting bug | NEW - found by fuzzer 2026-07-05 |
+| FZ-TYPED-FN-NO-RETURN-CAUGHT | same bug as FZ-TYPED-FN-NO-RETURN with the bogus interpreter error caught by a script `try/catch`: interpreter prints `caught: Undefined variable '<local>'`, VM prints nothing (it returned null) | 2529, 3657, 3784 | interpreter | NEW - found by fuzzer 2026-07-05 |
+| FZ-NEG-ZERO | unary minus on a `0.0`-valued float: interpreter yields `+0.0`, VM yields IEEE `-0.0` (visible via to_string: `0.000000` vs `-0.000000`) | 1985, 2148, 2255 | interpreter (IEEE 754 negation of +0.0 is -0.0; C++ agrees; the VM preserves it) | NEW - found by fuzzer 2026-07-05 |
+| FZ-OVERFLOW-OP-NAME | checked-integer-overflow error text names the wrong operator, and a DIFFERENT wrong operator per backend (minimized: a `-` overflow inside a for body reports `Integer overflow in '*'` on interpreter, `Integer overflow in '+='` on VM) | 2706 | both (each names a wrong operator); must also converge textually | NEW - found by fuzzer 2026-07-05 |
 | KD-ORDERING-THROW | `throw` inside a class `operator<` swallowed by one backend | none observed in pilot (fix may already be landed) | n/a | matcher retained defensively |
+
+## Harness lessons encoded (not engine bugs)
+
+- A script can CATCH the execution-budget error and keep going, making printed output
+  wall-clock dependent (campaign seed 324: a `var&` mutator resetting a for-loop variable
+  produced an infinite loop whose `catch` swallowed the budget error). The harness now marks
+  any segment consuming >=90% of the budget as budget-hit and skips the program.
 
 ## Watched (no matcher)
 

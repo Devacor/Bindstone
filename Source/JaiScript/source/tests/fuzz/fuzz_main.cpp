@@ -141,7 +141,9 @@ namespace {
 
 		program minimized = p;
 		bool have_min = false;
-		if (opt.minimize_flag) {
+		// Only minimize UNRECOGNIZED divergences: suppressed ones are already
+		// triaged, and minimization is the expensive step of the campaign.
+		if (opt.minimize_flag && supp.empty()) {
 			minimize_stats stats;
 			auto still = [&](const program& cand) {
 				// Any divergence keeps the reduction: drifting into a KNOWN shape is

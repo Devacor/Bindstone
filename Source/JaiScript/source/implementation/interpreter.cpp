@@ -2296,6 +2296,7 @@ interpreter::interpreter()
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
     resume_id_ = string_symbolizer_->intern("resume");
     done_id_ = string_symbolizer_->intern("done");
+    same_as_id_ = string_symbolizer_->intern("same_as");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2360,6 +2361,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
     resume_id_ = string_symbolizer_->intern("resume");
     done_id_ = string_symbolizer_->intern("done");
+    same_as_id_ = string_symbolizer_->intern("same_as");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2424,6 +2426,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
     resume_id_ = string_symbolizer_->intern("resume");
     done_id_ = string_symbolizer_->intern("done");
+    same_as_id_ = string_symbolizer_->intern("same_as");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -6421,11 +6424,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // No unwrapping needed - just access the object_holder directly
 
     // Built-in same_as() for all values (identity/equality comparison)
-    static uint64_t same_as_id = 0;
-    if (same_as_id == 0) {
-        same_as_id = string_symbolizer_->intern("same_as");
-    }
-    if (expr->member_id == same_as_id) {
+    // same_as_id_ is a per-interpreter member (symbol ids are per-engine; a static here
+    // cached the first engine's id and broke same_as on every later engine).
+    if (expr->member_id == same_as_id_) {
         // Create a bound same_as method for this value
         script_function same_as_method = [this, capturedValue = objectValue](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
             if (args.size() != 1) {

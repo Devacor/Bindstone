@@ -675,6 +675,7 @@ namespace jai {
         uint64_t coroutine_handle_type_id_;
         uint64_t resume_id_;
         uint64_t done_id_;
+        uint64_t same_as_id_;
 
         // Cached symbol IDs for operator overloading (initialized in constructor)
         uint64_t op_plus_id_;

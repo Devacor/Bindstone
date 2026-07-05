@@ -619,6 +619,43 @@ public:
                 "recursion-limit message carries the depth (got: " + msg[0] + ")");
         });
 
+        // ---- fuzz FZ-UNDEF-VAR-THIS-DECORATION (seeds 34/28): compound-assign to an
+        // undefined identifier resolved the TARGET before evaluating the rhs on the
+        // interpreter, so `v1 += v1` blamed the lhs while the vm (C++17 order: rhs
+        // first) blamed the rhs load. The "(no 'this' in scope)" decoration itself is
+        // symmetric on both backends and stays. ----
+        test("fuzz_compound_undef_eval_order_parity", [this]() {
+            auto expect_both = [&](const char* src, const std::string& needle, const std::string& what) {
+                std::string msg[2];
+                int idx = 0;
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    try { e->execute(src); }
+                    catch (const std::exception& ex) { msg[idx] = ex.what(); }
+                    ++idx;
+                }
+                check_eq(msg[0], msg[1], what + " error text is byte-identical across backends");
+                check_true(msg[0].find(needle) != std::string::npos,
+                    what + " blames the right name (got: " + msg[0] + ")");
+            };
+            // rhs load fails first (rhs-first sequencing): plain undefined-variable text
+            expect_both("v1 += v1;", "Undefined variable 'v1'", "undef += same undef");
+            expect_both("v1 += fn8();", "Undefined variable 'fn8'", "undef += undef call");
+            // rhs fine, target undefined: symmetric decorated text
+            expect_both("v1 += 1;", "Undefined variable 'v1' (no 'this' in scope)", "undef += literal");
+        });
+        test("fuzz_compound_undef_rhs_side_effects_run_first", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                var log = "";
+                function s() { log += "x"; return 1; }
+                try { v1 += s(); } catch (err) { log += "c"; }
+                log;
+            )");
+            check_eq(std::string("xc"), r.as_string());
+        });
+
         test("range_for_ref_realloc_no_corruption", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

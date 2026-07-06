@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Safety Rails — JaiScript Embedding</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li class="current"><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="safety-rails">Safety Rails<a class="hlink" href="#safety-rails" aria-label="link">&#8203;</a></h1>
+<p>JaiScript&#x27;s sandbox position (<code>docs/why_jaiscript.md</code> §6, Dev ruling logged 2026-07): <strong>there is no sandbox API because safety is the default.</strong> A script can only touch what the host registered — the language ships <strong>no built-in file, network, or system access</strong> (even <code>print</code> arrives only via <code>jai::stdlib::register_all</code>, and its output stream is host-controlled via <code>set_output_stream</code>). The registration surface <em>is</em> the allowlist. On top of that no-ambient-authority baseline sit four enforcement rails.</p>
+<h2 id="1-execution-budget-terminal-uncatchable-by-script">1. Execution budget — terminal, uncatchable by script<a class="hlink" href="#1-execution-budget-terminal-uncatchable-by-script" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execution_budget(1.0 / 60);   // wall-clock seconds per execute()/resume()
+eng-&gt;execution_budget();           // read back; 0 disables; DEFAULT: 1.0 second</code></pre></div>
+<p>A script exceeding the budget raises an <code>execution_budget_exceeded</code> error that is <strong>terminal</strong>: every script <code>catch</code> is skipped — plain try/catch, nested catches, catches inside functions, lambdas, coroutines, and even the outer script&#x27;s catch around a <em>reentrant</em> execute (host callback calling <code>execute()</code> mid-script). The failure always reaches the host; a script can never swallow its own timeout.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/safety.cpp — verified
+eng-&gt;execution_budget(0.05);
+eng-&gt;execute(&quot;var caught = 0; try { while (true) { } } catch (e) { caught = 1; } caught;&quot;);
+// throws to C++: &quot;Script execution budget exceeded - raise engine::execution_budget
+//                 or break up the work: Script execution budget exceeded&quot;
+eng-&gt;execute(&quot;2 + 2&quot;).as_int();    // 4 — the engine survives; each execute gets a fresh deadline</code></pre></div>
+<p>Why terminal: the earlier catchable semantics enabled a fuzzer-found denial-of-service (FZ-BUDGET-LIVELOCK — catch-and-retry loops kept <code>execute()</code> from ever returning). The whole matrix is pinned in <code>language/execution_budget_tests.cpp</code>: <code>budget_error_is_terminal_not_catchable</code>, <code>budget_livelock_catch_retry_loop_terminates</code>, <code>budget_terminal_skips_nested_catches</code> / <code>_inside_function</code> / <code>_inside_lambda</code> / <code>_inside_coroutine</code>, <code>budget_terminal_crosses_reentrant_execute_boundary</code>, <code>budget_rearms_per_execute</code>, <code>default_budget_is_one_second</code>.</p>
+<p>Granularity: checked at loop back-edges and call entry, clock sampled every 1024 ticks — no measurable hot-path cost, and straight-line C++ bindings are never interrupted mid-call (<code>engine.hpp</code> doc comment). Corollary: a single very slow <em>host</em> call can overshoot the deadline before the next check.</p>
+<h2 id="2-memory-cap-deny-in-place-one-catchable-raise-then-terminal">2. Memory cap — deny-in-place, one catchable raise, then terminal<a class="hlink" href="#2-memory-cap-deny-in-place-one-catchable-raise-then-terminal" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;memory_cap(64 * 1024 * 1024);   // approximate bytes per top-level execute()/resume()
+                                      // 0 disables; DEFAULT: 0 (unlimited)</code></pre></div>
+<p>Accounting is a <strong>high-water mark</strong> charged at the heavy-value chokepoints — container growth (<code>push</code>/insert/repeat/concat), string concat, <code>clone</code>, environment growth. Frees are <em>not</em> credited back (v1 approximation, documented in <code>engine.hpp</code>). An allocation that would cross the cap is <strong>denied in place</strong> — the object never grows — and raises:</p>
+<ul><li><strong>First raise per execute: an ordinary catchable script error</strong>, and the counter re-arms to zero so the script can free caches and continue working. This is the legit recovery path:</li></ul>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">  try { while (true) { a.push(&quot;xxxxxxxxxx&quot;); } }
+  catch (err) { a = []; }   // err == &quot;Script memory cap exceeded (262144 bytes) -
+                             //         raise engine::memory_cap or break up the work&quot;</code></pre></div>
+<ul><li><strong>Second raise in the same execute: terminal</strong>, exactly like a budget overrun — every catch skipped, <code>execute()</code> fails to the host. (Verified live in <code>hosts/safety.cpp</code>: first raise caught by script, second raise thrown to C++.)</li></ul>
+<ul><li>Fresh execute = fresh allowance and raise count; reentrant executes share the outer call&#x27;s allowance.</li></ul>
+<p>Pinned in <code>execution_budget_tests.cpp</code>: <code>memory_cap_first_raise_is_catchable_and_denies</code>, <code>memory_cap_second_raise_is_terminal</code>, <code>memory_cap_error_text_names_the_cap</code>, <code>memory_cap_map_growth_bomb_trips</code> (subscript auto-insert counts), <code>memory_cap_env_growth_bomb_trips</code> (environment growth counts), <code>memory_cap_resets_per_execute</code>, <code>memory_cap_zero_is_unlimited</code>. The differential fuzz harness runs every generated program under a 64 MB cap.</p>
+<p>Known v1 approximations (from the design ledger, honest limits): frees aren&#x27;t credited, slot-stored locals aren&#x27;t charged, and the budget&#x27;s 1024-tick clock gate means a single enormous operation can overshoot before the check fires — the cap denies at the chokepoints it instruments, it is not an allocator hook.</p>
+<h2 id="3-checked-integer-overflow-compile-time-policy">3. Checked integer overflow (compile-time policy)<a class="hlink" href="#3-checked-integer-overflow-compile-time-policy" aria-label="link">&#8203;</a></h2>
+<p>Chosen at build time, applied via <code>if constexpr</code> so the losing policy costs zero at runtime (<code>detail/integer_ops.hpp</code>):</p>
+<ul><li>**<code>JAISCRIPT_CHECKED_OVERFLOW</code> (the default — &quot;safe by default&quot;)**: overflowing <code>+ - *</code>, unary <code>-</code>, and <code>INT64_MIN / -1</code> raise a <strong>catchable</strong> runtime error.</li><li>**<code>JAISCRIPT_WRAP_ON_OVERFLOW</code>**: silent two&#x27;s-complement wraparound (max speed).</li></ul>
+<p>Either way arithmetic is never undefined behavior (computed in unsigned). The policy is applied consistently everywhere — interpreter fast paths, VM opcodes, counted-loop updates, <code>++</code>/<code>--</code>, and even the parser&#x27;s constant folder (which <em>declines to fold</em> rather than wrap; fuzz-ledger fixes PARSER-FOLD-WRAPS / INCDEC-WRAPS-SILENTLY closed the last bypasses). Hosts can introspect the build&#x27;s policy:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;throw_on_overflow();     // true in the default build (verified)</code></pre></div>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var x = 9223372036854775807;
+try { x = x + 1; } catch (e) { }   // e == &quot;Integer overflow in &#x27;+&#x27;&quot;   (verified)</code></pre></div>
+<h2 id="4-recursion-and-parse-depth-caps">4. Recursion and parse-depth caps<a class="hlink" href="#4-recursion-and-parse-depth-caps" aria-label="link">&#8203;</a></h2>
+<ul><li><strong>Script call depth</strong>: <code>JAI_MAX_CALL_DEPTH</code> (default 10000, <code>detail/interpreter.hpp</code>) — exceeded depth raises a <strong>catchable</strong> error with one shared message on both backends and both trigger paths (depth cap and native-stack guard): <code>&quot;Maximum recursion depth (10000) exceeded - possible infinite recursion&quot;</code> (verified live; message unification pinned by the FZ-RECURSION-MSG-TEXT fuzz fix). The engine stays fully usable afterwards.</li><li><strong>Parser recursion</strong>: <code>MAX_PARSE_DEPTH = 250</code> (<code>detail/parser.hpp</code>) — deeply nested source throws before the native stack can overflow.</li><li><strong>JSON text parsing</strong>: <code>JAI_MAX_JSON_PARSE_DEPTH = 128</code> (<code>json_archive.hpp</code>) — same rationale for <code>from_json</code> on hostile input.</li></ul>
+<h2 id="putting-it-together-running-untrusted-script">Putting it together: running untrusted script<a class="hlink" href="#putting-it-together-running-untrusted-script" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();          // nothing registered = nothing reachable
+eng-&gt;execution_budget(0.005);            // 5 ms per execute
+eng-&gt;memory_cap(16 * 1024 * 1024);       // 16 MB high-water
+eng-&gt;set_output_stream(myLogStream);     // if you register print at all
+// register ONLY the API surface the script should have
+eng-&gt;add_function(&quot;move_to&quot;, ...);</code></pre></div>
+<p>That is the whole configuration. Budget and cap exhaustion are terminal; overflow and recursion are catchable script errors; and there is nothing ambient to escape <em>to</em> — the serializers are hardened separately against hostile data (<code>serialization/serialization_security_tests.cpp</code>: type/property names from payloads are never executed, oversized array/map length prefixes rejected).</p><nav class="prevnext"><a class="prev" href="../embedding/04-jaibite.html"><span>&larr; previous</span>jaibite: Parse Once, Ship Precompiled</a><a class="next" href="../embedding/06-static-checking.html"><span>next &rarr;</span>Static Checking</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

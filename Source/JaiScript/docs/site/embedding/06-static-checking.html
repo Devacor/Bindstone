@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Static Checking — JaiScript Embedding</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li class="current"><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="static-checking-opt-in">Static Checking (opt-in)<a class="hlink" href="#static-checking-opt-in" aria-label="link">&#8203;</a></h1>
+<p>A backend-neutral AST checker (<code>detail/type_checker.hpp</code> + <code>source/implementation/type_checker.cpp</code>, spec in <code>docs/static_checking.md</code>) that runs once per unique source at parse-cache-entry creation — the same hook covers <code>execute(string)</code>, jaibite creation/load, hot-reload re-parses, and registration changes. <strong>Off by default; the off path costs one branch.</strong></p>
+<h2 id="mode-api">Mode API<a class="hlink" href="#mode-api" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;static_checking(jai::check_mode::off | warn | strict);   // default: off
+jai::check_report r = eng-&gt;check(source);                     // parse (cached) + check, ANY mode
+const jai::check_report&amp; d = eng-&gt;last_check_diagnostics();   // last checked execute/bite</code></pre></div>
+<ul><li><strong>off</strong> — zero behavior change, no diagnostics collected.</li><li><strong>warn</strong> — diagnostics collected and retrievable; execution proceeds.</li><li><strong>strict</strong> — any error-severity diagnostic makes <code>execute()</code> / <code>jaibite()</code> / <code>jaibite_load*()</code> throw <code>jai::static_check_error</code> <strong>before anything runs</strong>; <code>what()</code> is the full accumulated, location-sorted, deduplicated listing (cap 100), compiler style with source lines and carets.</li></ul>
+<p>Verified live (<code>hosts/staticcheck.cpp</code>):</p>
+<div class="codeblock cb-plain"><pre><code class="lang-plain">diagnostics: 2
+  2:4 cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27;
+  3:9 use of undeclared identifier &#x27;missing&#x27;
+warn mode ran: 42 with 1 diagnostic(s) on record
+strict throw:
+static check failed:
+script:2:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
+    x = &quot;hello&quot;;
+       ^
+script:3:9: error: use of undeclared identifier &#x27;missing&#x27;
+    int y = missing + 1;
+            ^
+
+clean strict: 4</code></pre></div>
+<p>(The warn demo puts the bad assignment in an <code>if (false)</code> branch: the checker is flow-insensitive so it still flags it, while the runtime never reaches it — showing that warn collects but never gates.)</p>
+<p><code>check_diagnostic</code> fields: <code>severity, line, column, message, related_line/column</code>. Diagnostics are mode-independent; mode only decides whether errors gate execution. Warning severity never gates. Pinning suite: <code>semantics/static_check_tests.cpp</code> (<code>off_by_default_and_mode_roundtrip</code>, <code>strict_throws_before_anything_runs</code>, <code>warn_mode_executes_and_diagnostics_are_retrievable</code>, <code>check_is_independent_of_mode</code>, <code>accumulates_all_errors_sorted</code>, <code>diagnostic_cap_at_100</code>, ...).</p>
+<h2 id="rule-table-mirrors-the-runtime-s-enforce-type-compatibility">Rule table (mirrors the runtime&#x27;s <code>enforce_type_compatibility</code>)<a class="hlink" href="#rule-table-mirrors-the-runtime-s-enforce-type-compatibility" aria-label="link">&#8203;</a></h2>
+<div class="tablewrap"><table><thead><tr><th>target</th><th>accepts</th><th>notes</th></tr></thead><tbody><tr><td><code>int</code></td><td>int, float (truncates), bool</td><td>string/char/null/containers = error</td></tr><tr><td><code>float</code></td><td>float, int, bool</td><td></td></tr><tr><td><code>bool</code></td><td>anything</td><td>truthy conversion</td></tr><tr><td><code>string</code></td><td>anything</td><td>to_string conversion</td></tr><tr><td><code>char</code></td><td>char only</td><td><code>char c = 65</code> is a runtime error too</td></tr><tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>element/key types NOT checked (lenient v1)</td></tr><tr><td>object <code>C</code></td><td>null; same class; derived→base; ctor conversion <code>C(src)</code></td><td>unrelated class with no viable 1-arg ctor = error</td></tr><tr><td><code>shared_ptr</code> / <code>weak_ptr</code> / refs / function slots</td><td>anything</td><td>lenient v1</td></tr><tr><td>**<code>var</code>**</td><td><strong>anything, forever</strong></td><td><strong>THE opt-out</strong> — a var-typed expression makes downstream types unknown (like TS <code>any</code>); unknown never errors</td></tr><tr><td><code>auto</code> + initializer</td><td>inferred, then enforced as that type</td><td></td></tr><tr><td><code>auto</code> without initializer</td><td>dynamic (unchecked)</td><td>runtime locks at first assignment; checker opts out (documented leniency)</td></tr></tbody></table></div>
+<p>Settled rulings baked into the table (both pinned by <code>static_check_tests.cpp</code>):</p>
+<ul><li><strong>Compound assign follows C++ rules</strong> (<code>compound_assign_follows_cpp_rules</code>): typed <code>x op= rhs</code> behaves as <code>x = T(x op rhs)</code>, so <code>int x; x += 2.5</code> is fine (truncates) and <code>x += &quot;s&quot;</code> errors. <code>var</code> targets stay dynamic.</li><li><strong>Typed fields are real</strong> (<code>script_class_members_and_field_types</code>): field initializers, member stores (<code>obj.field = v</code>, bare <code>field = v</code> in methods, inherited fields) all check against the declared type — matching the runtime&#x27;s typed-field enforcement.</li></ul>
+<p>Other checked surfaces (each with its pinning test):</p>
+<ul><li><strong>Calls</strong> — when the callee resolves statically: script functions/ctors/methods get arity (with defaults) + per-arg assignability; overloads error only if NO overload matches (<code>script_function_arity_and_types</code>, <code>script_function_defaults_and_overloads</code>, <code>script_class_constructors</code>). Host C++ functions are checked through <code>engine::host_function_signatures</code> — arity across overloads (variadic = anything) and only per-arg <em>certainties</em> (<code>host_function_signature_checking</code>; note the C++ boundary has no numeric→string conversion, unlike script <code>string</code> slots). Callables held in variables: unchecked.</li><li><strong>Returns</strong> — must be assignable to the declared return type; a value from a <code>void</code> function errors; bare <code>return;</code> from a typed fn is warning severity in v1; coroutines exempt (<code>return_type_checking</code>, <code>coroutines_stay_lenient</code>).</li><li><strong>Identifiers</strong> — undeclared = error, resolved against scopes, class members (inherited included), top-level two-pass declarations (forward references work), any name declared anywhere in the script, per-call instance variables, and the engine&#x27;s full registration surface. Scripts containing <code>include</code>/<code>import</code> downgrade undeclared-identifier to warning (<code>undeclared_identifier_is_an_error</code>, <code>forward_references_resolve</code>, <code>includes_downgrade_undeclared_to_warning</code>).</li><li><strong>Members</strong> — unknown field/method on a <em>fully known</em> class = error (reads and writes); any unresolvable ancestor opens the class to silence; builtins/subscripts/ namespaces lenient; enum member existence IS checked (<code>host_class_member_checking</code>, <code>inheritance_members_and_assignability</code>, <code>lenient_surfaces_stay_silent</code>).</li><li><strong>Recovery</strong> — an erroring expression assumes its declared type, so one bad line yields one diagnostic, not a cascade (<code>recovery_no_cascades_and_dedupe</code>).</li></ul>
+<h2 id="the-false-positive-contract">The false-positive contract<a class="hlink" href="#the-false-positive-contract" aria-label="link">&#8203;</a></h2>
+<p><strong>A program that runs clean and does not genuinely violate declared types must produce ZERO error diagnostics.</strong> Everywhere the static story is uncertain the checker goes silent (<code>var</code>, unknown/open classes, element types, includes, callable variables, host object conversions). Enforced by <code>static_check_tests.cpp::fuzz_corpus_false_positive_gate</code>: 200 differential-fuzzer generator seeds — any program that executes cleanly must check clean.</p>
+<p>This is the guarantee that makes <code>strict</code> deployable on a real codebase: turning it on can only reject scripts that were already broken.</p>
+<h2 id="jaibite-stamping">jaibite stamping<a class="hlink" href="#jaibite-stamping" aria-label="link">&#8203;</a></h2>
+<p>Bites created/executed under warn/strict carry diagnostics (<code>bite.checked_clean()</code>, <code>bite.check_diagnostics()</code>); <code>save()</code> stamps a checked-clean bit; on load the stamp is trusted only when the registration fingerprint matches, else the bite is re-checked against the loading engine (strict throws at load). Checked once — re-create to re-check. Details and pinning tests in the jaibite chapter (<code>jaibite_save_load_stamp</code>, <code>jaibite_strict_gates_creation</code>, <code>jaibite_execute_checks_lazily</code>).</p>
+<h2 id="cost-and-staleness">Cost and staleness<a class="hlink" href="#cost-and-staleness" aria-label="link">&#8203;</a></h2>
+<p>Zero when off. When on: one AST walk per unique source (parse-order cost, cached beside the parse), re-run only when the registration-surface epoch moves (<code>add_function</code>/<code>add_global</code>/<code>add_class</code>/<code>register_template_type</code> bump it — <code>registration_epoch_recheck</code>); executes with per-call instance variables re-check fresh per call. New source text (hot reload) = new cache entry = fresh check (<code>hot_reload_new_source_is_rechecked</code>).</p>
+<h2 id="deployment-pattern">Deployment pattern<a class="hlink" href="#deployment-pattern" aria-label="link">&#8203;</a></h2>
+<p>The type ladder makes rollout incremental: leave prototype scripts on <code>var</code> (never flagged), declare types where you want enforcement, run <code>warn</code> in dev builds to collect diagnostics, and promote to <code>strict</code> in CI or at asset-bake time (<code>eng-&gt;check(source)</code> needs no mode and is the batch-validation entry point — it throws <code>parse_error</code> only if the source doesn&#x27;t parse).</p><nav class="prevnext"><a class="prev" href="../embedding/05-safety-rails.html"><span>&larr; previous</span>Safety Rails</a><a class="next" href="../embedding/07-hot-reload.html"><span>next &rarr;</span>Hot Reload</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

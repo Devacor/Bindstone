@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dynamic_binder: Binding C++ Classes — JaiScript Embedding</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li class="current"><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="dynamic-binder-binding-c-classes"><code>dynamic_binder</code>: Binding C++ Classes<a class="hlink" href="#dynamic-binder-binding-c-classes" aria-label="link">&#8203;</a></h1>
+<p><code>jai::dynamic_binder&lt;T&gt;</code> (<code>include/jaiscript/core/dynamic_binder.hpp</code>) is the fluent builder that registers a C++ class with an engine. One chain covers constructors, methods, properties, operators, statics, and inheritance:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/binder.cpp — compiled and run against the real lib
+jai::dynamic_binder&lt;Vec2&gt;(*eng, &quot;Vec2&quot;)
+    .constructor&lt;&gt;()
+    .constructor&lt;double, double&gt;()            // overloaded ctors
+    .method(&quot;length&quot;, &amp;Vec2::length)
+    .method(&quot;scale&quot;, &amp;Vec2::scale)            // Vec2&amp; scale(double) -&gt; chainable
+    .method(&quot;translate&quot;, &amp;Vec2::translate)
+    .method(&quot;+&quot;, &amp;Vec2::operator+)            // operator overloading by name
+    .method(&quot;==&quot;, &amp;Vec2::operator==)
+    .property(&quot;x&quot;, &amp;Vec2::x)
+    .property(&quot;y&quot;, &amp;Vec2::y)
+    .build();</code></pre></div>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = Vec2(3.0, 4.0);
+v.length();                                   // 5
+var a = Vec2(1.0, 2.0) + Vec2(3.0, 4.0);      // operator+ dispatches to C++
+var c = Vec2(1.0, 1.0);
+c.scale(3.0).translate(1.0, 0.0).x;           // 4 — chained through T&amp; returns
+v.x = 30.0;                                   // property writes hit the C++ member</code></pre></div>
+<p>Verified output (<code>hosts/binder.cpp</code>): <code>5</code>, <code>10</code>, <code>1</code> (<code>==</code>), <code>4</code> (chain), <code>30.2655</code> (post-write <code>length()</code>).</p>
+<p><code>build()</code> finalizes registration; the destructor calls it for you if you forget (the binder is also movable, non-copyable). Pinning tests: <code>integration/class_builder_tests.cpp</code> and <code>integration/dynamic_binder_tests.hpp</code> (suites &quot;Class Builder&quot; / dynamic binder).</p>
+<h2 id="constructors">Constructors<a class="hlink" href="#constructors" aria-label="link">&#8203;</a></h2>
+<ul><li><code>.constructor&lt;&gt;()</code> — default; if <code>T</code> has a <code>T(engine*)</code> constructor it is preferred automatically (<code>has_engine_constructor</code> concept).</li><li><code>.constructor&lt;Args...&gt;()</code> — typed; registered as an overload set with full C++ parameter signatures, so <code>Vec2(1, 2)</code> vs <code>Vec2()</code> resolve by arity and type.</li><li>Construction from script is just a call: <code>Vec2(3.0, 4.0)</code>. The object is created with <code>std::make_shared&lt;T&gt;</code> and stored inside a <code>class_instance</code> wrapper.</li><li>Registered classes also participate in <strong>conversion construction</strong>: a script function declared <code>function f(Vec2 v)</code> called with arguments a 1-arg ctor accepts will convert (see <code>language/constructor_conversion_tests.cpp</code>).</li></ul>
+<h2 id="methods">Methods<a class="hlink" href="#methods" aria-label="link">&#8203;</a></h2>
+<p>Three shapes, all <code>.method(name, ...)</code>:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">.method(&quot;length&quot;, &amp;Vec2::length)                    // member fn ptr (const or not)
+.method(&quot;setText&quot;, [](Button&amp; self, const std::string&amp; t) { self.setText(t); })
+                                                     // lambda; first param T&amp; or const T&amp; = self
+.method(&quot;version&quot;, []() { return 3; })              // lambda without self
+.static_method(&quot;origin&quot;, []() { return Vec2(); })   // Class::origin() / Vec2::origin()</code></pre></div>
+<p>Same-arity overloads of one method name resolve by C++ parameter signature — each registration carries its <code>param_type_info</code> vector so <code>set(float, float)</code> vs <code>set(int, int)</code> pick correctly instead of last-registration-wins (comment + machinery in <code>dynamic_binder.hpp::method</code>; overload scoring shared with free functions via <code>engine::select_cpp_overload</code>).</p>
+<p>Passing a member <em>data</em> pointer to <code>.method()</code> is a compile error with a message telling you to use <code>.property()</code> (static_assert in the lambda overload).</p>
+<h2 id="properties">Properties<a class="hlink" href="#properties" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">.property(&quot;x&quot;, &amp;Vec2::x)                       // member pointer: read/write
+.property(&quot;hp&quot;, &amp;Player::getHp, &amp;Player::setHp)  // getter/setter pair (lambdas or member fns)
+.static_property(&quot;count&quot;, &amp;Player::count)      // class-level</code></pre></div>
+<ul><li>Script access is natural: <code>v.x</code>, <code>v.x = 30.0</code>. Setters are only generated for copy-assignable member types.</li><li>A <code>std::vector&lt;E&gt;</code> member is wrapped in a zero-copy <code>bound_cpp_vector&lt;E&gt;</code> with array-like methods (<code>size/push/pop/at/[]</code>), auto-registered on first use.</li><li>Members whose type is a <strong>registered class</strong> bind by reference (cpp_bound) so mutation and signal connection act on the live member, not a copy; unregistered copyable types copy (comment in <code>property_impl</code>).</li><li><strong>Registration-order validation</strong>: a property whose type is an unregistered class throws at registration time with a fix-it message. Opt out for circular dependencies with <code>jai::skip_type_check</code>: <code>.property(&quot;child&quot;, &amp;Parent::child, jai::skip_type_check)</code>.</li></ul>
+<h2 id="operator-overloading">Operator overloading<a class="hlink" href="#operator-overloading" aria-label="link">&#8203;</a></h2>
+<p>Operators are methods named by their token: <code>+ - * / % == != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, plus <code>[]</code>. Register a real C++ operator or a lambda:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">.method(&quot;+&quot;, &amp;Point::operator+)
+.method(&quot;==&quot;, [](const Point&amp; a, const Point&amp; b) { return a.x == b.x &amp;&amp; a.y == b.y; })</code></pre></div>
+<p>Registering <code>!=</code> is optional when <code>==</code> exists — script <code>!=</code> falls back to negated <code>==</code> (pinned by <code>dynamic_binder_tests.hpp::equality_operator</code>, <code>comparison_operators</code>, <code>arithmetic_operators</code>). Free-function operators between primitives can also be registered on the engine (<code>add_function(&quot;+&quot;, ...)</code>); the engine detects numeric-operator overrides and disables its fast paths accordingly (<code>engine.hpp::isNumericOperator</code>).</p>
+<p>Script classes overload operators the same way from the other side — <code>bool operator&lt;(Money o) { ... }</code> / <code>function operator+(Money o) { ... }</code> — so a type can start in script and graduate to C++ without call sites changing. Runnable demo (verified on both backends): <code>engine/snippets/script_operator_overloading.jai</code>; note the class-typed-return parse quirk recorded in <code>engine/INTENT_QUESTIONS.md</code> #2 (use the <code>function operator+</code> form when an operator returns the class itself).</p>
+<h2 id="chaining-t-returns">Chaining <code>T&amp;</code> returns<a class="hlink" href="#chaining-t-returns" aria-label="link">&#8203;</a></h2>
+<p>A method returning <code>T&amp;</code> into its receiver (the <code>scale().translate()</code> idiom) is safe across temporaries: the returned cpp_bound receiver is kept alive by the <code>object_holder::keep_alive</code> anchor, so <code>Vec2(1,1).scale(3).translate(1,0).x</code> never dangles. Pinned by <code>dynamic_binder_tests.hpp::method_chaining</code> and <code>value_semantics_tests.hpp::method_chaining_no_copy</code>; the June-review dangling-temporary fix is the reason the anchor exists (do not remove it — noted in <code>Source/JaiScript/CLAUDE.md</code>).</p>
+<h2 id="inheritance-and-upcasting">Inheritance and upcasting<a class="hlink" href="#inheritance-and-upcasting" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">jai::dynamic_binder&lt;Animal&gt;(*eng, &quot;Animal&quot;)
+    .constructor&lt;&gt;()
+    .method(&quot;speak&quot;, &amp;Animal::speak)
+    .property(&quot;name&quot;, &amp;Animal::name)
+    .build();
+
+jai::dynamic_binder&lt;Dog&gt;(*eng, &quot;Dog&quot;)
+    .constructor&lt;&gt;()
+    .base_class&lt;Animal&gt;()          // appends; chain for multiple inheritance
+    .method(&quot;fetch&quot;, &amp;Dog::fetch)
+    .build();</code></pre></div>
+<ul><li><code>base_class&lt;Base&gt;()</code> is <code>static_assert</code>-guarded (<code>is_base_of</code>) and rejects diamond inheritance at registration with a thrown error.</li><li>Derived instances inherit base methods and properties: <code>d.speak()</code>, <code>d.name</code> work, and virtual dispatch is preserved (verified: <code>Dog().speak()</code> returns the Dog override).</li><li>**Automatic upcast on <code>shared_ptr&lt;Base&gt;</code> parameters**: a C++ function or method taking <code>std::shared_ptr&lt;Animal&gt;</code> accepts a script-side <code>Dog</code> (verified in <code>hosts/binder.cpp</code>: <code>speak_of(pet)</code> → <code>&quot;REX says woof&quot;</code>). <code>base_class</code> also records the serialization assignability edge so polymorphic loads type-check.</li><li>Script classes can extend C++ classes: <code>class Wrapper : ReloadCppBase { ... }</code> with <code>super(...)</code> calling the bound constructor (pinned by <code>hot_reload_correctness_tests.cpp::cpp_object_survives_field_changing_reload</code>).</li></ul>
+<h2 id="shared-ptr-semantics"><code>shared_ptr</code> semantics<a class="hlink" href="#shared-ptr-semantics" aria-label="link">&#8203;</a></h2>
+<p>Objects are reference types at the C++ boundary. <code>eng-&gt;make_object(shared_ptr)</code> wraps <em>your</em> pointer — no copy, shared identity:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto pet = std::make_shared&lt;Dog&gt;();
+eng-&gt;add_global(&quot;pet&quot;, eng-&gt;make_object(pet));
+eng-&gt;execute(&quot;pet.name = \&quot;REX\&quot;;&quot;);
+// pet-&gt;name == &quot;REX&quot;, pet.use_count() == 2   (verified)</code></pre></div>
+<p><code>eng-&gt;make_object&lt;T&gt;(args...)</code> constructs in place. <code>add_global_ref</code> on a class type wraps a <strong>non-owning</strong> aliasing pointer — you must guarantee lifetime. Passing <code>shared_ptr&lt;T&gt;</code> through <code>as&lt;std::shared_ptr&lt;T&gt;&gt;()</code> round-trips the same control block (<code>semantics/weak_ptr_tests.cpp</code> covers the weak side).</p>
+<h2 id="auto-bind-and-helpers"><code>auto_bind</code> and helpers<a class="hlink" href="#auto-bind-and-helpers" aria-label="link">&#8203;</a></h2>
+<p><code>.auto_bind(mode)</code> auto-detects and registers (<code>bind_mode::all</code> | <code>properties</code> | <code>hierarchy</code>):</p>
+<ul><li>base classes from a <code>T::_jai_base_types</code> tuple typedef,</li><li><code>JAI_PROPERTY</code>-declared properties when <code>T</code> is a <code>property_owner</code> (observable ones get wrapper types with <code>on_change</code>),</li><li>common methods by concept: <code>to_string()</code>, <code>size()</code>, <code>empty()</code>, <code>==</code>/<code>!=</code> from <code>operator==</code>,</li><li>a <code>static T::jai_auto_bind(dynamic_binder&lt;T&gt;&amp;)</code> hook so classes can register private members themselves.</li></ul>
+<p>Other verbs worth knowing:</p>
+<ul><li><code>.version(n)</code> + <code>.post_load_hook([](T&amp; self, int version){...})</code> — serialization versioning/migration (see the Serialization chapter).</li><li><code>.deserialization_factory(...)</code> — construct non-default-constructible types on load (archive-only, context-only, or context+archive signatures, auto-detected).</li><li><code>.transparent_wrapper(unwrap)</code> — operations not found on the wrapper retry on the unwrapped value (<code>player.score + 5</code> where <code>score</code> is <code>observable_property&lt;int&gt;</code>).</li><li>Template types: a name like <code>&quot;Point&lt;int&gt;&quot;</code> auto-registers the base template name with the parser (<code>integration/template_binder_tests.cpp</code>).</li></ul>
+<h2 id="threading-note-what-exists-vs-planned">Threading note (what exists vs planned)<a class="hlink" href="#threading-note-what-exists-vs-planned" aria-label="link">&#8203;</a></h2>
+<p>What exists today: <strong>engine-level isolation</strong>. No statics anywhere means two engines on two threads are safe with no locks — but one engine (and the objects registered into it) must be used from one thread at a time. A <code>.thread_shareable()</code> binder flag for sharing const assets across engine isolates appears in <code>docs/parallel_design.md</code> and is explicitly marked <strong>&quot;new — does not exist&quot;</strong> — it is a design proposal, not API. Do not look for it in the header.</p><nav class="prevnext"><a class="prev" href="../embedding/01-embedding-quickstart.html"><span>&larr; previous</span>Embedding Quickstart</a><a class="next" href="../embedding/03-backends.html"><span>next &rarr;</span>Backends: Interpreter vs VM</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

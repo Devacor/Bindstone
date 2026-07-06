@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coroutine Hosting — JaiScript Embedding</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li class="current"><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="coroutine-hosting">Coroutine Hosting<a class="hlink" href="#coroutine-hosting" aria-label="link">&#8203;</a></h1>
+<p>Script coroutines are the engine&#x27;s built-in answer to per-entity behaviors, cutscenes, and multi-frame AI: calling a <code>coroutine</code> function returns a <strong>handle</strong>; <code>resume()</code> runs to the next <code>yield</code>, <code>done()</code> reports completion. Each backend owns its continuation representation behind one interface (interpreter: saved environment + AST continuation replay; VM: fibers/frames — <code>include/jaiscript/core/coroutine.hpp</code>, <code>coroutine_backend_state</code>).</p>
+<h2 id="script-surface">Script surface<a class="hlink" href="#script-surface" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// snippets/coroutine_tour.jai — verified, both backends identical
+coroutine int countdown(int from) {
+    for (int i = from; i &gt; 0; --i) { yield i; }
+    return 0;
+}
+
+auto c = countdown(3);
+while (!c.done()) { print(to_string(c.resume())); }   // 3, 2, 1, 0
+                                                       // (the final resume delivers the return value)
+var seen = [];
+for (auto v : countdown(4)) { seen.push(v); }          // range-for drives coroutines
+print(to_json(seen));                                  // [4,3,2,1] — return value not included</code></pre></div>
+<p>Coroutine <strong>methods</strong> work too — the handle pins the receiver alive across suspension and <code>this</code> stays bound (<code>coroutine.hpp::set_receiver</code>; used in anger by <code>examples/crawler</code>&#x27;s boss):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// snippets/coroutine_method.jai — verified, both backends identical
+class Boss {
+    int phase = 0;
+    coroutine int fight() { phase = 1; yield 10; phase = 2; yield 20; return 99; }
+}
+auto b = Boss();
+auto c = b.fight();
+c.resume();   // 10, b.phase == 1 — mutations through the receiver are visible live</code></pre></div>
+<p>Pinning suite: <code>language/coroutine_tests.cpp</code> (yield/resume sequencing, <code>done()</code> transitions, multiple simultaneous handles, range-for driving, sum-until-done loops).</p>
+<h2 id="driving-from-c-pattern-1-through-executes-the-simple-way">Driving from C++, pattern 1: through executes (the simple way)<a class="hlink" href="#driving-from-c-pattern-1-through-executes-the-simple-way" aria-label="link">&#8203;</a></h2>
+<p>A handle stored in an engine global persists **across separate <code>execute()</code> calls** — each execute resumes exactly where the last left off. This is the frame-loop pattern: create behaviors once, tick them per frame with tiny resume scripts.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/coro.cpp — compiled and run, verified
+eng-&gt;execute(R&quot;( coroutine int spawner(int n) {
+                     for (int i = 1; i &lt;= n; ++i) { yield i * 10; }
+                     return -1;
+                 }
+                 var c = spawner(3); )&quot;);
+
+for (int i = 0; i &lt; 4; ++i) {
+    auto v = eng-&gt;execute(&quot;c.resume();&quot;);                 // 10, 20, 30, -1
+    bool finished = eng-&gt;execute(&quot;c.done()&quot;).as&lt;bool&gt;();  // false ×3, then true
+}</code></pre></div>
+<p>Cross-execute persistence is specifically pinned — including the nasty case where the coroutine&#x27;s source line is re-executed in between (redeclaring <code>c</code>) and where the bite form is used: <code>coroutine_tests.cpp::coroutine_resume_across_executes_with_redeclare</code>, <code>semantics/engine_tests.hpp::jaibite_coroutine_across_runs</code> / <code>jaibite_coroutine_resume_across_runs</code>.</p>
+<h2 id="driving-from-c-pattern-2-the-native-handle">Driving from C++, pattern 2: the native handle<a class="hlink" href="#driving-from-c-pattern-2-the-native-handle" aria-label="link">&#8203;</a></h2>
+<p>The script value <em>is</em> a <code>jai::coroutine_handle</code> in an object holder — you can pull it out once and drive it with zero script round-trips:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/coro.cpp — verified
+#include &lt;jaiscript/core/coroutine.hpp&gt;
+
+eng-&gt;execute(&quot;var c2 = spawner(2);&quot;);
+auto holder = eng-&gt;execute(&quot;c2&quot;).get_object_holder();
+auto handle = std::static_pointer_cast&lt;jai::coroutine_handle&gt;(holder-&gt;data);
+
+while (!handle-&gt;done()) {
+    jai::checked_result&lt;jai::script_value&gt; step = handle-&gt;resume(eng.get());
+    if (!step) break;                     // error channel (checked_result)
+    step.value().as_int();                // 10, 20, then -1 (the return value)
+}</code></pre></div>
+<p>Verified output: <code>C++ resume -&gt; 10</code>, <code>C++ resume -&gt; 20</code>, <code>C++ resume -&gt; -1</code>.</p>
+<p>API notes (<code>coroutine.hpp</code>):</p>
+<ul><li><code>resume(engine*)</code> returns <code>checked_result&lt;script_value&gt;</code> — test it before using the value; a failed coroutine reports <code>status::failed</code>.</li><li><code>done()</code> == <code>completed || failed</code>; <code>get_status()</code> exposes <code>created/running/suspended/completed/failed</code>.</li><li>The <code>shared_ptr</code> you extracted keeps the coroutine (and, for method coroutines, its receiver) alive — this is the supported way to own a behavior from C++.</li></ul>
+<h2 id="semantics-worth-knowing-before-you-build-on-them">Semantics worth knowing before you build on them<a class="hlink" href="#semantics-worth-knowing-before-you-build-on-them" aria-label="link">&#8203;</a></h2>
+<ul><li>**The final <code>resume()</code> of a completed coroutine delivers the <code>return</code> value** (the <code>-1</code> / <code>99</code> above), and typed coroutine returns convert to the declared type (<code>coroutine_tests.cpp::coroutine_final_typed_return_converts</code>). Range-for consumes only the <em>yielded</em> values.</li><li>**Resuming past the end of a coroutine with no <code>return</code>** is the one open, deliberately-suppressed backend divergence (interpreter repeats the last yield, VM yields null; ledger <code>source/tests/fuzz/known_divergences.md</code> KD-CORO-RESUME-PAST-END, triaged: the interpreter is wrong). Always either give coroutines a <code>return</code> or gate on <code>done()</code> — both patterns are backend-identical.</li><li><strong>Budget interaction</strong>: the execution budget applies per <code>execute()</code>/<code>resume()</code> call, and a budget overrun inside a coroutine is terminal like everywhere else — a <code>catch</code> around the <code>yield</code> cannot swallow it (<code>execution_budget_tests.cpp::budget_terminal_skips_catch_inside_coroutine</code>).</li><li>Coroutine parameters bind <strong>by value</strong> on both backends — even reference-shaped arguments (<code>vm_backend_tests.cpp::coroutine_ref_param_lvalue_binds_by_value</code>, <code>coroutine_ref_param_identifier_binds_by_value</code>, run on both backends); captures and closure state behave like lambdas.</li><li>Hot reload: a suspended coroutine keeps its old body until it finishes; new invocations get the new definition (see the Hot Reload chapter and the roguelike&#x27;s monster brains).</li></ul><nav class="prevnext"><a class="prev" href="../embedding/08-serialization.html"><span>&larr; previous</span>Serialization</a><a class="next" href="../embedding/10-signals-properties.html"><span>next &rarr;</span>Signals &amp; Observable Properties</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

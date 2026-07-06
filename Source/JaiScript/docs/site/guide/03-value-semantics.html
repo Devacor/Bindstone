@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Value Semantics &amp; References — JaiScript Guide</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li class="current"><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="value-semantics-references">Value Semantics &amp; References<a class="hlink" href="#value-semantics-references" aria-label="link">&#8203;</a></h1>
+<p><strong>Read this chapter before writing any JaiScript.</strong> The single most common ambush for new users lives here: <em>JaiScript copies by default — everywhere.</em> Assignment copies. Function arguments copy. Even <strong>class instances copy</strong>. If you mutate a copy, the original never hears about it, and nothing warns you.</p>
+<h2 id="the-ambush-mutations-on-copies-vanish-silently">The ambush: mutations on copies vanish silently<a class="hlink" href="#the-ambush-mutations-on-copies-vanish-silently" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto a = [1, 2, 3];
+auto b = a;          // assignment COPIES the array
+b[0] = 99;
+print(&quot;a[0] = {}  (the original is untouched)&quot;, a[0]);
+print(&quot;b[0] = {}&quot;, b[0]);
+
+function double_all(arr) {
+    for (auto&amp; x : arr) { x *= 2; }   // mutates the local COPY
+}
+auto nums = [1, 2, 3];
+double_all(nums);                     // parameter passed BY VALUE
+print(&quot;after double_all(nums): nums[0] = {}  &lt;- mutation vanished!&quot;, nums[0]);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a[0] = 1  (the original is untouched)
+b[0] = 99
+after double_all(nums): nums[0] = 1  &lt;- mutation vanished!</code></pre></div>
+<p>*(pinned: semantics/value_semantics_tests.hpp — <code>assignment_copies</code>, <code>array_assignment_copies</code>, <code>map_assignment_copies</code>, <code>function_by_value_copies</code>; deep-copy details in semantics/test_deep_copy.cpp, test_object_deep_copy.cpp)*</p>
+<p><strong>This applies to class instances too</strong> — unlike Python/JS/Lua/C#, objects are values:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
+    int x = 0;
+    void set(int v) { x = v; }             // methods mutate their own instance
+}
+auto p = Point();
+p.x = 1;
+auto q = p;          // class instances COPY on assignment too
+q.x = 99;
+print(&quot;p.x = {}  q.x = {}&quot;, p.x, q.x);
+
+function try_mutate(o) { o.x = 77; }       // by-value param: mutation is lost
+try_mutate(p);
+print(&quot;after try_mutate(p): p.x = {}&quot;, p.x);
+
+p.set(42);                                 // method calls DO mutate the receiver
+print(&quot;after p.set(42):    p.x = {}&quot;, p.x);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">p.x = 1  q.x = 99
+after try_mutate(p): p.x = 1
+after p.set(42):    p.x = 42</code></pre></div>
+<p>So: <strong>methods mutate their receiver; free functions receive copies.</strong> When a mutation &quot;doesn&#x27;t stick&quot;, check whether you passed the object by value.</p>
+<h2 id="escape-hatch-1-reference-parameters">Escape hatch 1: <code>&amp;</code> reference parameters<a class="hlink" href="#escape-hatch-1-reference-parameters" aria-label="link">&#8203;</a></h2>
+<p>Declare a parameter with <code>&amp;</code> and the callee binds the <em>caller&#x27;s</em> variable. Works with explicit types (<code>int&amp; x</code>) and with <code>auto&amp;</code> (any type):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }         // typed by-ref parameter
+auto n = 41;
+bump(n);
+print(&quot;after bump(n): {}&quot;, n);
+
+function fill(auto&amp; arr, v) { arr.push(v); }   // auto&amp; works for any type
+auto items = [];
+fill(items, &quot;sword&quot;);
+print(&quot;items.size() = {}&quot;, items.size());
+
+class Hero { int hp = 10; }
+function heal(auto&amp; who) { who.hp += 5; }
+auto h = Hero();
+heal(h);                                   // &amp; is how object mutations survive a call
+print(&quot;h.hp = {}&quot;, h.hp);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after bump(n): 42
+items.size() = 1
+h.hp = 15</code></pre></div>
+<p>*(pinned: semantics/value_semantics_tests.hpp <code>reference_parameter_preserves_modifications</code>; vm/vm_backend_tests.cpp <code>ref_param_*</code> family — ~25 tests covering pass-through chains, block/loop scopes, methods, globals, recursion)*</p>
+<h2 id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments">Escape hatch 2: field and element lvalues as ref arguments<a class="hlink" href="#escape-hatch-2-field-and-element-lvalues-as-ref-arguments" aria-label="link">&#8203;</a></h2>
+<p>You can pass <code>obj.field</code> or <code>arr[i]</code> straight into a <code>&amp;</code> parameter. Element references re-resolve <strong>through the container</strong>, so they stay correct even if the array reallocates its storage:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }
+class Hero { int hp = 10; }
+auto h = Hero();
+bump(h.hp);                 // field lvalue passes by reference
+print(&quot;h.hp = {}&quot;, h.hp);
+
+auto arr = [5, 6, 7];
+bump(arr[1]);               // array element lvalue passes by reference
+print(&quot;arr[1] = {}&quot;, arr[1]);
+for (int i = 0; i &lt; 64; ++i) { arr.push(0); }   // force reallocation
+bump(arr[1]);               // element refs re-resolve through the container
+print(&quot;arr[1] after realloc = {}&quot;, arr[1]);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">h.hp = 11
+arr[1] = 7
+arr[1] after realloc = 8</code></pre></div>
+<p>*(pinned: vm/vm_backend_tests.cpp <code>ref_param_instance_field_from_method_body</code>, <code>ref_param_element_ref_single_hop</code>, <code>ref_param_element_ref_pass_through_realloc</code>, <code>ref_param_element_ref_shrink_errors</code> — shrinking the array out from under an element ref raises a catchable error rather than corrupting memory; the shared kernel is <code>detail/ref_lvalue.hpp</code>, verbatim in both backends)*</p>
+<h2 id="escape-hatch-3-reference-declarations-auto">Escape hatch 3: reference declarations (<code>auto&amp;</code>)<a class="hlink" href="#escape-hatch-3-reference-declarations-auto" aria-label="link">&#8203;</a></h2>
+<p><code>auto&amp; r = x;</code> declares an alias. References chain, and element references survive reallocation just like ref params:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = 1;
+auto&amp; g = v;         // reference declaration: g aliases v
+auto&amp; h = g;         // references chain
+h = h + 3;
+print(&quot;v = {}&quot;, v);
+
+var arr = [7, 8];
+auto&amp; x = arr[1];    // element reference
+for (int i = 0; i &lt; 64; ++i) { arr.push(0); }
+x = 42;              // still writes through after the array reallocated
+print(&quot;arr[1] = {}&quot;, arr[1]);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">v = 4
+arr[1] = 42</code></pre></div>
+<p>*(pinned: vm/vm_backend_tests.cpp <code>ref_decl_shares_env_ref</code>, <code>ref_decl_element_ref_survives_realloc</code>)*</p>
+<p><strong>Current caveat:</strong> an <code>auto&amp;</code> bound to a <em>typed</em> array&#x27;s element drops the element&#x27;s type constraint — you can write a string through it into an <code>array&lt;int&gt;</code> (pinned deliberately for now: vm/vm_backend_tests.cpp <code>ref_decl_element_constraint_dropped</code>).</p>
+<p><strong>Known crash (reported):</strong> calling a builtin <em>string</em> method through a ref <em>declaration</em> (<code>auto&amp; r = s; r.length();</code>) currently segfaults on both backends at the commit these docs were built from. String methods through ref <em>parameters</em> are fine, as are array/map methods through ref declarations. Until fixed, dereference first or operate on the original variable. (See INTENT_QUESTIONS.)</p>
+<h2 id="escape-hatch-4-range-for-with-auto">Escape hatch 4: range-for with <code>auto&amp;</code><a class="hlink" href="#escape-hatch-4-range-for-with-auto" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1, 2, 3];
+for (auto x : nums) { x *= 2; }       // copies: original unchanged
+print(&quot;after value loop: {}&quot;, nums[0]);
+for (auto&amp; x : nums) { x *= 2; }      // references: mutates in place
+print(&quot;after ref loop:   {}&quot;, nums[0]);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after value loop: 1
+after ref loop:   2</code></pre></div>
+<p>*(pinned: language/range_based_for_tests.cpp; language/review_regression_tests.cpp <code>range_for_ref_in_function</code>, <code>range_for_ref_realloc_no_corruption</code>)*</p>
+<h2 id="escape-hatch-5-shared-ptr-opt-in-reference-semantics">Escape hatch 5: <code>shared_ptr&lt;T&gt;</code> — opt-in reference semantics<a class="hlink" href="#escape-hatch-5-shared-ptr-opt-in-reference-semantics" aria-label="link">&#8203;</a></h2>
+<p>When you <em>want</em> an object shared by handle (entity registries, cross-references), declare it <code>shared_ptr&lt;T&gt;</code>. Copies of the handle alias the same object; <code>weak_ptr&lt;T&gt;</code> observes without owning:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
+shared_ptr&lt;P&gt; sp = P();
+auto alias = sp;
+alias.x = 99;
+print(&quot;sp.x = {} (shared!)&quot;, sp.x);
+function poke(o) { o.x = 42; }
+poke(sp);
+print(&quot;after poke: {}&quot;, sp.x);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">sp.x = 99 (shared!)
+after poke: 42</code></pre></div>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
+shared_ptr&lt;P&gt; sp = P();
+weak_ptr&lt;P&gt; w = sp;
+print(&quot;expired: {}&quot;, w.expired());
+auto l = w.lock();
+l.x;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">expired: false
+== result: 3</code></pre></div>
+<p>Note the guard rail: <code>weak_ptr&lt;P&gt; w = p;</code> from a plain (value-semantic) object is an error — <em>&quot;Cannot initialize weak_ptr&lt;&gt; from value-semantic object: use shared_ptr\&lt;T\&gt;&quot;</em>. <em>(pinned: semantics/weak_ptr_tests.cpp, semantics/script_container_tests.cpp)</em></p>
+<h2 id="clone-vs-copy-host-api-note">clone vs copy (host API note)<a class="hlink" href="#clone-vs-copy-host-api-note" aria-label="link">&#8203;</a></h2>
+<p>Inside script, assignment always behaves as a (deep) copy, as shown above. On the <strong>C++ side</strong> the rule is inverted: copying a <code>jai::script_value</code> is a cheap O(1) <em>shallow</em> handle copy (heavy types sit behind <code>strong_ptr</code>), and <code>value.clone()</code> is the explicit deep copy. Don&#x27;t confuse the two worlds: script <code>=</code> copies; C++ <code>=</code> aliases. <em>(pinned: semantics/test_cpp_bound.cpp, semantics/test_deep_copy_comprehensive.cpp; documented in core/value.hpp)</em></p><nav class="prevnext"><a class="prev" href="../guide/02-type-ladder.html"><span>&larr; previous</span>The Type Ladder: typed, auto, var</a><a class="next" href="../guide/04-operators.html"><span>next &rarr;</span>Operators &amp; Arithmetic</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

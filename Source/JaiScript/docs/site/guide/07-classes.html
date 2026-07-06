@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classes — JaiScript Guide</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li class="current"><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="classes">Classes<a class="hlink" href="#classes" aria-label="link">&#8203;</a></h1>
+<p>Script classes: fields with initializers (run in <strong>declaration order</strong>), constructors with overloading and <code>: this(...)</code> delegation, inheritance with <code>super</code>, statics, and hot reload with instance migration. All methods are virtual; overriding requires the explicit <code>override</code> keyword. Remember from Value Semantics: instances are <strong>values</strong> — assignment copies; use <code>shared_ptr&lt;T&gt;</code> for handle semantics.</p>
+<h2 id="fields-constructors-implicit-self">Fields, constructors, implicit self<a class="hlink" href="#fields-constructors-implicit-self" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature {
+    string name = &quot;anonymous&quot;;
+    int health = 100;
+    int max_health = health;
+
+    Creature(string n) { name = n; }
+
+    void take_damage(int amount) {
+        health -= amount;
+        if (health &lt;= 0) { print(&quot;{} died&quot;, name); }
+    }
+
+    auto describe() { return name + &quot; (&quot; + to_string(health) + &quot;/&quot; + to_string(max_health) + &quot;)&quot;; }
+}
+auto goblin = Creature(&quot;goblin&quot;);
+goblin.take_damage(30);
+print(goblin.describe());
+goblin.take_damage(80);
+goblin.describe();</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">goblin (70/100)
+goblin died
+== result: goblin (-10/100)</code></pre></div>
+<p><code>max_health = health</code> works because field initializers run top-to-bottom in declaration order. Methods access fields directly (implicit self); construction is a plain call — <code>Creature(&quot;goblin&quot;)</code>, **no <code>new</code> keyword**. <code>private:</code> / <code>public:</code> section labels parse (C++ style), but access is not currently enforced — see INTENT_QUESTIONS. <em>(pinned: language/script_class_tests.cpp, language/test_cat_class_syntax.cpp)</em></p>
+<h2 id="constructor-overloading-and-this-delegation">Constructor overloading and <code>: this(...)</code> delegation<a class="hlink" href="#constructor-overloading-and-this-delegation" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
+    int x = 0;
+    int y = 0;
+    Point() : this(0, 0) {}
+    Point(int v) : this(v, v) {}
+    Point(int px, int py) { x = px; y = py; print(&quot;main ctor ({}, {})&quot;, px, py); }
+}
+auto a = Point();
+auto b = Point(3);
+auto c = Point(1, 2);
+b.x + c.y;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">main ctor (0, 0)
+main ctor (3, 3)
+main ctor (1, 2)
+== result: 5</code></pre></div>
+<p><em>(pinned: language/constructor_conversion_tests.cpp, language/method_overload_tests.cpp)</em></p>
+<h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, explicit <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
+    int a = 0;
+    Cat(int v) { a = v; }
+    auto speak() { return &quot;meow &quot; + to_string(a); }
+}
+class Tiger : Cat {
+    Tiger() : super(5) {}
+    auto speak() override {
+        return &quot;ROAR! (base said: &quot; + super::speak() + &quot;)&quot;;
+    }
+}
+auto t = Tiger();
+print(t.speak());
+Cat c = t;
+type_of(c);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ROAR! (base said: meow 5)
+== result: object</code></pre></div>
+<p>Redefining a base method <strong>without</strong> <code>override</code> is an error — the message is explicit:</p>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Method &#x27;speak&#x27; shadows base class method. Use &#x27;override&#x27; keyword if this is intentional</code></pre></div>
+<p>Assigning a derived instance to a base-typed variable is allowed; the reverse (parent to child), siblings, and structurally-identical unrelated classes are rejected. *(pinned: language/override_tests.cpp, override_edge_cases.cpp; semantics/strong_types_tests.cpp <code>class_inheritance_child_to_parent_allowed</code>, <code>class_type_sibling_classes_rejected</code>, <code>class_type_unrelated_classes_with_same_fields_rejected</code>)*</p>
+<h2 id="typed-fields-are-enforced-new">Typed fields are enforced (new)<a class="hlink" href="#typed-fields-are-enforced-new" aria-label="link">&#8203;</a></h2>
+<p>Fields follow the same type ladder as variables: explicit types enforce and convert; <code>var</code> fields stay dynamic; <code>auto</code> fields lock on their initializer.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Stats {
+    int hp = 10;
+    var anything = 0;
+}
+auto s = Stats();
+s.hp = 3.9;
+print(&quot;hp = {} ({})&quot;, s.hp, type_of(s.hp));
+s.anything = &quot;free&quot;;
+print(&quot;anything = {}&quot;, s.anything);
+try {
+    s.hp = &quot;not a number&quot;;
+} catch (e) {
+    print(&quot;caught: {}&quot;, e);
+}
+s.hp;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp = 3 (int)
+anything = free
+caught: Type mismatch in assignment
+== result: 3</code></pre></div>
+<p>Enforcement covers direct assigns, implicit-<code>this</code> assigns in methods/ctors, compound assigns, inherited fields, the C++ <code>set_field</code> API, and JSON round-trips. *(pinned: semantics/strong_types_tests.cpp <code>typed_field_direct_assign_converts</code>, <code>typed_field_implicit_this_and_ctor_convert</code>, <code>typed_field_compound_converts</code>, <code>typed_field_inheritance_enforced</code>, <code>typed_field_set_field_cpp_api</code>, <code>typed_field_json_roundtrip</code>)*</p>
+<h2 id="statics">Statics<a class="hlink" href="#statics" aria-label="link">&#8203;</a></h2>
+<p>Static fields and methods belong to the class and are reached with <code>::</code>. Instance constructors/methods see them directly:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter {
+    static int count = 0;
+    static float PI = 3.14159;
+    Counter() { count = count + 1; }
+    static int twice_count() { return count * 2; }
+}
+auto a = Counter();
+auto b = Counter();
+auto c = Counter();
+print(&quot;Counter::count = {}&quot;, Counter::count);
+print(&quot;Counter::twice_count() = {}&quot;, Counter::twice_count());
+Counter::PI;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Counter::count = 3
+Counter::twice_count() = 6
+== result: 3.141590</code></pre></div>
+<p><em>(pinned: language/static_field_tests.cpp, static_method_tests.cpp — including statics with inheritance; namespaces can override class statics of the same name, see Kitchen Sink)</em></p>
+<h2 id="hot-reload-with-permissive-migration">Hot reload with permissive migration<a class="hlink" href="#hot-reload-with-permissive-migration" aria-label="link">&#8203;</a></h2>
+<p>Re-executing a <code>class</code> declaration on the same engine <strong>reloads</strong> the class. Live instances migrate permissively: fields that still exist <strong>keep their current values</strong> (including still-default ones), brand-new fields get the new defaults, removed fields drop. The two <code>execute()</code> calls below run on one engine (marked <code>//=== execute</code>):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config {
+    auto version = 1;
+    auto name = &quot;default&quot;;
+}
+auto cfg = Config();
+cfg.name = &quot;production&quot;;
+print(&quot;before reload: v{} {}&quot;, cfg.version, cfg.name);
+//=== execute
+class Config {
+    auto version = 2;
+    auto name = &quot;default&quot;;
+    auto retries = 3;
+}
+print(&quot;after reload:  v{} {} retries={}&quot;, cfg.version, cfg.name, cfg.retries);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">before reload: v1 production
+== result: null
+after reload:  v1 production retries=3
+== result: null</code></pre></div>
+<p>Note <code>version</code> stayed <code>1</code> — migration preserves <em>existing per-instance state</em>, it does not re-run initializers for fields that already exist; only the new <code>retries</code> field picked up its default. Methods always come from the newest class definition. Hot reload even works while a function/class on the current call stack is redefined, and suspended method coroutines survive a field-changing reload of their class. *(pinned: language/hot_reload_tests.cpp, hot_reload_correctness_tests.cpp; language/coroutine_tests.cpp <code>method_coroutine_survives_field_changing_reload</code>)*</p><nav class="prevnext"><a class="prev" href="../guide/06-functions.html"><span>&larr; previous</span>Functions &amp; Lambdas</a><a class="next" href="../guide/08-coroutines.html"><span>next &rarr;</span>Coroutines</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

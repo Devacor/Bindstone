@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Functions &amp; Lambdas — JaiScript Guide</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li class="current"><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="functions-lambdas">Functions &amp; Lambdas<a class="hlink" href="#functions-lambdas" aria-label="link">&#8203;</a></h1>
+<h2 id="declaration-forms-typed-params-defaults">Declaration forms, typed params, defaults<a class="hlink" href="#declaration-forms-typed-params-defaults" aria-label="link">&#8203;</a></h2>
+<p>Three equivalent declaration styles: <code>function name(params) -&gt; type</code>, <code>auto name(params)</code> (inferred return), and typed C-style. Parameters may be typed (enforced + converted like any typed target) or bare (dynamic). Default arguments work, including several in a row:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function add(int a, int b) -&gt; int { return a + b; }
+auto mul(a, b) { return a * b; }
+function greet(string name, string greeting = &quot;hello&quot;) -&gt; string {
+    return greeting + &quot; &quot; + name;
+}
+print(add(2, 3));
+print(mul(4, 2.5));
+print(greet(&quot;world&quot;));
+print(greet(&quot;world&quot;, &quot;salve&quot;));
+function clamp(int v, int lo = 0, int hi = 100) -&gt; int {
+    return v &lt; lo ? lo : (v &gt; hi ? hi : v);
+}
+print(&quot;clamp(150) = {}&quot;, clamp(150));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5
+10.000000
+hello world
+salve world
+clamp(150) = 100</code></pre></div>
+<p>*(pinned: language/function_tests.cpp — <code>default_parameter_multiple</code>, <code>default_parameter_string</code>; typed params/returns: semantics/strong_types_tests.cpp <code>function_with_typed_params</code>, <code>function_param_type_conversion</code>, <code>function_returns_to_typed_var</code>)*</p>
+<p>By-reference parameters (<code>int&amp; x</code>, <code>auto&amp; x</code>) bind the caller&#x27;s variable — covered in depth in the Value Semantics chapter.</p>
+<h2 id="lambdas-and-captures">Lambdas and captures<a class="hlink" href="#lambdas-and-captures" aria-label="link">&#8203;</a></h2>
+<p>C++11-style lambdas with explicit captures: <code>[x]</code> copies, <code>[&amp;x]</code> references, <code>[=]</code> copies everything used, <code>[&amp;]</code> references everything used:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto add = [](int a, int b) -&gt; int { return a + b; };
+print(&quot;add(5, 3) = {}&quot;, add(5, 3));
+
+int multiplier = 10;
+auto scale = [multiplier](int x) { return x * multiplier; };
+multiplier = 999;
+print(&quot;scale(4) = {}&quot;, scale(4));
+
+int counter = 0;
+auto inc = [&amp;counter]() { counter++; };
+inc(); inc(); inc();
+print(&quot;counter = {}&quot;, counter);
+
+auto a = 2; auto b = 3;
+auto sum_all = [=]() { return a + b; };
+auto set_a = [&amp;]() { a = 100; };
+set_a();
+print(&quot;a = {}, sum_all() = {} (captured before set_a)&quot;, a, sum_all());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">add(5, 3) = 8
+scale(4) = 40
+counter = 3
+a = 100, sum_all() = 5 (captured before set_a)</code></pre></div>
+<p><strong>Auto-capture:</strong> even with an empty capture list, a lambda can read enclosing variables — captures are automatic when omitted:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto n = 5;
+auto f = []() { return n; };
+f();</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 5</code></pre></div>
+<p>*(pinned: language/test_lambda_captures.cpp; semantics/strong_types_tests.cpp <code>lambda_captures_typed_var</code>, <code>lambda_modifies_var_capture</code>)*</p>
+<h2 id="functions-are-values-closures-outlive-their-frame">Functions are values; closures outlive their frame<a class="hlink" href="#functions-are-values-closures-outlive-their-frame" aria-label="link">&#8203;</a></h2>
+<p>Functions and lambdas can be stored in variables, arrays, and maps, passed as arguments, and returned. A by-reference capture keeps the captured local alive after the declaring function returns — the classic counter factory works:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function apply_twice(f, x) { return f(f(x)); }
+print(apply_twice([](v) { return v * 3; }, 2));
+
+function make_counter() {
+    var count = 0;
+    return [&amp;count]() { count += 1; return count; };
+}
+auto next = make_counter();
+print(&quot;{} {} {}&quot;, next(), next(), next());
+
+auto ops = {&quot;double&quot;: [](x) { return x * 2; }, &quot;square&quot;: [](x) { return x * x; }};
+print(&quot;ops map: {}&quot;, ops[&quot;square&quot;](7));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">18
+1 2 3
+ops map: 49</code></pre></div>
+<h2 id="recursion">Recursion<a class="hlink" href="#recursion" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int {
+    if (n &lt; 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+auto out = [];
+for (int i = 0; i &lt; 10; ++i) { out.push(fib(i)); }
+out.join(&quot;, &quot;);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34</code></pre></div>
+<p>(On the VM backend, script-to-script calls run as in-loop frames — deep script recursion does not consume native stack.)</p>
+<h2 id="variadics-live-on-the-host-side">Variadics live on the host side<a class="hlink" href="#variadics-live-on-the-host-side" aria-label="link">&#8203;</a></h2>
+<p>Script functions have fixed arity (plus defaults). Variadic functions are provided by the <strong>host</strong> via <code>engine::add_variadic_function</code>, which receives all arguments as a vector — <code>print</code> and <code>format</code> are exactly this:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">engine.add_variadic_function(&quot;sum_all&quot;, [&amp;engine](const std::vector&lt;jai::script_value&gt;&amp; args) {
+    jai::script_int total = 0;
+    for (auto&amp; a : args) total += a.as_int();
+    return jai::script_value(total, &amp;engine);
+});
+// script: sum_all(1, 2, 3, 4)  -&gt;  10</code></pre></div>
+<p>Function overloading by arity <em>is</em> available inside namespaces (<code>utils::add(a,b)</code> vs <code>utils::add(a,b,c)</code> — see Kitchen Sink) and for class constructors/methods (see Classes). *(pinned: foundry/suite_namespaces.cpp <code>namespace_function_overload</code>; language/method_overload_tests.cpp)*</p><nav class="prevnext"><a class="prev" href="../guide/05-control-flow.html"><span>&larr; previous</span>Control Flow</a><a class="next" href="../guide/07-classes.html"><span>next &rarr;</span>Classes</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

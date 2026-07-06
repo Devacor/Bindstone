@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enums, Namespaces, Destructuring &amp; Friends — JaiScript Guide</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li class="current"><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="the-kitchen-sink">The Kitchen Sink<a class="hlink" href="#the-kitchen-sink" aria-label="link">&#8203;</a></h1>
+<p>The smaller conveniences: enums, namespaces, destructuring, the ternary operator, and null-safe access.</p>
+<h2 id="enums">Enums<a class="hlink" href="#enums" aria-label="link">&#8203;</a></h2>
+<p><code>enum Name { a, b, c }</code> declares sequential integer constants (0-based), accessed with dot syntax. They compare naturally and work as <code>switch</code> cases:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
+print(&quot;east = {}&quot;, Direction.east);
+auto d = Direction.south;
+print(&quot;d == south: {}&quot;, d == Direction.south);
+switch (d) {
+    case Direction.north: print(&quot;going up&quot;);
+    case Direction.south: print(&quot;going down&quot;);
+    default: print(&quot;sideways&quot;);
+}
+Direction.west;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">east = 2
+d == south: true
+going down
+== result: 3</code></pre></div>
+<p>Enum members are plain ints at runtime (<code>Direction.east</code> prints <code>2</code>). *(pinned: language/function_tests.cpp — <code>enum_basic</code>, <code>enum_comparison</code>, <code>enum_in_switch</code>)*</p>
+<h2 id="namespaces">Namespaces<a class="hlink" href="#namespaces" aria-label="link">&#8203;</a></h2>
+<p>Namespaces group functions, variables, and classes behind <code>::</code>. They are <strong>flat</strong> — <code>namespace my::nested::deep { }</code> is a single namespace whose name contains <code>::</code>, and &quot;nesting&quot; blocks composes the same way. Functions overload <strong>by arity</strong>; redefining an existing name+arity requires the <code>override</code> keyword (mirrors hot-reload discipline):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace utils {
+    auto add(a, b) { return a + b; }
+    auto add(a, b, c) { return a + b + c; }    // overload by arity
+    auto VERSION = 3;
+    class Vec2 {
+        int x = 0; int y = 0;
+        Vec2(int px, int py) { x = px; y = py; }
+        auto len2() { return x * x + y * y; }
+    }
+}
+namespace my::nested::deep {                    // flat name with :: in it
+    auto answer() { return 42; }
+}
+print(&quot;utils::add(1, 2) = {}&quot;, utils::add(1, 2));
+print(&quot;utils::add(1, 2, 3) = {}&quot;, utils::add(1, 2, 3));
+print(&quot;version {}&quot;, utils::VERSION);
+auto v = utils::Vec2(3, 4);
+print(&quot;len2 = {}&quot;, v.len2());
+my::nested::deep::answer();</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">utils::add(1, 2) = 3
+utils::add(1, 2, 3) = 6
+version 3
+len2 = 25
+== result: 42</code></pre></div>
+<p>Extra wrinkles, all pinned in foundry/suite_namespaces.cpp:</p>
+<ul><li>Duplicate name+arity without <code>override</code> → error (<code>namespace_override_required</code>); <code>auto func(x) override { ... }</code> replaces (<code>namespace_override_allowed</code>).</li><li>A namespace can share a name with a <strong>class</strong> and its functions then <em>override the class&#x27;s static methods</em> of matching arity — lookup prefers namespace overrides, falls back to class statics (<code>namespace_overrides_class_static</code>, <code>namespace_override_before_class</code> — order doesn&#x27;t matter).</li><li>Keywords like <code>string</code> are usable as namespace names (<code>namespace_string_keyword_as_name</code>).</li><li>Wrong arity / missing member through <code>::</code> are runtime errors (<code>namespace_function_arity_mismatch</code>, <code>namespace_member_not_found</code>).</li></ul>
+<h2 id="destructuring">Destructuring<a class="hlink" href="#destructuring" aria-label="link">&#8203;</a></h2>
+<p><code>auto [a, b, c] = array;</code> unpacks positionally. Extra elements are ignored; missing ones bind <code>null</code>:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto [x, y, z] = [1, 2, 3];
+print(&quot;{} {} {}&quot;, x, y, z);
+auto [a, b] = [10, 20, 30];       // extras ignored
+print(&quot;{} {}&quot;, a, b);
+auto [p, q, r] = [10, 20];        // missing become null
+print(&quot;{} {} {}&quot;, p, q, r == null ? &quot;null&quot; : to_string(r));
+auto pos = [4, 7];
+auto [px, py] = pos;
+px + py;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 2 3
+10 20
+10 20 null
+== result: 11</code></pre></div>
+<p>*(pinned: language/function_tests.cpp — <code>destructuring_basic</code>, <code>destructuring_fewer_vars</code>, <code>destructuring_more_vars</code>, <code>destructuring_from_variable</code>)*</p>
+<h2 id="ternary">Ternary<a class="hlink" href="#ternary" aria-label="link">&#8203;</a></h2>
+<p>Right-associative, so the classic cascade reads top-down without parentheses:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto health = 40;
+auto status = health &gt; 0 ? &quot;alive&quot; : &quot;dead&quot;;
+auto level = health &gt; 75 ? &quot;healthy&quot; :
+             health &gt; 25 ? &quot;wounded&quot; : &quot;critical&quot;;
+print(&quot;{} and {}&quot;, status, level);
+health &gt; 50 ? 1 : 0;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">alive and wounded
+== result: 0</code></pre></div>
+<p>*(pinned: language/operator_tests.hpp <code>ternary_operator</code>)*</p>
+<h2 id="null-safe-access">Null-safe access: <code>?.</code><a class="hlink" href="#null-safe-access" aria-label="link">&#8203;</a></h2>
+<p><code>x?.member(...)</code> evaluates to <code>null</code> when <code>x</code> is null instead of erroring — chains short-circuit:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto obj = null;
+auto a = obj?.length();          // null-safe: short-circuits to null
+print(&quot;obj?.length() = {}&quot;, a == null ? &quot;null&quot; : to_string(a));
+auto s = &quot;hello&quot;;
+print(&quot;s?.length() = {}&quot;, s?.length());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">obj?.length() = null
+s?.length() = 5</code></pre></div>
+<p>*(pinned: language/function_tests.cpp — <code>null_safe_on_null</code>, <code>null_safe_on_value</code>, <code>null_safe_chain</code>)*</p>
+<p>Related conveniences documented elsewhere: <code>weak_ptr</code>/<code>shared_ptr</code> (Value Semantics), statics via <code>::</code> (Classes), <code>#include</code>/<code>#import</code> hash-prefix tolerance (Modules).</p><nav class="prevnext"><a class="prev" href="../guide/10-modules.html"><span>&larr; previous</span>Modules: include vs import</a><span></span></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

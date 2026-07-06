@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operators &amp; Arithmetic — JaiScript Guide</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li class="current"><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="operators-arithmetic">Operators &amp; Arithmetic<a class="hlink" href="#operators-arithmetic" aria-label="link">&#8203;</a></h1>
+<h2 id="the-table">The table<a class="hlink" href="#the-table" aria-label="link">&#8203;</a></h2>
+<div class="tablewrap"><table><thead><tr><th>Category</th><th>Operators</th><th>Notes</th></tr></thead><tbody><tr><td>Arithmetic</td><td><code>+ - * / %</code></td><td><code>int op int</code> stays int (<code>7 / 2</code> → <code>3</code>); any float operand promotes</td></tr><tr><td>Unary</td><td><code>- ! ~ ++ --</code></td><td><code>++</code>/<code>--</code> in both prefix and postfix form</td></tr><tr><td>Compound assign</td><td><code>= += -= *= /= %=</code></td><td>typed targets convert C++-style (see Type Ladder). Bitwise compounds (<code>&amp;=</code> <code>|=</code> <code>^=</code> <code>&lt;&lt;=</code> <code>&gt;&gt;=</code>) are <strong>not currently parsed</strong> — spell them out (<code>f = f | m</code>).</td></tr><tr><td>Comparison</td><td><code>== != &lt; &gt; &lt;= &gt;= &lt;=&gt;</code></td><td><code>&lt;=&gt;</code> returns -1 / 0 / 1; <code>1 == 1.0</code> is true</td></tr><tr><td>Logical</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td><td>short-circuit</td></tr><tr><td>Bitwise</td><td><code>&amp;</code> <code>|</code> <code>^</code> <code>~</code> <code>&lt;&lt;</code> <code>&gt;&gt;</code></td><td>on integers</td></tr><tr><td>Ternary</td><td><code>?:</code></td><td>right-associative</td></tr><tr><td>Member/index</td><td><code>. [] ?. ::</code></td><td><code>?.</code> is null-safe (see Kitchen Sink), <code>::</code> reaches statics/namespaces</td></tr></tbody></table></div>
+<p>String <code>+</code> concatenates (<code>&quot;a&quot; + &quot;b&quot;</code>), and <code>+</code> with a string operand stringifies via the usual coercions. Comparison on strings is lexicographic.</p>
+<p>*(pinned: language/operator_tests.hpp — <code>basic_arithmetic</code>, <code>mixed_type_arithmetic</code>, <code>spaceship_operator</code>, <code>logical_short_circuit</code>, <code>bitwise_operators</code>, <code>operator_precedence</code>; switch has no fallthrough surprises either — see Control Flow)*</p>
+<h2 id="arithmetic-precedence-inc-dec">Arithmetic, precedence, inc/dec<a class="hlink" href="#arithmetic-precedence-inc-dec" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;7 / 2   = {}&quot;, 7 / 2);         // int / int stays int
+print(&quot;7.0 / 2 = {}&quot;, 7.0 / 2);       // any float operand promotes
+print(&quot;7 % 3   = {}&quot;, 7 % 3);
+print(&quot;2 + 3 * 4 = {}&quot;, 2 + 3 * 4);   // usual precedence
+auto x = 5;
+print(&quot;x++ = {}, then x = {}&quot;, x++, x);
+print(&quot;--x = {}&quot;, --x);
+-x;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7 / 2   = 3
+7.0 / 2 = 3.500000
+7 % 3   = 1
+2 + 3 * 4 = 14
+x++ = 5, then x = 6
+--x = 5
+== result: -5</code></pre></div>
+<h2 id="comparisons-short-circuit">Comparisons, <code>&lt;=&gt;</code>, short-circuit<a class="hlink" href="#comparisons-short-circuit" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;3 &lt;=&gt; 7  = {}&quot;, 3 &lt;=&gt; 7);      // spaceship: -1 / 0 / 1
+print(&quot;7 &lt;=&gt; 7  = {}&quot;, 7 &lt;=&gt; 7);
+print(&quot;9 &lt;=&gt; 7  = {}&quot;, 9 &lt;=&gt; 7);
+print(&quot;\&quot;a\&quot; &lt; \&quot;b\&quot; = {}&quot;, &quot;a&quot; &lt; &quot;b&quot;);
+print(&quot;1 == 1.0 = {}&quot;, 1 == 1.0);
+auto side_effects = 0;
+function tick() { side_effects += 1; return true; }
+auto r = false &amp;&amp; tick();             // short-circuit: tick never runs
+print(&quot;side_effects = {}&quot;, side_effects);
+true || tick();
+side_effects;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 &lt;=&gt; 7  = -1
+7 &lt;=&gt; 7  = 0
+9 &lt;=&gt; 7  = 1
+&quot;a&quot; &lt; &quot;b&quot; = true
+1 == 1.0 = true
+side_effects = 0
+== result: 0</code></pre></div>
+<p>Float ordering uses a total order (NaN included) so values remain valid map keys — <code>==</code> and <code>&lt;=&gt;</code> are kept mutually consistent by design. *(pinned: language/review_regression_tests.cpp — the <code>&lt;=&gt;</code>/NaN map-key ordering fixes)*</p>
+<h2 id="bitwise">Bitwise<a class="hlink" href="#bitwise" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;6 &amp; 3  = {}&quot;, 6 &amp; 3);
+print(&quot;6 | 3  = {}&quot;, 6 | 3);
+print(&quot;6 ^ 3  = {}&quot;, 6 ^ 3);
+print(&quot;~0     = {}&quot;, ~0);
+print(&quot;1 &lt;&lt; 4 = {}&quot;, 1 &lt;&lt; 4);
+print(&quot;32 &gt;&gt; 2 = {}&quot;, 32 &gt;&gt; 2);
+auto flags = 0b0001;
+flags = flags | 0b0100;    // note: spelled-out form (no |= yet)
+flags;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6 &amp; 3  = 2
+6 | 3  = 7
+6 ^ 3  = 5
+~0     = -1
+1 &lt;&lt; 4 = 16
+32 &gt;&gt; 2 = 8
+== result: 5</code></pre></div>
+<h2 id="checked-overflow-raises-never-wraps-never-ub">Checked overflow: raises, never wraps, never UB<a class="hlink" href="#checked-overflow-raises-never-wraps-never-ub" aria-label="link">&#8203;</a></h2>
+<p>The default build policy is <code>JAISCRIPT_CHECKED_OVERFLOW</code> (&quot;safe by default&quot;): overflowing <code>+ - *</code>, unary <code>-</code>, and <code>INT64_MIN / -1</code> raise a <strong>catchable</strong> runtime error. The alternative build policy (<code>JAISCRIPT_WRAP_ON_OVERFLOW</code>) wraps two&#x27;s- complement instead. Either way, integer arithmetic is <strong>never undefined behavior</strong> — internally it is computed in unsigned. <code>engine::throw_on_overflow()</code> reports which policy the build uses.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto big = 9223372036854775807;   // INT64_MAX
+try {
+    big = big + 1;                // checked overflow raises, never wraps or UB
+} catch (e) {
+    print(&quot;caught: {}&quot;, e);
+}
+big;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Integer overflow in &#x27;+&#x27;
+== result: 9223372036854775807</code></pre></div>
+<p>Note the value is untouched after the failed operation. <code>++</code>/<code>--</code> are covered by the same policy, as are the intermediate results of compound assignments. *(pinned: language/review_regression_tests.cpp <code>incdec_overflow_checked_prefix_decrement</code>; semantics/strong_types_tests.cpp <code>compound_overflow_policy_covers_intermediate</code>; policy implementation: detail/integer_ops.hpp)*</p>
+<h2 id="division-by-zero">Division by zero<a class="hlink" href="#division-by-zero" aria-label="link">&#8203;</a></h2>
+<p>Both integer <strong>and</strong> float division by zero raise a catchable error (floats do not produce IEEE infinity):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {
+    auto x = 1 / 0;
+} catch (e) {
+    print(&quot;int:   caught {}&quot;, e);
+}
+try {
+    auto y = 1.0 / 0.0;    // float division by zero also raises (no IEEE inf)
+} catch (e) {
+    print(&quot;float: caught {}&quot;, e);
+}
+&quot;still running&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int:   caught Division by zero
+float: caught Division by zero
+== result: still running</code></pre></div>
+<p>*(pinned: language/operator_tests.hpp <code>division_by_zero</code>)*</p>
+<h2 id="operator-overloading">Operator overloading<a class="hlink" href="#operator-overloading" aria-label="link">&#8203;</a></h2>
+<p>Script classes can define operators (used with class instances on the left and even primitive right-hand sides), and C++-bound classes get operator overloading through <code>dynamic_binder</code>. *(pinned: language/operator_tests.hpp <code>script_class_operator_primitive_rhs</code>, <code>operator_overloading_with_custom_types</code>)*</p><nav class="prevnext"><a class="prev" href="../guide/03-value-semantics.html"><span>&larr; previous</span>Value Semantics &amp; References</a><a class="next" href="../guide/05-control-flow.html"><span>next &rarr;</span>Control Flow</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

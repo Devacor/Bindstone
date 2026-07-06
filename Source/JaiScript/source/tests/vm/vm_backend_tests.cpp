@@ -1221,20 +1221,19 @@ public:
 			}
 		});
 
-		test("tier1_field_constraint_is_value_carried", [this]() {
-			// Field typedness is value-carried (declared var/int both tag by the stored
-			// value): an int-tagged field constrains the ref exactly like the in-method
-			// identifier-assign path; an any-tagged field value binds unconstrained
+		test("tier1_field_constraint_is_declared_type", [this]() {
+			// RULED (2026-07): the DECLARED field type is the ref constraint. A 'var' field
+			// is dynamic — its ref binds unconstrained regardless of the stored value's tag —
+			// while a declared 'int' field constrains the ref exactly like the in-method
+			// identifier-assign path does.
 			const char* src = R"(
-				class Box { var v = 1; }
+				class Box { var v = 1; int i = 1; }
 				function put(var& x) { x = "str"; }
 				var b = Box();
 				var msg = "";
-				try { put(b.v); } catch (e) { msg = e; }
-				var anyTagged = 2;
-				b.v = anyTagged;
+				try { put(b.i); } catch (e) { msg = e; }
 				put(b.v);
-				to_string(b.v) + "|" + msg;
+				to_string(b.v) + "|" + to_string(b.i) + "|" + msg;
 			)";
 			std::string first;
 			for (bool use_vm : {false, true}) {
@@ -1242,9 +1241,9 @@ public:
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
-				check_true(got.find("str|") == 0, "any-tagged field value binds unconstrained");
+				check_true(got.find("str|1|") == 0, "var field binds unconstrained; int field unchanged");
 				check_true(got.find("Cannot assign 'string' to field of type 'int'") != std::string::npos,
-					"int-tagged field value constrains the ref");
+					"declared int field constrains the ref");
 				if (!use_vm) { first = got; } else { check_eq(first, got, "identical error text on both backends"); }
 			}
 		});
@@ -2386,9 +2385,29 @@ public:
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
 			check_true(i_out.find("AB|") == 0, std::string("interp: raw same-class and subtype accepted, got: ") + i_out);
-			check_true(i_out.find("Cannot assign 'int' to field of type 'shared_ptr<S>'") != std::string::npos,
-				"interp: rejection names the full shared_ptr constraint");
+			// RULED (2026-07): the ref constraint is the DECLARED type ('S p'), so the
+			// rejection names 'S' rather than the bind-time value's shared_ptr<S> tag
+			check_true(i_out.find("Cannot assign 'int' to field of type 'S'") != std::string::npos,
+				std::string("interp: rejection names the declared constraint, got: ") + i_out);
 			check_eq(i_out, v_out, "shared_ptr field constraint parity");
+		});
+
+		test("tier1_auto_field_shared_ptr_tag_still_constrains", [this, run_both_backends]() {
+			// An 'auto' field has no declared type, so the ref constraint falls back to the
+			// bind-time value tag — a held shared_ptr<S> keeps the old full-name rejection
+			const char* src = R"(
+				class S { int x = 1; }
+				class H { auto p = shared_ptr<S>(); }
+				function put(var& x, var val) { x = val; }
+				var h = H();
+				var msg = "";
+				try { put(h.p, 5); } catch (e) { msg = "" + e; }
+				msg;
+			)";
+			auto [i_out, v_out] = run_both_backends(src);
+			check_true(i_out.find("Cannot assign 'int' to field of type 'shared_ptr<S>'") != std::string::npos,
+				std::string("interp: auto field keeps the value-tag constraint, got: ") + i_out);
+			check_eq(i_out, v_out, "auto-field shared_ptr constraint parity");
 		});
 
 		// Element refs and direct subscript assign are ONE gate: the same store into the

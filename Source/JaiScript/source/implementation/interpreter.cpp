@@ -3808,8 +3808,13 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
             return result.error_value();
         }
     } else if (target.has_field(member_id)) {
-        // Direct field assignment (deep copy for value types, share for shared_ptr)
-        target.instance->set_field(member_id, clone_for_assignment(value));
+        // Direct field assignment (deep copy for value types, share for shared_ptr);
+        // typed fields enforce like locals
+        auto enforced = target.instance->enforce_field_write(member_id, clone_for_assignment(value));
+        if (!enforced) {
+            return enforced.error_value();
+        }
+        target.instance->set_field_unchecked(member_id, enforced.value());
     } else {
         std::string member_str(memberExpr->member);
         active_exception_value_ = make_value("Cannot assign to non-existent member '" + member_str + "'");
@@ -4292,7 +4297,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (op_symbol_id != 0) {
                         auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
                         if (custom_result.has_value()) {
-                            instance->set_field(identifier->symbol_id, clone_for_assignment(custom_result.value()));
+                            auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(custom_result.value()));
+                            if (!enforced) {
+                                return enforced.error_value();
+                            }
+                            instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                             push_value(std::move(custom_result.value()));
                             return {};
                         }
@@ -4377,8 +4386,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
                 }
 
-                // Set the field and push result
-                instance->set_field(identifier->symbol_id, clone_for_assignment(resultValue));
+                // Store the enforced (declared-type converted) value; the expression result
+                // stays the promoted value, matching member/element compound semantics
+                auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(resultValue));
+                if (!enforced) {
+                    return enforced.error_value();
+                }
+                instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                 push_value(std::move(resultValue));
             }
         } else if (expr->target->get_type() == node_type::member_expr) {
@@ -5021,11 +5035,20 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                     }
                                 }
                                 // Not a C++ property or no setter - use regular field assignment
+                                // (typed fields enforce like locals)
                                 if (!assigned_to_member) {
                                     if (is_lvalue_read) {
-                                        instance->set_field(identifier->symbol_id, clone_for_assignment(value));
+                                        auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(value));
+                                        if (!enforced) {
+                                            return enforced.error_value();
+                                        }
+                                        instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                                     } else {
-                                        instance->set_field(identifier->symbol_id, std::move(value));
+                                        auto enforced = instance->enforce_field_write(identifier->symbol_id, std::move(value));
+                                        if (!enforced) {
+                                            return enforced.error_value();
+                                        }
+                                        instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                                         value = instance->get_field(identifier->symbol_id);  // Shallow copy for return
                                     }
                                     assigned_to_member = true;
@@ -9314,6 +9337,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     
     // Collect new field defaults and methods (using uint64_t IDs for performance)
     std::unordered_map<uint64_t, script_value> new_field_defaults;
+    std::unordered_map<uint64_t, type_info_ptr> new_field_types; // declared types (typed fields enforce like locals)
     std::unordered_map<uint64_t, script_value> new_methods;
     std::unordered_map<uint64_t, script_value> new_static_methods;
     std::set<uint64_t> new_static_field_ids; // statics declared in this (re)definition, for reload purge
@@ -9519,6 +9543,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                     // Also add a null default value to the field_defaults map (using ID for performance)
                     // This ensures the field exists but will be properly initialized later
                     new_field_defaults[field_id] = default_val;
+                    // Declared type ('auto' parses as null and infers; 'var' stores the any tag)
+                    if (var_decl->type) {
+                        new_field_types[field_id] = var_decl->type;
+                    }
                 }
             }
 
@@ -9748,17 +9776,24 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Extract the class_instance from the first argument (this)
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
 
-                // Set the field value using the cached ID
-                instance->set_field(field_id, args[1]);
-
-                // Return the value that was set
-                return args[1];
+                // Typed fields enforce like locals (declared type; auto infers from the
+                // initialized value); the converted value is what gets stored and returned
+                auto enforced = instance->enforce_field_write(field_id, args[1]);
+                if (!enforced) {
+                    return enforced;
+                }
+                instance->set_field_unchecked(field_id, enforced.value());
+                return std::move(enforced.value());
             };
             auto [setter_id, _2] = string_symbolizer_->get_setter_id_with_view(field_id);
             new_methods[setter_id] = script_value::make_function(setter, engine_);
         }
         
         
+        // Declared types install first so redefine_class flags a retype as fields_changed
+        // and migrate_fields converts against the NEW types (retype ruling)
+        class_def->replace_field_declared_types(std::move(new_field_types));
+
         // Call redefine_class with the new field defaults and methods
         // Call redefine_class to migrate existing instances
         class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_);
@@ -9779,6 +9814,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         environment_->clear_all_parent_caches();
     } else {
         // For new classes, add the fields normally
+        class_def->replace_field_declared_types(std::move(new_field_types));
         for (const auto& [field_id, default_val] : new_field_defaults) {
             // Convert ID back to string for add_field (legacy API)
             std::string field_name(string_symbolizer_->get_string(field_id));
@@ -9813,11 +9849,14 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 // Extract the class_instance from the first argument (this)
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
 
-                // Set the field value using ID
-                instance->set_field(field_id, args[1]);
-
-                // Return the value that was set
-                return args[1];
+                // Typed fields enforce like locals (declared type; auto infers from the
+                // initialized value); the converted value is what gets stored and returned
+                auto enforced = instance->enforce_field_write(field_id, args[1]);
+                if (!enforced) {
+                    return enforced;
+                }
+                instance->set_field_unchecked(field_id, enforced.value());
+                return std::move(enforced.value());
             };
             auto [setter_id, _2] = string_symbolizer_->get_setter_id_with_view(field_id);
             class_def->add_method_by_id(setter_id, setter);

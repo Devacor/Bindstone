@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 namespace jai::foundry::tests {
@@ -1158,6 +1159,227 @@ public:
                 catch (const std::exception&) { threw = true; }
                 check(threw, use_vm ? "vm: += overflow raises" : "interp: += overflow raises");
             }
+        });
+
+        // ===== TYPED CLASS FIELDS ENFORCE LIKE LOCALS (ruling 2026-07) =====
+        // Declared field types are stored on the class definition and every write path
+        // converts through the field kernel (same table '=' uses on locals): direct member
+        // assign, implicit-this assign, compound, ctor field-init, set_field C++ API,
+        // from_json. var fields stay dynamic; auto fields infer from the initialized value
+        // then enforce.
+
+        test("typed_field_direct_assign_converts", [this, check_both, both]() {
+            check_both(R"(
+                class C { int v = 0; }
+                auto c = C();
+                c.v = 4.7;
+                type_of(c.v) + ":" + to_string(c.v)
+            )", "int:4", "int field truncates float assign");
+            check_both(R"(
+                class C { float f = 0.0; }
+                auto c = C();
+                c.f = 3;
+                type_of(c.f) + ":" + to_string(c.f)
+            )", "float:3.000000", "float field widens int assign");
+            check_both(R"(
+                class C { string s = ""; }
+                auto c = C();
+                c.s = 42;
+                c.s
+            )", "42", "string field converts via to_string");
+            auto [i_out, v_out] = both(R"(
+                class C { int v = 0; }
+                auto c = C();
+                c.v = "nope";
+                c.v
+            )");
+            check_eq(i_out, v_out, "string-into-int field error parity");
+            check_true(i_out.find("ERROR") == 0 && i_out.find("Type mismatch in assignment") != std::string::npos,
+                std::string("locals-identical error text, got: ") + i_out);
+        });
+
+        test("typed_field_implicit_this_and_ctor_convert", [this, check_both, both]() {
+            check_both(R"(
+                class C {
+                    int v = 0;
+                    void set(var x) { v = x; }
+                }
+                auto c = C();
+                c.set(9.9);
+                type_of(c.v) + ":" + to_string(c.v)
+            )", "int:9", "implicit-this assign converts");
+            check_both(R"(
+                class C { int v = 4.7; }
+                auto c = C();
+                type_of(c.v) + ":" + to_string(c.v)
+            )", "int:4", "ctor field-init converts the initializer");
+            check_both(R"(
+                class C {
+                    int v = 0;
+                    C(var x) { v = x; }
+                }
+                auto c = C(6.9);
+                to_string(c.v)
+            )", "6", "ctor body assign converts");
+            auto [i_out, v_out] = both(R"(
+                class C {
+                    int v = 0;
+                    void set(var x) { v = x; }
+                }
+                auto c = C();
+                c.set("bad");
+                c.v
+            )");
+            check_eq(i_out, v_out, "implicit-this mismatch parity");
+            check_true(i_out.find("ERROR") == 0, "implicit-this mismatch raises");
+        });
+
+        test("typed_field_compound_converts", [this, check_both]() {
+            check_both(R"(
+                class C { int v = 10; }
+                auto c = C();
+                c.v += 2.5;
+                type_of(c.v) + ":" + to_string(c.v)
+            )", "int:12", "member compound converts back");
+            check_both(R"(
+                class C {
+                    int v = 10;
+                    void bump() { v += 2.5; }
+                }
+                auto c = C();
+                c.bump();
+                type_of(c.v) + ":" + to_string(c.v)
+            )", "int:12", "implicit-this compound converts back");
+            check_both(R"(
+                class C { int v = 10; }
+                auto c = C();
+                c.v %= 4.5;
+                to_string(c.v)
+            )", "1", "member %= fmod then truncate");
+        });
+
+        test("var_and_auto_fields", [this, check_both, both]() {
+            // var fields stay fully dynamic
+            check_both(R"(
+                class C { var v = 1; }
+                auto c = C();
+                c.v = 2.5;
+                var t1 = type_of(c.v);
+                c.v = "s";
+                t1 + "|" + c.v
+            )", "float|s", "var field stays dynamic");
+            check_both(R"(
+                class C { var v = 10; }
+                auto c = C();
+                c.v += 2.5;
+                type_of(c.v) + ":" + to_string(c.v)
+            )", "float:12.500000", "var field compound stays dynamic");
+            // auto fields infer from the initializer then enforce
+            check_both(R"(
+                class C { auto v = 1; }
+                auto c = C();
+                c.v = 2.5;
+                type_of(c.v) + ":" + to_string(c.v)
+            )", "int:2", "auto field locks to inferred int");
+            auto [i_out, v_out] = both(R"(
+                class C { auto v = 1; }
+                auto c = C();
+                c.v = "s";
+                c.v
+            )");
+            check_eq(i_out, v_out, "auto field mismatch parity");
+            check_true(i_out.find("ERROR") == 0, "auto field rejects a string");
+        });
+
+        test("typed_field_inheritance_enforced", [this, check_both, both]() {
+            check_both(R"(
+                class Base { int bv = 0; }
+                class Derived : Base { var dv = 0; }
+                auto d = Derived();
+                d.bv = 7.7;
+                type_of(d.bv) + ":" + to_string(d.bv)
+            )", "int:7", "base typed field enforced on derived instance");
+            auto [i_out, v_out] = both(R"(
+                class Base { int bv = 0; }
+                class Derived : Base { var dv = 0; }
+                auto d = Derived();
+                d.bv = "bad";
+                d.bv
+            )");
+            check_eq(i_out, v_out, "inherited field mismatch parity");
+            check_true(i_out.find("ERROR") == 0, "inherited typed field rejects a string");
+        });
+
+        test("typed_field_object_fields_keep_object_model", [this, check_both, both]() {
+            // Declared class-typed fields accept same class, subtypes, null, and shared_ptr
+            // wrappers (JaiScript objects travel as object OR shared_ptr over one holder)
+            check_both(R"(
+                class S { int x = 1; }
+                class T : S { int t = 2; }
+                class H { S p = null; }
+                auto h = H();
+                h.p = S();
+                var a = h.p.x;
+                h.p = T();
+                var b = h.p.t;
+                h.p = null;
+                var c2 = "n";
+                if (h.p == null) { c2 = "null"; }
+                to_string(a) + "|" + to_string(b) + "|" + c2
+            )", "1|2|null", "same class, subtype, and null accepted");
+            auto [i_out, v_out] = both(R"(
+                class S { int x = 1; }
+                class B { int x = 1; }
+                class H { S p = null; }
+                auto h = H();
+                h.p = B();
+                h.p
+            )");
+            check_eq(i_out, v_out, "unrelated class rejection parity");
+            check_true(i_out.find("ERROR") == 0, "unrelated class rejected");
+        });
+
+        test("typed_field_set_field_cpp_api", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute("class C { int v = 0; var w = 0; }  auto c = C();");
+                auto obj = e->execute("c");
+                auto instance = obj.as<std::shared_ptr<jai::class_instance>>();
+                check_not_null(instance.get());
+                uint64_t v_id = e->symbolize("v");
+                uint64_t w_id = e->symbolize("w");
+                // Converts like '='
+                instance->set_field(v_id, jai::script_value(4.7, e.get()));
+                check_eq((int64_t)4, e->execute("c.v").as_int());
+                // var fields stay dynamic through the C++ API
+                instance->set_field(w_id, jai::script_value(std::string("s"), e.get()));
+                check_eq(std::string("s"), e->execute("c.w").as<std::string>());
+                // No conversion -> throws with the locals-identical text
+                bool threw = false;
+                try { instance->set_field(v_id, jai::script_value(std::string("bad"), e.get())); }
+                catch (const std::exception& ex) {
+                    threw = std::string(ex.what()).find("Type mismatch in assignment") != std::string::npos;
+                }
+                check(threw, "set_field rejects an inconvertible value");
+            }
+        });
+
+        test("typed_field_json_roundtrip", [this, check_both]() {
+            check_both(R"(
+                class P { int hp = 0; float speed = 0.0; string name = ""; }
+                auto p = P();
+                p.hp = 42; p.speed = 1.5; p.name = "hero";
+                var j = to_json(p);
+                var q = from_json(j);
+                type_of(q.hp) + ":" + to_string(q.hp) + "|" + type_of(q.speed) + ":" + to_string(q.speed) + "|" + q.name
+            )", "int:42|float:1.500000|hero", "JSON round-trip preserves typed fields");
+            // A float JSON payload into an int field converts on the way in
+            check_both(R"(
+                class P { int hp = 0; }
+                var q = from_json("{\"_type_\": \"P\", \"hp\": 7.9}");
+                type_of(q.hp) + ":" + to_string(q.hp)
+            )", "int:7", "JSON float into int field truncates");
         });
 
         test("compound_fused_mixed_type_bails_to_conversion", [this, check_both]() {

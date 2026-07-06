@@ -219,7 +219,16 @@ namespace jai::detail {
 						}
 						return script_value(*field_value);
 					}
-					type_info_ptr tag = field_value->get_type_info();
+					// DECLARED field type wins as the constraint (typed fields enforce like
+					// locals; 'var' declares any and stays unconstrained); undeclared ('auto')
+					// fields fall back to the bind-time value tag
+					type_info_ptr tag = nullptr;
+					if (const class_definition* field_class_def = instance->get_class_definition()) {
+						tag = field_class_def->get_field_declared_type(member_id);
+					}
+					if (!tag) {
+						tag = field_value->get_type_info();
+					}
 					type_info_ptr constraint = nullptr;
 					if (tag && tag->base_type != script_value_type::jai_any_type &&
 					    tag->base_type != script_value_type::jai_null_type) {

@@ -186,6 +186,9 @@ namespace {
                 case node_type::new_expr:
                     walk_args(static_cast<new_expr*>(e)->arguments);
                     break;
+                case node_type::include_expr:
+                    walk_expr(static_cast<include_expr*>(e)->path_expr.get());
+                    break;
                 case node_type::ternary_expr: {
                     auto* t = static_cast<ternary_expr*>(e);
                     walk_expr(t->condition.get());
@@ -632,6 +635,35 @@ checked_result<expression_ptr> parser::primary() {
         auto superExpr = std::make_shared<super_expr>(superToken.location);
         uint64_t member_id = get_symbol_id(methodName);
         return std::make_shared<member_expr>(methodName.location, superExpr, methodName.lexeme, member_id, false);
+    }
+
+    // include in expression position: evaluates to the included file's result value
+    // (var cfg = include "config.jai"). Statement-position include is claimed earlier
+    // by declaration(), so statement semantics are unchanged. Same three path forms as
+    // the directive: "path", <path>, (expr).
+    if (match(token_type::include_keyword)) {
+        token includeToken = previous();
+        if (match(token_type::left_paren)) {
+            JAISCRIPT_TRY_ASSIGN(expression_ptr path_expr, expression());
+            JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after include expression"));
+            return std::make_shared<include_expr>(includeToken.location, path_expr);
+        }
+        std::string path;
+        if (match(token_type::string_literal)) {
+            path = previous().string_value;
+        } else if (match(token_type::less)) {
+            std::string path_buffer;
+            while (!check(token_type::greater) && !is_at_end()) {
+                path_buffer += peek().lexeme;
+                advance();
+            }
+            JAISCRIPT_TRY(consume(token_type::greater, "Expected '>' after include path"));
+            path = path_buffer;
+        } else {
+            report_error("Expected string literal, '<', or '(' after include", peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
+        return std::make_shared<include_expr>(includeToken.location, path);
     }
 
     // new T(args) / new T{args}: pure sugar for shared_ptr<T>(args) construction —

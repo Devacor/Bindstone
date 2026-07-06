@@ -6964,6 +6964,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             } else if (e->get_type() == node_type::yield_expr) {
                 auto* ye = static_cast<yield_expr*>(e);
                 if (ye->value) find_identifiers(ye->value.get());
+            } else if (e->get_type() == node_type::include_expr) {
+                auto* ie = static_cast<include_expr*>(e);
+                if (ie->path_expr) find_identifiers(ie->path_expr.get());
             }
             // Add more expression types as needed
         };
@@ -7179,6 +7182,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             case node_type::yield_expr:
                 if (static_cast<yield_expr*>(e)->value)
                     collect_outer_slots_expr(static_cast<yield_expr*>(e)->value.get());
+                break;
+            case node_type::include_expr:
+                if (static_cast<include_expr*>(e)->path_expr)
+                    collect_outer_slots_expr(static_cast<include_expr*>(e)->path_expr.get());
                 break;
             default: break;
             }
@@ -10109,7 +10116,10 @@ checked_result<void> interpreter::visit_expression_decl(expression_decl* decl) {
     return dispatch_expr(decl->expression.get());
 }
 
-checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
+// One include body for BOTH positions: statement (include_decl, value discarded by the
+// caller) and expression (include_expr, value IS the expression) — identical path
+// resolution, execution, and errors by construction.
+checked_result<void> interpreter::include_into_value_stack(expression* path_expr_node, const std::string& literal_path) {
     // Get the engine reference
     auto engine_ptr = engine_;
     if (!engine_ptr) {
@@ -10119,9 +10129,9 @@ checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
 
     // Get the path either from literal or expression
     std::string path;
-    if (decl->path_expr) {
+    if (path_expr_node) {
         // Evaluate the expression to get the path
-        JAISCRIPT_TRY(dispatch_expr(decl->path_expr.get()));
+        JAISCRIPT_TRY(dispatch_expr(path_expr_node));
         script_value path_value = pop_value();
 
         // Convert to string
@@ -10132,7 +10142,7 @@ checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
         path = path_value.as<std::string>();
     } else {
         // Use the literal path
-        path = decl->path;
+        path = literal_path;
     }
 
     // Resolve the file path
@@ -10160,6 +10170,14 @@ checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
     // Push the result onto the value stack
     push_value(result);
     return {};
+}
+
+checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
+    return include_into_value_stack(decl->path_expr.get(), decl->path);
+}
+
+checked_result<void> interpreter::visit_include_expr(include_expr* expr) {
+    return include_into_value_stack(expr->path_expr.get(), expr->path);
 }
 
 checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
@@ -11968,6 +11986,8 @@ checked_result<void> interpreter::dispatch_expr(expression* expr) {
             return visit_lambda_expr(static_cast<lambda_expr*>(expr));
         case node_type::new_expr:
             return visit_new_expr(static_cast<new_expr*>(expr));
+        case node_type::include_expr:
+            return visit_include_expr(static_cast<include_expr*>(expr));
         case node_type::ternary_expr:
             return visit_ternary_expr(static_cast<ternary_expr*>(expr));
         case node_type::array_literal_expr:

@@ -448,6 +448,12 @@ namespace jai::detail {
                     node(d->path_expr.get());
                     break;
                 }
+                case node_type::include_expr: {
+                    auto* e = static_cast<const include_expr*>(n);
+                    str(e->path);
+                    node(e->path_expr.get());
+                    break;
+                }
                 case node_type::import_decl: {
                     auto* d = static_cast<const import_decl*>(n);
                     str(d->path);
@@ -1075,6 +1081,13 @@ namespace jai::detail {
                     auto d = std::make_shared<include_decl>(loc, path);
                     d->path_expr = expr_opt();
                     result = d;
+                    break;
+                }
+                case node_type::include_expr: {
+                    std::string path = str();
+                    auto e = std::make_shared<include_expr>(loc, path);
+                    e->path_expr = expr_opt();
+                    result = e;
                     break;
                 }
                 case node_type::import_decl: {

@@ -805,6 +805,11 @@ private:
                 }
                 return t;
             }
+            case node_type::include_expr: {
+                auto* inc = static_cast<include_expr*>(e);
+                if (inc->path_expr) { infer(inc->path_expr.get()); }
+                return ctype::make(ctype::unknown);   // include's value is the file's result
+            }
             case node_type::ternary_expr: {
                 auto* t = static_cast<ternary_expr*>(e);
                 infer(t->condition.get());
@@ -1625,6 +1630,9 @@ void static_checker::collect_names_expr(const expression* e) {
             break;
         case node_type::new_expr:
             for (const auto& arg : static_cast<const new_expr*>(e)->arguments) { collect_names_expr(arg.get()); }
+            break;
+        case node_type::include_expr:
+            collect_names_expr(static_cast<const include_expr*>(e)->path_expr.get());
             break;
         case node_type::ternary_expr: {
             auto* t = static_cast<const ternary_expr*>(e);

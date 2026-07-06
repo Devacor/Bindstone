@@ -390,6 +390,8 @@ namespace jai {
         checked_result<void> visit_namespace_decl(namespace_decl* decl) override;
         checked_result<void> visit_expression_decl(expression_decl* decl) override;
         checked_result<void> visit_include_decl(include_decl* decl) override;
+        checked_result<void> visit_include_expr(include_expr* expr);
+        checked_result<void> include_into_value_stack(expression* path_expr_node, const std::string& literal_path);
         checked_result<void> visit_import_decl(import_decl* decl) override;
         checked_result<void> visit_enum_decl(enum_decl* decl) override;
         checked_result<void> visit_destructuring_decl(destructuring_decl* decl) override;

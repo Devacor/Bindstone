@@ -56,6 +56,7 @@ namespace jai {
         super_expr,
         throw_expr,
         yield_expr,
+        include_expr,   // include in expression position: evaluates to the file's result
 
         // Statements (20-39)
         expression_stmt = 20,
@@ -324,6 +325,20 @@ namespace jai {
 
         new_expr(const source_location& loc, type_info_ptr t, std::vector<expression_ptr> args)
             : expression(loc, node_type::new_expr), type(t), arguments(std::move(args)) {}    };
+
+    // include in expression position — always runs the file, evaluates to its result
+    // (exactly what engine::execute returns for that source). Statement-position include
+    // stays include_decl (value discarded).
+    class include_expr : public expression {
+    public:
+        std::string path;          // literal syntax: include "file.jai" / include <file>
+        expression_ptr path_expr;  // computed syntax: include(expr)
+
+        include_expr(const source_location& loc, const std::string& p)
+            : expression(loc, node_type::include_expr), path(p), path_expr(nullptr) {}
+
+        include_expr(const source_location& loc, expression_ptr expr)
+            : expression(loc, node_type::include_expr), path(), path_expr(expr) {}    };
 
     // Ternary expression
     class ternary_expr : public expression {

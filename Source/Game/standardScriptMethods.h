@@ -7,6 +7,7 @@
 #include <string>
 #include "MV/Script/script.h"
 #include "MV/Utility/generalUtility.h"
+#include "MV/Utility/stopwatch.h"
 #include <jaiscript/core/engine.hpp>
 
 template <typename DataType>
@@ -23,22 +24,30 @@ struct StandardScriptMethods {
 		if (scriptDeath) { scriptDeath(a_object); }
 	}
 
+	// Parse-once by default; with MV_SCRIPT_HOT_RELOAD=1 an mtime change re-evals the file
+	// on the live engine (redefinition semantics keep existing instances working).
 	StandardScriptMethods<DataType>& loadScript(MV::Script &a_script, const std::string &a_assetType, const std::string &a_id, bool a_isServer) {
+		bool firstLoad = loadedFileTimestamp == 0;
+		if (!firstLoad) {
+			if (!MV::scriptHotReloadEnabled()) { return *this; }
+			auto now = MV::Stopwatch::programTime(); // called per update; re-stat at most twice a second
+			if (now < nextHotReloadCheck) { return *this; }
+			nextHotReloadCheck = now + 0.5;
+		}
 		std::string filePath = a_assetType + "/" + a_id + (a_isServer ? "/main.script" : "/mainClient.script");
-		bool shouldLoad = loadedFileTimestamp == 0;
-		loadedFileTimestamp = 1;
-		if (shouldLoad) {
-			scriptContents = MV::fileContents(filePath);
-			if (!scriptContents.empty()) {
-				MV::info("Loaded Script: [", filePath, "]");
-				// Non-owning alias: `self` only has to outlive the eval (we own `this`,
-				// and the catalog entry outlives the engine's use of it).
-				auto self = a_script.engine().make_object(
-					std::shared_ptr<StandardScriptMethods<DataType>>(this, [](StandardScriptMethods<DataType>*) {}));
-				a_script.eval(filePath, scriptContents, { { "self", self } });
-			} else {
-				MV::error("Failed to load script for ", a_assetType, ": ", a_id);
-			}
+		std::time_t currentTimestamp = MV::lastFileWriteTime(filePath);
+		if (!firstLoad && (currentTimestamp <= 0 || currentTimestamp == loadedFileTimestamp)) { return *this; }
+		loadedFileTimestamp = currentTimestamp > 0 ? currentTimestamp : 1;
+		scriptContents = MV::fileContents(filePath);
+		if (!scriptContents.empty()) {
+			MV::info(firstLoad ? "Loaded Script: [" : "Reloaded Script: [", filePath, "]");
+			// Non-owning alias: `self` only has to outlive the eval (we own `this`,
+			// and the catalog entry outlives the engine's use of it).
+			auto self = a_script.engine().make_object(
+				std::shared_ptr<StandardScriptMethods<DataType>>(this, [](StandardScriptMethods<DataType>*) {}));
+			a_script.eval(filePath, scriptContents, { { "self", self } });
+		} else {
+			MV::error("Failed to load script for ", a_assetType, ": ", a_id);
 		}
 		return *this;
 	}
@@ -51,6 +60,7 @@ struct StandardScriptMethods {
 private:
 	std::string scriptContents;
 	std::time_t loadedFileTimestamp = 0;
+	double nextHotReloadCheck = 0.0;
 };
 
 #endif

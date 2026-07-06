@@ -158,7 +158,7 @@ The clean seam is already in this example: **the game is a pure function of
 
 ```
 main.cpp            thin host: console, keys, Rng, file IO, flags
-scripts/state.jai   persistent globals (G, RNG) — excluded from hot reload
+scripts/state.jai   persistent globals (G, RNG) — reload_scripts() deliberately skips it (re-running its top-level decls would reset the run)
 scripts/util.jai    colors, hashing, direction tables
 scripts/data.jai    species/classes/bestiary/items/affixes/flavor
 scripts/entities.jai Entity/Monster/Player/Item classes + timed effects

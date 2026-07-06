@@ -1,5 +1,7 @@
 // jai_rogue entry point. The host executes: import "main.jai"; rogue_main();
-// state.jai holds the persistent globals and is excluded from hot reload.
+// state.jai holds the persistent globals (G, RNG). reload_scripts() below deliberately
+// skips it: reloading would re-run its top-level declarations and reset the live run.
+// (Not a language mechanism - just don't re-execute files whose side effects you want kept.)
 
 import "state.jai";
 import "util.jai";

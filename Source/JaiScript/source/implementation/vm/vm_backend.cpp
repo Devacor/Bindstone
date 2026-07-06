@@ -677,6 +677,13 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 		state.current_env = state.entry_env;
 		state.ip = 0;
 
+		// Method coroutine: the fiber frame is a method frame over the pinned receiver
+		// ('this' also resolves via the closure env; the frame copy serves the Tier-1
+		// lvalue-ref path, which reads the caller frame's this)
+		if (!handle.receiver().is_null()) {
+			state.locals.set_this(handle.receiver());
+		}
+
 		const auto& args = handle.get_args();
 		auto prev_env = environment_;
 		environment_ = state.entry_env;
@@ -6495,7 +6502,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 
 		// Declared types install first so redefine_class flags a retype as fields_changed
 		// and migrate_fields converts against the NEW types (retype ruling)
-		class_def->replace_field_declared_types(std::move(new_field_types));
+		class_def->replace_field_declared_types(std::move(new_field_types), true);
 
 		class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_);
 
@@ -6511,7 +6518,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 
 		environment_->clear_all_parent_caches();
 	} else {
-		class_def->replace_field_declared_types(std::move(new_field_types));
+		class_def->replace_field_declared_types(std::move(new_field_types), false);
 		for (const auto& [field_id, default_val] : new_field_defaults) {
 			std::string field_name(symbolizer_->get_string(field_id));
 			class_def->add_field(field_name, default_val);
@@ -6701,6 +6708,24 @@ checked_result<void> vm_backend::exec_namespace_decl_node(namespace_decl* decl) 
 checked_result<script_value> vm_backend::execute_method_ast(const std::shared_ptr<function_decl>& ast,
                                                             std::shared_ptr<environment> method_env,
                                                             const std::vector<script_value>& args) {
+	// Coroutine methods mint a handle instead of executing (free-coroutine parity).
+	// The handle pins its OWN method env carrying 'this' — the caller recycles
+	// method_env back to the pool right after this returns — plus the receiver, so
+	// the instance stays alive while suspended and 'this' resolves identically
+	// across resumes. KEEP BYTE-PARALLEL with interpreter::execute_method_ast.
+	if (ast->is_coroutine) {
+		script_value this_obj = make_null();
+		if (auto this_result = method_env->get(this_id_)) {
+			this_obj = std::move(this_result.value());
+		}
+		auto coro_env = std::make_shared<environment>(method_env->get_parent(), symbolizer_, this_obj);
+		coro_env->define(this_id_, this_obj);
+		auto handle = std::make_shared<coroutine_handle>(engine_);
+		handle->set_function(ast, args, coro_env);
+		handle->set_receiver(std::move(this_obj));
+		return script_value::make_coroutine_handle(coroutine_handle_type_id_, std::static_pointer_cast<void>(handle), engine_);
+	}
+
 	script_defined_function script_func(
 		ast->name,
 		ast->parameters,

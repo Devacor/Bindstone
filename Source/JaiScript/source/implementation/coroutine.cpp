@@ -13,7 +13,8 @@ checked_result<script_value> execution_backend::resume_coroutine(coroutine_handl
 
 coroutine_handle::coroutine_handle(engine* eng)
     : engine_(eng)
-    , yield_value_(std::monostate{}, eng) {
+    , yield_value_(std::monostate{}, eng)
+    , receiver_(std::monostate{}, eng) {
 }
 
 void coroutine_handle::set_function(std::shared_ptr<function_decl> func,

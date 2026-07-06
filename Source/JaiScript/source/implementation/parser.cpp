@@ -2003,8 +2003,13 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
     // Parse class members
     class_decl::member_visibility visibility = class_decl::Public;
+    const bool class_entry_in_coroutine = in_coroutine_;
 
     while (!check(token_type::right_brace) && !is_at_end()) {
+        // Error-recovery `continue`s below can leave in_coroutine_ armed; every member
+        // starts from the class-entry state
+        in_coroutine_ = class_entry_in_coroutine;
+
         // Check for visibility specifiers
         if (match(token_type::public_keyword)) {
             auto colon_result = consume(token_type::colon, "Expected ':' after 'public'");
@@ -2023,6 +2028,14 @@ checked_result<declaration_ptr> parser::class_declaration() {
             }
             visibility = class_decl::Private;
             continue;
+        }
+
+        // Coroutine methods: 'coroutine' precedes a typed or 'function'-keyword method
+        // (free-function syntax parity); constructors/destructors/fields reject below
+        bool member_is_coroutine = false;
+        if (match(token_type::coroutine_keyword)) {
+            member_is_coroutine = true;
+            in_coroutine_ = true;
         }
 
         // Parse member declaration
@@ -2050,6 +2063,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 // This is a field with the class type, fall through to regular member parsing
                 bool is_static = match(token_type::static_keyword);
                 bool is_override = match(token_type::override_keyword);
+
+                if (is_static && check(token_type::coroutine_keyword)) {
+                    report_error("static coroutine methods are not supported", peek());
+                    synchronize();
+                    continue;
+                }
 
                 auto type_result = parse_type();
                 if (!type_result) {
@@ -2348,6 +2367,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
             bool is_static = match(token_type::static_keyword);
             bool is_override = match(token_type::override_keyword);
 
+            if (is_static && check(token_type::coroutine_keyword)) {
+                report_error("static coroutine methods are not supported", peek());
+                synchronize();
+                continue;
+            }
+
             auto type_result = parse_type();
             if (!type_result) {
                 synchronize();
@@ -2593,9 +2618,32 @@ checked_result<declaration_ptr> parser::class_declaration() {
             }
         }
 
+        in_coroutine_ = class_entry_in_coroutine;
+        if (member_is_coroutine) {
+            auto* func_member = member && member->get_type() == node_type::function_decl
+                ? static_cast<function_decl*>(member.get()) : nullptr;
+            if (!func_member) {
+                report_error("'coroutine' in a class body must be followed by a method", peek());
+                synchronize();
+                continue;
+            }
+            if (func_member->is_static) {
+                report_error("static coroutine methods are not supported", peek());
+                synchronize();
+                continue;
+            }
+            if (func_member->name == className.lexeme ||
+                (!func_member->name.empty() && func_member->name[0] == '~')) {
+                report_error("constructors and destructors cannot be coroutines", peek());
+                synchronize();
+                continue;
+            }
+            func_member->is_coroutine = true;
+        }
         classDecl->members.push_back({visibility, member});
     }
 
+    in_coroutine_ = class_entry_in_coroutine;
     JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after class body"));
 
     return classDecl;

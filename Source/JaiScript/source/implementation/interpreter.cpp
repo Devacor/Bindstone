@@ -3620,6 +3620,11 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
 
     // Generic path - evaluate operand and use existing logic
     JAISCRIPT_TRY(dispatch_expr(expr->operand.get()));
+    // Operand raised a script exception (e.g. ++obj.missing member read): propagate it
+    // instead of clobbering it with invalid_assignment_target below (vm parity)
+    if (is_unwinding_) {
+        return {};
+    }
     script_value operand = pop_value();
 
     size_t oi = operand.raw_storage_index();

@@ -296,6 +296,19 @@ namespace stdlib {
             return script_value(args[0].to_string(), eng);
         });
 
+        // §13 (ruled 2026-07): opaque host pointers (make_value(T*) on an UNREGISTERED
+        // type) are non-null/truthy to script but the engine cannot name them — this
+        // predicate is how scripts tell a registered/script object (true) from an opaque
+        // host-only pass-through token (false). All ordinary values answer true.
+        eng_ref.add_function("is_registered_type", [](const script_value& val) -> bool {
+            const script_value& d = val.is_reference() ? val.deref() : val;
+            if (d.raw_storage_index() == script_value::TYPEID_CPP_BOUND &&
+                !d.is_int() && !d.is_float() && !d.is_bool() && !d.is_char() && !d.is_string()) {
+                return false;
+            }
+            return true;
+        });
+
         eng_ref.add_function("type_of", [](const script_value& val) -> std::string {
             switch (val.type()) {
                 case script_value_type::jai_null_type: return "null";

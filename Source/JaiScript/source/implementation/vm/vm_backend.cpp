@@ -1024,7 +1024,8 @@ bool vm_backend::is_truthy(const script_value& value) {
 			if (value.is_float()) return value.unchecked_as_float() != 0.0;
 			if (value.is_string()) return !value.unchecked_as_string().empty();
 			if (value.is_char()) return true;
-			return false;   // opaque bound: preserves the old index-0 falsy observable
+			// Opaque bound: truthy while the host pointer is live (§13, 2026-07)
+			return value.get_cpp_bound_ptr() != nullptr;
 		case script_value::TYPEID_REFERENCE:
 			// References are transparent to truthiness like every other consumer
 			// (element reads reach conditions as reference wrappers; `if (a[0])`
@@ -1870,6 +1871,13 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 	if (unwrapped_left.is_string() && unwrapped_right.is_string()) return script_value(unwrapped_left.unchecked_as_string() == unwrapped_right.unchecked_as_string(), engine_);
 	if (unwrapped_left.is_bool() && unwrapped_right.is_bool()) return script_value(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool(), engine_);
 	if (unwrapped_left.is_char() && unwrapped_right.is_char()) return script_value(unwrapped_left.unchecked_as_char() == unwrapped_right.unchecked_as_char(), engine_);
+
+	// Opaque host pointers (unregistered make_value(T*)): identity — equal iff both
+	// alias the SAME live pointer (§13 ruling 2026-07). Bound primitives never reach
+	// here (their semantic branches above answered). KEEP BYTE-PARALLEL with the interpreter.
+	if (unwrapped_left.is_cpp_bound_primitive() && unwrapped_right.is_cpp_bound_primitive()) {
+		return script_value(unwrapped_left.get_cpp_bound_ptr() == unwrapped_right.get_cpp_bound_ptr(), engine_);
+	}
 
 	if (left.is_array() && right.is_array()) {
 		auto& left_arr = const_cast<script_value&>(left).get_array_storage();
@@ -3615,6 +3623,14 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 checked_result<void> vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 	script_value operand = std::move(stack_.back());
 	stack_.pop_back();
+
+	// `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
+	// full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,
+	// 2026-07). Identical result for bound primitives. Byte-parallel with the interpreter.
+	if (static_cast<token_type>(ins.a) == token_type::bang) {
+		stack_.push_back(script_value(!is_truthy(operand), engine_));
+		return {};
+	}
 
 	size_t oi = operand.raw_storage_index();
 	// S8: bound operand decodes in place to a detached temp (byte-parallel with the interpreter unary switch)

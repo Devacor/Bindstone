@@ -286,7 +286,12 @@ namespace jai {
         bool is_null() const {
             const script_value& d = deref();
             const size_t idx = d.raw_storage_index();
-            return idx == TYPEID_NULL || (idx == TYPEID_CPP_BOUND && d.bound_semantic_is(TYPEID_NULL));
+            // Opaque host pointers (make_value(T*) on an unregistered type) are NON-null
+            // while the pointer is live — they ARE objects to script (open question #13,
+            // ruled 2026-07); a null host pointer still reads as null.
+            return idx == TYPEID_NULL ||
+                   (idx == TYPEID_CPP_BOUND && d.bound_semantic_is(TYPEID_NULL) &&
+                    d.get_cpp_bound_ptr() == nullptr);
         }
         bool is_invalid() const { return deref().raw_storage_index() == TYPEID_INVALID; }
         bool is_int() const {

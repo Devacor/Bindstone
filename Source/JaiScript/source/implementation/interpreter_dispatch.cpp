@@ -652,6 +652,13 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
     if (unwrapped_left.is_bool() && unwrapped_right.is_bool()) return make_value(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool());
     if (unwrapped_left.is_char() && unwrapped_right.is_char()) return make_value(unwrapped_left.unchecked_as_char() == unwrapped_right.unchecked_as_char());
 
+    // Opaque host pointers (unregistered make_value(T*)): identity — equal iff both
+    // alias the SAME live pointer (§13 ruling 2026-07). Bound primitives never reach
+    // here (their semantic branches above answered). KEEP BYTE-PARALLEL with the VM.
+    if (unwrapped_left.is_cpp_bound_primitive() && unwrapped_right.is_cpp_bound_primitive()) {
+        return make_value(unwrapped_left.get_cpp_bound_ptr() == unwrapped_right.get_cpp_bound_ptr());
+    }
+
     // Array equality - compare by reference (same array instance)
     if (left.is_array() && right.is_array()) {
         auto& left_arr = const_cast<script_value&>(left).get_array_storage();

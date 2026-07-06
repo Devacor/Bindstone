@@ -932,20 +932,82 @@ public:
 			}
 		});
 
-		test("ref_decl_element_constraint_dropped", [this]() {
-			// D4v pin: auto& over a typed-array element drops the element-type constraint
-			// (today's decl semantics), so the retyping write must keep succeeding
+		test("ref_decl_element_constraint_enforced", [this]() {
+			// RULED (2026-07-06): reverses the e43f8a6f D4v constraint-dropping pin —
+			// element refs from typed containers CARRY the container's element type, so
+			// the retyping write through an auto& decl errors with the same text as
+			// direct element assignment, and the element keeps its value.
 			const char* src = R"(
 				array<int> arr = [1, 2, 3];
 				auto& x = arr[1];
-				x = "s";
-				type_of(arr[1]);
+				var msg = "";
+				try { x = "s"; } catch (e) { msg = e; }
+				msg + "|" + type_of(arr[1]) + "|" + to_string(arr[1]);
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				jai::stdlib::register_all(e);
-				check_eq(std::string("string"), e->execute(src).as<std::string>());
+				check_eq(std::string("Cannot assign 'string' to element of type 'int'|int|2"),
+				         e->execute(src).as<std::string>());
+			}
+		});
+
+		test("ref_element_constraint_all_shapes", [this]() {
+			// The same constraint holds for every element-ref shape: range-for auto&,
+			// ref params bound to elements, compound stores through decl refs. var
+			// (any-tagged) containers stay unconstrained; valid stores keep working.
+			const char* src = R"(
+				array<int> arr = [1, 2, 3];
+				var out = "";
+				try { for (auto& v : arr) { v = "s"; } out = out + "FOR-LEAK"; }
+				catch (e) { out = out + e; }
+				for (auto& v : arr) { v = v * 2; }
+				out = out + "|" + to_string(arr[0]);
+				function retype(auto& r) { r = "s"; }
+				try { retype(arr[0]); out = out + "|PARAM-LEAK"; } catch (e) { out = out + "|" + e; }
+				function bump(int& r) { r += 1; }
+				bump(arr[2]);
+				out = out + "|" + to_string(arr[2]);
+				auto& c = arr[1];
+				c += 100;
+				out = out + "|" + to_string(arr[1]);
+				var vArr = [1, "two", 3.5];
+				auto& y = vArr[0];
+				y = "retyped";
+				out = out + "|" + vArr[0];
+				out;
+			)";
+			const std::string expected =
+				"Cannot assign 'string' to element of type 'int'|2"
+				"|Cannot assign 'string' to element of type 'int'|7|104|retyped";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				check_eq(expected, e->execute(src).as<std::string>(),
+				         use_vm ? "vm element constraint shapes" : "interp element constraint shapes");
+			}
+		});
+
+		test("ref_decl_element_constraint_through_alias_chain", [this]() {
+			// A ref decl aliasing another constrained element ref decl shares the holder
+			// AND its constraint (the alias writes through and enforces identically)
+			const char* src = R"(
+				array<int> arr = [5];
+				auto& outer = arr[0];
+				auto& local = outer;
+				var msg = "";
+				try { local = "s"; } catch (e) { msg = e; }
+				local = 6;
+				msg + "|" + to_string(arr[0]);
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				jai::stdlib::register_all(e);
+				check_eq(std::string("Cannot assign 'string' to element of type 'int'|6"),
+				         e->execute(src).as<std::string>());
 			}
 		});
 

@@ -612,7 +612,10 @@ string healthLevel = health > 75 ? "healthy" :
 2. **Container Homogeneity**: `auto` containers require homogeneous elements. `var` allows heterogeneous.
 3. **Reference Semantics**: `&` for reference parameters, captures, declarations, returns, and
    range-for bindings. Lvalue arguments (`f(obj.field)`, `f(arr[i])`) bind by reference to
-   `&` parameters.
+   `&` parameters. References into **typed containers carry the element type**: storing a
+   mismatched type through `auto& x = intArr[i]`, `for (auto& x : intArr)`, or a ref
+   parameter bound to an element errors exactly like direct element assignment. `var`
+   (any-tagged) containers stay unconstrained.
 4. **RAII**: Constructors and destructors called automatically.
 5. **Generic Types**: Limited to built-in containers plus C++-bound template types; not full
    script-side templates.

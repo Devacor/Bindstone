@@ -55,34 +55,20 @@ namespace {
         return std::nullopt;
     }
 
-    // Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: share the
-    // holder, except constrained element refs re-derive an unconstrained alias (auto&
-    // drops the element-type constraint - pinned decl semantics)
+    // Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: SHARE
+    // the holder, constraint included. RULED (2026-07-06): element/field/map-entry refs
+    // keep their bind-time type constraint through a ref decl — auto& over an
+    // array<int> element enforces int on store exactly like direct element assignment
+    // (reverses the e43f8a6f constraint-dropping pin). Sharing also keeps container
+    // re-resolution (realloc/shrink safe). KEEP BYTE-PARALLEL with vm_decl_ref_alias.
     checked_result<script_value> decl_ref_alias(const script_value& source, engine* eng) {
+        (void)eng;
         auto refHolder = source.get_reference_holder();
         if (!refHolder) {
             return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
         }
         if (!refHolder->has_cell && !refHolder->has_map_key && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
-        }
-        if (refHolder->container_element_type) {
-            if (refHolder->container) {
-                if (refHolder->container_index >= refHolder->container->size()) {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
-                }
-                return script_value::make_element_reference(refHolder->container, refHolder->container_index, refHolder->sourceEnv.lock(), eng, nullptr);
-            }
-            if (refHolder->owner_instance) {
-                if (!refHolder->owner_instance->find_field_value(refHolder->field_id)) {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
-                }
-                return script_value::make_field_reference(refHolder->owner_instance, refHolder->field_id, eng, nullptr);
-            }
-            if (refHolder->has_map_key) {
-                return script_value::make_map_entry_reference(refHolder->container_map, *refHolder->cell(), eng, nullptr);
-            }
-            return script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock(), eng);
         }
         return script_value(source);
     }
@@ -8711,7 +8697,18 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     // Reallocation-safe reference (container+index, not a raw element
                     // pointer): a push in the loop body can reallocate the vector, and a
                     // raw pointer would dangle -> heap corruption on write-through (#41).
-                    *loop_var_ptr = script_value::make_element_reference(array_storage, i, environment_, engine_, nullptr);
+                    // RULED (2026-07-06): the ref carries the container's declared element
+                    // type — for (auto& x : intArr) x = "s" errors like intArr[i] = "s";
+                    // var (any-tagged) containers stay unconstrained.
+                    type_info_ptr element_constraint = nullptr;
+                    if (auto tag = container.get_type_info(); tag && tag->base_type == script_value_type::jai_array_type) {
+                        type_info_ptr et = tag->element_type();
+                        if (et && et->base_type != script_value_type::jai_any_type &&
+                            et->base_type != script_value_type::jai_null_type) {
+                            element_constraint = et;
+                        }
+                    }
+                    *loop_var_ptr = script_value::make_element_reference(array_storage, i, environment_, engine_, element_constraint);
                 } else {
                     // Make a copy of the element - assign directly to pointer
                     *loop_var_ptr = (*array_storage)[i].clone();

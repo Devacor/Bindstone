@@ -268,6 +268,11 @@ public:
 
         // Section-12.5 ruling: compound on a bound value stored AS an element/member/field
         // decode-reads the LIVE C++ value, then detach-and-replaces the slot (C++ untouched).
+        // ALL-DETACH ruling (2026-07, open question #12, approved verbatim): write-through
+        // belongs to the registered NAME (and refs/captures/by-ref params bound to it),
+        // never to stored copies. Literal construction now snapshots like every
+        // assignment-shaped store, so the slots hold 100 (construction-time value), not
+        // a live alias — the two decode-reads-live asserts flipped with this ruling.
         test("pin_element_compound_detach_and_replace", [this]() {
             auto eng = jai::foundry::make_engine();
             int c8 = 100;
@@ -276,18 +281,60 @@ public:
             c8 = 40;
             eng->execute("arr8[0] += 5;");
             check_eq(40, c8, "array-element compound leaves C++ variable untouched");
-            check_eq((int64_t)45, eng->execute("arr8[0]").as_int(), "array-element compound decode-reads live");
+            check_eq((int64_t)105, eng->execute("arr8[0]").as_int(), "array element snapshots at construction (all-detach)");
             eng->execute("m8[\"k\"] += 2;");
             check_eq(40, c8, "map-value compound leaves C++ variable untouched");
-            check_eq((int64_t)42, eng->execute("m8[\"k\"]").as_int(), "map-value compound decode-reads live");
+            check_eq((int64_t)102, eng->execute("m8[\"k\"]").as_int(), "map value snapshots at construction (all-detach)");
             c8 = 1000;
-            check_eq((int64_t)45, eng->execute("arr8[0]").as_int(), "array element detached after compound");
-            check_eq((int64_t)42, eng->execute("m8[\"k\"]").as_int(), "map value detached after compound");
+            check_eq((int64_t)105, eng->execute("arr8[0]").as_int(), "array element stays detached");
+            check_eq((int64_t)102, eng->execute("m8[\"k\"]").as_int(), "map value stays detached");
         });
 
-        // Assigning a bound value INTO an object member detaches it at store time today
-        // (unlike array/map slots, which keep the alias) — the member snapshots the value
-        // at assignment; compound then operates on the plain snapshot. Pinned as-is.
+        // Rows 14/15/11 of the #12 matrix — the previously unpinned cells. Post-ruling:
+        // stored values are detached snapshots, so ref-mediated compounds through
+        // container slots and the implicit-this move path can never reach C++.
+        test("pin_ref_compound_on_stored_bound_never_reaches_cpp", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto eng = jai::engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                int c14 = 10;
+                eng->add_global_ref("c14", c14);
+                eng->execute("var arr = [c14];");
+                c14 = 20;
+                eng->execute("for (auto& x : arr) { x += 5; }");
+                check_eq(20, c14, use_vm ? "vm: range-for ref compound leaves C++ untouched"
+                                         : "interp: range-for ref compound leaves C++ untouched");
+                check_eq((int64_t)15, eng->execute("arr[0]").as_int(), "slot is the construction snapshot + 5");
+                eng->execute("auto& r = arr[0]; r += 5;");
+                check_eq(20, c14, "ref-decl compound leaves C++ untouched");
+                check_eq((int64_t)20, eng->execute("arr[0]").as_int(), "ref-decl compound on the snapshot");
+            }
+        });
+
+        test("pin_implicit_this_member_store_detaches", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto eng = jai::engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                int c11 = 10;
+                eng->add_global_ref("c11", c11);
+                eng->add_function("mkBound11", [&c11, e = eng.get()]() {
+                    return e->execute("c11");
+                });
+                eng->execute(R"(
+                    class R11 { var f = 0; void grab() { f = mkBound11(); } }
+                    var o = R11();
+                    o.grab();
+                )");
+                c11 = 99;
+                check_eq((int64_t)10, eng->execute("o.f").as_int(),
+                         use_vm ? "vm: implicit-this move stores a detached snapshot"
+                                : "interp: implicit-this move stores a detached snapshot");
+            }
+        });
+
+        // Assigning a bound value INTO an object member detaches it at store time — and
+        // since the #12 all-detach ruling (2026-07) array/map slots snapshot the same
+        // way; the member snapshots at assignment, compound operates on the snapshot.
         test("pin_member_compound_detach_and_replace", [this]() {
             auto eng = jai::foundry::make_engine();
             int c9 = 100;

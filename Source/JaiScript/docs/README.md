@@ -1,6 +1,9 @@
 # JaiScript
 
-A high-performance scripting language with C++-like syntax designed for game engines. Features 25-578x faster execution than ChaiScript, seamless C++ integration, modern language features, and follows C++ standard library naming conventions with snake_case throughout.
+A high-performance embedded scripting language with C++-like syntax designed for game engines.
+Two swappable execution backends (tree-walking interpreter and bytecode VM) at full test parity,
+seamless C++ integration, hot reload, and C++ standard library naming conventions (snake_case
+throughout).
 
 ## Why JaiScript?
 
@@ -12,20 +15,32 @@ JaiScript was born from real-world game development frustrations with existing e
 - **Limited closures** - Manual capture lists `fun[var1, var2]` instead of automatic capture
 - **Poor null handling** - Awkward `.is_var_null()` instead of simple `!= null`
 
-See [docs/why-jaiscript.md](docs/why-jaiscript.md) for detailed real-world examples and comparisons.
+See [why_jaiscript.md](why_jaiscript.md) for detailed real-world examples and comparisons.
 
 JaiScript solves these issues while maintaining the performance and C++ integration that game engines require.
 
 ## Features
 
-- **Exceptional Performance** - 25-578x faster than ChaiScript
-- **C++-like Syntax** - Familiar to C++ developers  
-- **Modern Language Features** - Lambdas with captures, flexible function syntax, operator overloading
-- **Seamless C++ Integration** - Clean dynamic_binder API for exposing C++ types
-- **Hot Reload for Script Classes** - Redefine script classes at runtime with automatic instance migration
-- **Standard Naming Conventions** - Uses snake_case throughout to match C++ standard library
-- **Zero Dependencies** - Standalone implementation
-- **Flexible Build Options** - Header-only, compiled library, or single compilation unit
+- **Two Backends, Full Parity** - Tree-walking interpreter (default) and a bytecode VM; select
+  per engine with `engine->set_backend(jai::backend_type::vm)` before the first execute, or run
+  the whole test suite on the VM with `jaiscript_tests.exe --backend=vm`
+- **Pre-Parsed Scripts (jaibite)** - Parse once, execute repeatedly; binary save/load of parsed
+  scripts (`jaibite()`, `jaibite_load()`), with the VM's compiled bytecode cached inside the bite
+- **Opt-In Static Checking** - `off`/`warn`/`strict` modes (`engine->static_checking(...)`); in
+  strict mode type errors throw before anything runs — see `static_checking.md`
+- **Sandboxing Limits** - Wall-clock execution budgets and a script memory cap; budget overruns
+  are TERMINAL (skip every script `catch`, always reach the host)
+- **Modern Language Features** - Lambdas with captures, coroutines (functions AND methods) with
+  `yield`, template strings (`` `hp: ${x}` ``), `include`/`import`, destructuring, enums,
+  namespaces, operator overloading, default arguments
+- **Real Reference Semantics** - Lvalue reference arguments (`f(obj.field)`, `f(arr[i])`),
+  reference returns/locals, `shared_ptr`/`weak_ptr` script types
+- **Typed Fields and Locals** - Typed class fields are enforced like typed locals; the
+  `int`/`auto`/`var` ladder gives you exactly as much typing as you want
+- **Seamless C++ Integration** - Clean `dynamic_binder` API for exposing C++ types
+- **Hot Reload for Script Classes** - Redefine script classes at runtime with automatic instance
+  migration
+- **Zero Dependencies** - Standalone implementation, no external libraries
 
 ## Quick Start
 
@@ -33,24 +48,32 @@ JaiScript solves these issues while maintaining the performance and C++ integrat
 #include <jaiscript/core/engine.hpp>
 
 int main() {
-    jai::engine engine;
-    
+    auto engine = jai::engine::make();   // engines are always shared_ptr (ctor is private)
+
     // Execute script with modern syntax
-    auto result = engine.execute(R"(
+    auto result = engine->execute(R"(
         // Variables with type inference
         auto x = 10;
         auto y = 20;
-        
-        // Functions with multiple syntax styles
-        auto add = [](script_int a, script_int b) -> script_int { return a + b; };
-        
+
+        // Lambdas use script-side type names (int, float, string, ...)
+        auto add = [](int a, int b) -> int { return a + b; };
+
         // Use the function
         add(x, y)
     )");
-    
-    std::cout << "Result: " << result.as<script_int>() << std::endl; // 30
+
+    std::cout << "Result: " << result.as_int() << std::endl; // 30
     return 0;
 }
+```
+
+Optional: run on the bytecode VM instead of the interpreter (must be set before the first
+execute):
+
+```cpp
+auto engine = jai::engine::make();
+engine->set_backend(jai::backend_type::vm);
 ```
 
 ## Language Overview
@@ -70,6 +93,7 @@ var dynamic = 5;         // Dynamic typing (any type allowed)
 // auto - type inference, locks to inferred type
 auto x = 5;              // Locked to int
 x = 10;                  // OK
+x = 3.9;                 // OK: truncates to 3 (C++-style conversion)
 x = "hello";             // ERROR: type mismatch
 
 // var - dynamic typing, any type allowed
@@ -87,11 +111,44 @@ var flexible = [1, "two", 3.14]; // OK: var allows mixed
 // Multiple declaration styles supported
 int multiply(int a, int b) { return a * b; }
 auto divide(float a, float b) -> float { return a / b; }
-function greet(string name) { print("Hello, " + name); }
+function greet(string name, string greeting = "Hello") {  // default arguments
+    print(greeting + ", " + name);
+}
 
 // Lambda expressions with captures
 int multiplier = 10;
 auto scale = [multiplier](int x) -> int { return x * multiplier; };
+
+// Reference parameters bind lvalue arguments (locals, obj.field, arr[i])
+void heal(Creature& c, int amount) { c.health += amount; }
+heal(party[0], 25);
+```
+
+### Coroutines
+```javascript
+coroutine function counter(int limit) {
+    for (int i = 0; i < limit; i++) { yield i; }
+}
+for (auto n : counter(3)) { print(n); }   // range-for drives the coroutine
+
+// Coroutine METHODS work too
+class Spawner {
+    coroutine function waves(int count) {
+        for (int i = 0; i < count; i++) { yield i; }
+    }
+}
+```
+
+### Template Strings
+```javascript
+auto name = "Dragon";
+print(`The ${name} has ${hp * 2} hp`);   // backtick + ${expr} interpolation
+```
+
+### Include / Import
+```javascript
+include "setup.jai";     // PHP-template style: always runs, may produce a value
+import "creature.jai";   // module style: cached per path, declarations only, never a value
 ```
 
 ### Control Flow
@@ -134,7 +191,7 @@ switch (weapon_type) {
 
 ### Exception Handling
 ```javascript
-// Try-catch with exception variable
+// Try-catch with exception variable — e is the THROWN VALUE with its type preserved
 try {
     throw "Something went wrong!";
 } catch (e) {
@@ -160,23 +217,27 @@ try {
     print("Outer catch: " + e);
 }
 
-// Throw any value type
+// Throw any value type — catch (e) receives it typed, not stringified
 throw 42;                   // Numbers
 throw "Error message";      // Strings
 throw {code: 404};         // Objects
 ```
 
+Both backends support exceptions fully. Terminal errors (execution-budget exhaustion, latched
+memory-cap) skip every script `catch` and surface at the host — see `EXCEPTION_DESIGN.md`.
+
 ### Operators
 - **Arithmetic**: `+`, `-`, `*`, `/`, `%`
-- **Compound**: `+=`, `-=`, `*=`, `/=`
+- **Compound**: `+=`, `-=`, `*=`, `/=`, `%=`
 - **Increment**: `++`, `--` (prefix and postfix)
 - **Comparison**: `<`, `>`, `<=`, `>=`, `==`, `!=`
 - **Spaceship**: `<=>` (three-way comparison)
 - **Logical**: `&&`, `||`, `!`
 - **Bitwise**: `&`, `|`, `^`, `~`, `<<`, `>>`
+- **Null-safe access**: `?.`
 - **Ternary**: `condition ? true_val : false_val`
 - **Control Flow**: `break`, `continue`, `switch`/`case`/`default`/`fallthrough` (break-by-default semantics)
-- **Custom Operator Overloading**: Full support for custom operators on user-defined types
+- **Custom Operator Overloading**: `= + - * / [] < > <= >= == !=` on script classes
 
 ### Arrays and Maps
 ```javascript
@@ -186,11 +247,12 @@ numbers.push(6);
 int first = numbers[0];
 int size = numbers.size();
 
-// Map literals and operations
+// Map literals — both styles parse
 auto scores = {
-    {"player1", 100},
+    {"player1", 100},          // C++ style entries
     {"player2", 85}
 };
+auto point = {x: 10, y: 20};   // JSON style (bare keys become strings)
 scores["player3"] = 90;
 int p1Score = scores["player1"];
 
@@ -227,7 +289,7 @@ auto ptr = shared_ptr<Counter>();
 ptr = 42;             // Calls Counter::operator=(42), not pointer reassign
 ```
 
-See `docs/TYPE_SYSTEM_DESIGN.md` for complete reference semantics documentation.
+See `TYPE_SYSTEM_DESIGN.md` for complete reference semantics documentation.
 
 ## Hot Reload Support (Script Classes)
 
@@ -379,25 +441,26 @@ jai::dynamic_binder<Wizard>(engine, "Wizard")
 
 #### auto_bind() Modes
 
-`auto_bind()` supports different modes for controlling what gets auto-registered:
+`auto_bind()` takes a `jai::bind_mode` controlling what gets auto-registered
+(`all` / `properties` / `hierarchy`):
 
 ```cpp
-// bind_mode::all (default) - Base classes + default constructor + auto-detected methods
-// Auto-detects: to_string(), size(), empty() if present
+// bind_mode::all (default) - Base classes + properties + auto-detected methods/constructors
+// Auto-detects: default constructor, to_string(), size(), empty(), operator==/!=
 jai::dynamic_binder<MyClass>(engine, "MyClass")
     .auto_bind(jai::bind_mode::all);  // or just .auto_bind()
 
-// bind_mode::properties - Base classes only, no auto constructors/methods
+// bind_mode::properties - Base classes + properties only (no auto methods/constructors)
 jai::dynamic_binder<MyClass>(engine, "MyClass")
     .auto_bind(jai::bind_mode::properties)
     .constructor<>()  // Manual constructor since not auto-detected
     .method("custom_method", &MyClass::custom_method);
 
-// bind_mode::none - No auto-binding, just returns builder for manual setup
+// bind_mode::hierarchy - Base classes only (no properties or auto methods)
 jai::dynamic_binder<MyClass>(engine, "MyClass")
-    .auto_bind(jai::bind_mode::none)  // Effectively a no-op
-    .base_class<BaseClass>()          // Manual base class
-    .constructor<>();
+    .auto_bind(jai::bind_mode::hierarchy)
+    .constructor<>()
+    .property("hand_picked", &MyClass::hand_picked);
 ```
 
 #### Multiple Inheritance with auto_bind()
@@ -446,7 +509,8 @@ jai::dynamic_binder<Sprite>(engine, "Sprite")
 |----------|----------|
 | Manual `base_class<>()` | Simple classes, no property system, full control needed |
 | `auto_bind()` (default) | Classes using `property_owner`, want default constructor + common methods |
-| `auto_bind(bind_mode::properties)` | Need base classes but want manual constructor/method control |
+| `auto_bind(bind_mode::properties)` | Need base classes + properties but manual constructor/method control |
+| `auto_bind(bind_mode::hierarchy)` | Need only the base-class chain wired up |
 
 **What auto_bind(bind_mode::all) auto-detects:**
 - Default constructor (if `std::is_default_constructible_v<T>`)
@@ -455,16 +519,17 @@ jai::dynamic_binder<Sprite>(engine, "Sprite")
 - `empty()` method (if present)
 - `operator==` and `operator!=` (if `operator==(const T&, const T&)` is defined)
 - Base classes from `_jai_base_types` (if using `property_owner<T, Bases...>`)
+- A `static T::jai_auto_bind(binder)` hook (if present) for registering private members
 
 ### Adding Functions
 ```cpp
 // Simple function binding
-engine.add_function("sqrt", [](script_float x) -> script_float {
+engine->add_function("sqrt", [](script_float x) -> script_float {
     return std::sqrt(x);
 });
 
-// Variadic functions  
-engine.add_variadic_function("print", [](const std::vector<script_value>& args) {
+// Variadic functions
+engine->add_variadic_function("print", [](const std::vector<script_value>& args) {
     for (const auto& arg : args) {
         std::cout << arg.to_string();
     }
@@ -476,12 +541,12 @@ engine.add_variadic_function("print", [](const std::vector<script_value>& args) 
 ### Zero-Copy Parameters
 ```cpp
 // Const references avoid copies
-engine.add_function("processString", [](const script_string& str) {
+engine->add_function("processString", [](const script_string& str) {
     // Direct access to script string - no copy
 });
 
 // Custom types work the same way
-engine.add_function("distance", [](const Vec2& a, const Vec2& b) -> script_float {
+engine->add_function("distance", [](const Vec2& a, const Vec2& b) -> script_float {
     // No copies made of Vec2 objects
     return std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
 });
@@ -489,58 +554,59 @@ engine.add_function("distance", [](const Vec2& a, const Vec2& b) -> script_float
 
 ## Building
 
-### Option 1: Header-Only (Simplest)
-```cpp
-#include <jaiscript/jaiscript.hpp>
-```
+JaiScript is a compiled implementation (headers in `include/jaiscript/`, sources in
+`source/implementation/`) built with CMake. Include the umbrella header
+`#include <jaiscript/jaiscript.hpp>` (or individual headers like `core/engine.hpp`) and link
+the library.
 
-### Option 2: Compiled Library  
-```cmake
-add_library(jaiscript 
-    Source/JaiScript/src/implementation/engine.cpp
-    Source/JaiScript/src/implementation/interpreter.cpp
-    Source/JaiScript/src/implementation/lexer.cpp
-    Source/JaiScript/src/implementation/parser.cpp
-    Source/JaiScript/src/implementation/value.cpp
-)
-target_include_directories(jaiscript PUBLIC Source/JaiScript/include)
-```
-
-### Option 3: Single Compilation Unit
-```cpp
-// In one .cpp file in your project
-#define JAISCRIPT_IMPLEMENTATION
-#include <jaiscript/jaiscript.hpp>
-```
-
-### Running Tests
-```bash
-cd Source/JaiScript/TestSuite
-make clean && make
-make run_tests
-```
+- Standalone build, options, and test instructions: see [BUILD.md](BUILD.md)
+- Day-to-day development workflow (Debug/Release configs, test filtering, `--backend=vm`,
+  building against MutedVision/Bindstone): see `Source/JaiScript/CLAUDE.md`
+- Test framework details: see [JaiScriptTesting.md](JaiScriptTesting.md) and
+  [JaiScriptVMTesting.md](JaiScriptVMTesting.md)
 
 ## API Reference
 
 ### engine Class
 ```cpp
 class engine {
+    // Construction — the constructor is private; engines are always shared_ptr
+    static std::shared_ptr<engine> make();
+
     // Script execution
-    script_value execute(const script_string& code);
-    script_value execute_file(const script_string& path);
-    
+    script_value execute(const std::string& code);
+    script_value execute_file(const std::string& path);
+    script_value execute(const std::string& code, const instance_variables& locals);
+
+    // Pre-parsed scripts (parse once, run many; binary save/load via jaibite::save)
+    jai::jaibite jaibite(const std::string& code);
+    script_value execute(jai::jaibite& bite);
+    jai::jaibite jaibite_load(const std::string& path);
+
+    // Backend selection (before the first execute)
+    void set_backend(backend_type type);   // interpreter (default) or vm
+
+    // Static checking (off/warn/strict) — see static_checking.md
+    void static_checking(check_mode mode);
+    check_report check(const std::string& code);
+
+    // Sandboxing
+    void execution_budget(double seconds);  // terminal on overrun; default 1.0
+    void memory_cap(size_t bytes);          // 0 = unlimited (default)
+
     // Variable management
-    void add_global(const script_string& name, script_value value);
-    script_value get_variable(const script_string& name);
-    bool has_variable(const script_string& name);
-    
+    void add_global(const std::string& name, script_value value);
+    template<typename T> void add_global_ref(const std::string& name, T& value);
+    script_value get_variable(const std::string& name) const;
+    bool has_variable(const std::string& name) const;
+
     // Function registration
-    void add_function(const script_string& name, script_function func);
-    void add_variadic_function(const script_string& name, script_function func);
-    
-    // Type registration (see dynamic_binder)
-    template<typename T>
-    dynamic_binder<T> addClass(const script_string& name);
+    template<typename Func> void add_function(const std::string& name, Func&& func);
+    void add_variadic_function(const std::string& name, script_function func);
+
+    // Type registration — normally done through jai::dynamic_binder<T>(engine, "Name"),
+    // which calls this under the hood:
+    void add_class(const std::string& name, std::shared_ptr<class_definition> classDef);
 };
 ```
 
@@ -649,10 +715,8 @@ auto path = format("/home/", username, "/docs");   // "/home/alice/docs"
 // Escape sequences work the same as print
 auto literal = format("{{name}}: {{value}}");      // "{name}: {value}"
 
-// Building JSON strings (use concatenation mode)
-auto json = format("", "{\"", key, "\": \"", value, "\"}");  // {"key": "value"}
-// Or use string concatenation
-auto json2 = "{\"" + key + "\": \"" + value + "\"}";
+// Template strings are often cleaner than either mode:
+auto json = `{"${key}": "${value}"}`;
 ```
 
 #### `to_string(value)`
@@ -671,40 +735,50 @@ Parses a JSON string and returns the corresponding JaiScript value.
 
 ## Performance
 
-Benchmark results vs ChaiScript:
-- Simple arithmetic: **578x faster**
-- Variable operations: **293x faster**
-- Function calls: **173x faster**
-- Loops: **25.8x faster**
-- Overall: **25-578x performance improvement**
+Current committed baselines live in [thin_value_rebaseline.md](thin_value_rebaseline.md) (§6,
+interpreter and VM side by side) and [execution_mode_metrics.md](execution_mode_metrics.md)
+(execution-mode and jaibite-cache numbers). `script_value` is 32 bytes (static_assert-gated),
+heavy types ride in non-atomic `strong_ptr` for O(1) copies, and the benchmark suite includes
+sol2/Lua and Squirrel comparisons (`x64-Release BENCHMARKS` config).
 
-See `docs/performance.md` for detailed benchmarks.
+[PERFORMANCE.md](PERFORMANCE.md) is a HISTORICAL (2025-12, tree-walker era) analysis — its
+ChaiScript comparison tables predate the VM and the thin-value fold.
 
 ## Documentation
 
-### Core Documentation
-- `ROADMAP.md` - Feature roadmap and priorities
-- `TYPE_SYSTEM_DESIGN.md` - Type system, shared_ptr/weak_ptr, auto-unwrap semantics
-- `STRONG_TYPES.md` - Strong typing implementation details
-- `grammar.md` - Complete language grammar reference
+### Language & Type System
+- [grammar.md](grammar.md) - Complete language grammar reference
+- [why_jaiscript.md](why_jaiscript.md) - Motivation with real-world comparisons
+- [STRONG_TYPES.md](STRONG_TYPES.md) - The runtime type ladder (int/auto/var)
+- [static_checking.md](static_checking.md) - Opt-in static type checking (off/warn/strict)
+- [TYPE_SYSTEM_DESIGN.md](TYPE_SYSTEM_DESIGN.md) - Type system, shared_ptr/weak_ptr, auto-unwrap semantics
+- [EXCEPTION_DESIGN.md](EXCEPTION_DESIGN.md) - Exception handling (+ terminal-error tier)
 
-### Design Documents
-- `JaiScript_FutureDesign.md` - Roadmap and vision for JaiScript's future
-- `JaiScript_DeepCopyDesign.md` - Deep copy semantics design
-- `EXCEPTION_DESIGN.md` - Exception handling design
-- `VM_REFERENCE_SEMANTICS_DESIGN.md` - VM reference semantics
-- `PERSISTENT_INTERPRETER_DESIGN.md` - Persistent interpreter design
+### Engine & Integration
+- [BUILD.md](BUILD.md) - Build instructions and options
+- [SERIALIZATION.md](SERIALIZATION.md) - The C++ value-archive system (jai_archive)
+- [TEMPLATE_BINDING_PROPOSAL.md](TEMPLATE_BINDING_PROPOSAL.md) - Binding C++ template classes (implemented)
+- [LOCAL_VARIABLES_BEHAVIOR.md](LOCAL_VARIABLES_BEHAVIOR.md) - `instance_variables` overlay scopes
+- [NAMING_CONVENTIONS.md](NAMING_CONVENTIONS.md) - Code naming conventions
+- [portability.md](portability.md) - Platform/compiler portability notes
+- [invariants.md](invariants.md) - Load-bearing internal invariants (read before touching value layout/VM)
 
-### Reference
-- `BUILD.md` - Build instructions and options
-- `PERFORMANCE.md` - Performance analysis and benchmarks
-- `NAMING_CONVENTIONS.md` - Code naming conventions
-- `JaiScriptTesting.md` / `JaiScriptVMTesting.md` - Testing guides
-- `JaiScript_BinarySerialization.md` - Binary serialization format
+### Performance & Testing
+- [execution_mode_metrics.md](execution_mode_metrics.md) - Execution modes, jaibite, cache metrics
+- [thin_value_spec.md](thin_value_spec.md) / [thin_value_rebaseline.md](thin_value_rebaseline.md) - 32-byte value fold (as-built spec + benchmark baseline)
+- [PERFORMANCE.md](PERFORMANCE.md) - HISTORICAL 2025-12 performance analysis
+- [JaiScriptTesting.md](JaiScriptTesting.md) / [JaiScriptVMTesting.md](JaiScriptVMTesting.md) - Testing guides
 
-## Known Limitations
-
-- Exception handling not yet supported in VM backend (works in interpreter)
+### Roadmap & Design History
+- [ROADMAP.md](ROADMAP.md) - Feature roadmap and priorities
+- [parallel_design.md](parallel_design.md) / [parallel_prove_or_serial.md](parallel_prove_or_serial.md) - Parallelism design + decision record
+- [JaiScript_FutureDesign.md](JaiScript_FutureDesign.md) - VISION (2025) document
+- [JaiScript_DeepCopyDesign.md](JaiScript_DeepCopyDesign.md) - Deep copy semantics
+- [REFERENCE_SEMANTICS_PLAN.md](REFERENCE_SEMANTICS_PLAN.md) - HISTORICAL reference-semantics plan
+- [PERSISTENT_INTERPRETER_DESIGN.md](PERSISTENT_INTERPRETER_DESIGN.md) - HISTORICAL persistent-interpreter design
+- [MIGRATION_PLAN.md](MIGRATION_PLAN.md) - HISTORICAL ChaiScript→JaiScript migration plan
+- [JAI_ARCHIVE_DEVIRTUALIZATION.md](JAI_ARCHIVE_DEVIRTUALIZATION.md) - HISTORICAL archive devirtualization
+- [JaiScript_BinarySerialization.md](JaiScript_BinarySerialization.md) - HISTORICAL binary-serialization vision
 
 ## Type Conversion Behavior
 
@@ -712,7 +786,7 @@ JaiScript follows C++ semantics for numeric conversions:
 - `int` to `float`: automatic widening conversion
 - `float` to `int`: automatic truncation (no warning, matches C++ behavior)
 
-See `JaiScript_FutureDesign.md` for planned features including unified serialization and property system enhancements.
+Want stricter? Enable static checking (`engine->static_checking(jai::check_mode::strict)`).
 
 ## License
 

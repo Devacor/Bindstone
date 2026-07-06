@@ -13,17 +13,17 @@ function present(var lines) -> string {
 	return frame;
 }
 
-// Coloring a glyph costs five string concats; the palette is tiny. Build each
-// colored cell once and reuse it forever (join() then stitches rows in C++).
-var CELL_CACHE = {};
-
-function ccell(string color_code, string glyph) -> string {
-	var cache_key = color_code + glyph;
-	if (CELL_CACHE.has(cache_key)) { return CELL_CACHE[cache_key]; }
-	var cell = col(color_code, glyph);
-	CELL_CACHE[cache_key] = cell;
-	return cell;
-}
+// Frame-build hot path: coloring a tile costs a script call + five concats, and
+// the map does it ~1280 times a frame. Tiles only come in five kinds, so bake
+// the colored cell per kind once (indexed by tile id: wall floor stairs statue mural).
+var TILE_CELL_VIS = [
+	col("37", "#"), col("90", "."), col("96", ">"), col("93", "&"), col("95", "%")
+];
+var TILE_CELL_SEEN = [
+	col("90", "#"), col("90", " "), col("90", ">"), col("90", "&"), col("90", "%")
+];
+var CELL_UNSEEN = " ";
+var MAP_DIVIDER = col("90", "|");
 
 function bar(int cur, int cap, int width, string color_on) -> string {
 	if (cap <= 0) { cap = 1; }
@@ -53,7 +53,7 @@ function tile_color(int t) -> string {
 }
 
 function render_game() -> void {
-	// frame_mark();   // --time probe: turn logic ends here, frame build begins
+	frame_mark();   // --time probe: turn logic ends here, frame build begins
 	var lines = [];
 	var p = G.player;
 	var god_tag = p.god ? col("95", " [GOD]") : "";
@@ -72,33 +72,33 @@ function render_game() -> void {
 	}
 
 	var panel = build_panel();
+	var player_cell = col(p.color, "@");
 	for (int y = 0; y < MAP_H; ++y) {
 		var row = "";
 		for (int x = 0; x < MAP_W; ++x) {
 			var i = idx(x, y);
 			if (x == p.x && y == p.y) {
-				row = row + col(p.color, "@");
+				row = row + player_cell;
 			} else if (G.visible[i]) {
 				var over = overlay[i];
 				if (over != null) { row = row + col(over[1], over[0]); }
-				else { row = row + col(tile_color(G.tiles[i]), tile_glyph(G.tiles[i])); }
+				else { row = row + TILE_CELL_VIS[G.tiles[i]]; }
 			} else if (G.seen[i]) {
-				var t = G.tiles[i];
-				row = row + (t == TILE_WALL ? col("90", "#") : col("90", tile_glyph(t) == "." ? " " : tile_glyph(t)));
+				row = row + TILE_CELL_SEEN[G.tiles[i]];
 			} else {
-				row = row + " ";
+				row = row + CELL_UNSEEN;
 			}
 		}
 		var side = y < panel.size() ? panel[y] : "";
-		lines.push(row + col("90", "|") + side);
+		lines.push(row + MAP_DIVIDER + side);
 	}
 
-	// message log: last 5. Loop var is mi, NOT i: an earlier nested-scope `var i`
-	// makes a later `for (int i ...)` body silently never run (slot aliasing bug,
-	// both backends, 2026-07) — reported; renamed around it.
+	// message log: last 5 (loop var deliberately reuses `i` after the map loop's
+	// inner `var i` — live canary for the for-loop slot-alias parser bug fixed
+	// engine-side in ba60aa53; if messages vanish, that fix regressed)
 	var start = imax(0, G.msgs.size() - 5);
-	for (int mi = start; mi < G.msgs.size(); ++mi) {
-		lines.push(" " + G.msgs[mi]);
+	for (int i = start; i < G.msgs.size(); ++i) {
+		lines.push(" " + G.msgs[i]);
 	}
 	present(lines);
 }

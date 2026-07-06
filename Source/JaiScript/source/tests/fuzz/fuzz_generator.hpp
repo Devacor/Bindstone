@@ -620,11 +620,15 @@ namespace jai::fuzz {
 				lines_.push_back("}");
 			}
 
-			// Operator methods (throwing variants exercise the operator-throw surface)
+			// Operator methods (throwing variants exercise the operator-throw surface;
+			// the named-class-return spelling covers the typed-operator parse path that
+			// only `auto operator+` / `bool operator<` shapes left blind — open question #11)
 			if (rng_.chance(35)) {
 				ci.has_op_plus = true;
 				if (rng_.chance(20))
 					lines_.push_back("auto operator+(" + ci.name + " other) { throw \"op-plus-boom\"; }");
+				else if (rng_.chance(35))
+					lines_.push_back(ci.name + " operator+(" + ci.name + " other) { var r = other; r." + first_int_field + " = " + first_int_field + " + other." + first_int_field + "; return r; }");
 				else
 					lines_.push_back("auto operator+(" + ci.name + " other) { return " + first_int_field + " + other." + first_int_field + "; }");
 			}

@@ -2,6 +2,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <memory>
 #include <cmath>
 
@@ -192,6 +193,84 @@ public:
             auto result = eng->execute("var a = 5; var b = 3; a + b");
             check_eq(16, result.as<int>());  // (5 + 3) * 2
             check_true(has_custom_ops);
+        });
+
+        // FIXED (2026-07, open question #11): typed operator methods accept named-class
+        // return types — `Money operator+(Money o)` parses inside class Money (the
+        // own-class-name member branch consumes the operator symbol like the general
+        // typed path). Parity with the function-keyword spelling.
+        test("operator_named_class_return_type", [this]() {
+            const char* src = R"(
+                class Money {
+                    int cents = 0;
+                    Money() { cents = 0; }
+                    Money(int c) { cents = c; }
+                    Money operator+(Money o) { return Money(cents + o.cents); }
+                    bool operator<(Money o) { return cents < o.cents; }
+                }
+                var a = Money(25);
+                var b = Money(50);
+                var c = a + b;
+                var chained = a + b + Money(100);
+                to_string(c.cents) + "|" + to_string(chained.cents) + "|" + to_string(a < b);
+            )";
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                stdlib::register_all(*e);
+                check_eq(std::string("75|175|true"), e->execute(src).as<std::string>(),
+                         use_vm ? "vm class-return operator" : "interp class-return operator");
+            }
+        });
+
+        test("operator_class_return_matches_function_spelling", [this]() {
+            // The typed spelling and the function-keyword spelling produce the same result
+            const char* src = R"(
+                class V1 {
+                    int v = 0;
+                    V1() { v = 0; }
+                    V1(int n) { v = n; }
+                    V1 operator+(V1 o) { return V1(v + o.v); }
+                }
+                class V2 {
+                    int v = 0;
+                    V2() { v = 0; }
+                    V2(int n) { v = n; }
+                    function operator+(V2 o) { return V2(v + o.v); }
+                }
+                var s1 = (V1(3) + V1(4)).v;
+                var s2 = (V2(3) + V2(4)).v;
+                to_string(s1) + "|" + to_string(s2);
+            )";
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                stdlib::register_all(*e);
+                check_eq(std::string("7|7"), e->execute(src).as<std::string>(),
+                         use_vm ? "vm spelling parity" : "interp spelling parity");
+            }
+        });
+
+        test("operator_subscript_returns_class", [this]() {
+            const char* src = R"(
+                class Cell {
+                    int payload = 0;
+                    Cell() { payload = 0; }
+                    Cell(int p) { payload = p; }
+                }
+                class Grid {
+                    int base = 10;
+                    Cell operator[](int i) { return Cell(base + i); }
+                }
+                var g = Grid();
+                g[5].payload;
+            )";
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                check_eq((int64_t)15, e->execute(src).as_int(),
+                         use_vm ? "vm operator[] class return" : "interp operator[] class return");
+            }
         });
     }
 };

@@ -2533,11 +2533,27 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 // Continue with regular member parsing...
                 if (check(token_type::identifier)) {
                     token name = advance();
+                    std::string method_name(name.lexeme);
+
+                    // Typed operator methods returning the enclosing class land HERE (the
+                    // ctor lookahead saw no '('): consume the operator symbol exactly like
+                    // the general typed path so `Money operator+(Money o)` parses inside
+                    // class Money (open question #11, FIXED 2026-07)
+                    if (method_name == "operator") {
+                        auto op_name = parse_operator_method_symbol();
+                        if (!op_name) {
+                            synchronize();
+                            continue;
+                        }
+                        method_name = std::move(*op_name);
+                    }
+
                     if (match(token_type::left_paren)) {
                         // Function
                         current_--;
-                        auto func = std::make_shared<function_decl>(previous().location, name.lexeme);
-                        func->name_id = get_symbol_id(name);
+                        auto [fall_name_id, fall_name_view] = symbolizer_->intern_with_view(method_name);
+                        auto func = std::make_shared<function_decl>(previous().location, fall_name_view);
+                        func->name_id = fall_name_id;
                         func->is_static = is_static;
                         func->is_override = is_override;
 
@@ -2744,54 +2760,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
             // Check for operator overload: function operator= or function operator+
             if (check(token_type::identifier) && peek().lexeme == "operator") {
                 advance(); // consume 'operator'
-
-                // Now consume the operator symbol
-                if (check(token_type::equal)) {
-                    advance();
-                    method_name = "=";
-                } else if (check(token_type::plus)) {
-                    advance();
-                    method_name = "+";
-                } else if (check(token_type::minus)) {
-                    advance();
-                    method_name = "-";
-                } else if (check(token_type::star)) {
-                    advance();
-                    method_name = "*";
-                } else if (check(token_type::slash)) {
-                    advance();
-                    method_name = "/";
-                } else if (check(token_type::left_bracket)) {
-                    advance();
-                    if (!match(token_type::right_bracket)) {
-                        report_error("Expected ']' after '[' in operator[]", peek());
-                        synchronize();
-                        continue;
-                    }
-                    method_name = "[]";
-                } else if (check(token_type::less)) {
-                    advance();
-                    method_name = "<";
-                } else if (check(token_type::greater)) {
-                    advance();
-                    method_name = ">";
-                } else if (check(token_type::less_equal)) {
-                    advance();
-                    method_name = "<=";
-                } else if (check(token_type::greater_equal)) {
-                    advance();
-                    method_name = ">=";
-                } else if (check(token_type::equal_equal)) {
-                    advance();
-                    method_name = "==";
-                } else if (check(token_type::bang_equal)) {
-                    advance();
-                    method_name = "!=";
-                } else {
-                    report_error("Expected operator symbol after 'operator' keyword", peek());
+                auto op_name = parse_operator_method_symbol();
+                if (!op_name) {
                     synchronize();
                     continue;
                 }
+                method_name = std::move(*op_name);
             } else if (check(token_type::identifier)) {
                 // Regular method name
                 token name_tok = advance();
@@ -2839,53 +2813,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
                 // Check for operator overload: function operator=(Type arg) or function operator+(...)
                 if (method_name == "operator") {
-                    // Consume the operator symbol
-                    if (check(token_type::equal)) {
-                        advance();
-                        method_name = "=";
-                    } else if (check(token_type::plus)) {
-                        advance();
-                        method_name = "+";
-                    } else if (check(token_type::minus)) {
-                        advance();
-                        method_name = "-";
-                    } else if (check(token_type::star)) {
-                        advance();
-                        method_name = "*";
-                    } else if (check(token_type::slash)) {
-                        advance();
-                        method_name = "/";
-                    } else if (check(token_type::left_bracket)) {
-                        advance();
-                        if (!match(token_type::right_bracket)) {
-                            report_error("Expected ']' after '[' in operator[]", peek());
-                            synchronize();
-                            continue;
-                        }
-                        method_name = "[]";
-                    } else if (check(token_type::less)) {
-                        advance();
-                        method_name = "<";
-                    } else if (check(token_type::greater)) {
-                        advance();
-                        method_name = ">";
-                    } else if (check(token_type::less_equal)) {
-                        advance();
-                        method_name = "<=";
-                    } else if (check(token_type::greater_equal)) {
-                        advance();
-                        method_name = ">=";
-                    } else if (check(token_type::equal_equal)) {
-                        advance();
-                        method_name = "==";
-                    } else if (check(token_type::bang_equal)) {
-                        advance();
-                        method_name = "!=";
-                    } else {
-                        report_error("Expected operator symbol after 'operator' keyword", peek());
+                    auto op_name = parse_operator_method_symbol();
+                    if (!op_name) {
                         synchronize();
                         continue;
                     }
+                    method_name = std::move(*op_name);
                 }
 
                 if (match(token_type::left_paren)) {
@@ -3307,6 +3240,33 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
     }
 
     return namespace_decl_node;
+}
+
+// Consumes the symbol after an 'operator' method name (= + - * / [] < > <= >= == !=).
+// Errors are reported here; nullopt tells the caller to synchronize. ONE consumption
+// shared by every class-member operator site so their accepted sets can't drift.
+std::optional<std::string> parser::parse_operator_method_symbol() {
+    if (check(token_type::equal)) { advance(); return std::string("="); }
+    if (check(token_type::plus)) { advance(); return std::string("+"); }
+    if (check(token_type::minus)) { advance(); return std::string("-"); }
+    if (check(token_type::star)) { advance(); return std::string("*"); }
+    if (check(token_type::slash)) { advance(); return std::string("/"); }
+    if (check(token_type::left_bracket)) {
+        advance();
+        if (!match(token_type::right_bracket)) {
+            report_error("Expected ']' after '[' in operator[]", peek());
+            return std::nullopt;
+        }
+        return std::string("[]");
+    }
+    if (check(token_type::less)) { advance(); return std::string("<"); }
+    if (check(token_type::greater)) { advance(); return std::string(">"); }
+    if (check(token_type::less_equal)) { advance(); return std::string("<="); }
+    if (check(token_type::greater_equal)) { advance(); return std::string(">="); }
+    if (check(token_type::equal_equal)) { advance(); return std::string("=="); }
+    if (check(token_type::bang_equal)) { advance(); return std::string("!="); }
+    report_error("Expected operator symbol after 'operator' keyword", peek());
+    return std::nullopt;
 }
 
 checked_result<declaration_ptr> parser::include_declaration() {

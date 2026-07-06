@@ -66,6 +66,7 @@ namespace jai {
         checked_result<declaration_ptr> variable_declaration();
         checked_result<declaration_ptr> include_declaration();
         checked_result<declaration_ptr> import_declaration();
+        std::optional<std::string> parse_operator_method_symbol();
         
         // statement parsing
         checked_result<statement_ptr> statement();

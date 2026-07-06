@@ -6,7 +6,7 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal_binding.hpp>
-#include <jaiscript/stdlib/stdlib.hpp>
+#include "MV/Script/script.h"
 
 static jai::registrar<StandardMessages, MV::Services> _hookStandardMessages("StandardMessages",
 	[](jai::dynamic_binder<StandardMessages>& builder, const MV::Services&) {
@@ -44,13 +44,7 @@ void sdl_quit(void){
 Game::Game(Managers& a_managers) :
 	gameData(a_managers, false),
 	done(false),
-	jaiEngine_(jai::engine::make()) {
-
-	jai::stdlib::register_all(*jaiEngine_);
-	jaiEngine_->set_script_error_handler([](const std::string& a_message) {
-		MV::error("Script callback failed: ", a_message);
-	});
-	jai::bind_registrar<MV::Services>(*jaiEngine_, a_managers.services);
+	jaiEngine_(MV::makeScriptEngine(a_managers.services)) {
 
 	// Script globals (non-owning: this/messages outlive the engine)
 	jaiEngine_->add_global("game", jaiEngine_->make_object(std::shared_ptr<Game>(this, [](Game*) {})));

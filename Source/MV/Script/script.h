@@ -3,6 +3,7 @@
 
 #include <string>
 #include <map>
+#include <memory>
 #include <vector>
 
 namespace jai {
@@ -12,6 +13,17 @@ namespace jai {
 
 namespace MV {
 	class Services;
+
+	// One place for engine policy: VM backend (env MV_SCRIPT_INTERPRETER=1 forces the
+	// tree-walking interpreter for parity debugging), stdlib, Services-bound registrars,
+	// script-error logging via MV::error, a memory cap, and static_checking(warn) in
+	// debug builds (diagnostics surface through Script::eval as MV::warning).
+	// Callers still connect the engine into their Services themselves.
+	std::shared_ptr<jai::engine> makeScriptEngine(const Services& a_services, size_t a_memoryCapBytes = 256 * 1024 * 1024);
+
+	// Env MV_SCRIPT_HOT_RELOAD=1: gameplay .script files re-eval when their mtime changes
+	// (see StandardScriptMethods::loadScript). Off = parse-once shipping behavior.
+	bool scriptHotReloadEnabled();
 
 	// Forward declarations only here; the implementation TU (Source/Game/Script/script.cpp) includes the engine.
 	class Script {

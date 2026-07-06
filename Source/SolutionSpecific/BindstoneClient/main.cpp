@@ -1,5 +1,3 @@
-#if 1
-
 #include "Game/gameEditor.h"
 #include "MV/Utility/threadPool.hpp"
 #include "MV/Utility/services.hpp"
@@ -15,8 +13,11 @@
 #include "Game/NetworkLayer/clientActions.h"
 #include "MV/Network/networkObject.h"
 
-#include "JaiScript/stdlib/stdlib.hpp"
+#include "MV/Script/script.h"
+#include "MV/Utility/generalUtility.h"
+#include "Game/standardScriptMethods.h"
 
+#include <filesystem>
 #include <fstream>
 
 #include "glm/mat4x4.hpp"
@@ -198,9 +199,7 @@ static void RunJsonParseBenchmark(jai::engine* eng) {
 // exactly like the editor's Load button. Run: BindstoneClient.exe -loadbench
 static void RunSceneLoadBenchmark(bool a_headless) {
 	Managers managers({ "", "" });
-	auto jaiEngine = jai::engine::make();
-	jai::stdlib::register_all(*jaiEngine);
-	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	if (a_headless) {
 		managers.renderer.makeHeadless();
@@ -265,9 +264,7 @@ static bool roundtripNetworkAction(MV::Services& a_services) {
 // Clickable::onAccept serializes again. Run: BindstoneClient.exe -wirebuttons
 static void RunButtonWiring() {
 	Managers managers({ "", "" });
-	auto jaiEngine = jai::engine::make();
-	jai::stdlib::register_all(*jaiEngine);
-	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	static MV::TapDevice wireMouse;
 	managers.services.connect(&wireMouse);
@@ -313,9 +310,7 @@ static void RunButtonWiring() {
 // redirect - copy the result back to the repo Assets).
 static void RunLoginUiRepair() {
 	Managers managers({ "", "" });
-	auto jaiEngine = jai::engine::make();
-	jai::stdlib::register_all(*jaiEngine);
-	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	static MV::TapDevice repairMouse;
 	managers.services.connect(&repairMouse);
@@ -420,13 +415,34 @@ static void RunLoginUiRepair() {
 	repairScene("Assets/Prefabs/LoginName.prefab", nullptr);
 }
 
+// Evals every <a_assetType>/<id>/main(.script|Client.script) through the same
+// StandardScriptMethods path the game uses; passes when the eval succeeds and the script
+// bound at least one spawn/update/death hook — end-to-end proof on the configured backend.
+template <typename DataType>
+static void verifyFamilyScripts(MV::Script& a_script, const std::string& a_assetType, int& a_passed, int& a_failed) {
+	std::error_code errorCode;
+	for (std::filesystem::directory_iterator it("Assets/" + a_assetType, errorCode), end; !errorCode && it != end; it.increment(errorCode)) {
+		if (!it->is_directory()) { continue; }
+		auto id = it->path().filename().string();
+		for (bool isServer : { true, false }) {
+			std::string file = a_assetType + "/" + id + (isServer ? "/main.script" : "/mainClient.script");
+			if (!MV::fileExistsInSearchPaths(file)) { continue; }
+			StandardScriptMethods<DataType> methods;
+			auto self = a_script.engine().make_object(
+				std::shared_ptr<StandardScriptMethods<DataType>>(&methods, [](StandardScriptMethods<DataType>*) {}));
+			bool ok = a_script.eval(file, MV::fileContents(file), { { "self", self } })
+				&& (methods.scriptSpawn || methods.scriptUpdate || methods.scriptDeath);
+			std::cout << (ok ? "[OK]   script " : "[FAIL] script ") << file << std::endl;
+			if (ok) { ++a_passed; } else { ++a_failed; }
+		}
+	}
+}
+
 // Loads every shipped scene/prefab/catalog headless and reports pass/fail. Guards the
 // jai asset format end to end. Run: BindstoneClient.exe -verifyassets
 static void RunAssetVerification() {
 	Managers managers({ "", "" });
-	auto jaiEngine = jai::engine::make();
-	jai::stdlib::register_all(*jaiEngine);
-	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	static MV::TapDevice verifyMouse;
 	managers.services.connect(&verifyMouse);
@@ -505,6 +521,12 @@ static void RunAssetVerification() {
 		std::cout << "[FAIL] Catalogs: " << e.what() << std::endl;
 		++failed;
 	}
+
+	MV::Script script(*jaiEngine);
+	verifyFamilyScripts<Creature>(script, "Creatures", passed, failed);
+	verifyFamilyScripts<Building>(script, "Buildings", passed, failed);
+	verifyFamilyScripts<BattleEffect>(script, "BattleEffects", passed, failed);
+
 	std::cout << "\n[verify] " << passed << " passed, " << failed << " failed" << std::endl;
 }
 
@@ -647,9 +669,7 @@ int main(int argc, char *argv[]) {
 	derived->baseMember = 5;
 	derived->derived1Member = 10;
 
-	auto testEngine = jai::engine::make();
-	jai::stdlib::register_all(*testEngine);
-	jai::bind_registrar<MV::Services>(*testEngine, MV::Services::instance());
+	auto testEngine = MV::makeScriptEngine(MV::Services::instance());
 	MV::Services::instance().connect<jai::engine>(testEngine.get());
 
 	for (int i = 0; i < argc; ++i) {
@@ -907,318 +927,3 @@ void PathfindingTest() {
 	std::cout << "YO" << std::endl;
 }
 
-#else
-/*
- *  rectangles.c
- *  written by Holmes Futrell
- *  use however you want
- */
-
-//Grabbed from here: https://gist.github.com/Khaledgarbaya/86ac0b3cf9e5fc89cdcb
-#include "SDL.h"
-#include <time.h>
-#include <stdlib.h>
-#include <stdio.h>
-
-#include "MV/Script/script.h"
-#include "MV/Utility/log.h"
-
-#include "MV/Network/dynamicVariable.h"
-
-
-using namespace std;
-
-/*
- Produces a random int x, min <= x <= max
- following a uniform distribution
- */
-int randomInt(int min, int max) {
-    return min + rand() % (max - min + 1);
-}
-
-/*
- Produces a random float x, min <= x <= max
- following a uniform distribution
- */
-float randomFloat(float min, float max) {
-    return rand() / (float) RAND_MAX *(max - min) + min;
-}
-
-void fatalError(const char *string) {
-    printf("%s: %s\n", string, SDL_GetError());
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, string, SDL_GetError(), NULL);
-    exit(1);
-}
-
-static Uint64 prevTime = 0;
-
-double updateDeltaTime() {
-    Uint64 curTime;
-    double deltaTime;
-    
-    if (prevTime == 0) {
-        prevTime = SDL_GetPerformanceCounter();
-    }
-    
-    curTime = SDL_GetPerformanceCounter();
-    deltaTime = (double) (curTime - prevTime) / (double) SDL_GetPerformanceFrequency();
-    prevTime = curTime;
-    
-    return deltaTime;
-}
-
-void render(SDL_Renderer *renderer) {
-    Uint8 r, g, b;
-    int renderW;
-    int renderH;
-    
-    SDL_RenderGetLogicalSize(renderer, &renderW, &renderH);
-    
-    /*  Come up with a random rectangle */
-    SDL_Rect rect;
-    rect.w = randomInt(64, 128);
-    rect.h = randomInt(64, 128);
-    rect.x = randomInt(0, renderW);
-    rect.y = randomInt(0, renderH);
-    
-    /* Come up with a random color */
-    r = randomInt(50, 255);
-    g = randomInt(50, 255);
-    b = randomInt(50, 255);
-    
-    /*  Fill the rectangle in the color */
-    SDL_SetRenderDrawColor(renderer, r, g, b, 255);
-    SDL_RenderFillRect(renderer, &rect);
-    
-    /* update screen */
-    SDL_RenderPresent(renderer);
-}
-
-struct PointTest {
-	int x;
-	void display() {
-		MV::info("Bindstone: PointTest Display");
-	}
-};
-
-void customPrint(const std::string& string) {
-	MV::info("Bindstone: " + string);
-}
-
-void hookDynamicVariable2(chaiscript::ChaiScript& a_script) {
-	a_script.add(chaiscript::user_type<MV::DynamicVariable>(), "DynamicVariable");
-	a_script.add(chaiscript::constructor<MV::DynamicVariable()>(), "DynamicVariable");
-	a_script.add(chaiscript::constructor<MV::DynamicVariable(bool)>(), "DynamicVariable");
-	a_script.add(chaiscript::constructor<MV::DynamicVariable(int64_t)>(), "DynamicVariable");
-	a_script.add(chaiscript::constructor<MV::DynamicVariable(int)>(), "DynamicVariable");
-	a_script.add(chaiscript::constructor<MV::DynamicVariable(size_t)>(), "DynamicVariable");
-	a_script.add(chaiscript::constructor<MV::DynamicVariable(double)>(), "DynamicVariable");
-	a_script.add(chaiscript::constructor<MV::DynamicVariable(const std::string&)>(), "DynamicVariable");
-
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, bool a_value) -> decltype(auto) {
-		return a_self = a_value;
-		}), "=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int64_t a_value) -> decltype(auto) {
-		return a_self = a_value;
-		}), "=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, size_t a_value) -> decltype(auto) {
-		return a_self = a_value;
-		}), "=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int a_value) -> decltype(auto) {
-		return a_self = a_value;
-		}), "=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, double a_value) -> decltype(auto) {
-		return a_self = a_value;
-		}), "=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, std::string a_value) -> decltype(auto) {
-		return a_self = a_value;
-		}), "=");
-
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, bool a_value) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int64_t a_value) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, size_t a_value) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int a_value) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, double a_value) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, std::string a_value) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-
-	a_script.add(chaiscript::fun([&](bool a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](int64_t a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](size_t a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](int a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](double a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-	a_script.add(chaiscript::fun([&](std::string a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self == a_value;
-		}), "==");
-
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, bool a_value) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int64_t a_value) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, size_t a_value) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int a_value) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, double a_value) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, std::string a_value) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-
-	a_script.add(chaiscript::fun([&](bool a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](int64_t a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](size_t a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](int a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](double a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-	a_script.add(chaiscript::fun([&](std::string a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
-		return a_self != a_value;
-		}), "!=");
-
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
-		return a_self.getBool();
-		}), "bool");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
-		return a_self.getInt();
-		}), "int");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
-		return a_self.getDouble();
-		}), "double");
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
-		return a_self.getString();
-		}), "string");
-
-	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
-		return a_self.clear();
-		}), "clear");
-
-	a_script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, MV::DynamicVariable>>("DynamicVariableMap"));
-	a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<MV::DynamicVariable>>("DynamicVariableVector"));
-}
-
-int main(int argc, char *argv[]) {
-    
-    SDL_Window *window;
-    SDL_Renderer *renderer;
-    int done;
-    SDL_Event event;
-    int windowW;
-    int windowH;
-    
-    /* initialize SDL */
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fatalError("Could not initialize SDL");
-    }
-    
-    /* seed random number generator */
-    srand(time(NULL));
-    
-    /* create window and renderer */
-    window = SDL_CreateWindow(NULL, 0, 0, 480, 320, SDL_WINDOW_ALLOW_HIGHDPI);
-    if (window == 0) {
-        fatalError("Could not initialize Window");
-    }
-    renderer = SDL_CreateRenderer(window, -1, 0);
-    if (!renderer) {
-        fatalError("Could not create renderer");
-    }
-    
-    SDL_GetWindowSize(window, &windowW, &windowH);
-    SDL_RenderSetLogicalSize(renderer, windowW, windowH);
-    
-    /* Fill screen with black */
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer);
-    
-	chaiscript::ChaiScript script;
-	script.add(chaiscript::fun([](const std::string& a_output) {
-		MV::info("CHAISCRIPT: ", a_output);
-	}), "log_chaiscript_output");
-	script.eval("global print = fun(x){ log_chaiscript_output(to_string(x)); };");
-	script.add(chaiscript::user_type<PointTest>(), "PointTest");
-	script.add(chaiscript::constructor<PointTest()>(), "PointTest");
-	script.add(chaiscript::fun(&PointTest::display), "display");
-	script.add(chaiscript::fun(&PointTest::x), "x");
-	script.add(chaiscript::fun(&customPrint), "log_chaiscript_output");
-	script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, PointTest>>("PointTestMap"));
-	
-	script.eval(R"(
-		print("Trying PointTest");
-		var testStuff = PointTest();
-		print("Trying PrintVar");
-		print(testStuff.x);
-		testStuff.x = 5;
-		print(testStuff.x);
-		testStuff.display();
-	)");
-
-	script.eval(R"(
-		print("TRYING DYNAMIC VARIABLE");
-		var v = DynamicVariable(10);
-		print(v.int);
-		var v2 = DynamicVariable("Test");
-		print(v2.string);
-		print("TEST SUCCESS");
-
-		var testStuff2 = DynamicVariableMap();
-		print("f1");
-		testStuff2["v1"] = false;
-		print("f2");
-		print(testStuff2["v1"].bool);
-		testStuff2["v2"] = 0;
-		print("f3");
-		print(testStuff2["v2"].int);
-		)");
-    /* Enter render loop, waiting for user to quit */
-    done = 0;
-    while (!done) {
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) {
-                done = 1;
-            }
-        }
-        render(renderer);
-        SDL_Delay(1);
-    }
-    
-    /* shutdown SDL */
-    SDL_Quit();
-    
-    return 0;
-}
-#endif

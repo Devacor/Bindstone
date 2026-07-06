@@ -8,8 +8,7 @@
 #include "MV/Utility/scopeGuard.hpp"
 
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/registrar.hpp>
-#include <jaiscript/stdlib/stdlib.hpp>
+#include "MV/Script/script.h"
 
 // Lines of "email handle password"; each missing account is created through the same
 // query/hash path CreatePlayer uses, so local clients can log straight in.
@@ -26,9 +25,7 @@ int main(int, char *[]) {
 	Managers managers({});
 	managers.timer.start();
 
-	auto jaiEngine = jai::engine::make();
-	jai::stdlib::register_all(*jaiEngine);
-	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	MV::Services::instance().connect<jai::engine>(jaiEngine.get());
 

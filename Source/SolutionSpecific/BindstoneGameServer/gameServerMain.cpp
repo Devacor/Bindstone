@@ -16,8 +16,7 @@
 #include "MV/Utility/taskActions.hpp"
 
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/registrar.hpp>
-#include <jaiscript/stdlib/stdlib.hpp>
+#include "MV/Script/script.h"
 
 #include <fstream>
 
@@ -264,9 +263,7 @@ int main(int, char *[]) {
 
 	MV::initializeSpineBindings();
 
-	auto jaiEngine = jai::engine::make();
-	jai::stdlib::register_all(*jaiEngine);
-	jai::bind_registrar<MV::Services>(*jaiEngine, managers.services);
+	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	MV::Services::instance().connect<jai::engine>(jaiEngine.get());
 

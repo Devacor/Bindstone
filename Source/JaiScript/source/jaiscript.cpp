@@ -15,6 +15,7 @@
 #include "implementation/class_registry.cpp"
 #include "implementation/parse_errors.cpp"
 #include "implementation/interpreter_dispatch.cpp"
+#include "implementation/type_checker.cpp"
 #include "implementation/vm/vm_compiler.cpp"
 #include "implementation/vm/vm_backend.cpp"
 #include "implementation/vm/disassembler.cpp"

@@ -1112,6 +1112,24 @@ uint64_t engine::registration_fingerprint() const {
         for (unsigned char c : name) { hash ^= c; hash *= 1099511628211ull; }
         hash ^= 0xFFu; hash *= 1099511628211ull;  // name separator
     }
+    // Plain-global function registrations (zero-arg add_function, add_variadic_function,
+    // single untyped bindings) never enter overloadedFunctions, so they were invisible
+    // here — a .jaib saved against them loaded with registration_mismatch()==false and
+    // died at execute (open question #10, FIXED by inclusion 2026-07). Folded in AFTER
+    // the sorted overload surface with an arity-class marker, so engines registering
+    // none of these hash exactly as before; engines that do get a CHANGED fingerprint
+    // (old .jaibs then report the advisory mismatch — correct, loads never hard-fail).
+    std::vector<std::pair<std::string_view, char>> plain;
+    plain.reserve(impl->functionArities.size());
+    for (const auto& [name, arity] : impl->functionArities) {
+        plain.emplace_back(name, arity == SIZE_MAX ? 'v' : (arity == 0 ? 'z' : 'n'));
+    }
+    std::sort(plain.begin(), plain.end());
+    for (const auto& [name, kind] : plain) {
+        for (unsigned char c : name) { hash ^= c; hash *= 1099511628211ull; }
+        hash ^= 0xFEu; hash *= 1099511628211ull;  // plain-function separator
+        hash ^= static_cast<unsigned char>(kind); hash *= 1099511628211ull;
+    }
     return hash;
 }
 

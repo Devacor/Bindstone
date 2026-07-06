@@ -396,6 +396,37 @@ public:
             check_true(loaded_mismatch.registration_mismatch());
             check_eq(int64_t(3), loaded_mismatch.execute().as_int());
         });
+
+        // FIXED by inclusion (2026-07, open question #10): zero-arg and variadic host
+        // functions register as plain globals (never enter overloadedFunctions) and were
+        // invisible to registration_fingerprint(), so a .jaib saved against them loaded
+        // with registration_mismatch()==false and died at execute. They now fold into
+        // the fingerprint with an arity-class marker.
+        test("registration_fingerprint_sees_zero_arg_and_variadic", [this]() {
+            using namespace jaibite_test_detail;
+            auto a = fresh_engine(false, {});
+            auto b = fresh_engine(false, {});
+            check_eq(a->registration_fingerprint(), b->registration_fingerprint());
+
+            a->add_function("zero_arg_probe", []() -> jai::script_int { return 1; });
+            check_true(a->registration_fingerprint() != b->registration_fingerprint());
+
+            b->add_function("zero_arg_probe", []() -> jai::script_int { return 1; });
+            check_eq(a->registration_fingerprint(), b->registration_fingerprint());
+
+            a->add_variadic_function("variadic_probe",
+                [](const std::vector<jai::script_value>& args) -> jai::script_value {
+                    return jai::script_value((jai::script_int)args.size(), nullptr);
+                });
+            check_true(a->registration_fingerprint() != b->registration_fingerprint());
+
+            // The failure scenario: save with the zero-arg fn, load into an engine
+            // without it -> the advisory flag now fires (load itself never hard-fails)
+            auto bytes = a->jaibite("zero_arg_probe();").save_bytes();
+            auto bare = fresh_engine(false, {});
+            auto loaded = bare->jaibite_load_bytes(bytes);
+            check_true(loaded.registration_mismatch());
+        });
     }
 };
 

@@ -1,6 +1,15 @@
 # `parallel_for` enforcement UX: prove-or-serial (companion proposal)
 
-Status: COMPANION PROPOSAL to `parallel_design.md` (rewritten 30d3aa28) — not a replacement.
+Status: RULED 2026-07-06 — **Dev ruled (A), pure contract semantics**: "B just makes the
+language insecure. I'd rather error." Silent serialization (fork B, and the hybrid's GO/NO-GO
+serial fallback) is dead: a `parallel_for` body either satisfies the contract or ERRORS —
+never quietly runs serial. What survives fork-independently: the §3 checklist repurposed as
+*early static diagnostics* for the same contract violations (erroring at parse time instead of
+runtime is aligned with the ruling; silent fallback is not), the §4 prerequisites (ordered
+reductions non-negotiable), and the §5 pmap-first sequencing. Body kept unedited below as the
+decision record.
+
+Was: COMPANION PROPOSAL to `parallel_design.md` (rewritten 30d3aa28) — not a replacement.
 Everything RULED there stays ruled and is assumed here: one engine + `thread_storage` pads
 (§1), static contiguous chunks (§3), the three-level binding annotation + ordered command
 buffer (§5), iteration-order error selection (§6), `jai::thread_pool` (§7), deterministic pads
@@ -165,3 +174,10 @@ Rule on the fork: **(A) pure contract** (unprovable-but-legal bodies fan out and
 runtime walls alone), **(B) pure hint** (rejected for the legal-when-serial degradation), or
 **(hybrid) contract rules + prove-or-serial GO/NO-GO** (recommended). Everything else in this
 note is implementation detail under whichever ruling lands.
+
+**RULED: (A).** Dev, 2026-07-06: "B just makes the language insecure. I'd rather error." One
+construct, one meaning, one failure mode — an error. No execution-strategy ambiguity, nothing
+whose behavior depends on analysis strength. The §3 checklist may still ship as strict-mode
+*parse-time errors* for contract violations (earlier detection of the same error, never a
+behavior fork); any purely-internal cost heuristic must preserve "legal body always fans out,
+illegal body always errors."

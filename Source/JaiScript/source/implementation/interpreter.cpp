@@ -4166,7 +4166,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if (leftIdx == script_value::TYPEID_FLOAT) {
                             target.unchecked_as_float_ref() += derefRight.as_float();
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-                            target = make_value(target.unchecked_as_int() + derefRight.unchecked_as_float());
+                            JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() + derefRight.unchecked_as_float()), identifier->name));
                         } else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
                             // engine::memory_cap chokepoint: deny the append before it exists
                             if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
@@ -4188,7 +4188,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if (leftIdx == script_value::TYPEID_FLOAT) {
                             target.unchecked_as_float_ref() -= derefRight.as_float();
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-                            target = make_value(target.unchecked_as_int() - derefRight.unchecked_as_float());
+                            JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() - derefRight.unchecked_as_float()), identifier->name));
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
@@ -4204,7 +4204,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if (leftIdx == script_value::TYPEID_FLOAT) {
                             target.unchecked_as_float_ref() *= derefRight.as_float();
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-                            target = make_value(target.unchecked_as_int() * derefRight.unchecked_as_float());
+                            JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() * derefRight.unchecked_as_float()), identifier->name));
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
@@ -4227,10 +4227,19 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if (leftIdx == script_value::TYPEID_FLOAT) {
                             target.unchecked_as_float_ref() /= derefRight.as_float();
                         } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-                            target = make_value(target.unchecked_as_int() / derefRight.unchecked_as_float());
+                            JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() / derefRight.unchecked_as_float()), identifier->name));
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
+                        break;
+                    }
+
+                    case token_type::percent_equal: {
+                        if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+                        }
+                        JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight));
+                        JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
                         break;
                     }
 
@@ -4357,6 +4366,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                         }
                         break;
+                    case token_type::percent_equal: {
+                        if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+                        }
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+                        break;
+                    }
                     default:
                         return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
                 }
@@ -4484,6 +4500,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                             "Invalid operands for /=");
                     }
+                    break;
+                }
+                case token_type::percent_equal: {
+                    if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
+                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+                            "Modulo by zero");
+                    }
+                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
                     break;
                 }
                 default:
@@ -5750,6 +5774,25 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
 
     // Incompatible types - error
     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type ? target_type->id : 0);
+}
+
+// Compound store-back: locked targets convert the promoted result like '=' does; var
+// targets keep the promoted result and re-tag it 'any' so the variable stays dynamic.
+// KEEP BYTE-PARALLEL with vm_backend::compound_typed_store_back.
+checked_result<void> interpreter::compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name) {
+    type_info_ptr tag = target.get_type_info();
+    if (tag && tag->base_type != script_value_type::jai_any_type) {
+        auto enforced = enforce_type_compatibility(std::move(promoted), tag, var_name);
+        if (!enforced) {
+            return enforced.error_value();
+        }
+        promoted = std::move(enforced.value());
+        promoted.set_type_info(tag);
+    } else if (tag) {
+        promoted.set_type_info(tag);
+    }
+    target = std::move(promoted);
+    return {};
 }
 
 // Helper to convert value to string, checking for to_string() method on objects

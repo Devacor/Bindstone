@@ -358,9 +358,12 @@ public:
     // Declared field types (ruling 2026-07: typed fields enforce like locals). 'auto'
     // fields store no entry (they infer from the initialized value); 'var' stores the
     // any tag explicitly (dynamic stays dynamic). Replaced wholesale on definition and
-    // on hot reload; a semantic change flags the next redefine_class as fields_changed
-    // so instances re-migrate (converting per the retype ruling).
-    void replace_field_declared_types(std::unordered_map<uint64_t, type_info_ptr> new_types) {
+    // on hot reload; a semantic change on a REDEFINITION (mark_changes) flags the next
+    // redefine_class as fields_changed so instances re-migrate (converting per the
+    // retype ruling). The initial definition must NOT flag: a spurious first-reload
+    // migration would rebuild fields_ and dangle field pointers cached by suspended
+    // coroutines' env chains.
+    void replace_field_declared_types(std::unordered_map<uint64_t, type_info_ptr> new_types, bool mark_changes) {
         auto same_type = [](type_info_ptr a, type_info_ptr b) {
             if (!a || !b) return a == b;
             return a->base_type == b->base_type && a->type_name == b->type_name;
@@ -376,7 +379,7 @@ public:
             }
         }
         field_declared_types_ = std::move(new_types);
-        if (changed) {
+        if (changed && mark_changes) {
             declared_types_dirty_ = true;
         }
     }
@@ -1548,9 +1551,10 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
 inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_ids,
                                            const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
     (void)old_field_ids;
-    std::unordered_map<uint64_t, script_value> new_fields;
-    new_fields.reserve(new_field_defaults.size() + 1);
-
+    // IN-PLACE per-id migration: kept fields keep their unordered_map NODE, so
+    // script_value addresses stay stable — suspended coroutines' env chains and
+    // this-capturing closures cache pointers to field nodes, and a wholesale map
+    // rebuild would dangle every one of them.
     for (const auto& [id, default_value] : new_field_defaults) {
         auto it = fields_.find(id);
         type_info_ptr declared = class_def_ ? class_def_->get_field_declared_type(id) : nullptr;
@@ -1560,12 +1564,12 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             // value wherever the assignment table allows (float->int truncates, int->string
             // via to_string, subtype objects stay); only a value with NO conversion (object
             // into int, string into int) falls back to the new initializer default. Reloads
-            // stay permissive and never brick an instance. Same-type fields pass through the
+            // stay permissive and never brick an instance. Same-type fields pass the
             // kernel's same-type fast path and keep their value.
             if (auto converted = detail::try_convert_field_value(it->second, declared, engine_)) {
-                new_fields.emplace(id, std::move(*converted));
+                it->second = std::move(*converted);
             } else {
-                new_fields.emplace(id, default_value.clone());
+                it->second = default_value.clone();
             }
             continue;
         }
@@ -1573,28 +1577,28 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
         // keep the existing runtime value, EXCEPT when a non-null new default's kind differs
         // from the held value (an auto field reloaded with a different-typed initializer), so
         // adopt the new default. A null default carries no type and never triggers a reset.
-        bool retyped = !default_value.is_null() && it != fields_.end() &&
-            it->second.deref().current_type() != default_value.deref().current_type();
-        if (it != fields_.end() && !retyped) {
-            new_fields.emplace(id, std::move(it->second));
-        } else {
-            new_fields.emplace(id, default_value.clone());
-        }
-    }
-
-    // The C++ base object lives in a runtime-only field (_cpp_object) that never appears
-    // in the declared field defaults. Carry it across so a field-changing reload of a
-    // script class extending a C++ class doesn't drop (and destruct) the C++ object and
-    // leave inherited C++ methods uncallable.
-    uint64_t cpp_id = get_cpp_object_field_id();
-    if (cpp_id != 0 && new_fields.find(cpp_id) == new_fields.end()) {
-        auto it = fields_.find(cpp_id);
         if (it != fields_.end()) {
-            new_fields.emplace(cpp_id, std::move(it->second));
+            bool retyped = !default_value.is_null() &&
+                it->second.deref().current_type() != default_value.deref().current_type();
+            if (retyped) {
+                it->second = default_value.clone();
+            }
+        } else {
+            fields_.emplace(id, default_value.clone());
         }
     }
 
-    fields_ = std::move(new_fields);
+    // Drop fields absent from the new definition — EXCEPT the runtime-only _cpp_object
+    // field (the C++ base object never appears in the declared defaults; dropping it
+    // would destruct the C++ object and leave inherited C++ methods uncallable).
+    uint64_t cpp_id = get_cpp_object_field_id();
+    for (auto it = fields_.begin(); it != fields_.end();) {
+        if (it->first != cpp_id && new_field_defaults.find(it->first) == new_field_defaults.end()) {
+            it = fields_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 inline bool class_instance::is_script_class() const {

@@ -535,6 +535,194 @@ public:
             check_eq(int64_t(62), result.as<int64_t>());
         });
 
+        // ===== COROUTINE METHODS (ruling 2026-07) =====
+        // `coroutine int steps() { ... }` inside a class: calling it on an instance mints
+        // a handle exactly like a free coroutine; 'this' is pinned in the handle (its own
+        // method env + receiver) and survives suspension on both backends.
+
+        auto both_backends = [](const char* src) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+        auto check_both = [this, both_backends](const char* src, const std::string& expected, const char* what) {
+            auto [i_out, v_out] = both_backends(src);
+            check_eq(expected, i_out, std::string("interp: ") + what);
+            check_eq(expected, v_out, std::string("vm: ") + what);
+        };
+
+        test("method_coroutine_this_across_suspensions", [this, check_both]() {
+            check_both(R"(
+                class Counter {
+                    int x = 10;
+                    coroutine int steps() {
+                        yield 1;
+                        yield this.x;
+                        x = x + 5;
+                        yield x;
+                        return 2.9;
+                    }
+                }
+                auto c = Counter();
+                auto g = c.steps();
+                var a = g.resume();
+                var b = g.resume();
+                var d = g.resume();
+                var e = g.resume();
+                to_string(a) + "|" + to_string(b) + "|" + to_string(d) + "|" +
+                    type_of(e) + ":" + to_string(e) + "|" + to_string(g.done()) + "|" + to_string(c.x)
+            )", "1|10|15|int:2|true|15",
+                "this-field reads/writes across suspensions + typed final return + done()");
+        });
+
+        test("method_coroutine_range_for_drives", [this, check_both]() {
+            check_both(R"(
+                class Gen {
+                    int n = 3;
+                    coroutine int items() { for (int i = 0; i < n; ++i) { yield i * 10; } }
+                }
+                auto g = Gen();
+                var sum = 0;
+                for (auto v : g.items()) { sum += v; }
+                sum
+            )", "30", "range-for drives a method coroutine");
+        });
+
+        test("method_coroutine_two_instances_interleaved", [this, check_both]() {
+            check_both(R"(
+                class C { int id = 0; C(int i) { id = i; } coroutine int gen() { yield id; yield id * 2; } }
+                auto a = C(1); auto b = C(2);
+                auto ga = a.gen(); auto gb = b.gen();
+                to_string(ga.resume()) + to_string(gb.resume()) + to_string(ga.resume()) + to_string(gb.resume())
+            )", "1224", "two instances' coroutines interleave independently");
+        });
+
+        test("method_coroutine_pins_instance", [this, check_both]() {
+            // The only strong ref to the instance dies with make()'s frame; the handle
+            // keeps it alive (receiver + method env pin), so resumes still see fields
+            check_both(R"(
+                class D { int v = 7; coroutine int g() { yield v; v = 99; yield v; } }
+                function make() { auto d = D(); return d.g(); }
+                auto h = make();
+                to_string(h.resume()) + "|" + to_string(h.resume())
+            )", "7|99", "handle keeps the instance alive while suspended");
+        });
+
+        test("method_coroutine_inherited_on_derived", [this, check_both]() {
+            check_both(R"(
+                class Base { int bv = 5; coroutine int gen() { yield bv; yield bv * 2; } }
+                class Derived : Base { int dv = 1; }
+                auto d = Derived();
+                d.bv = 6;
+                auto g = d.gen();
+                to_string(g.resume()) + "|" + to_string(g.resume())
+            )", "6|12", "base coroutine method binds the derived receiver");
+        });
+
+        test("static_coroutine_method_rejected", [this]() {
+            // Both orders parse-error cleanly; the engine stays usable (parser synchronizes)
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                bool threw = false;
+                try { e->execute("class S { static coroutine int f() { yield 1; } }"); }
+                catch (const std::exception& ex) {
+                    threw = std::string(ex.what()).find("static coroutine methods are not supported") != std::string::npos;
+                }
+                check(threw, "static coroutine reports the dedicated error");
+                bool threw2 = false;
+                try { e->execute("class S2 { coroutine static int f() { yield 1; } }"); }
+                catch (const std::exception& ex) {
+                    threw2 = std::string(ex.what()).find("static coroutine methods are not supported") != std::string::npos;
+                }
+                check(threw2, "coroutine static reports the dedicated error");
+                check_eq(static_cast<script_int>(4), e->execute("2 + 2").as<script_int>());
+            }
+        });
+
+        test("coroutine_field_rejected", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                bool threw = false;
+                try { e->execute("class K { coroutine int x = 5; }"); }
+                catch (const std::exception& ex) {
+                    threw = std::string(ex.what()).find("'coroutine' in a class body must be followed by a method") != std::string::npos;
+                }
+                check(threw, "coroutine before a field reports the dedicated error");
+            }
+        });
+
+        // HOT RELOAD PRECEDENT (free coroutines): redefining the function while a handle
+        // is suspended leaves the handle running the OLD body (it pins its own decl +
+        // closure env); new calls mint handles over the NEW body.
+        test("free_coroutine_redefine_while_suspended", [this]() {
+            auto engine = make_engine();
+            engine->execute("coroutine int f() { yield 1; yield 2; return 3; }");
+            engine->execute("var h = f();");
+            check_eq(static_cast<script_int>(1), engine->execute("h.resume();").as<script_int>());
+            engine->execute("coroutine int f() { yield 100; return 200; }"); // redefine mid-suspension
+            check_eq(static_cast<script_int>(2), engine->execute("h.resume();").as<script_int>());  // old body continues
+            check_eq(static_cast<script_int>(3), engine->execute("h.resume();").as<script_int>());
+            engine->execute("var h2 = f();");
+            check_eq(static_cast<script_int>(100), engine->execute("h2.resume();").as<script_int>()); // new body for new handles
+        });
+
+        // A FIELD-CHANGING reload while a method coroutine is suspended: migration runs
+        // IN PLACE (kept fields keep their storage nodes — suspended env chains cache
+        // field pointers), so the old body resumes over the live, migrated instance.
+        // A retype mid-suspension converts the value per the retype ruling and the old
+        // body simply sees the converted value (int 40 -> "40"; "40" + 1 concatenates).
+        test("method_coroutine_survives_field_changing_reload", [this, check_both]() {
+            check_both(R"(
+                class W { int v = 1; coroutine int gen() { yield v; yield v + 1; return 0; } }
+                var w = W();
+                w.v = 40;
+                var h = w.gen();
+                var a = h.resume();
+                class W { int v = 1; string extra = "e"; coroutine int gen() { yield 8; return 0; } }
+                var b = h.resume();
+                to_string(a) + "|" + to_string(b) + "|" + w.extra
+            )", "40|41|e", "field added mid-suspension: old body continues on stable storage");
+            check_both(R"(
+                class W { int v = 1; coroutine int gen() { yield v; yield v + 1; return 0; } }
+                var w = W();
+                w.v = 40;
+                var h = w.gen();
+                var a = h.resume();
+                class W { string v = ""; coroutine int gen() { yield 8; return 0; } }
+                var b = to_string(h.resume());
+                to_string(a) + "|" + b + "|" + w.v
+            )", "40|401|40", "retype mid-suspension: old body sees the converted value");
+        });
+
+        // Method coroutines MATCH that precedent: a class hot reload while a method
+        // coroutine is suspended leaves the suspended handle on the OLD body, resuming
+        // against the SAME (migrated) instance; fresh calls use the NEW body.
+        test("method_coroutine_hot_reload_matches_free_precedent", [this]() {
+            auto engine = make_engine();
+            engine->execute(R"(
+                class W { int v = 1; coroutine int gen() { yield v; yield v + 1; return 0; } }
+                var w = W();
+                var h = w.gen();
+            )");
+            check_eq(static_cast<script_int>(1), engine->execute("h.resume();").as<script_int>());
+            engine->execute("class W { int v = 1; coroutine int gen() { yield v * 100; return 0; } }");
+            // Old body continues, reading the live (migrated) instance field
+            check_eq(static_cast<script_int>(2), engine->execute("h.resume();").as<script_int>());
+            engine->execute("var h2 = w.gen();");
+            check_eq(static_cast<script_int>(100), engine->execute("h2.resume();").as<script_int>());
+        });
+
     }
 };
 

@@ -9792,7 +9792,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         
         // Declared types install first so redefine_class flags a retype as fields_changed
         // and migrate_fields converts against the NEW types (retype ruling)
-        class_def->replace_field_declared_types(std::move(new_field_types));
+        class_def->replace_field_declared_types(std::move(new_field_types), true);
 
         // Call redefine_class with the new field defaults and methods
         // Call redefine_class to migrate existing instances
@@ -9814,7 +9814,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         environment_->clear_all_parent_caches();
     } else {
         // For new classes, add the fields normally
-        class_def->replace_field_declared_types(std::move(new_field_types));
+        class_def->replace_field_declared_types(std::move(new_field_types), false);
         for (const auto& [field_id, default_val] : new_field_defaults) {
             // Convert ID back to string for add_field (legacy API)
             std::string field_name(string_symbolizer_->get_string(field_id));
@@ -10145,6 +10145,25 @@ checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
 checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<function_decl> ast,
                                            std::shared_ptr<environment> method_env,
                                            const std::vector<script_value>& args) {
+    // Coroutine methods mint a handle instead of executing (free-coroutine parity).
+    // The handle pins its OWN method env carrying 'this' — the caller recycles
+    // method_env back to the pool right after this returns — plus the receiver, so
+    // the instance stays alive while suspended and 'this' resolves identically
+    // across resumes. KEEP BYTE-PARALLEL with vm_backend::execute_method_ast.
+    if (ast->is_coroutine) {
+        const uint64_t this_id = string_symbolizer_->get_this_id();
+        script_value this_obj(std::monostate{}, engine_);
+        if (auto this_result = method_env->get(this_id)) {
+            this_obj = std::move(this_result.value());
+        }
+        auto coro_env = std::make_shared<environment>(method_env->get_parent(), string_symbolizer_, this_obj);
+        coro_env->define(this_id, this_obj);
+        auto handle = std::make_shared<coroutine_handle>(engine_);
+        handle->set_function(ast, args, coro_env);
+        handle->set_receiver(std::move(this_obj));
+        return make_coroutine_object(engine_, coroutine_handle_type_id_, handle);
+    }
+
     // Create a script_defined_function with the method environment
     script_defined_function script_func(
         ast->name,

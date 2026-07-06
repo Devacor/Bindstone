@@ -41,6 +41,11 @@ public:
     const std::vector<script_value>& get_args() const { return initial_args_; }
     std::shared_ptr<environment> get_closure_env() const { return closure_env_; }
 
+    // Method coroutines pin their receiver here: the handle keeps the instance alive
+    // across suspension (the closure env also carries 'this' for body resolution).
+    void set_receiver(script_value receiver) { receiver_ = std::move(receiver); }
+    const script_value& receiver() const { return receiver_; }
+
     void set_status(status s) { status_ = s; }
 
     coroutine_backend_state* backend_state() const { return backend_state_.get(); }
@@ -58,6 +63,7 @@ private:
     std::shared_ptr<function_decl> function_;
     std::vector<script_value> initial_args_;
     std::shared_ptr<environment> closure_env_;
+    script_value receiver_;
 
     std::unique_ptr<coroutine_backend_state> backend_state_;
 };

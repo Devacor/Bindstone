@@ -4663,14 +4663,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_));
                     } else {
                         // Slot locals enforce their locked type like the environment path does
+                        // (same-type fast guard keeps the hot store path call-free)
                         type_info_ptr slot_type = frameLocal->get_type_info();
-                        auto enforced = enforce_type_compatibility(std::move(value), slot_type, identifier->name);
-                        if (!enforced) {
-                            return enforced.error_value();
-                        }
-                        value = std::move(enforced.value());
-                        if (slot_type && slot_type->base_type == script_value_type::jai_any_type) {
-                            value.set_type_info(slot_type);
+                        if (slot_type && (slot_type->base_type != value.type() ||
+                                          slot_type->base_type == script_value_type::jai_object_type)) {
+                            auto enforced = enforce_type_compatibility(std::move(value), slot_type, identifier->name);
+                            if (!enforced) {
+                                return enforced.error_value();
+                            }
+                            value = std::move(enforced.value());
+                            if (slot_type->base_type == script_value_type::jai_any_type) {
+                                value.set_type_info(slot_type);
+                            }
                         }
                         // Direct assignment to call frame local
                         *frameLocal = std::move(value.clone());

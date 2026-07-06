@@ -1,5 +1,13 @@
 # Persistent Interpreter Design
 
+> **DONE / HISTORICAL as of 2026-07.** The direction shipped (snake_case:
+> `prepare_for_execution` / `push_scope` / `pop_scope` / `define_variable`, prepare-in-catch
+> recovery, persistent globals in a single shared global environment). Three of the five code
+> blocks below describe machinery that was NEVER built: the post-execute global copy-back loop,
+> the `interpreterNeedsRebuild` flag, and the cppGlobals/scriptGlobals split — none were needed.
+> Superseded by the reentry-isolation work (commit 74b438d8: `prepare` early-returns while
+> executing; reentrant executes save/restore full interpreter state). History only.
+
 ## Key Benefits
 1. **No repeated setup costs** - Initialize once, use many times
 2. **Natural local variables support** - Just push/pop scopes

@@ -1,5 +1,16 @@
 # Non-Owning Reference Support in JaiScript
 
+> **IMPLEMENTED — but via this plan's own REJECTED alternative. Do NOT implement from this doc.**
+> Non-owning refs shipped in `object_holder::bound_ptr` (with the strong `keep_alive` anchor —
+> stronger than the sketched weak `owner_hint_`), NOT the "recommended" `cpp_bound_ptr_`
+> extension: that member no longer exists anywhere (folded into the boxed `cpp_bound_holder`
+> variant alternative by the thin-value work). The converter shipped as
+> `convert_reference_with_registry` (`engine_impl.hpp`), not a `value_converter<T&>` edit; no
+> feature flag exists. What did ship as written: `has_registered_class<T>()`,
+> `is_non_owning_object()`, and the extraction guard.
+> The reference internals are being rewritten by the CELLS refactor — this doc is history only.
+> The ChaiScript comparison and lifetime patterns below are still useful reading.
+
 ## Problem Statement
 
 When C++ methods return `T&` or `const T&` for registered types, JaiScript's `value_converter<T&>::to()` currently attempts to copy the object. This fails for non-copyable types (types with deleted copy constructors, reference members, unique_ptr members, etc.).

@@ -1,6 +1,19 @@
 # JaiScript Exception Handling Design
 
-**Status: ✅ IMPLEMENTED (Interpreter only, VM support pending)**
+> **DONE as of 2026-07 — shipped in BOTH backends** (interpreter and bytecode VM, full try/catch/
+> throw parity; see `records_base` catchability in `vm_backend` and commit 94311244). The design
+> below is the original sketch; where it disagrees with the addendum, the addendum wins.
+>
+> **Since this doc:**
+> - **Typed throw values.** `throw 42` delivers the int 42 to `catch (e)` — the thrown VALUE is
+>   preserved with its type, not stringified (the "e is a string" claims below are stale).
+> - **Terminal-error tier.** Execution-budget exhaustion ALWAYS latches a terminal error (never
+>   catchable); a `memory_cap` denial is catchable on its FIRST raise per execute, terminal on the
+>   second. A latched terminal error skips every script `catch` to the host boundary
+>   (`detail/execution_limits.hpp`, the catch-skip in the interpreter's try handling).
+> - **Propagation mechanism.** The `is_unwinding_` flag sketch was superseded by
+>   `checked_result<void>` propagation through the visitors.
+> - `finally` remains unimplemented (still-future, as designed).
 
 ## Overview
 Simple, effective exception handling that integrates cleanly with C++.

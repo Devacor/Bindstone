@@ -1,12 +1,22 @@
 # JaiScript Future Design
 
+> **VISION DOCUMENT (2025) — see ROADMAP.md for the live roadmap.** Much of this shipped, often
+> under different names: unified serialization (pointer dedup, binary format, versioning) is
+> live; the property system shipped as `JAI_PROPERTY` (`properties/`), not `MV_PROPERTY`; memory
+> optimizations shipped as the 32-byte thin-value fold + env pooling; the JIT path was obviated
+> by the full-parity bytecode VM (+ epoch-keyed lookup caches); async/await was obviated by
+> coroutines (functions AND methods). Never happened: header-only / single-header distribution —
+> JaiScript is a compiled implementation. Genuinely open items (`??`, generics, pattern matching,
+> `extend`, stdlib I/O, LSP/debugger) are tracked in ROADMAP.md. Shipped/obviated items are
+> marked ✅/↪ in place below.
+
 ## Vision
 
 JaiScript aims to become the definitive scripting solution for high-performance C++ games by unifying scripting, serialization, and hot-reload into a single, elegant system.
 
 ## Core Philosophy
 
-- **Zero-friction adoption**: Header-only, no dependencies
+- **Zero-friction adoption**: No external dependencies (compiled implementation, not header-only)
 - **Performance first**: 25-578x faster than alternatives
 - **C++ semantics**: Familiar syntax, zero-copy integration, snake_case naming conventions
 - **Unified system**: One solution for scripting AND serialization
@@ -50,7 +60,7 @@ class Character {
 
 ## Planned Features
 
-### 1. Unified Serialization System
+### 1. Unified Serialization System ✅ SHIPPED (see SERIALIZATION.md)
 
 **Pointer Deduplication**
 - Track shared_ptr instances across serialization
@@ -85,7 +95,7 @@ Building on existing class hot reload, extend to functions:
 - Keep closure captures
 - Update function bodies in-place
 
-### 3. Property System Integration
+### 3. Property System Integration ✅ SHIPPED as `JAI_PROPERTY` + `property_owner` CRTP (properties/)
 
 **Automatic Binding**
 ```cpp
@@ -112,12 +122,12 @@ engine.add_property_provider(std::make_unique<mv_property_provider>());
 
 ### 4. Performance Optimizations
 
-**JIT Compilation Path**
+**JIT Compilation Path** ↪ OBVIATED — shipped as the full-parity bytecode VM instead
 - Optional JIT backend for hot paths
-- Inline caching for property access
+- Inline caching for property access (shipped as epoch-keyed lookup caches)
 - Type specialization for numeric operations
 
-**Memory Optimizations**
+**Memory Optimizations** ✅ SHIPPED — 32-byte `script_value` (thin_value_spec.md), env pooling
 - Small object optimization for Value type
 - Custom allocators for script objects
 - Pool allocation for temporary values
@@ -127,7 +137,7 @@ engine.add_property_provider(std::make_unique<mv_property_provider>());
 **Still Planned**
 - Null coalescing `??`
 - Template/generic functions
-- Async/await for coroutines
+- ~~Async/await for coroutines~~ ↪ OBVIATED — coroutines shipped (`coroutine`/`yield`, incl. methods)
 - Pattern matching
 
 ### 6. Tooling and Ecosystem

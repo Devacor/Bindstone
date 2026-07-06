@@ -1,6 +1,13 @@
 # JaiScript Performance Analysis
 
-## Current JaiScript Performance (Release Build)
+> **HISTORICAL — 2025-12, tree-walker era, pre-VM, pre-thin-value-fold.** Every number below
+> predates the bytecode VM and the 32-byte `script_value` fold; the ChaiScript comparisons are
+> unreproducible (the ChaiScript dependency was deleted; the benchmark suite now compares against
+> sol2/Lua and Squirrel). For current committed baselines see `thin_value_rebaseline.md` §6
+> (interpreter and VM side by side) and `execution_mode_metrics.md`. The "Bytecode compilation"
+> future item below SHIPPED as the full-parity VM backend (`--backend=vm`; MV defaults to VM).
+
+## Historical JaiScript Performance (Release Build, 2025-12)
 
 Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-28):
 
@@ -606,12 +613,12 @@ This enables `/Zi` debug info with optimizations for tools like Visual Studio Pr
 ## Future Optimizations
 
 Potential improvements under consideration:
-- [ ] JIT compilation for hot loops
+- [x] ~~JIT compilation for hot loops~~ (obviated by the bytecode VM + epoch-keyed lookup caches)
 - [x] Constant folding in parser (implemented - 1uS vs ChaiScript's 3uS)
 - [ ] Dead code elimination
-- [ ] Type inference for faster dispatch
+- [x] Type inference for faster dispatch (shipped as opt-in static checking — `static_checking.md`)
 - [ ] SIMD operations for arrays
-- [ ] Bytecode compilation (would close gap with Squirrel)
+- [x] Bytecode compilation — SHIPPED as the full-parity VM backend (`--backend=vm`; VM Fibonacci(15) 840uS vs Squirrel's class-era 878uS)
 
 ## Benchmark History
 

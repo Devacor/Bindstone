@@ -36,7 +36,7 @@ function creation_screen() -> var {
 		lines.push("");
 		for (int i = 0; i < SPECIES.size(); ++i) {
 			var s = SPECIES[i];
-			lines.push(`  ${i + 1}) ` + col("97", s["name"]));
+			lines.push(`  ${i + 1}) ${col("97", s["name"])}`);
 			lines.push(col("90", `     ${s["blurb"]}`));
 			lines.push(col("36", `     ${s["trait_name"]}: `) + col("90", s["trait_blurb"]));
 		}
@@ -55,7 +55,7 @@ function creation_screen() -> var {
 		lines.push("");
 		for (int i = 0; i < CLASSES.size(); ++i) {
 			var c = CLASSES[i];
-			lines.push(`  ${i + 1}) ` + col("97", c["name"]));
+			lines.push(`  ${i + 1}) ${col("97", c["name"])}`);
 			lines.push(col("90", `     ${c["blurb"]}`));
 			lines.push(col("36", `     ${c["skill_name"]} (${c["skill_cost"]} focus): `) + col("90", c["skill_blurb"]));
 		}
@@ -72,7 +72,7 @@ function creation_screen() -> var {
 		var lines = [];
 		lines.push(col("93", " Your name, wanderer?") + col("90", "  (letters, enter to finish, esc for a nameless run)"));
 		lines.push("");
-		lines.push("   > " + col("97", hero_name) + col("90", "_"));
+		lines.push(`   > ${col("97", hero_name)}${col("90", "_")}`);
 		present(lines);
 		var key = read_key();
 		if (key == "enter") { break; }

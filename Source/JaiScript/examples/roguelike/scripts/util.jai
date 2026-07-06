@@ -6,11 +6,11 @@ var MAP_H = 20;
 // ANSI foreground color codes (strings; the lexer has no \x escape, so the
 // host hands us ESC as a global).
 function col(string code, string text) -> string {
-	return ESC + "[" + code + "m" + text + ESC + "[0m";
+	return `${ESC}[${code}m${text}${ESC}[0m`;
 }
 
 function col256(int code, string text) -> string {
-	return ESC + "[38;5;" + to_string(code) + "m" + text + ESC + "[0m";
+	return `${ESC}[38;5;${code}m${text}${ESC}[0m`;
 }
 
 // FNV-1a, 32-bit lane inside an int64 (checked-overflow build: a real 64-bit

@@ -239,12 +239,12 @@ function tick_effects(var& target) -> void {
 				var left = target.effects[i]["turns"] - 1;
 				var left_note = "fading";
 				if (left == 1) { left_note = "1 turn left"; }
-				else if (left > 1) { left_note = to_string(left) + " turns left"; }
+				else if (left > 1) { left_note = `${left} turns left`; }
 				if (target.glyph == "@") {
 					var after = player_hp_after(dmg);
 					log_msg(col("91", `Burning: -${dmg} HP (HP ${after}/${G.player.total_max_hp()}), ${left_note}.`));
 				} else if (is_visible(target.x, target.y)) {
-					log_msg(col("91", mon_subject(target) + ` burns for ${dmg}` + health_note(imax(0, target.hp - dmg), target.max_hp) + "."));
+					log_msg(col("91", `${mon_subject(target)} burns for ${dmg}${health_note(imax(0, target.hp - dmg), target.max_hp)}.`));
 				}
 				hurt_entity(target, dmg, "burning");
 				break;
@@ -266,8 +266,8 @@ function tick_effects(var& target) -> void {
 		if (target.effects[i]["turns"] <= 0) {
 			expire_effect(target, kind, power);
 			if (target.glyph == "@") {
-				var fade_note = EFFECT_FADE.has(kind) ? EFFECT_FADE[kind] : kind + " fades.";
-				log_msg(col("90", "(" + fade_note + ")"));
+				var fade_note = EFFECT_FADE.has(kind) ? EFFECT_FADE[kind] : `${kind} fades.`;
+				log_msg(col("90", `(${fade_note})`));
 			}
 		} else {
 			kept.push(target.effects[i]);

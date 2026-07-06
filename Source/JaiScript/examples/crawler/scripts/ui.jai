@@ -27,7 +27,7 @@ var MAP_DIVIDER = col("90", "|");
 function title_line() -> string {
 	var god_tag = G.player.god ? col("95", " [GOD]") : "";
 	return col("93", " GRUBWELL") + col("90", " -- dungeons of the unwashed --")
-		+ `  Floor ${G.floor}/10  Turn ${G.turn}  ` + col("90", "~ " + theme_name(G.floor) + " ~") + god_tag;
+		+ `  Floor ${G.floor}/10  Turn ${G.turn}  ` + col("90", `~ ${theme_name(G.floor)} ~`) + god_tag;
 }
 
 function compose_frame(var view_lines) -> void {
@@ -148,12 +148,12 @@ function build_panel() -> var {
 	lines.push("       " + compass_letter(0));
 	lines.push("     " + compass_letter(3) + " " + col("90", "+") + " " + compass_letter(1));
 	lines.push("       " + compass_letter(2));
-	lines.push(" Face " + col("96", FACE_NAME[G.facing]));
-	lines.push(" Wpn " + gear_label(p.weapon));
-	lines.push(" Arm " + gear_label(p.armor));
-	lines.push(" Trk " + gear_label(p.trinket));
+	lines.push(` Face ${col("96", FACE_NAME[G.facing])}`);
+	lines.push(` Wpn ${gear_label(p.weapon)}`);
+	lines.push(` Arm ${gear_label(p.armor)}`);
+	lines.push(` Trk ${gear_label(p.trinket)}`);
 	var fx_line = " ";
-	for (auto fx : p.effects) { fx_line = fx_line + fx["kind"] + ":" + to_string(fx["turns"]) + " "; }
+	for (auto fx : p.effects) { fx_line = fx_line + `${fx["kind"]}:${fx["turns"]} `; }
 	lines.push(col("95", fx_line));
 	return lines;
 }
@@ -245,7 +245,7 @@ function inventory_screen() -> bool {
 		var letters = "abcdefghijklmnopqrstuv";
 		for (int i = 0; i < p.inventory.size(); ++i) {
 			var it = p.inventory[i];
-			lines.push(`  ${letters.at(i)}) ` + col(it.color, item_label(it)) + item_stats_label(it));
+			lines.push(`  ${letters.at(i)}) ${col(it.color, item_label(it))}${item_stats_label(it)}`);
 		}
 		if (p.inventory.size() == 0) { lines.push(col("90", "  (lint, mostly)")); }
 		present(lines);
@@ -256,7 +256,7 @@ function inventory_screen() -> bool {
 		var chosen = p.inventory[pick_index];
 		var verb = chosen.kind == "potion" ? "quaff" : (chosen.kind == "scroll" ? "read" : "equip");
 		var sub = [];
-		sub.push(" " + col(chosen.color, item_label(chosen)) + item_stats_label(chosen));
+		sub.push(` ${col(chosen.color, item_label(chosen))}${item_stats_label(chosen)}`);
 		sub.push(col("90", ` rarity: ${chosen.rarity}`));
 		sub.push("");
 		sub.push(`  e) ${verb}`);

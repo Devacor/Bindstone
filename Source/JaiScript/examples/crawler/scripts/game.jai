@@ -221,7 +221,7 @@ function enter_floor() -> void {
 	if (G.floor == 10) {
 		log_msg(col("91", "The air tastes of ash and unspent color. HE is here."));
 	} else {
-		log_msg(col("90", `You descend to floor ${G.floor}: ` + theme_name(G.floor) + "."));
+		log_msg(col("90", `You descend to floor ${G.floor}: ${theme_name(G.floor)}.`));
 	}
 }
 

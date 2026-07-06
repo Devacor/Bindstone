@@ -124,11 +124,11 @@ function build_panel() -> var {
 	lines.push(` Eva ${p.total_eva()}  Crt ${p.total_crit()}`);
 	lines.push(" " + col("33", `Gold ${p.gold}`));
 	lines.push("");
-	lines.push(" Wpn " + gear_label(p.weapon));
-	lines.push(" Arm " + gear_label(p.armor));
-	lines.push(" Trk " + gear_label(p.trinket));
+	lines.push(` Wpn ${gear_label(p.weapon)}`);
+	lines.push(` Arm ${gear_label(p.armor)}`);
+	lines.push(` Trk ${gear_label(p.trinket)}`);
 	var fx_line = " ";
-	for (auto fx : p.effects) { fx_line = fx_line + fx["kind"] + ":" + to_string(fx["turns"]) + " "; }
+	for (auto fx : p.effects) { fx_line = fx_line + `${fx["kind"]}:${fx["turns"]} `; }
 	lines.push(col("95", fx_line));
 	lines.push(" " + col("90", "? for help"));
 	return lines;
@@ -217,7 +217,7 @@ function inventory_screen() -> bool {
 		var letters = "abcdefghijklmnopqrstuv";
 		for (int i = 0; i < p.inventory.size(); ++i) {
 			var it = p.inventory[i];
-			lines.push(`  ${letters.at(i)}) ` + col(it.color, item_label(it)) + item_stats_label(it));
+			lines.push(`  ${letters.at(i)}) ${col(it.color, item_label(it))}${item_stats_label(it)}`);
 		}
 		if (p.inventory.size() == 0) { lines.push(col("90", "  (lint, mostly)")); }
 		present(lines);
@@ -228,7 +228,7 @@ function inventory_screen() -> bool {
 		var chosen = p.inventory[pick_index];
 		var verb = chosen.kind == "potion" ? "quaff" : (chosen.kind == "scroll" ? "read" : "equip");
 		var sub = [];
-		sub.push(" " + col(chosen.color, item_label(chosen)) + item_stats_label(chosen));
+		sub.push(` ${col(chosen.color, item_label(chosen))}${item_stats_label(chosen)}`);
 		sub.push(col("90", ` rarity: ${chosen.rarity}`));
 		sub.push("");
 		sub.push(`  e) ${verb}`);

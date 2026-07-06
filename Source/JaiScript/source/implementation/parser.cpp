@@ -1748,6 +1748,9 @@ checked_result<statement_ptr> parser::block_statement() {
     token leftBrace = previous();
     std::vector<declaration_ptr> declarations;
 
+    // Locals declared in this block stop resolving by name once it closes
+    block_scope_guard block_scope(*this);
+
     while (!check(token_type::right_brace) && !is_at_end()) {
         JAISCRIPT_TRY_ASSIGN(declaration_ptr decl, declaration());
         declarations.push_back(std::move(decl));
@@ -1840,6 +1843,8 @@ checked_result<statement_ptr> parser::for_statement() {
 
                 // Allocate the loop variable's slot BEFORE parsing the body so
                 // that references to it inside the body resolve to this slot.
+                // The loop variable's name stops resolving after the loop closes.
+                block_scope_guard loop_var_scope(*this);
                 uint64_t var_id = get_symbol_id(varName);
                 size_t var_slot = SIZE_MAX;
                 if (in_function_scope() && var_id != UINT64_MAX) {

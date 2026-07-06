@@ -164,6 +164,11 @@ namespace jai {
         struct function_scope {
             size_t next_slot = 0;  // Next available slot index
             std::unordered_map<uint64_t, size_t> symbol_to_slot;  // symbol_id -> slot
+            // Lexical scoping for the lookup map: block scopes log (symbol, previous slot
+            // or SIZE_MAX) so end_block_scope restores shadowed/expired names. Slots stay
+            // unique per declaration; only the name->slot visibility is scoped.
+            std::vector<std::pair<uint64_t, size_t>> shadow_undo;
+            std::vector<size_t> block_marks;
         };
         std::vector<function_scope> function_scope_stack_;  // Stack for nested functions/lambdas
 
@@ -180,11 +185,48 @@ namespace jai {
             return count;
         }
 
+        void begin_block_scope() {
+            if (function_scope_stack_.empty()) return;
+            auto& scope = function_scope_stack_.back();
+            scope.block_marks.push_back(scope.shadow_undo.size());
+        }
+
+        void end_block_scope() {
+            if (function_scope_stack_.empty()) return;
+            auto& scope = function_scope_stack_.back();
+            if (scope.block_marks.empty()) return;
+            const size_t mark = scope.block_marks.back();
+            scope.block_marks.pop_back();
+            while (scope.shadow_undo.size() > mark) {
+                const auto [symbol_id, previous_slot] = scope.shadow_undo.back();
+                scope.shadow_undo.pop_back();
+                if (previous_slot == SIZE_MAX) {
+                    scope.symbol_to_slot.erase(symbol_id);
+                } else {
+                    scope.symbol_to_slot[symbol_id] = previous_slot;
+                }
+            }
+        }
+
+        // RAII for begin/end_block_scope across the parser's early-return error paths
+        struct block_scope_guard {
+            parser& p_;
+            explicit block_scope_guard(parser& p) : p_(p) { p_.begin_block_scope(); }
+            ~block_scope_guard() { p_.end_block_scope(); }
+            block_scope_guard(const block_scope_guard&) = delete;
+            block_scope_guard& operator=(const block_scope_guard&) = delete;
+        };
+
         // Allocate a slot for a variable, returns the slot index
         size_t allocate_slot(uint64_t symbol_id) {
             if (function_scope_stack_.empty()) return SIZE_MAX;  // Not in a function
             auto& scope = function_scope_stack_.back();
             size_t slot = scope.next_slot++;
+            if (!scope.block_marks.empty()) {
+                auto existing = scope.symbol_to_slot.find(symbol_id);
+                scope.shadow_undo.emplace_back(symbol_id,
+                    existing != scope.symbol_to_slot.end() ? existing->second : SIZE_MAX);
+            }
             scope.symbol_to_slot[symbol_id] = slot;
             return slot;
         }

@@ -1030,6 +1030,158 @@ public:
             )");
             check_eq(result.as<int>(), 50);
         });
+
+        // ===== COMPOUND ASSIGNMENT: C++ RULES ON TYPED TARGETS (ruling 2026-07) =====
+        // x op= rhs ≡ x = T(x op rhs): compute in the promoted type, convert the result
+        // back to the declared type exactly like plain '=' (int truncates toward zero).
+        // var (any-typed) targets keep the old dynamic behavior (int += 2.5 -> float 3.5).
+        // Every test runs on BOTH backends and pins byte-identical output.
+
+        auto both = [](const char* src) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+        auto check_both = [this, both](const char* src, const std::string& expected, const char* what) {
+            auto [i_out, v_out] = both(src);
+            check_eq(expected, i_out, std::string("interp: ") + what);
+            check_eq(expected, v_out, std::string("vm: ") + what);
+        };
+
+        test("compound_int_target_converts_back", [this, check_both]() {
+            check_both("int x = 10; x += 2.5; type_of(x) + \":\" + to_string(x)", "int:12", "int +=");
+            check_both("int x = 10; x -= 2.5; to_string(x)", "7", "int -=");
+            check_both("int x = 10; x *= 2.5; to_string(x)", "25", "int *=");
+            check_both("int x = 10; x /= 4.0; to_string(x)", "2", "int /= truncates 2.5 -> 2");
+            check_both("int x = 10; x %= 4.5; to_string(x)", "1", "int %= fmod then truncate");
+        });
+
+        test("compound_truncates_toward_zero", [this, check_both]() {
+            check_both("int x = 0; x += 2.5; to_string(x)", "2", "2.5 -> 2");
+            check_both("int x = 0; x -= 2.5; to_string(x)", "-2", "-2.5 -> -2");
+            check_both("int x = 5; x -= 7.5; to_string(x)", "-2", "5 - 7.5 = -2.5 -> -2");
+        });
+
+        test("compound_float_target_stays_float", [this, check_both]() {
+            check_both("float f = 1.5; f += 2; type_of(f) + \":\" + to_string(f)", "float:3.500000", "float +=int");
+            check_both("float f = 7.5; f %= 2; to_string(f)", "1.500000", "float %=");
+            check_both("float f = 5.0; f /= 2; to_string(f)", "2.500000", "float /=");
+        });
+
+        test("compound_auto_locked_behaves_typed", [this, check_both]() {
+            check_both("auto x = 10; x += 2.5; type_of(x) + \":\" + to_string(x)", "int:12", "auto-locked int");
+            check_both("auto f = 1.0; f += 2.5; type_of(f) + \":\" + to_string(f)", "float:3.500000", "auto-locked float");
+            // Untyped params are inferred-then-enforced (auto), so they convert back too
+            check_both("function f(x) { x += 2.5; return type_of(x) + \":\" + to_string(x); } f(10)", "int:12", "inferred param");
+            check_both("function f(int x) { x += 2.5; return to_string(x); } f(10)", "12", "typed param");
+            check_both("function g() { int y = 10; y += 2.5; return to_string(y); } g()", "12", "slot local");
+        });
+
+        test("compound_var_target_stays_dynamic", [this, check_both]() {
+            check_both("var x = 10; x += 2.5; type_of(x) + \":\" + to_string(x)", "float:12.500000", "var += float promotes");
+            check_both("var x = 10; x %= 3; type_of(x) + \":\" + to_string(x)", "int:1", "var %= int stays int");
+            check_both("var x = 10; x %= 4.5; type_of(x) + \":\" + to_string(x)", "float:1.000000", "var %= float promotes");
+            // The dynamic tag survives a mixed-type compound: the variable is still a var
+            // afterwards (the old in-place path used to clobber the 'any' tag, wrongly
+            // locking the variable to the promoted type)
+            check_both("var x = 10; x += 2.5; x = \"s\"; x", "s", "var stays var after mixed compound");
+        });
+
+        test("compound_modulo_scalar_targets", [this, check_both, both]() {
+            check_both("int x = 10; x %= 3; to_string(x)", "1", "int %= int");
+            check_both("auto x = 10; x %= 3; to_string(x)", "1", "auto %= int");
+            // Divide/modulo by zero errors stay identical across backends
+            auto [i1, v1] = both("int x = 10; x %= 0; x");
+            check_eq(i1, v1, "modulo-by-zero parity");
+            check(i1.find("ERROR") == 0, "int %= 0 raises");
+            auto [i2, v2] = both("float f = 1.5; f %= 0.0; f");
+            check_eq(i2, v2, "float modulo-by-zero parity");
+            check(i2.find("ERROR") == 0, "float %= 0.0 raises");
+        });
+
+        test("compound_string_targets_append", [this, check_both, both]() {
+            check_both("string s = \"a\"; s += \"b\"; s", "ab", "string += string");
+            check_both("var s = \"a\"; s += \"b\"; s", "ab", "var-string += string");
+            // Non-string rhs on a string target keeps today's type_mismatch (parity-pinned)
+            auto [i_out, v_out] = both("string s = \"a\"; s += 1; s");
+            check_eq(i_out, v_out, "string += int parity");
+            check(i_out.find("ERROR") == 0, "string += int raises");
+        });
+
+        test("compound_expression_result_is_stored_value", [this, check_both]() {
+            // The compound expression evaluates to the converted (stored) value, exactly
+            // like '=' on a typed local does
+            check_both("int x = 10; var r = (x += 2.5); type_of(r) + \":\" + to_string(r)", "int:12", "result converted");
+            check_both("var x = 10; var r = (x += 2.5); type_of(r) + \":\" + to_string(r)", "float:12.500000", "var result promoted");
+        });
+
+        test("compound_typed_element_and_ref_targets", [this, check_both]() {
+            // Constrained element: the store converts (12.5 -> 12); the expression result
+            // stays the promoted value, matching plain subscript-assign's result semantics
+            check_both("array<int> a = [10]; a[0] += 2.5; type_of(a[0]) + \":\" + to_string(a[0])", "int:12", "typed element converts");
+            check_both("array<int> a = [10]; var r = (a[0] += 2.5); to_string(r)", "12.500000", "element result promoted (matches '=')");
+            check_both("array<int> a = [10]; a[0] %= 4.5; to_string(a[0])", "1", "typed element %=");
+            // Constrained ref bound to a typed element behaves route-independently
+            check_both(R"(
+                array<int> a = [10];
+                function f(int& r) { r += 2.5; }
+                f(a[0]);
+                type_of(a[0]) + ":" + to_string(a[0])
+            )", "int:12", "constrained ref compound converts");
+        });
+
+        test("compound_mismatch_errors_parity", [this, both]() {
+            auto [i1, v1] = both("int x = 10; x += \"s\"; x");
+            check_eq(i1, v1, "int += string parity");
+            check(i1.find("ERROR") == 0, "int += string raises");
+            auto [i2, v2] = both("bool b = true; b += 1; b");
+            check_eq(i2, v2, "bool += int parity");
+            check(i2.find("ERROR") == 0, "bool += int raises");
+        });
+
+        test("compound_overflow_policy_covers_intermediate", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                if (!e->throw_on_overflow()) { return; }  // wrap build: policy off by design
+                bool threw = false;
+                try { e->execute("int x = 9223372036854775807; x += 1; x"); }
+                catch (const std::exception&) { threw = true; }
+                check(threw, use_vm ? "vm: += overflow raises" : "interp: += overflow raises");
+            }
+        });
+
+        test("compound_fused_mixed_type_bails_to_conversion", [this, check_both]() {
+            // VM: x += f * 2.0 compiles to op_compound_fused; the int-only fast path must
+            // bail (float operand) and the general path converts each iteration (2.5 -> 2)
+            check_both(R"(
+                function h() {
+                    int x = 0;
+                    float f = 1.25;
+                    for (int i = 0; i < 4; ++i) { x += f * 2.0; }
+                    return type_of(x) + ":" + to_string(x);
+                }
+                h()
+            )", "int:8", "fused mixed bails and converts");
+            // Pure int fused fast path is untouched
+            check_both(R"(
+                function h() {
+                    int x = 0;
+                    for (int i = 0; i < 5; ++i) { x += i * 2; }
+                    return to_string(x);
+                }
+                h()
+            )", "20", "fused int fast path");
+        });
     }
 };
 

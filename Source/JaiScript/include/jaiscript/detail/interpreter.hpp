@@ -882,6 +882,15 @@ namespace jai {
             std::string_view var_name = ""
         );
 
+        // Compound-assignment store-back (x op= rhs ≡ x = T(x op rhs)): a locked target
+        // converts the promoted result through enforce_type_compatibility exactly like '=';
+        // var (any-tagged) targets keep the promoted result AND their dynamic tag.
+        checked_result<void> compound_typed_store_back(
+            script_value& target,
+            script_value promoted,
+            std::string_view var_name
+        );
+
         // Type conversion helpers (inlined for performance)
         // Helper function for object to_bool() method lookup (defined in interpreter.cpp)
         bool object_to_bool_via_method(const script_value& value);

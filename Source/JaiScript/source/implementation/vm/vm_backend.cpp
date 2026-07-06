@@ -218,7 +218,7 @@ namespace {
 		if (!refHolder) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 		}
-		if (!refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
+		if (!refHolder->has_cell && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
 		}
 		if (refHolder->container_element_type) {
@@ -722,6 +722,9 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();
+				if (param.ref_escaping && !default_val.is_reference()) {
+					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
+				}
 				state.locals.set_local(param.slot_index, std::move(default_val));
 				continue;
 			}
@@ -735,11 +738,11 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 			bool should_share = false;
 			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
 			if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
-			if (should_share) {
-				state.locals.set_local(param.slot_index, converted_arg);
-			} else {
-				state.locals.set_local(param.slot_index, converted_arg.clone());
+			script_value bound = should_share ? std::move(converted_arg) : converted_arg.clone();
+			if (param.ref_escaping && !bound.is_reference()) {
+				bound = script_value::make_cell_reference(std::move(bound), engine_);
 			}
+			state.locals.set_local(param.slot_index, std::move(bound));
 		}
 		environment_ = prev_env;
 		state.started = true;
@@ -1033,6 +1036,11 @@ bool vm_backend::is_truthy(const script_value& value) {
 			if (value.is_string()) return !value.unchecked_as_string().empty();
 			if (value.is_char()) return true;
 			return false;   // opaque bound: preserves the old index-0 falsy observable
+		case script_value::TYPEID_REFERENCE:
+			// References are transparent to truthiness like every other consumer
+			// (element reads reach conditions as reference wrappers; `if (a[0])`
+			// on a false element was always-truthy before this case existed)
+			return is_truthy(value.deref());
 		default: return true;
 	}
 }
@@ -1277,7 +1285,12 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	return ptr;
 }
 
-checked_result<void> vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value) {
+checked_result<void> vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell) {
+	// Escape-marked declarations box into a cell (reference_holder cell mode): reference
+	// binding then shares the handle. Reference values pass through (ref decls alias).
+	if (box_cell && !value.is_reference()) {
+		value = script_value::make_cell_reference(std::move(value), engine_);
+	}
 	if (slot_index != SIZE_MAX && f.locals && !f.top_level) {
 		f.locals->set_local(slot_index, std::move(value));
 	} else {
@@ -2733,27 +2746,48 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
 
+	// Element/subscript reads arrive as reference wrappers (rhs-lvalue read shape);
+	// assignment consumes the VALUE - normalize like every other consumer
+	// (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr). Copy out through a
+	// temp: assigning value.deref() straight into value destroys the holder that OWNS
+	// the deref target while the copy is still reading it.
+	if (value.is_reference()) {
+		script_value derefed = value.deref();
+		value = std::move(derefed);
+	}
+
 	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* frameLocal = f.locals->get_local(ins.b)) {
+			// A cell in the slot IS the variable's storage when the name is the value
+			// decl itself (escape-boxed local): write the cell with the same typed
+			// enforcement a plain slot gets. Ref-alias names (ref params / auto& decls)
+			// and non-cell references keep the store-through semantics.
+			script_value* storage = frameLocal;
 			if (frameLocal->is_reference()) {
-				JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
-			} else {
-				// Slot locals enforce their locked type like the env path below does
-				// (same-type fast guard keeps the hot store path call-free)
-				type_info_ptr slot_type = frameLocal->get_type_info();
-				if (slot_type && (slot_type->base_type != value.type() ||
-				                  slot_type->base_type == script_value_type::jai_object_type)) {
-					auto enforced = enforce_type_compatibility(std::move(value), slot_type);
-					if (!enforced) {
-						return enforced.error_value();
-					}
-					value = std::move(enforced.value());
-					if (slot_type->base_type == script_value_type::jai_any_type) {
-						value.set_type_info(slot_type);
-					}
+				auto* holder = frameLocal->get_reference_holder();
+				if (holder && holder->has_cell && !(ins.c & store_flag_ref_alias)) {
+					storage = holder->cell();
+				} else {
+					JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
+					stack_.push_back(std::move(value));
+					return {};
 				}
-				*frameLocal = std::move(value.clone());
 			}
+			// Slot locals enforce their locked type like the env path below does
+			// (same-type fast guard keeps the hot store path call-free)
+			type_info_ptr slot_type = storage->get_type_info();
+			if (slot_type && (slot_type->base_type != value.type() ||
+			                  slot_type->base_type == script_value_type::jai_object_type)) {
+				auto enforced = enforce_type_compatibility(std::move(value), slot_type);
+				if (!enforced) {
+					return enforced.error_value();
+				}
+				value = std::move(enforced.value());
+				if (slot_type->base_type == script_value_type::jai_any_type) {
+					value.set_type_info(slot_type);
+				}
+			}
+			*storage = std::move(value.clone());
 			stack_.push_back(std::move(value));
 			return {};
 		}
@@ -2761,11 +2795,29 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 
 	if (environment_->contains(sym)) {
 		script_value* currentVal = environment_->get_value_ptr(sym);
+		bool boxed_cell = false;
 		if (currentVal && currentVal->is_reference()) {
-			JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_));
-			stack_.push_back(std::move(value));
-			return {};
+			// Escape-boxed variable (cell) named as itself: redirect to the cell inner and
+			// run the full assignment semantics below on it; anything else stores through
+			auto* holder = currentVal->get_reference_holder();
+			if (holder && holder->has_cell && !(ins.c & store_flag_ref_alias)) {
+				currentVal = holder->cell();
+				boxed_cell = true;
+			} else {
+				JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_));
+				stack_.push_back(std::move(value));
+				return {};
+			}
 		}
+		// Boxed storage writes the cell inner directly (an env assign would replace the
+		// handle and detach every alias)
+		auto store_back = [&](script_value&& v) -> checked_result<void> {
+			if (boxed_cell) {
+				*currentVal = std::move(v);
+				return {};
+			}
+			return environment_->assign(sym, std::move(v));
+		};
 		if (currentVal && currentVal->is_cpp_bound()) {
 			currentVal->assign_through(value);
 			stack_.push_back(std::move(value));
@@ -2775,9 +2827,9 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 			script_value result = value;
 			if (value.is_null()) {
 				auto type_info = currentVal->get_type_info();
-				JAISCRIPT_TRY(environment_->assign(sym, script_value::make_empty_weak_ptr(type_info, engine_)));
+				JAISCRIPT_TRY(store_back(script_value::make_empty_weak_ptr(type_info, engine_)));
 			} else if (value.is_weak_ptr()) {
-				JAISCRIPT_TRY(environment_->assign(sym, std::move(value)));
+				JAISCRIPT_TRY(store_back(std::move(value)));
 			} else if (value.type() == script_value_type::jai_shared_ptr_type) {
 				auto weak_type_info = currentVal->get_type_info();
 				auto expected_type = weak_type_info ? weak_type_info->element_type() : nullptr;
@@ -2806,7 +2858,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 				if (!weak_result) {
 					return weak_result.error_value();
 				}
-				JAISCRIPT_TRY(environment_->assign(sym, std::move(weak_result.value())));
+				JAISCRIPT_TRY(store_back(std::move(weak_result.value())));
 			} else if (value.type() == script_value_type::jai_object_type) {
 				auto type_info = currentVal->get_type_info();
 				uint64_t weak_type_id = (type_info && !type_info->type_params.empty())
@@ -2835,7 +2887,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 			std::string expected_type_name = expected_type ? expected_type->type_name : "";
 
 			if (value.is_null()) {
-				JAISCRIPT_TRY(environment_->assign(sym, std::move(value)));
+				JAISCRIPT_TRY(store_back(std::move(value)));
 			} else if (value.is_weak_ptr()) {
 				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
 					"Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
@@ -2861,7 +2913,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 				}
 
 				value.set_type_info(ptr_type_info);
-				JAISCRIPT_TRY(environment_->assign(sym, std::move(value)));
+				JAISCRIPT_TRY(store_back(std::move(value)));
 			} else {
 				auto holder = currentVal->get_object_holder();
 				if (!holder || !holder->data) {
@@ -2959,8 +3011,11 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 
 		if (rhs_lvalue) {
 			script_value assignValue = value.clone();
-			JAISCRIPT_TRY(environment_->assign(sym, std::move(assignValue)));
+			JAISCRIPT_TRY(store_back(std::move(assignValue)));
 			stack_.push_back(std::move(value));
+		} else if (boxed_cell) {
+			JAISCRIPT_TRY(store_back(std::move(value)));
+			stack_.push_back(*currentVal);
 		} else {
 			JAISCRIPT_TRY(environment_->assign(sym, std::move(value)));
 			script_value* stored = environment_->get_value_ptr(sym);
@@ -4385,7 +4440,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 				script_value::make_empty_weak_ptr(decl->type, engine_));
 		}
 		if (value.is_weak_ptr()) {
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value));
+			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 		}
 		if (value.type() == script_value_type::jai_shared_ptr_type) {
 			auto expected_type = decl->type ? decl->type->element_type() : nullptr;
@@ -4414,7 +4469,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 			if (!weak_result) {
 				return weak_result.error_value();
 			}
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(weak_result.value()));
+			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(weak_result.value()), decl->ref_escaping);
 		}
 		if (value.type() == script_value_type::jai_object_type) {
 			auto type_info = decl->type;
@@ -4438,13 +4493,13 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		if (!has_init) {
 			script_value null_ptr = make_null();
 			null_ptr.set_type_info(decl->type);
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(null_ptr));
+			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(null_ptr), decl->ref_escaping);
 		}
 		script_value value = std::move(stack_.back());
 		stack_.pop_back();
 		if (value.is_null()) {
 			value.set_type_info(decl->type);
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value));
+			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 		}
 		if (value.is_weak_ptr()) {
 			return checked_result<void>(make_error_code(runtime_error_code::invalid_weak_ptr_conversion), "Cannot initialize shared_ptr directly from weak_ptr");
@@ -4452,7 +4507,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		if (value.type() == script_value_type::jai_object_type ||
 		    value.type() == script_value_type::jai_shared_ptr_type) {
 			value.set_type_info(decl->type);
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value));
+			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 		}
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
 	}
@@ -4508,7 +4563,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		value.set_type_info(decl->type);
 	}
 
-	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value));
+	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 }
 
 checked_result<void> vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
@@ -5909,7 +5964,10 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 		if (ref_result && ref_result.value().get().is_string()) {
 			auto methodIt = builtins_.string_methods.find(member->member_id);
 			if (methodIt != builtins_.string_methods.end()) {
-				script_value& var_ref = ref_result.value().get();
+				// Resolve through references (ref decls/cells): string builtins read
+				// self's storage RAW, and in-place mutation must land in the target
+				// (KEEP BYTE-PARALLEL with the interpreter's identifier-receiver path)
+				script_value& var_ref = ref_result.value().get().deref();
 				auto result = methodIt->second(builtin_ctx(), var_ref, arguments);
 				if (!result) {
 					return result.error_value();
@@ -8582,6 +8640,9 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();
+				if (param.ref_escaping && !default_val.is_reference()) {
+					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
+				}
 				locals.set_local(param.slot_index, std::move(default_val));
 				continue;
 			}
@@ -8697,6 +8758,14 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				}
 			}
 		} else {
+			// Escape-marked value params box into a cell so downstream ref binds share it
+			auto boxed_param = [&](script_value&& v) -> script_value {
+				if (param.ref_escaping && !v.is_reference()) {
+					return script_value::make_cell_reference(std::move(v), engine_);
+				}
+				return std::move(v);
+			};
+
 			// auto/var parameter + primitive argument, or a typed primitive parameter whose
 			// storage already matches: copy IS clone for primitives and carries the arg's
 			// type_info verbatim - exactly what the full path (identity try_convert + clone)
@@ -8711,7 +8780,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			     (param.type->base_type == script_value_type::jai_float_type && ri == script_value::TYPEID_FLOAT) ||
 			     (param.type->base_type == script_value_type::jai_bool_type && ri == script_value::TYPEID_BOOL) ||
 			     (param.type->base_type == script_value_type::jai_char_type && ri == script_value::TYPEID_CHAR))) {
-				locals.set_local(param.slot_index, script_value(arg));
+				locals.set_local(param.slot_index, boxed_param(script_value(arg)));
 				continue;
 			}
 
@@ -8729,7 +8798,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				if (param.type && param.type->base_type == script_value_type::jai_object_type &&
 				    derefed.storage_type() == script_value_type::jai_object_type &&
 				    derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
-					locals.set_local(param.slot_index, derefed.clone());
+					locals.set_local(param.slot_index, boxed_param(derefed.clone()));
 					continue;
 				}
 			}
@@ -8749,9 +8818,9 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			}
 
 			if (should_share) {
-				locals.set_local(param.slot_index, std::move(converted_arg));
+				locals.set_local(param.slot_index, boxed_param(std::move(converted_arg)));
 			} else {
-				locals.set_local(param.slot_index, converted_arg.clone());
+				locals.set_local(param.slot_index, boxed_param(converted_arg.clone()));
 			}
 		}
 	}

@@ -100,6 +100,9 @@ namespace jai::vm {
     // op_store c flags
     inline constexpr uint32_t store_flag_rhs_lvalue = 1; // RHS was identifier/member/subscript
     inline constexpr uint32_t store_flag_no_result = 2;  // statement position: run() pops the result
+    inline constexpr uint32_t store_flag_ref_alias = 4;  // target names a reference decl (ref param /
+                                                         // auto& decl): a cell in the slot stores THROUGH
+                                                         // instead of writing the cell as the variable
 
     // op_compound_store c layout: low 3 bits = kind, upper bits = flags
     inline constexpr uint32_t compound_kind_mask = 0x7;

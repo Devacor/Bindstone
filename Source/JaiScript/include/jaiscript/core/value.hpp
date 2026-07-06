@@ -187,6 +187,11 @@ namespace jai {
         // field node by id (never a cached address), so hot reload cannot dangle it.
         static script_value make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,
                                                  engine* eng, type_info_ptr field_type);
+        // Cell reference (Lua-upvalue box): the reference OWNS the boxed value. Escape-marked
+        // variables hold one from declaration; ref binding/aliasing shares the handle, and the
+        // cell keeps the value alive for as long as any handle exists (escape-legal semantics).
+        // `boxed` must not itself be a reference (callers deref first).
+        static script_value make_cell_reference(script_value&& boxed, engine* eng);
         static script_value make_function(const script_function& func, engine* eng);
 
         // Mints an unregistered object holder wrapping a coroutine_handle; bypasses the
@@ -1582,6 +1587,22 @@ namespace jai {
             script_value* target = nullptr;  // Points to the referenced value (when container is null)
             std::weak_ptr<environment> sourceEnv;  // environment that owns the target
             type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
+
+            // CELL mode (Lua-upvalue box): the holder OWNS the referenced value in inline
+            // storage - one make_strong allocation is the whole box. Escape-marked variables
+            // store a cell reference from declaration, so binding/aliasing is a handle copy
+            // and an escaped reference keeps its target alive instead of dangling/erroring.
+            // Mutually exclusive with the container/instance modes below.
+            static constexpr size_t cell_storage_size = 32;   // == sizeof(script_value), gated in value.cpp
+            alignas(8) unsigned char cell_storage[cell_storage_size];
+            bool has_cell = false;
+            script_value* cell() noexcept { return reinterpret_cast<script_value*>(cell_storage); }
+            const script_value* cell() const noexcept { return reinterpret_cast<const script_value*>(cell_storage); }
+
+            reference_holder() = default;
+            reference_holder(const reference_holder&) = delete;
+            reference_holder& operator=(const reference_holder&) = delete;
+            ~reference_holder();   // destroys the cell value (value.cpp: script_value complete there)
 
             // For references into a std::vector element (range-for `auto&`, `arr[i]`
             // lvalue): hold the OWNING container + index instead of a raw element

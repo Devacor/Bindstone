@@ -762,6 +762,80 @@ public:
             )");
             check_eq((int64_t)999, r.as_int());  // recomputed element address, not a dangling ptr
         });
+
+        // ---- 2026-07: builtin methods through references (docs-agent finding) ----
+        // String builtins invoked through a ref DECL segfaulted on both backends: the
+        // identifier-receiver fast path passed the RAW stored value (a reference wrapper)
+        // as `self`, and string builtins read self's storage unchecked. Array/map
+        // builtins and ref PARAMS took other paths and worked - this pins the full
+        // matrix: {string, array, map} x {ref decl, ref param, range-for auto& element},
+        // observer AND mutating (mutation must land in the referenced target).
+        test("string_builtins_through_ref_decl", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            auto r = e->execute(R"(
+                auto s = "abc";
+                auto& r = s;
+                int n = r.length();
+                r.to_upper();
+                to_string(n) + "|" + s + "|" + r;
+            )");
+            check_eq(std::string("3|ABC|ABC"), r.as_string());
+        });
+
+        test("string_builtins_through_ref_param", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            auto r = e->execute(R"(
+                auto s = "abc";
+                function up(var& t) -> int { t.to_upper(); return t.length(); }
+                int n = up(s);
+                to_string(n) + "|" + s;
+            )");
+            check_eq(std::string("3|ABC"), r.as_string());
+        });
+
+        test("string_builtins_through_range_for_ref", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            auto r = e->execute(R"(
+                var strs = ["ab", "cd"];
+                for (auto& s : strs) { s.to_upper(); }
+                strs[0] + strs[1];
+            )");
+            check_eq(std::string("ABCD"), r.as_string());
+        });
+
+        test("array_map_builtins_through_ref_decl", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            auto r = e->execute(R"(
+                var arr = [1, 2, 3];
+                auto& ra = arr;
+                ra.push(4);
+                var m = {"k": 1};
+                auto& rm = m;
+                rm["j"] = 2;
+                to_string(ra.size()) + "|" + to_string(arr.size()) + "|" +
+                to_string(rm.size()) + "|" + to_string(m.size());
+            )");
+            check_eq(std::string("4|4|2|2"), r.as_string());
+        });
+
+        test("array_map_builtins_through_ref_param", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            auto r = e->execute(R"(
+                function grow(var& a) { a.push(9); }
+                function put(var& m) { m["x"] = 5; }
+                var arr = [1];
+                var mp = {"k": 1};
+                grow(arr);
+                put(mp);
+                to_string(arr.size()) + "|" + to_string(arr[1]) + "|" + to_string(mp.size());
+            )");
+            check_eq(std::string("2|9|2"), r.as_string());
+        });
     }
 };
 

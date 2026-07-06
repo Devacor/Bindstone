@@ -342,7 +342,8 @@ namespace jai::vm {
         // Returns the same pointer environment::get_ref/get_value_ptr's storage prefix
         // would; nullptr = caller must run its original full lookup (fallback tails).
         script_value* env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id);
-        checked_result<void> define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value);
+        // box_cell: escape-marked decls wrap the value into a cell (see reference_holder)
+        checked_result<void> define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell = false);
 
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type);
         // Compound-assignment store-back (x op= rhs ≡ x = T(x op rhs)); interpreter twin:

@@ -87,6 +87,10 @@ namespace jai::detail {
 			if (!holder) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Null reference");
 			}
+			if (holder->has_cell) {
+				cur = holder->cell();
+				continue;
+			}
 			if (holder->container) {
 				if (holder->container_index >= holder->container->size()) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");

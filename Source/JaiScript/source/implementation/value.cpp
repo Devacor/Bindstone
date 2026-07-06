@@ -47,6 +47,30 @@ script_value::script_value(script_bool b, engine* eng) : type_info_(nullptr), en
 }
 
 
+script_value::reference_holder::~reference_holder() {
+    if (has_cell) {
+        cell()->~script_value();
+        has_cell = false;
+    }
+}
+
+script_value script_value::make_cell_reference(script_value&& boxed, engine* eng) {
+    static_assert(sizeof(script_value) == reference_holder::cell_storage_size &&
+                  alignof(script_value) <= 8, "cell inline storage must fit a script_value");
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(boxed.get_type_info());
+    // engine::memory_cap: cells are heap boxes (raised at the next loop back-edge)
+    eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
+    auto ref = make_strong<reference_holder>();
+    new (ref->cell_storage) script_value(std::move(boxed));
+    ref->has_cell = true;
+    v.storage_ = ref;
+    return v;
+}
+
 script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env) {
     if (!target) {
         throw runtime_error("Cannot create reference to null");
@@ -556,6 +580,10 @@ const script_value& script_value::deref() const {
         if (!refHolder) {
             throw runtime_error("Null reference");
         }
+        if (refHolder->has_cell) {
+            // Cell reference: the holder owns the value - always alive, no liveness check
+            return refHolder->cell()->deref();
+        }
         if (refHolder->container) {
             // Vector-element reference: recompute the element address from container+index
             // each time so it survives reallocation (push), and bounds-check so a shrink
@@ -596,6 +624,9 @@ script_value& script_value::deref() {
         if (!refHolder) {
             throw runtime_error("Null reference");
         }
+        if (refHolder->has_cell) {
+            return refHolder->cell()->deref();
+        }
         if (refHolder->container) {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Reference to a removed array element");
@@ -626,6 +657,10 @@ void script_value::assign_through(const script_value& value) {
         auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
         if (!refHolder) {
             throw runtime_error("Null reference in assign_through");
+        }
+        if (refHolder->has_cell) {
+            *refHolder->cell() = value;
+            return;
         }
         if (refHolder->container) {
             // Vector-element reference: resolve fresh + bounds-check before writing,
@@ -704,6 +739,10 @@ void script_value::assign_through(script_value&& value) {
         auto refHolder = std::get<strong_ptr<reference_holder>>(storage_);
         if (!refHolder) {
             throw runtime_error("Null reference in assign_through");
+        }
+        if (refHolder->has_cell) {
+            *refHolder->cell() = std::move(value);
+            return;
         }
         if (refHolder->container) {
             if (refHolder->container_index >= refHolder->container->size()) {

@@ -92,6 +92,10 @@ namespace jai {
         std::string name;
         bool is_reference = false;
         bool is_const = false;
+        // Parser escape analysis: the parameter may be bound by reference downstream
+        // (bare-identifier ref argument / ref-decl source), so value binding boxes its
+        // storage into a cell (see reference_holder cell mode)
+        bool ref_escaping = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
         mutable size_t slot_index = SIZE_MAX;     // Slot index for fast local access (SIZE_MAX = not assigned)
         expression_ptr default_value;
@@ -184,6 +188,11 @@ namespace jai {
         std::string_view name;  // Points to symbolizer storage (permanent)
         uint64_t symbol_id;     // Interned symbol ID - must be set by parser
         size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = use environment)
+        // Parser resolution: false when this name statically resolves to a REFERENCE
+        // declaration (ref param / auto& decl / auto& loop var). Simple stores consult it
+        // when the storage holds a cell: value-decl names write the cell like the variable
+        // itself (typed enforcement); ref-alias names store through unconstrained.
+        bool names_value_decl = true;
 
         identifier_expr(const source_location& loc, std::string_view n, uint64_t sym_id)
             : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id), slot_index(SIZE_MAX) {}
@@ -428,6 +437,9 @@ namespace jai {
         size_t variable_slot_index = SIZE_MAX;   // Slot index for fast local access (SIZE_MAX = use environment)
         bool is_reference;             // true for auto&, false for auto
         bool is_const;                 // true for const auto&
+        // Parser escape analysis (value-mode loop vars): per-iteration values are stored
+        // through a cell so the variable can be bound by reference
+        bool var_ref_escaping = false;
         expression_ptr container;      // The container to iterate over
         statement_ptr body;            // Loop body
 
@@ -517,6 +529,9 @@ namespace jai {
         uint64_t name_id = UINT64_MAX;  // Interned name for fast lookup (UINT64_MAX = not interned)
         expression_ptr initializer;  // Can be null
         bool is_static = false;      // For static class members
+        // Parser escape analysis: the variable may be bound by reference, so its
+        // declaration boxes the value into a cell (storage IS the cell from birth)
+        bool ref_escaping = false;
         size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = global/class member)
 
         variable_decl(const source_location& loc, type_info_ptr t, std::string_view n, expression_ptr init = nullptr)
@@ -653,6 +668,8 @@ namespace jai {
     public:
         std::vector<std::pair<std::string_view, uint64_t>> names;
         std::vector<size_t> slot_indices;
+        // Parser escape analysis, per name (empty = no name escapes)
+        std::vector<bool> ref_escaping;
         expression_ptr initializer;
 
         destructuring_decl(const source_location& loc, expression_ptr init)

@@ -12,13 +12,21 @@ same state hash on the tree-walking interpreter and the bytecode VM.
 
 ## Build
 
-Part of the normal JaiScript CMake build (`JAISCRIPT_BUILD_EXAMPLES=ON` by default):
+Part of the normal JaiScript CMake build (`JAISCRIPT_BUILD_EXAMPLES=ON` by default).
+`build.bat` builds both configurations and prints both paths:
 
 ```bash
 # from Source/JaiScript (VsDevCmd + Ninja, same as the test builds)
-cmake --build out/build/x64-Debug --target jai_rogue
-# exe: out/build/x64-Debug/bin/jai_rogue.exe
+cmake --build "out/build/x64-Release BENCHMARKS" --target jai_rogue   # PLAY THIS ONE
+cmake --build out/build/x64-Debug --target jai_rogue                  # --dev iteration
 ```
+
+**Play the Release exe.** JaiScript in a Debug build runs ~25-40x slower — every
+keypress costs several hundred ms of turn+render script time, which feels like input
+lag. Release turns are a few ms. The tradeoff: Release links take ~2 minutes (LTCG),
+Debug links in ~1s, so keep Debug for `--dev` hot-reload script iteration and do
+your actual dungeon crawling in `out/build/x64-Release BENCHMARKS/bin/jai_rogue.exe`.
+`--time` prints a key-to-frame latency report on exit if you want the numbers.
 
 The exe prefers the *source* `scripts/` directory (so `--dev` hot reload edits the
 files you have open); a `rogue_scripts/` copy is placed next to the binary for
@@ -38,7 +46,8 @@ Needs a Windows 10+ console at least 80x28 (ANSI colors via VT processing).
 
 | key | action |
 |---|---|
-| `h j k l` `y u b n` / arrows | move / attack (8-way) |
+| `w a s d` / `h j k l` / arrows | move / attack (cardinal) |
+| `y u b n` | move / attack (diagonals) |
 | `.` | wait |
 | `g` | pick up |
 | `i` | inventory — letter to inspect, then `e` use/equip, `d` drop |
@@ -65,7 +74,7 @@ he breathes gray "hollow fire" until you carve the real thing back out of him.
 Victory releases it: the finale cycles all seven colors across the arena.
 
 **Species** (stat nudges + a trait): Jackodile-kin (Slip-Jaw: +20 evasion when
-bloodied), Drake-kin (Scaleblood: half burn damage), Vulpen (Keen Eye: +8% crit),
+bloodied), Drask-kin (Scaleblood: half burn damage), Vulpen (Keen Eye: +8% crit),
 Brockin (Too Stubborn To Die: survive one killing blow per floor), Pangolix
 (Curl Up: +3 def when dropped below a third).
 
@@ -87,6 +96,15 @@ generation ("Grubby Shiv of Nipping", "Vicious Fang Blade of the Ember");
 potions/scrolls are identify-by-use with per-seed appearance shuffles; timed
 effects (burning, regen, rage, stoneskin, hexes) are serializable data records
 ticked each turn — which is why buffs survive save/load exactly.
+
+**Combat readout**: every swing is narrated with a verb and numbers. Your own HP
+is always exact — "The Grublin claws you for 4 (HP 20/28). A crushing hit!" — and
+the side panel shows the damage you took since your last action. Enemies keep a
+roguelike's mystery: a health descriptor instead of numbers (unscathed / scuffed /
+bloodied / wavering / near death), so "You slash the Orglis for 7 -- bloodied."
+Dodges credit the patron ("JAI's blessing! You slip the Grublin's bite."), crits
+are called out on both sides, and timed effects tick with their numbers
+("Burning: -2 HP (HP 11/22), 2 turns left.") and announce when they fade.
 
 ## Determinism smoke test
 

@@ -397,11 +397,33 @@ struct engine::implementation {
         std::shared_ptr<void> compiled;
         uint64_t epoch = 0;
         uint64_t last_used = 0;
+        // Static-check result, cached beside the parse (amortized once per unique
+        // source); re-run when the registration surface epoch moves.
+        bool checked = false;
+        uint64_t checked_epoch = 0;
+        check_report check_result;
     };
     std::unordered_map<std::string, std::shared_ptr<script_cache_entry>> script_cache;
     uint64_t script_cache_epoch = 0;
     uint64_t script_cache_clock = 0;
     static constexpr size_t script_cache_max = 64;
+
+    // Static type checking (opt-in; off = zero cost beyond one branch at cache entry).
+    // check_surface_epoch_ moves on every registration the checker can see
+    // (functions, globals, classes, template types), invalidating cached check results
+    // without touching the parse cache.
+    check_mode static_check_mode_ = check_mode::off;
+    check_report last_check_;
+    uint64_t check_surface_epoch_ = 0;
+
+    const check_report& checked_report(engine& self, script_cache_entry& entry) {
+        if (!entry.checked || entry.checked_epoch != check_surface_epoch_) {
+            entry.check_result = detail::run_static_check(self, entry.declarations, nullptr);
+            entry.checked = true;
+            entry.checked_epoch = check_surface_epoch_;
+        }
+        return entry.check_result;
+    }
 
     std::shared_ptr<script_cache_entry> find_cached_script(const std::string& source) {
         auto it = script_cache.find(source);
@@ -858,6 +880,24 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
             cached = impl->store_cached_script(scriptContent, std::move(parse_result.value()));
         }
 
+        // Static-check hook: one place, at the parse-cache entry — covers execute(),
+        // hot-reload re-parses (new source = new entry) and registration-epoch changes.
+        if (impl->static_check_mode_ != check_mode::off) {
+            if (instanceVars.empty()) {
+                impl->last_check_ = impl->checked_report(*this, *cached);
+            } else {
+                // host-supplied instance variables are per-call: check fresh with those
+                // names defined instead of caching a result that depends on them
+                std::vector<std::string> extra;
+                extra.reserve(instanceVars.size());
+                for (const auto& [name, value] : instanceVars) { extra.push_back(name); }
+                impl->last_check_ = detail::run_static_check(*this, cached->declarations, &extra);
+            }
+            if (impl->static_check_mode_ == check_mode::strict && impl->last_check_.has_errors()) {
+                throw static_check_error("static check failed:\n" + impl->last_check_.format(scriptContent));
+            }
+        }
+
         return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars);
 
     } catch (const parse_error&) {
@@ -928,11 +968,33 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
     if (!parse_result) {
         throw parse_error(format_error(parse_result));
     }
-    return jai::jaibite(weak_from_this(), std::move(parse_result.value()));
+    jai::jaibite bite(weak_from_this(), std::move(parse_result.value()));
+    if (impl->static_check_mode_ != check_mode::off) {
+        check_bite(bite, &scriptContent);
+    }
+    return bite;
+}
+
+// Static-check a bite once and gate under strict. Source is only available at
+// creation time (loaded bites format their listing without snippets).
+void engine::check_bite(jai::jaibite& bite, const std::string* source) {
+    if (bite.check_state_ == jaibite::check_state::unchecked) {
+        bite.check_report_ = detail::run_static_check(*this, bite.declarations_, nullptr);
+        bite.check_state_ = bite.check_report_.has_errors()
+            ? jaibite::check_state::flagged : jaibite::check_state::clean;
+    }
+    impl->last_check_ = bite.check_report_;
+    if (impl->static_check_mode_ == check_mode::strict && bite.check_report_.has_errors()) {
+        throw static_check_error("static check failed:\n" +
+                                 bite.check_report_.format(source ? std::string_view(*source) : std::string_view{}));
+    }
 }
 
 script_value engine::execute(jai::jaibite& bite) {
     impl->has_executed_ = true;
+    if (impl->static_check_mode_ != check_mode::off) {
+        check_bite(bite, nullptr);   // no-op if already checked at creation/load
+    }
     backend()->prepare_for_execution();
     return execute_parsed(bite.declarations_, bite.compiled_, nullptr);
 }
@@ -950,7 +1012,8 @@ std::vector<uint8_t> jaibite::save_bytes() const {
     if (!owner) {
         throw script_exception("jaibite: owning engine no longer exists");
     }
-    return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint());
+    uint32_t flags = (check_state_ == check_state::clean) ? detail::k_jaibite_flag_checked_clean : 0;
+    return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint(), flags);
 }
 
 void jaibite::save(const std::string& path) const {
@@ -976,10 +1039,64 @@ jai::jaibite engine::jaibite_load(const std::string& path) {
 
 jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size) {
     uint64_t saved_fingerprint = 0;
-    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint);
+    uint32_t flags = 0;
+    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags);
     jai::jaibite bite(weak_from_this(), std::move(declarations));
     bite.registration_mismatch_ = (saved_fingerprint != registration_fingerprint());
+    // Trust the checked-clean stamp only when the registration surface matches the
+    // saving engine's; otherwise the bite loads unchecked and is re-checked here
+    // (relocated AST, this engine's surface) when a checking mode is active.
+    if ((flags & detail::k_jaibite_flag_checked_clean) && !bite.registration_mismatch_) {
+        bite.check_state_ = jaibite::check_state::clean;
+    }
+    if (impl->static_check_mode_ != check_mode::off) {
+        check_bite(bite, nullptr);
+    }
     return bite;
+}
+
+void engine::static_checking(check_mode mode) {
+    impl->static_check_mode_ = mode;
+}
+
+check_mode engine::static_checking() const {
+    return impl->static_check_mode_;
+}
+
+const check_report& engine::last_check_diagnostics() const {
+    return impl->last_check_;
+}
+
+check_report engine::check(const std::string& scriptContent) {
+    auto cached = impl->find_cached_script(scriptContent);
+    if (!cached) {
+        lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
+        auto tokens = lexer.tokenize();
+        parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
+        auto parse_result = parser.parse();
+        if (!parse_result) {
+            throw parse_error(format_error(parse_result));
+        }
+        cached = impl->store_cached_script(scriptContent, std::move(parse_result.value()));
+    }
+    return impl->checked_report(*this, *cached);
+}
+
+bool engine::host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const {
+    auto it = impl->overloadedFunctions.find(name);
+    if (it != impl->overloadedFunctions.end()) {
+        out.reserve(out.size() + it->second.overloads.size());
+        for (const auto& o : it->second.overloads) {
+            out.push_back({o.argCount, o.paramTypes});
+        }
+        return true;
+    }
+    auto arityIt = impl->functionArities.find(name);
+    if (arityIt != impl->functionArities.end()) {
+        out.push_back({arityIt->second, {}});
+        return true;
+    }
+    return false;
 }
 
 uint64_t engine::registration_fingerprint() const {
@@ -1014,6 +1131,7 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
+    ++impl->check_surface_epoch_;   // the static checker can see globals
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
     impl->global_environment_->define(id, std::move(value));
@@ -1052,6 +1170,7 @@ void engine::add_variadic_function(const std::string& name, script_function func
 // untyped function stays a plain global until a second one of the same name arrives).
 void engine::register_overload_impl(const std::string& name, size_t arity, script_function func,
                                     const std::vector<param_type_info>& paramTypes, bool createSetOnFirst) {
+    ++impl->check_surface_epoch_;   // the static checker can see registered functions
     auto existing_result = impl->global_environment_->get(name);
     bool hasExisting = existing_result && existing_result.value().is_function();
     bool setExists = impl->overloadedFunctions.find(name) != impl->overloadedFunctions.end();
@@ -1106,6 +1225,7 @@ uint64_t engine::symbolize(std::string_view str) const {
 
 void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {
     ++impl->script_cache_epoch;   // class registration can change how source parses
+    ++impl->check_surface_epoch_;
     impl->classes[name] = classDef;
     impl->classesByTypeId[classDef->get_type_id()] = classDef;  // Fast lookup by interned type_id
     // Also register with the unified class_registry for both C++ and script classes
@@ -1283,6 +1403,7 @@ void engine::set_has_custom_numeric_operators(bool value) {
 void engine::register_template_type(const std::string& baseTemplateName) {
     if (impl->registeredTemplateTypes.insert(baseTemplateName).second) {
         ++impl->script_cache_epoch;   // parses depend on the template-name set
+        ++impl->check_surface_epoch_;
     }
 }
 

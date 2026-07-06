@@ -13,6 +13,7 @@
 #include "bound_array.hpp"
 #include "bound_map.hpp"
 #include "jaibite.hpp"
+#include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <memory>
 #include <optional>
@@ -127,6 +128,34 @@ namespace jai {
         // parse-affecting registration surface. Stamped into saved jaibites; compared on
         // load to set jaibite::registration_mismatch().
         uint64_t registration_fingerprint() const;
+
+        // === STATIC TYPE CHECKING (opt-in; docs/static_checking.md) ===
+        // Off by default (zero behavior change, one branch per parse-cache entry).
+        // warn: diagnostics collected at parse-cache-entry creation, retrievable via
+        //       last_check_diagnostics(); execution proceeds.
+        // strict: any error-severity diagnostic makes execute()/jaibite creation/load
+        //       throw static_check_error BEFORE anything runs; what() is the full
+        //       accumulated, location-sorted, deduplicated listing with source + carets.
+        // Checks are amortized once per unique source (cached beside the parse) and
+        // re-run when the registration surface changes.
+        void static_checking(check_mode mode);
+        check_mode static_checking() const;
+
+        // Parse (cached) + check, independent of the current mode — tooling entry point.
+        // Throws parse_error if the source doesn't parse (checking is post-parse).
+        check_report check(const std::string& scriptContent);
+
+        // Diagnostics from the most recent checked execute()/jaibite path (warn/strict).
+        const check_report& last_check_diagnostics() const;
+
+        // Host-function surface for the static checker: per-overload arity (SIZE_MAX =
+        // variadic) + C++ parameter signature (empty = untyped legacy binding). Returns
+        // false when the name has no registered C++ function entry.
+        struct host_overload_signature {
+            size_t arity = 0;
+            std::vector<param_type_info> param_types;
+        };
+        bool host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const;
 
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
@@ -688,6 +717,10 @@ namespace jai {
         // Lazily constructs + wires the selected backend on first use, so creating an
         // engine (or switching backend type) costs nothing until a script actually runs.
         execution_backend* backend() const;
+
+        // Static-check a jaibite once (creation/load/first checked execute) and gate
+        // under strict; source is only available at creation time.
+        void check_bite(jai::jaibite& bite, const std::string* source);
 
         void initialize_engine_reference();
         void wire_backend();

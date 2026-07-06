@@ -13,6 +13,7 @@ set(JAISCRIPT_SOURCES
     implementation/parse_errors.cpp
     implementation/parser.cpp
     implementation/runtime_errors.cpp
+    implementation/type_checker.cpp
     implementation/type_info.cpp
     implementation/types.cpp
     implementation/value.cpp

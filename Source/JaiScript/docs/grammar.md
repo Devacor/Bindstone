@@ -34,7 +34,8 @@ Notes:
 // Arithmetic
 + - * / %
 
-// Assignment (complete set — there are NO bitwise compound assigns)
+// Assignment (complete set — bitwise compound assignments (|= &= ^= <<= >>=) are
+// deliberately omitted; spell it out: x = x | y)
 = += -= *= /= %=
 
 // Comparison
@@ -87,7 +88,9 @@ print(`The ${name} has ${hp * 2} hp`);   // The Dragon has 84 hp
 ```
 
 Inside a template string, `\`` escapes a backtick and `\$` escapes a dollar sign; `\n \r \t \\`
-also work. Nested braces inside `${...}` are balanced (e.g. `${ {"k": 1}["k"] }`).
+also work. Splices take arbitrary expressions, including indexing (e.g. with `var m = {"k": 1};`
+declared, `` `${m["k"]}` `` yields `"1"`). Known limitation (fix in flight): whitespace before a
+`}` inside a splice misparses — write `${m["k"]}`, not `${ m["k"] }`.
 
 ### Comments
 
@@ -229,6 +232,7 @@ expression = assignmentExpression
 assignmentExpression = ternaryExpression (assignmentOperator assignmentExpression)?
 
 assignmentOperator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                   // bitwise compound forms (|= &= ^= <<= >>=) deliberately omitted
 
 ternaryExpression = logicalOrExpression ("?" expression ":" ternaryExpression)?
 

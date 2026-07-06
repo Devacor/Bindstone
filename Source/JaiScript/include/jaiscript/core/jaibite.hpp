@@ -3,6 +3,7 @@
 #ifndef __JAISCRIPT_CORE_JAIBITE_HPP__
 #define __JAISCRIPT_CORE_JAIBITE_HPP__
 
+#include <jaiscript/detail/type_checker.hpp>
 #include <memory>
 #include <vector>
 #include <string>
@@ -40,15 +41,29 @@ namespace jai {
         // not touch the missing registrations); errors surface at execute() if it does.
         bool registration_mismatch() const { return registration_mismatch_; }
 
+        // Static-check state (docs/static_checking.md). A bite created or executed under
+        // warn/strict carries its diagnostics; checked_clean() means it was checked and
+        // has no error-severity diagnostics. save() stamps that flag beside the
+        // registration fingerprint; jaibite_load trusts the stamp only when the
+        // fingerprint matches, otherwise the bite loads unchecked and is re-checked on
+        // first strict/warn use (a bite is checked ONCE — later registrations don't
+        // re-trigger; re-create the bite to re-check).
+        bool checked_clean() const { return check_state_ == check_state::clean; }
+        const check_report& check_diagnostics() const { return check_report_; }
+
     private:
         friend class engine;
         jaibite(std::weak_ptr<engine> owner, std::vector<declaration_ptr> declarations)
             : engine_(std::move(owner)), declarations_(std::move(declarations)) {}
 
+        enum class check_state : uint8_t { unchecked, clean, flagged };
+
         std::weak_ptr<engine> engine_;
         std::vector<declaration_ptr> declarations_;
         std::shared_ptr<void> compiled_;   // backend-owned compiled artifact (vm: chunk)
         bool registration_mismatch_ = false;
+        check_state check_state_ = check_state::unchecked;
+        check_report check_report_;
     };
 
 } // namespace jai

@@ -26,6 +26,10 @@ namespace jai::detail {
 
     inline constexpr uint8_t k_jaibite_magic[4] = { 'J', 'B', 'I', 'T' };
     inline constexpr uint32_t k_jaibite_version = 1;
+    // Header flags (u32; readers ignore unknown bits, so no version bump needed):
+    // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
+    // trusted on load only when the registration fingerprint also matches.
+    inline constexpr uint32_t k_jaibite_flag_checked_clean = 0x1;
     inline constexpr int k_jaibite_max_depth = 1000;
 
     [[noreturn]] inline void jaibite_fail(const std::string& why) {
@@ -38,7 +42,8 @@ namespace jai::detail {
     public:
         explicit ast_writer(const string_symbolizer& symbols) : symbols_(symbols) {}
 
-        std::vector<uint8_t> serialize(const std::vector<declaration_ptr>& decls, uint64_t fingerprint) {
+        std::vector<uint8_t> serialize(const std::vector<declaration_ptr>& decls, uint64_t fingerprint,
+                                       uint32_t flags = 0) {
             varint(decls.size());
             for (const auto& d : decls) node(d.get());
 
@@ -46,7 +51,7 @@ namespace jai::detail {
             out.reserve(24 + body_.size() + table_.size() * 8);
             out.insert(out.end(), k_jaibite_magic, k_jaibite_magic + 4);
             fixed_u32(out, k_jaibite_version);
-            fixed_u32(out, 0);  // flags
+            fixed_u32(out, flags);
             fixed_u64(out, fingerprint);
             append_varint(out, table_.size());
             for (const auto& s : table_) {
@@ -489,7 +494,7 @@ namespace jai::detail {
         ast_reader(const uint8_t* data, size_t size, engine* eng)
             : data_(data), size_(size), eng_(eng), symbols_(eng->get_symbolizer()) {}
 
-        std::vector<declaration_ptr> deserialize(uint64_t& fingerprint_out) {
+        std::vector<declaration_ptr> deserialize(uint64_t& fingerprint_out, uint32_t* flags_out = nullptr) {
             if (size_ < 20) jaibite_fail("truncated header");
             if (std::memcmp(data_, k_jaibite_magic, 4) != 0) jaibite_fail("not a jaibite file (bad magic)");
             pos_ = 4;
@@ -497,7 +502,8 @@ namespace jai::detail {
             if (version != k_jaibite_version)
                 jaibite_fail("unsupported format version " + std::to_string(version) +
                              " (expected " + std::to_string(k_jaibite_version) + ")");
-            (void)fixed_u32();  // flags (none defined in v1)
+            uint32_t flags = fixed_u32();
+            if (flags_out) *flags_out = flags;
             fingerprint_out = fixed_u64();
 
             uint64_t table_count = varint();
@@ -1141,13 +1147,15 @@ namespace jai::detail {
     };
 
     inline std::vector<uint8_t> serialize_jaibite(const std::vector<declaration_ptr>& decls,
-                                                  const string_symbolizer& symbols, uint64_t fingerprint) {
-        return ast_writer(symbols).serialize(decls, fingerprint);
+                                                  const string_symbolizer& symbols, uint64_t fingerprint,
+                                                  uint32_t flags = 0) {
+        return ast_writer(symbols).serialize(decls, fingerprint, flags);
     }
 
     inline std::vector<declaration_ptr> deserialize_jaibite(const uint8_t* data, size_t size,
-                                                            engine* eng, uint64_t& fingerprint_out) {
-        return ast_reader(data, size, eng).deserialize(fingerprint_out);
+                                                            engine* eng, uint64_t& fingerprint_out,
+                                                            uint32_t* flags_out = nullptr) {
+        return ast_reader(data, size, eng).deserialize(fingerprint_out, flags_out);
     }
 
 } // namespace jai::detail

@@ -76,7 +76,9 @@ eng-&gt;get_imported_files();                // list</code></pre></div>
 <h2 id="which-one-do-i-want-the-real-world-idiom">Which one do I want? (the real-world idiom)<a class="hlink" href="#which-one-do-i-want-the-real-world-idiom" aria-label="link">&#8203;</a></h2>
 <p>The example games use both, exactly along the intended split (examples/roguelike/scripts/main.jai — verbatim):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// jai_rogue entry point. The host executes: import &quot;main.jai&quot;; rogue_main();
-// state.jai holds the persistent globals and is excluded from hot reload.
+// state.jai holds the persistent globals (G, RNG). reload_scripts() below deliberately
+// skips it: reloading would re-run its top-level declarations and reset the live run.
+// (Not a language mechanism - just don't re-execute files whose side effects you want kept.)
 
 import &quot;state.jai&quot;;
 import &quot;util.jai&quot;;

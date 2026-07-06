@@ -1,12 +1,18 @@
 // KINSTEIN 3D — a Wolfenstein-style grid raycaster: one DDA ray per screen
 // column over an authored 24x24 map, perpendicular-distance wall slices (no
-// fisheye by construction), N/S vs E/W face darkening, and floor/ceiling
-// gradient bands. The camera flies a scripted loop: waypoints plus a look-ahead
-// point on the same path, so turns steer themselves — no per-frame trig at all
-// (the ray fan comes from the camera-plane vector, not angles). This is the
-// reel's deliberate compute stress: ~100 DDA walks and 4,000 column writes per
-// frame, all script. Walls are solid bg colors quantized to 8 shades, so slice
-// columns are long same-escape runs — best case for the host VT filter.
+// fisheye by construction), N/S vs E/W face darkening, floor/ceiling gradient
+// bands, and now a bestiary: billboard Grublins (small green blobs) and Orglis
+// brutes stand along the route, occluded per column by the wall z-buffer and
+// scaled by distance. The scripted camera FIGHTS them: when an alive enemy sits
+// in the crosshair cone with clear line of sight, the gun auto-fires — muzzle
+// flash, rainbow hitscan tracer, hit-flash, then a gib scatter and a kill tally
+// on the scene HUD. Enemies respawn each lap so every loop is a fresh run.
+// The camera flies waypoints plus a look-ahead point on the same path, so turns
+// steer themselves — no per-frame trig (the ray fan comes from the camera-plane
+// vector). This is the reel's deliberate compute stress: ~100 DDA walks, 4,000
+// column writes, and a sprite pass per frame, all script. Walls are solid bg
+// colors quantized to 8 shades — long same-escape runs, best case for the host
+// VT filter.
 
 class Kinstein : Scene {
 	var wmap = [];
@@ -25,11 +31,30 @@ class Kinstein : Scene {
 	float planey = 0.0;
 	int wall_base = 0;
 	int banner_base = 0;
+	int sprite_base = 0;
 	float tt = 0.0;
+	// the bestiary (parallel arrays): type 0 grublin, 1 orglis
+	var ex = [];
+	var ey = [];
+	var et = [];
+	var es = [];         // 0 alive, 1 hit-flash, 2 gibbing, 3 down (respawns)
+	var est = [];
+	var stx = [];        // per-frame camera-space transforms
+	var sty = [];
+	var drawn = [];
+	var zcol = [];       // per-column wall depth from the last wall pass
+	int ne = 11;
+	int kills = 0;
+	float cool = 0.6;
+	float muzzle_t = 0.0;
+	float tracer_t = 0.0;
+	float hot_t = 0.0;
+	int tr_x = 0;
+	int tr_y = 0;
 
 	void build() override {
 		name = "KINSTEIN 3D";
-		handle = "grublin keep . one ray per column, zero textures";
+		handle = "grublin keep . one ray per column, zero mercy";
 		// # stone  M moss  G gold pillar  B banner (rainbow-fire, animated)
 		var rows = [
 			"##################BBBB##",
@@ -108,6 +133,30 @@ class Kinstein : Scene {
 				}
 			}
 		}
+		// sprites + combat kit
+		sprite_base = banner_base + 64;
+		pal.add_bg(26, 74, 30);                           // +0..3 grublin, far -> near
+		pal.add_bg(38, 104, 42);
+		pal.add_bg(52, 138, 54);
+		pal.add_bg(70, 178, 66);
+		pal.add_bg(74, 40, 26);                           // +4..7 orglis, far -> near
+		pal.add_bg(104, 54, 32);
+		pal.add_bg(140, 70, 38);
+		pal.add_bg(178, 90, 44);
+		pal.add_fg_bg(255, 232, 90, 52, 138, 54, "o");    // +8 grublin eye
+		pal.add_fg_bg(255, 140, 40, 140, 70, 38, "o");    // +9 orglis eye
+		pal.add_bg(255, 255, 255);                        // +10 hit flash
+		pal.add_bg(58, 58, 70);                           // +11 gun dark
+		pal.add_bg(96, 96, 112);                          // +12 gun lite
+		pal.add_bg(255, 244, 150);                        // +13 muzzle core
+		pal.add_bg(255, 176, 48);                         // +14 muzzle rim
+		for (int tr = 0; tr < 6; ++tr) {                  // +15..20 rainbow tracer
+			var ct = gfx.rainbow_rgb(tr * 1.0471975512);
+			pal.add_bg(ct[0], ct[1], ct[2]);
+		}
+		pal.add_fg_bg(130, 255, 150, 8, 10, 20, "+");     // +21 crosshair
+		pal.add_fg_bg(255, 84, 64, 8, 10, 20, "+");       // +22 crosshair, target down
+		pal.add_fg_bg(255, 208, 70, 10, 8, 24, "x");      // +23 kill tally
 		// the flight loop: west corridor, bottom hall, mid room, east corridor
 		wpx = [2.5, 2.5, 12.5, 12.5, 21.5, 21.5];
 		wpy = [2.5, 21.5, 21.5, 12.5, 12.5, 2.5];
@@ -117,6 +166,19 @@ class Kinstein : Scene {
 			seglen.push(sqrt(ddx * ddx + ddy * ddy));
 			path_len += seglen[i];
 		}
+		// garrison, posted along the route (a couple wait around corners)
+		ex = [2.5, 2.5, 2.5, 4.5, 5.5, 12.5, 12.5, 14.5, 18.5, 21.5, 20.5];
+		ey = [6.5, 12.5, 16.5, 19.5, 21.5, 18.5, 13.5, 12.5, 12.5, 8.5, 2.5];
+		et = [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1];
+		for (int i2 = 0; i2 < ne; ++i2) {
+			es.push(0);
+			est.push(0.0);
+			stx.push(0.0);
+			sty.push(0.0);
+			drawn.push(0);
+		}
+		zcol = gfx.make_grid(w);
+		for (int i3 = 0; i3 < w; ++i3) { zcol[i3] = 99.0; }
 	}
 
 	var path_at(float s) {
@@ -133,6 +195,29 @@ class Kinstein : Scene {
 		return [wpx[0], wpy[0]];
 	}
 
+	// DDA toward (dx, dy) in parameter space: true if no wall before frac of the way
+	bool los_clear(float dx, float dy, float frac) {
+		int mx = itrunc(posx);
+		int my = itrunc(posy);
+		float adx = dx < 0.0 ? -dx : dx;
+		float ady = dy < 0.0 ? -dy : dy;
+		float ddx = adx < 0.00000001 ? 100000000.0 : 1.0 / adx;
+		float ddy = ady < 0.00000001 ? 100000000.0 : 1.0 / ady;
+		int stepx = dx < 0.0 ? -1 : 1;
+		int stepy = dy < 0.0 ? -1 : 1;
+		float sdx = dx < 0.0 ? (posx - mx) * ddx : (mx + 1.0 - posx) * ddx;
+		float sdy = dy < 0.0 ? (posy - my) * ddy : (my + 1.0 - posy) * ddy;
+		for (int g = 0; g < 64; ++g) {
+			float trav = sdx < sdy ? sdx : sdy;
+			if (trav >= frac) { return true; }
+			if (sdx < sdy) { sdx += ddx; mx += stepx; }
+			else { sdy += ddy; my += stepy; }
+			int cv = wmap[my * mw + mx];
+			if (cv > 0) { return false; }
+		}
+		return false;
+	}
+
 	void update(float t, float dt) override {
 		tt = t;
 		float s = t * 2.4;
@@ -146,6 +231,97 @@ class Kinstein : Scene {
 		if (dl > 0.0001) { dirx = dx / dl; diry = dy / dl; }
 		planex = -diry * 0.66;
 		planey = dirx * 0.66;
+		// enemy state machine
+		cool -= dt;
+		muzzle_t -= dt;
+		tracer_t -= dt;
+		hot_t -= dt;
+		for (int i = 0; i < ne; ++i) {
+			int st = es[i];
+			if (st == 1) { est[i] = est[i] + dt; if (est[i] > 0.14) { es[i] = 2; est[i] = 0.0; } }
+			else if (st == 2) { est[i] = est[i] + dt; if (est[i] > 0.55) { es[i] = 3; est[i] = 0.0; } }
+			else if (st == 3) { est[i] = est[i] + dt; if (est[i] > 16.0) { es[i] = 0; est[i] = 0.0; } }
+		}
+		// auto-fire: nearest alive enemy in the crosshair cone with clear LOS
+		if (cool <= 0.0) {
+			float invdet = 1.0 / (planex * diry - dirx * planey);
+			int best = -1;
+			float besty = 99.0;
+			float bestx = 0.0;
+			for (int i2 = 0; i2 < ne; ++i2) {
+				int st2 = es[i2];
+				if (st2 != 0) { continue; }
+				float rx = ex[i2] - posx;
+				float ry = ey[i2] - posy;
+				float txx = invdet * (diry * rx - dirx * ry);
+				float tyy = invdet * (planex * ry - planey * rx);
+				if (tyy < 1.0 || tyy > 9.0) { continue; }
+				float aim = txx < 0.0 ? -txx : txx;
+				if (aim > tyy * 0.14) { continue; }
+				if (!los_clear(rx, ry, 0.95)) { continue; }
+				if (tyy < besty) { best = i2; besty = tyy; bestx = txx; }
+			}
+			if (best >= 0) {
+				es[best] = 1;
+				est[best] = 0.0;
+				kills = kills + 1;
+				cool = 0.55;
+				muzzle_t = 0.12;
+				tracer_t = 0.14;
+				hot_t = 0.35;
+				tr_x = itrunc(w * 0.5 * (1.0 + bestx / besty));
+				tr_y = h / 2 + itrunc(h * 0.10 / besty);
+			}
+		}
+	}
+
+	// one billboard blob: ellipse body, eyes, distance shade, hit-flash white.
+	// Row-major with a per-row half-width (one sqrt per row) — no per-cell float
+	// math, the inner loop is bounds + z-occlusion + write.
+	void draw_blob(var& grid, int i) {
+		float tyy = sty[i];
+		float txx = stx[i];
+		int scx = itrunc(w * 0.5 * (1.0 + txx / tyy));
+		int typ = et[i];
+		float size = typ == 1 ? 0.95 : 0.62;
+		int sh = itrunc(h * size / tyy);
+		sh = sh < 2 ? 2 : sh;
+		sh = sh > 32 ? 32 : sh;
+		int hw_max = (sh + (typ == 1 ? 4 : 1)) / 2;
+		int feet = h / 2 + itrunc(h * 0.5 / tyy);
+		int top = feet - sh;
+		float wob = sin(tt * 5.0 + i * 2.1) * 0.10;   // idle wobble (sways per row)
+		int shade = 3 - itrunc(tyy * 0.34);
+		shade = shade < 0 ? 0 : shade;
+		shade = shade > 3 ? 3 : shade;
+		bool flash = es[i] == 1;
+		int body = flash ? sprite_base + 10 : sprite_base + typ * 4 + shade;
+		int eye = sprite_base + 8 + typ;
+		for (int dy = 0; dy < sh; ++dy) {
+			int rr = top + dy;
+			if (rr < 0 || rr >= h) { continue; }
+			float v = (dy + 0.5) / sh * 2.0 - 1.0;
+			float vv = 1.0 - v * v * 1.15;
+			if (vv <= 0.0) { continue; }
+			int hw = itrunc(sqrt(vv) * hw_max);
+			int cxr = scx + itrunc(wob * v * hw_max);
+			int e0 = hw_max + 1;
+			int e1 = 0;
+			if (!flash && v > -0.4 && v < -0.05) {
+				e0 = itrunc(0.2 * hw_max);
+				e1 = itrunc(0.5 * hw_max);
+			}
+			int rowb = rr * w;
+			for (int dx = 0 - hw; dx <= hw; ++dx) {
+				int col = cxr + dx;
+				if (col < 0 || col >= w) { continue; }
+				if (tyy >= zcol[col]) { continue; }   // walls occlude per column
+				int pi = body;
+				int adx = dx < 0 ? 0 - dx : dx;
+				if (adx >= e0 && adx <= e1) { pi = eye; }
+				grid[rowb + col] = pi;
+			}
+		}
 	}
 
 	void render(var& grid) override {
@@ -170,9 +346,9 @@ class Kinstein : Scene {
 			while (hitv == 0 && guard < 64) {
 				if (sdx < sdy) { sdx += ddx; mx += stepx; side = 0; }
 				else { sdy += ddy; my += stepy; side = 1; }
-				// declaration, not assignment: `hitv = wmap[i]` (typed-local slot store
-				// from a bare element ref) throws Type mismatch on the interpreter at
-				// current HEAD — see README language feedback
+				// declaration, not assignment: `hitv = wmap[i]` (typed-local slot
+				// store from a bare element ref) throws Type mismatch on the
+				// interpreter at current HEAD — see README language feedback
 				int cellv = wmap[my * mw + mx];
 				hitv = cellv;
 				guard = guard + 1;
@@ -180,6 +356,7 @@ class Kinstein : Scene {
 			hitv = hitv == 0 ? 1 : hitv;
 			float pdist = side == 0 ? sdx - ddx : sdy - ddy;   // perpendicular: no fisheye
 			pdist = pdist < 0.08 ? 0.08 : pdist;
+			zcol[x] = pdist;
 			int lineh = itrunc(h / pdist);
 			int y0 = (h - lineh) / 2;
 			int y1 = y0 + lineh;
@@ -194,5 +371,77 @@ class Kinstein : Scene {
 			while (y < y1) { grid[gi] = pi; gi += w; y = y + 1; }
 			while (y < h) { grid[gi] = y; gi += w; y = y + 1; }
 		}
+		// sprite pass: camera-space transforms, then paint far to near
+		float invdet = 1.0 / (planex * diry - dirx * planey);
+		for (int i = 0; i < ne; ++i) {
+			float rx = ex[i] - posx;
+			float ry = ey[i] - posy;
+			stx[i] = invdet * (diry * rx - dirx * ry);
+			sty[i] = invdet * (planex * ry - planey * rx);
+			drawn[i] = 0;
+		}
+		for (int pass = 0; pass < ne; ++pass) {
+			int pick = -1;
+			float pty = -1.0;
+			for (int i2 = 0; i2 < ne; ++i2) {
+				if (drawn[i2] == 1) { continue; }
+				int st = es[i2];
+				if (st >= 2) { continue; }
+				float sv = sty[i2];
+				if (sv <= 0.25) { continue; }
+				if (sv > pty) { pty = sv; pick = i2; }
+			}
+			if (pick < 0) { break; }
+			drawn[pick] = 1;
+			draw_blob(grid, pick);
+		}
+		// gib scatter for the dying
+		int flick = itrunc(tt * 10.0);
+		for (int i3 = 0; i3 < ne; ++i3) {
+			int st3 = es[i3];
+			if (st3 != 2) { continue; }
+			float tyy = sty[i3];
+			if (tyy < 0.25) { continue; }
+			float prog = est[i3] * 1.9;
+			int scx = itrunc(w * 0.5 * (1.0 + stx[i3] / tyy));
+			int scy = h / 2 + itrunc(h * 0.22 / tyy);
+			float r = prog * (h * 0.45 / tyy);
+			int body = sprite_base + et[i3] * 4 + 3;
+			for (int k = 0; k < 10; ++k) {
+				float a = k * 0.628 + i3;
+				int gx = scx + itrunc(cos(a) * r * 2.0);
+				int gy = scy + itrunc(sin(a) * r + prog * prog * 6.0);
+				if (gx < 0 || gx >= w || gy < 1 || gy >= h) { continue; }
+				if (tyy >= zcol[gx]) { continue; }
+				grid[gy * w + gx] = k % 3 == 0 ? sprite_base + 8 + et[i3] : body;
+			}
+		}
+		// rainbow hitscan tracer, gun, muzzle flash, crosshair, kill tally
+		int gx0 = w / 2;
+		if (tracer_t > 0.0) {
+			int y0t = h - 4;
+			for (int k2 = 1; k2 < 14; ++k2) {
+				int xx = gx0 + (tr_x - gx0) * k2 / 14;
+				int yy = y0t + (tr_y - y0t) * k2 / 14;
+				if (xx < 0 || xx >= w || yy < 1 || yy >= h) { continue; }
+				grid[yy * w + xx] = sprite_base + 15 + (k2 + flick) % 6;
+			}
+		}
+		grid[(h - 1) * w + gx0 - 1] = sprite_base + 11;
+		grid[(h - 1) * w + gx0] = sprite_base + 12;
+		grid[(h - 1) * w + gx0 + 1] = sprite_base + 11;
+		grid[(h - 2) * w + gx0] = sprite_base + 11;
+		if (muzzle_t > 0.0) {
+			grid[(h - 3) * w + gx0] = sprite_base + 13;
+			grid[(h - 3) * w + gx0 - 1] = sprite_base + 14;
+			grid[(h - 3) * w + gx0 + 1] = sprite_base + 14;
+			grid[(h - 4) * w + gx0] = sprite_base + 14;
+		}
+		int chc = hot_t > 0.0 ? sprite_base + 22 : sprite_base + 21;
+		grid[(h / 2) * w + gx0] = chc;
+		grid[(h / 2) * w + gx0 - 3] = chc;
+		grid[(h / 2) * w + gx0 + 3] = chc;
+		int nk = kills > 24 ? 24 : kills;
+		for (int k3 = 0; k3 < nk; ++k3) { grid[w + 2 + k3] = sprite_base + 23; }
 	}
 }

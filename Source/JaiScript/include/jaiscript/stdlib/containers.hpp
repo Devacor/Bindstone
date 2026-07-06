@@ -24,14 +24,6 @@ namespace stdlib {
         script_pair(const script_value& f, script_value&& s)
             : first(f), second(std::move(s)) {}
 
-        // Factory method for creating a pair with a reference to the second value
-        static script_pair make_with_reference(const script_value& key,
-                                             script_value* value_ptr,
-                                             const std::shared_ptr<environment>& env,
-                                             engine* eng) {
-            return script_pair(key.clone(),
-                              script_value::make_reference(value_ptr, env, eng));
-        }
     };
 
     // Merge two maps, with the second map's values overriding the first's on key collision

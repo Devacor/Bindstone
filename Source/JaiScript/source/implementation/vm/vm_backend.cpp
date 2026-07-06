@@ -218,7 +218,7 @@ namespace {
 		if (!refHolder) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 		}
-		if (!refHolder->has_cell && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
+		if (!refHolder->has_cell && !refHolder->has_map_key && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
 		}
 		if (refHolder->container_element_type) {
@@ -233,6 +233,9 @@ namespace {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
 				}
 				return script_value::make_field_reference(refHolder->owner_instance, refHolder->field_id, eng, nullptr);
+			}
+			if (refHolder->has_map_key) {
+				return script_value::make_map_entry_reference(refHolder->container_map, *refHolder->cell(), eng, nullptr);
 			}
 			return script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock(), eng);
 		}
@@ -589,14 +592,14 @@ bool vm_backend::has_variable(const std::string& name) const {
 }
 
 void vm_backend::push_external_call_scope() {
-	external_metadata_stack_.push_back(std::move(current_arg_metadata_));
-	current_arg_metadata_.clear();
+	external_site_stack_.push_back(pending_site_ctx_);
+	pending_site_ctx_ = {};
 }
 
 void vm_backend::pop_external_call_scope() {
-	if (!external_metadata_stack_.empty()) {
-		current_arg_metadata_ = std::move(external_metadata_stack_.back());
-		external_metadata_stack_.pop_back();
+	if (!external_site_stack_.empty()) {
+		pending_site_ctx_ = external_site_stack_.back();
+		external_site_stack_.pop_back();
 	}
 }
 
@@ -4202,10 +4205,10 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 					}
 					value_ref.set_engine(left.get_engine());
 				}
-				script_value* element_ptr = &value_ref;
 				auto map_type_info = left.get_type_info();
 				type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-				script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_, value_type);
+				// Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
+				script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, engine_, value_type);
 				stack_.push_back(std::move(ref_value));
 			} else if (lvalue_shape) {
 				// Read: reference the existing entry, never insert
@@ -4217,7 +4220,7 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 					}
 					auto map_type_info = left.get_type_info();
 					type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-					stack_.push_back(script_value::make_reference(&value_ref, environment_, engine_, value_type));
+					stack_.push_back(script_value::make_map_entry_reference(left.get_map_storage(), right, engine_, value_type));
 				} else {
 					stack_.push_back(make_null());
 				}
@@ -4294,6 +4297,11 @@ checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instructio
 
 	auto refHolder = target_ref.get_reference_holder();
 	script_value* target_ptr = refHolder->target;
+	if (!target_ptr && refHolder->has_map_key) {
+		// Map-entry mode carries no raw target: re-resolve via find(key)
+		auto map_it = refHolder->container_map->find(*refHolder->cell());
+		if (map_it != refHolder->container_map->end()) { target_ptr = &map_it->second; }
+	}
 	if (!target_ptr) {
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 	}
@@ -4396,6 +4404,11 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 	}
 	auto refHolder = currentValue.get_reference_holder();
 	script_value* target_ptr = refHolder->target;
+	if (!target_ptr && refHolder->has_map_key) {
+		// Map-entry mode carries no raw target: re-resolve via find(key)
+		auto map_it = refHolder->container_map->find(*refHolder->cell());
+		if (map_it != refHolder->container_map->end()) { target_ptr = &map_it->second; }
+	}
 	if (!target_ptr) {
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 	}
@@ -4621,31 +4634,6 @@ checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction
 	return {};
 }
 
-void vm_backend::build_call_arg_metadata(frame& f, const call_site& site, size_t argc) {
-	for (size_t i = 0; i < argc; ++i) {
-		uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
-		if (symbol_id != UINT64_MAX) {
-			arg_ref_metadata meta(symbol_id, environment_.get());
-			const uint32_t slot = i < site.arg_slots.size() ? site.arg_slots[i] : k_invalid_u32;
-			if (slot != k_invalid_u32 && f.locals && f.locals->get_local(slot) != nullptr) {
-				meta.caller_locals = f.locals;
-				meta.slot = slot;
-			}
-			current_arg_metadata_.push_back(meta);
-		} else {
-			const uint32_t lvalue_node = i < site.arg_lvalue_nodes.size() ? site.arg_lvalue_nodes[i] : k_invalid_u32;
-			if (lvalue_node != k_invalid_u32 && f.code) {
-				arg_ref_metadata meta(UINT64_MAX, environment_.get());
-				meta.caller_locals = f.locals;
-				meta.lvalue_expr = static_cast<const expression*>(f.code->nodes[lvalue_node].get());
-				current_arg_metadata_.push_back(meta);
-			} else {
-				current_arg_metadata_.emplace_back();
-			}
-		}
-	}
-}
-
 checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
@@ -4660,19 +4648,11 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 		    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn &&
 		    argc == thunk->payload.fn->parameters.size()) {
 			const script_defined_function& fn = *thunk->payload.fn;
-			// Ref-free callees never read arg metadata, so skip the build entirely
-			const bool has_metadata = argc > 0 && fn.has_reference_parameters;
-			std::vector<arg_ref_metadata> saved_metadata;
-			if (has_metadata) {
-				saved_metadata = std::move(current_arg_metadata_);
-				current_arg_metadata_.clear();
-				current_arg_metadata_.reserve(argc);
-				build_call_arg_metadata(f, site, argc);
-			}
-			// push_script_frame owns saved_metadata restoration on every exit path
+			// Stateless ref binding: the call site travels as an argument; bind_parameters
+			// resolves ref args against the caller frame/env directly (no metadata channel)
 			try {
 				return push_script_frame(f, std::move(stack_[args_base - 1]), fn,
-				                         stack_, args_base, argc, saved_metadata, has_metadata);
+				                         stack_, args_base, argc, &site);
 			} catch (const script_exception& e) {
 				// pre-record throws leave callee+args on the stack; drop them like the
 				// pooled path already had (bind-time throws pop-core'd them already)
@@ -4710,15 +4690,6 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 
 	// Inline the invoke tail: an extra callee frame per script call would blow the
 	// native stack before JAI_MAX_CALL_DEPTH is reached in Debug builds
-	const bool has_args = argc > 0;
-	std::vector<arg_ref_metadata> saved_metadata;
-	if (has_args) {
-		saved_metadata = std::move(current_arg_metadata_);
-		current_arg_metadata_.clear();
-		current_arg_metadata_.reserve(argc);
-		build_call_arg_metadata(f, site, argc);
-	}
-
 	const script_function& func = callee.as_function();
 	const auto* thunk = func.target<script_callable_thunk>();
 	const bool direct = thunk && thunk->eng == engine_ &&
@@ -4726,23 +4697,25 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
-			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments));
+			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, f.locals, f.code));
 		} else {
+			// Opaque invoke: arm the pending call-site context for the callee's bind
+			pending_call_site saved_pending = pending_site_ctx_;
+			pending_site_ctx_ = arguments.empty() ? saved_pending
+			                                      : pending_call_site{&site, f.locals, f.code};
+			struct pending_restore {
+				vm_backend* vm; pending_call_site saved;
+				~pending_restore() { vm->pending_site_ctx_ = saved; }
+			} restore_pending{this, saved_pending};
 			callOutcome.emplace(func(arguments));
 		}
 	} catch (const script_exception& e) {
-		if (has_args) {
-			current_arg_metadata_ = std::move(saved_metadata);
-		}
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = e;
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
 		return {};
 	} catch (const std::exception& e) {
-		if (has_args) {
-			current_arg_metadata_ = std::move(saved_metadata);
-		}
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = script_exception(e.what());
 		is_unwinding_ = true;
@@ -4750,10 +4723,6 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 		return {};
 	}
 	checked_result<script_value>& result_checked = *callOutcome;
-
-	if (has_args) {
-		current_arg_metadata_ = std::move(saved_metadata);
-	}
 
 	if (!result_checked) {
 		return result_checked.error_value();
@@ -4774,22 +4743,11 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
 	const bool in_loop = direct && arguments.size() == thunk->payload.fn->parameters.size();
 
-	// Ref-free in-loop callees never read arg metadata, so skip the build entirely
-	const bool has_args = argc > 0 && !(in_loop && !thunk->payload.fn->has_reference_parameters);
-	std::vector<arg_ref_metadata> saved_metadata;
-	if (has_args) {
-		saved_metadata = std::move(current_arg_metadata_);
-		current_arg_metadata_.clear();
-		current_arg_metadata_.reserve(argc);
-		build_call_arg_metadata(f, site, argc);
-	}
-
 	if (in_loop) {
-		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes
-		// switch_to_. push_script_frame owns saved_metadata restoration on every exit.
+		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes switch_to_
 		try {
 			return push_script_frame(f, std::move(callee), *thunk->payload.fn,
-			                         arguments, 0, argc, saved_metadata, has_args);
+			                         arguments, 0, argc, &site);
 		} catch (const script_exception& e) {
 			active_exception_value_ = script_value(std::string(e.what()), engine_);
 			current_exception_ = e;
@@ -4807,23 +4765,25 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
-			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments));
+			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, f.locals, f.code));
 		} else {
+			// Opaque invoke: arm the pending call-site context for the callee's bind
+			pending_call_site saved_pending = pending_site_ctx_;
+			pending_site_ctx_ = arguments.empty() ? saved_pending
+			                                      : pending_call_site{&site, f.locals, f.code};
+			struct pending_restore {
+				vm_backend* vm; pending_call_site saved;
+				~pending_restore() { vm->pending_site_ctx_ = saved; }
+			} restore_pending{this, saved_pending};
 			callOutcome.emplace(func(arguments));
 		}
 	} catch (const script_exception& e) {
-		if (has_args) {
-			current_arg_metadata_ = std::move(saved_metadata);
-		}
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = e;
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
 		return {};
 	} catch (const std::exception& e) {
-		if (has_args) {
-			current_arg_metadata_ = std::move(saved_metadata);
-		}
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = script_exception(e.what());
 		is_unwinding_ = true;
@@ -4831,10 +4791,6 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 		return {};
 	}
 	checked_result<script_value>& result_checked = *callOutcome;
-
-	if (has_args) {
-		current_arg_metadata_ = std::move(saved_metadata);
-	}
 
 	if (!result_checked) {
 		return result_checked.error_value();
@@ -7464,9 +7420,9 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 		}
 		std::vector<script_value> args;
 		if (proto.is_reference) {
-			script_value* value_ptr = const_cast<script_value*>(&state.map_it->second);
 			args.push_back(state.map_it->first);
-			args.push_back(script_value::make_reference(value_ptr, environment_, engine_));
+			args.push_back(script_value::make_map_entry_reference(state.container->get_map_storage(),
+			                                                      state.map_it->first, engine_, nullptr));
 		} else {
 			args.push_back(state.map_it->first.clone());
 			args.push_back(state.map_it->second.clone());
@@ -8113,16 +8069,13 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
                                                    const script_defined_function& function,
                                                    const std::vector<script_value>& args,
                                                    size_t args_base, size_t argc,
-                                                   std::vector<arg_ref_metadata>& saved_metadata,
-                                                   bool has_args) {
+                                                   const call_site* site) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
 		return checked_result<void>(
 			make_error_code(runtime_error_code::max_recursion_depth),
 			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
-		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
 		return execution_limit_failure();
 	}
 	// In-loop dispatch invariant: results travel on stack_, never through return_value_
@@ -8132,7 +8085,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	// (chunk_for_body inserts, nothing erases), so the per-call shared_ptr pin was
 	// two redundant atomic refcounts per call
 	chunk* body_chunk;
-	try {
+	{
 		body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
 		if (!body_chunk) {
 			auto compiled = chunk_for_body(function.name, function.parameters, function.body, function.local_count);
@@ -8142,9 +8095,6 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 		if (call_records_top_ == call_records_.size()) {
 			call_records_.push_back(std::make_unique<call_record>());
 		}
-	} catch (...) {
-		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
-		throw;
 	}
 
 	call_record& rec = *call_records_[call_records_top_];
@@ -8158,10 +8108,6 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
-	if (has_args) {
-		std::swap(rec.saved_metadata, saved_metadata);   // swap reuses both capacities
-		rec.metadata_saved = true;
-	}
 	rec.locals.function_name = function.name;
 	rec.locals.reserve_locals(std::max(function.local_count, body_chunk->local_count));
 	// Compile-time lazy elision: plain callees whose bodies provably never touch the
@@ -8183,10 +8129,6 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 			setup_callee_env(function, rec.locals, rec.prev_env);
 		}
 	} catch (...) {
-		if (rec.metadata_saved) {
-			current_arg_metadata_ = std::move(rec.saved_metadata);
-			rec.metadata_saved = false;
-		}
 		rec.callee_pin = make_null();
 		rec.return_type = nullptr;
 		environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
@@ -8212,7 +8154,8 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(function.parameters, args, args_base, argc, rec.locals, *rec.f.code, rec.prev_env);
+		bound = bind_parameters(function.parameters, args, args_base, argc, rec.locals, *rec.f.code,
+		                        rec.prev_env, site, caller.locals, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -8236,19 +8179,10 @@ checked_result<void> vm_backend::enter_script_method(frame& caller, script_value
                                                      script_value&& receiver,
                                                      const std::vector<script_value>& arguments,
                                                      const call_site& site) {
-	const size_t argc = arguments.size();
-	const bool has_args = argc > 0;
-	std::vector<arg_ref_metadata> saved_metadata;
-	if (has_args) {
-		saved_metadata = std::move(current_arg_metadata_);
-		current_arg_metadata_.clear();
-		current_arg_metadata_.reserve(argc);
-		build_call_arg_metadata(caller, site, argc);
-	}
-	// push_method_frame owns saved_metadata restoration on every exit path
+	// Stateless ref binding: the call site travels as an argument
 	try {
 		return push_method_frame(caller, std::move(method_val), dispatch, ast, std::move(receiver),
-		                         arguments, saved_metadata, has_args);
+		                         arguments, &site);
 	} catch (const script_exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = e;
@@ -8269,23 +8203,20 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
                                                    const std::shared_ptr<function_decl>& ast,
                                                    script_value&& receiver,
                                                    const std::vector<script_value>& arguments,
-                                                   std::vector<arg_ref_metadata>& saved_metadata,
-                                                   bool has_args) {
+                                                   const call_site* site) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
 		return checked_result<void>(
 			make_error_code(runtime_error_code::max_recursion_depth),
 			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
-		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
 		return execution_limit_failure();
 	}
 	assert(!has_return_value_);
 
 	// Raw chunk*: pinned for the backend's lifetime by chunk_cache_ (see push_script_frame)
 	chunk* body_chunk;
-	try {
+	{
 		if (dispatch.body_cache_key == ast->body.get()) {
 			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
 		} else {
@@ -8297,9 +8228,6 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		if (call_records_top_ == call_records_.size()) {
 			call_records_.push_back(std::make_unique<call_record>());
 		}
-	} catch (...) {
-		if (has_args) { current_arg_metadata_ = std::move(saved_metadata); }
-		throw;
 	}
 
 	call_record& rec = *call_records_[call_records_top_];
@@ -8315,10 +8243,6 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
-	if (has_args) {
-		std::swap(rec.saved_metadata, saved_metadata);
-		rec.metadata_saved = true;
-	}
 	rec.locals.function_name = ast->name;
 	// Full-slot reserve: frame slot storage must NEVER reallocate mid-frame (counted-for
 	// state and references cache raw pointers into it)
@@ -8332,10 +8256,6 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		rec.locals.closure_env = dispatch.definition_env;
 		environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver));
 	} catch (...) {
-		if (rec.metadata_saved) {
-			current_arg_metadata_ = std::move(rec.saved_metadata);
-			rec.metadata_saved = false;
-		}
 		rec.callee_pin = make_null();
 		rec.return_type = nullptr;
 		rec.ast_pin.reset();
@@ -8358,7 +8278,8 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.locals, *rec.f.code, rec.prev_env);
+		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.locals, *rec.f.code,
+		                        rec.prev_env, site, caller.locals, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -8416,7 +8337,6 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		rec.f.entry_env = nullptr;
 	}
 	rec.locals.locals.clear();   // destroy callee locals now, keep capacity
-	rec.locals.ref_anchor.reset();   // expire references into this frame's slots
 	rec.locals.closure_env = nullptr;
 	rec.locals.this_object_ptr.reset();
 	rec.locals.is_method = false;
@@ -8427,10 +8347,6 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	rec.ast_pin.reset();
 	rec.method_result_anchor = false;
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
-	if (rec.metadata_saved) {
-		current_arg_metadata_ = std::move(rec.saved_metadata);
-		rec.metadata_saved = false;
-	}
 	--current_call_depth_;
 	frames_.pop_back();
 	--call_records_top_;
@@ -8603,11 +8519,36 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 	return result;
 }
 
+checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage, call_frame& locals, size_t param_slot) {
+	if (storage.is_reference()) {
+		if (!storage.get_reference_holder()) {
+			return checked_result<void>(
+				make_error_code(runtime_error_code::invalid_reference),
+				"Reference target is null");
+		}
+		// Share the holder: zero alloc; cells alias the same box, element/field refs
+		// keep their container/instance re-resolution
+		locals.set_local(param_slot, script_value(storage));
+		return {};
+	}
+	// Box on demand: the variable predates its escape mark (cross-execute global, C++
+	// define, dynamic shape). Its storage becomes the cell - reads/stores already handle
+	// the boxed form. Cached counted-for pointers may alias the old payload bytes, so
+	// demote active fast loops to their generic paths (cold path: first ref bind only).
+	script_value inner = std::move(storage);
+	storage = script_value::make_cell_reference(std::move(inner), engine_);
+	for (auto& cs : cfor_states_) { cs.fast = false; }
+	locals.set_local(param_slot, script_value(storage));
+	return {};
+}
+
 checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const std::vector<script_value>& args,
                                                  size_t args_base, size_t argc,
                                                  call_frame& locals, chunk& body_chunk,
-                                                 const std::shared_ptr<environment>& caller_env) {
+                                                 const std::shared_ptr<environment>& caller_env,
+                                                 const call_site* site, call_frame* caller_locals,
+                                                 chunk* caller_code) {
 	for (size_t i = 0; i < parameters.size(); ++i) {
 		const auto& param = parameters[i];
 
@@ -8653,39 +8594,30 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 		const auto& arg = args[args_base + i];
 
 		if (param.is_reference) {
-			if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
-				const arg_ref_metadata& meta = current_arg_metadata_[i];
-				auto symbol_id = meta.symbol_id;
-				auto env = meta.env;
+			if (site) {
+				// Stateless ref binding from the compile-time call site: identifier args
+				// share the caller storage's cell handle (boxing on demand when the
+				// variable predates its escape mark); field/subscript lvalue args resolve
+				// to owner-pinned identity refs via the shared kernel.
+				const uint64_t symbol_id = i < site->arg_symbols.size() ? site->arg_symbols[i] : UINT64_MAX;
+				const uint32_t slot = i < site->arg_slots.size() ? site->arg_slots[i] : k_invalid_u32;
 
-				// Caller frame-slot local: bind straight to the slot storage, anchored to
-				// the caller frame's lifetime (env lookup can't see slot locals and would
+				// Caller frame-slot local (env lookup can't see slot locals and would
 				// walk to an unrelated same-named outer variable)
-				if (meta.caller_locals && meta.slot != SIZE_MAX) {
-					script_value* slotPtr = meta.caller_locals->get_local(meta.slot);
-					if (slotPtr) {
-						if (slotPtr->is_reference()) {
-							if (!slotPtr->get_reference_holder()) {
-								return checked_result<void>(
-									make_error_code(runtime_error_code::invalid_reference),
-									"Reference target is null");
-							}
-							// Share the holder: zero alloc, and element refs keep their
-							// container re-resolution instead of a stale flattened pointer
-							locals.set_local(param.slot_index, script_value(*slotPtr));
-						} else {
-							locals.set_local(param.slot_index,
-								script_value::make_reference(slotPtr, meta.caller_locals->ensure_ref_anchor(symbolizer_)));
-						}
+				if (symbol_id != UINT64_MAX && slot != k_invalid_u32 && caller_locals) {
+					if (script_value* slotPtr = caller_locals->get_local(slot)) {
+						JAISCRIPT_TRY(bind_reference_to_storage(*slotPtr, locals, param.slot_index));
 						continue;
 					}
 				}
 
 				// Field/subscript/chain lvalue argument: resolve through the shared
 				// helper into an owner-pinned reference (Tier 1)
-				if (meta.lvalue_expr) {
-					auto resolved = detail::resolve_ref_lvalue(meta.lvalue_expr, meta.caller_locals,
-					                                           env, caller_env, engine_, symbolizer_);
+				const uint32_t lvalue_node = i < site->arg_lvalue_nodes.size() ? site->arg_lvalue_nodes[i] : k_invalid_u32;
+				if (lvalue_node != k_invalid_u32 && caller_code) {
+					auto resolved = detail::resolve_ref_lvalue(
+						static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
+						caller_locals, caller_env.get(), caller_env, engine_, symbolizer_);
 					if (!resolved) {
 						return resolved.error_value();
 					}
@@ -8693,53 +8625,14 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 					continue;
 				}
 
-				if (symbol_id != UINT64_MAX && env != nullptr) {
-					script_value* argPtr = env->get_value_ptr(symbol_id);
+				if (symbol_id != UINT64_MAX && caller_env) {
+					script_value* argPtr = caller_env->get_value_ptr(symbol_id);
 					if (!argPtr) {
 						return checked_result<void>(
 							make_error_code(runtime_error_code::undefined_variable),
 							"Cannot take reference of undefined variable");
 					}
-
-					if (argPtr->is_reference()) {
-						if (!argPtr->get_reference_holder()) {
-							return checked_result<void>(
-								make_error_code(runtime_error_code::invalid_reference),
-								"Reference target is null");
-						}
-						locals.set_local(param.slot_index, script_value(*argPtr));   // share the holder
-					} else {
-						// Recover the env's shared_ptr: the caller env chain covers block,
-						// method and elided-frame scopes (the metadata env is the caller's
-						// environment at the call op); frames and global remain fallbacks
-						std::shared_ptr<environment> env_shared;
-						for (auto p = caller_env; p; p = p->get_parent()) {
-							if (p.get() == env) {
-								env_shared = p;
-								break;
-							}
-						}
-						if (!env_shared && env == environment_.get()) {
-							env_shared = environment_;
-						}
-						if (!env_shared) {
-							for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
-								frame* fr = *it;
-								if (fr->locals && fr->locals->closure_env.get() == env) {
-									env_shared = fr->locals->closure_env;
-									break;
-								}
-							}
-							if (!env_shared && engine_) {
-								auto global_env = engine_->get_global_environment();
-								if (global_env.get() == env) {
-									env_shared = global_env;
-								}
-							}
-						}
-						script_value refValue = script_value::make_reference(argPtr, env_shared);
-						locals.set_local(param.slot_index, std::move(refValue));
-					}
+					JAISCRIPT_TRY(bind_reference_to_storage(*argPtr, locals, param.slot_index));
 				} else {
 					return checked_result<void>(
 						make_error_code(runtime_error_code::invalid_reference),
@@ -8827,7 +8720,16 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 	return {};
 }
 
-checked_result<script_value> vm_backend::call_script_function(const script_defined_function& function, const std::vector<script_value>& args) {
+checked_result<script_value> vm_backend::call_script_function(const script_defined_function& function, const std::vector<script_value>& args,
+                                                              const call_site* site, call_frame* caller_locals, chunk* caller_code) {
+	// Opaque entry (bound methods, constructors, function values): the arming invoke
+	// left the call-site context pending - consume it exactly once
+	if (!site) {
+		site = pending_site_ctx_.site;
+		caller_locals = pending_site_ctx_.caller_locals;
+		caller_code = pending_site_ctx_.caller_code;
+	}
+	pending_site_ctx_ = {};
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
 		return checked_result<script_value>(
 			make_error_code(runtime_error_code::max_recursion_depth),
@@ -8914,7 +8816,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	};
 
 	{
-		auto bind_result = bind_parameters(function.parameters, args, 0, args.size(), locals, *body_chunk, previousEnv);
+		auto bind_result = bind_parameters(function.parameters, args, 0, args.size(), locals, *body_chunk,
+	                                   previousEnv, site, caller_locals, caller_code);
 		if (!bind_result) {
 			cleanup();
 			return bind_result.error_value();

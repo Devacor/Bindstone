@@ -192,6 +192,11 @@ namespace jai {
         // cell keeps the value alive for as long as any handle exists (escape-legal semantics).
         // `boxed` must not itself be a reference (callers deref first).
         static script_value make_cell_reference(script_value&& boxed, engine* eng);
+        // Map-entry reference: pins the owning map (strong) and re-resolves find(key) on
+        // every deref/assign-through - an erased entry errors instead of dangling, and a
+        // reference into a temporary map keeps the map alive.
+        static script_value make_map_entry_reference(const strong_ptr<std::map<script_value, script_value>>& map_storage,
+                                                     const script_value& key, engine* eng, type_info_ptr value_type);
         static script_value make_function(const script_function& func, engine* eng);
 
         // Mints an unregistered object holder wrapping a coroutine_handle; bypasses the
@@ -1592,17 +1597,23 @@ namespace jai {
             // storage - one make_strong allocation is the whole box. Escape-marked variables
             // store a cell reference from declaration, so binding/aliasing is a handle copy
             // and an escaped reference keeps its target alive instead of dangling/erroring.
-            // Mutually exclusive with the container/instance modes below.
+            //
+            // MAP-ENTRY mode: container_map pins the owning map (strong) and the inline
+            // storage holds the KEY; deref/assign-through re-resolve via find(key) each
+            // time, so an erased entry errors cleanly and a reference into a temporary
+            // map keeps the map alive. Modes are mutually exclusive.
             static constexpr size_t cell_storage_size = 32;   // == sizeof(script_value), gated in value.cpp
             alignas(8) unsigned char cell_storage[cell_storage_size];
-            bool has_cell = false;
+            bool has_cell = false;      // inline storage holds the OWNED value
+            bool has_map_key = false;   // inline storage holds the map KEY (container_map set)
+            strong_ptr<std::map<script_value, script_value>> container_map;
             script_value* cell() noexcept { return reinterpret_cast<script_value*>(cell_storage); }
             const script_value* cell() const noexcept { return reinterpret_cast<const script_value*>(cell_storage); }
 
             reference_holder() = default;
             reference_holder(const reference_holder&) = delete;
             reference_holder& operator=(const reference_holder&) = delete;
-            ~reference_holder();   // destroys the cell value (value.cpp: script_value complete there)
+            ~reference_holder();   // destroys the inline value/key (value.cpp: script_value complete there)
 
             // For references into a std::vector element (range-for `auto&`, `arr[i]`
             // lvalue): hold the OWNING container + index instead of a raw element

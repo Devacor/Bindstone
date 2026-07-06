@@ -32,6 +32,8 @@ namespace jai::vm {
         checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override;
 
         script_value get_variable(const std::string& name) const override;
+        void push_external_call_scope() override;
+        void pop_external_call_scope() override;
         bool has_variable(const std::string& name) const override;
 
         void push_scope() override;
@@ -54,8 +56,6 @@ namespace jai::vm {
         std::vector<stack_frame> last_stack_trace() const override { return captured_trace_; }
         std::string format_stack_trace() const override;
 
-        void push_external_call_scope() override;
-        void pop_external_call_scope() override;
 
         checked_result<script_value> resume_coroutine(coroutine_handle& handle) override;
 
@@ -90,8 +90,6 @@ namespace jai::vm {
             bool method_result_anchor = false;         // method frames: replicate make_bound_method's keep-alive fix-up
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
-            std::vector<arg_ref_metadata> saved_metadata;
-            bool metadata_saved = false;
             bool env_lazy = false;
             size_t try_base = 0;
             size_t iter_base = 0;
@@ -100,6 +98,19 @@ namespace jai::vm {
         std::vector<std::unique_ptr<call_record>> call_records_;  // grows, never shrinks mid-run
         size_t call_records_top_ = 0;                  // records [0, top) are live
         frame* switch_to_ = nullptr;                   // set by the push path, consumed by op_call's case
+
+        // Pending call-site context armed around OPAQUE invokes (std::function values:
+        // bound methods, constructors, function values) and consumed once by the next
+        // call_script_function entered - ref params bind against the caller's variables
+        // through it. Save/restored as a single value by nested opaque calls; shelved
+        // across external (C++) invocations by the external_call_guard overrides.
+        struct pending_call_site {
+            const call_site* site = nullptr;
+            call_frame* caller_locals = nullptr;
+            chunk* caller_code = nullptr;
+        };
+        pending_call_site pending_site_ctx_{};
+        std::vector<pending_call_site> external_site_stack_;
 
         string_symbolizer* symbolizer_;
         std::shared_ptr<environment> environment_;
@@ -177,8 +188,6 @@ namespace jai::vm {
         coroutine_handle* active_coroutine_ = nullptr;
         bool yielding_ = false;
 
-        std::vector<arg_ref_metadata> current_arg_metadata_;
-        std::vector<std::vector<arg_ref_metadata>> external_metadata_stack_;
 
         bool has_custom_numeric_ops_ = false;
         std::function<checked_result<script_value>(const std::vector<script_value>&)> subscript_resolver_;
@@ -244,8 +253,7 @@ namespace jai::vm {
                                                const script_defined_function& function,
                                                const std::vector<script_value>& args,
                                                size_t args_base, size_t argc,
-                                               std::vector<arg_ref_metadata>& saved_metadata,
-                                               bool has_args);
+                                               const call_site* site);
         // Method-call flattening: a script-class instance method enters the dispatch loop
         // directly (no bound-method mint, no arg re-copies, no native run() recursion)
         checked_result<void> enter_script_method(frame& caller, script_value&& method_val,
@@ -259,8 +267,7 @@ namespace jai::vm {
                                                const std::shared_ptr<function_decl>& ast,
                                                script_value&& receiver,
                                                const std::vector<script_value>& arguments,
-                                               std::vector<arg_ref_metadata>& saved_metadata,
-                                               bool has_args);
+                                               const call_site* site);
         void anchor_method_result(script_value& result, script_value& receiver);
         void pop_script_frame_core(call_record& rec);
         checked_result<void> return_from_script_frame(frame*& fp, const vm_instruction& ins);
@@ -272,7 +279,10 @@ namespace jai::vm {
         void pop_records_to(size_t records_base, frame*& fp);
         script_value run_program(std::shared_ptr<chunk> program);
         checked_result<script_value> call_script_function(const script_defined_function& function,
-                                                          const std::vector<script_value>& args);
+                                                          const std::vector<script_value>& args,
+                                                          const call_site* site = nullptr,
+                                                          call_frame* caller_locals = nullptr,
+                                                          chunk* caller_code = nullptr);
         // Shared between call_script_function and the in-loop call path (single source of truth)
         void setup_callee_env(const script_defined_function& function, call_frame& locals,
                               const std::shared_ptr<environment>& prev_env);
@@ -280,10 +290,13 @@ namespace jai::vm {
                                              const std::vector<script_value>& args,
                                              size_t args_base, size_t argc,
                                              call_frame& locals, chunk& body_chunk,
-                                             const std::shared_ptr<environment>& caller_env);
-        // Fills current_arg_metadata_ (already cleared/reserved) from the call site,
-        // recording caller frame-slot coordinates for bare-identifier slot locals
-        void build_call_arg_metadata(frame& f, const call_site& site, size_t argc);
+                                             const std::shared_ptr<environment>& caller_env,
+                                             const call_site* site, call_frame* caller_locals,
+                                             chunk* caller_code);
+        // Ref-param bind against the caller's variable storage: shares an existing
+        // reference holder (cells alias), or boxes the value on demand (cell) when the
+        // variable predates its escape mark
+        checked_result<void> bind_reference_to_storage(script_value& storage, call_frame& locals, size_t param_slot);
         void clear_this_on_frame_exit(const std::shared_ptr<environment>& entry_env);
         script_value implicit_this_result(call_frame& locals);
         script_value implicit_result_for_record(call_record& rec);

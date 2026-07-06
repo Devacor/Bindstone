@@ -41,16 +41,32 @@ The 2026-07 failure mode: method frames compiled/reserved with local_count 0, so
 memory (demoreel finding 2 — silent wrong loop counts, Release; delayed detonation shapes).
 Never add a frame-creation path that skips the full-slot reserve.
 
-## 3. Ref-anchor environments are never pooled/reused
+## 3. Reference cells (the anchor rule's replacement, 2026-07)
 
-References carry `weak_ptr<environment> sourceEnv` (`reference_holder`, value.hpp:1581-1583).
-A frame's `ref_anchor` (environment.hpp:304-314) is a liveness token created on demand
-(`ensure_ref_anchor`) for refs bound to that frame's slot storage. Call *records* are pooled
-and recycled — the anchor is not: it is `reset()` when the record is recycled
-(vm_backend.cpp:7838, "expire references into this frame's slots"), so an escaped reference
-expires cleanly instead of dangling into reused slot storage. Never cache, share, or
-re-arm a ref_anchor across frames/recyclings; a reused anchor keeps stale refs "alive"
-pointing at someone else's locals.
+The old rule ("ref-anchor environments are never pooled/reused") is RETIRED along with
+the metadata/anchor machinery. References now come in four holder modes
+(`reference_holder`, value.hpp): CELL (the holder OWNS the value in inline storage —
+Lua upvalue), vector element (container+index re-resolve), instance field (owner+id
+re-resolve), and map entry (pinned map + key re-resolve). Rules:
+
+- Cells are minted ONLY by `make_cell_reference` (make_strong single allocation,
+  memory_cap-charged); the boxed value is never itself a reference. Escape-marked
+  declarations (`parser.cpp` ref_escape_marker) box at decl/bind; unmarked variables
+  bind by boxing ON DEMAND at the first ref bind (`bind_reference_to_storage`), which
+  must demote active counted-for fast states (they cache raw payload pointers).
+- Escape is LEGAL: a reference returned, stored, captured, or held across yields keeps
+  its target alive through the holder. Never reintroduce a raw-pointer + weak-env
+  reference to frame slots or env storage (`sourceEnv` survives only in the residual
+  mode-1 sites and dies with them).
+- Reference binding is STATELESS: the call site travels as an argument
+  (vm `bind_parameters(site, caller_locals, caller_code)`; interpreter
+  `call_site_context`). Opaque `std::function` boundaries hand it over via a single
+  consumed-once pending pointer (`pending_site_ctx_` / `pending_call_ctx_`), shelved
+  across external invocations by `external_call_guard`. Never add a second stateful
+  metadata channel.
+- Direct assignment to an escape-boxed variable writes the cell WITH the variable's
+  typed-store enforcement (`names_value_decl` / `store_flag_ref_alias` pick the
+  semantics); writes through ref aliases keep the unconstrained store-through rules.
 
 ## 4. S8 bound-operand prologue (TYPEID_CPP_BOUND = 14)
 

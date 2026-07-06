@@ -508,6 +508,41 @@ public:
             check_eq(result.as<std::string>(), "hello`world");
         });
 
+        // Splice depth is tracked on LEXED brace tokens (2026-07): whitespace before a
+        // brace used to skip the depth bookkeeping - `${ x }` was a parse error and a
+        // space-prefixed '{' swallowed the splice terminator (runaway template scan).
+        test("template_string_splice_whitespace", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var x = 5; `${ x }`;)").as<std::string>(), "5");
+            check_eq(engine->execute(R"(var y = 6; `${y }`;)").as<std::string>(), "6");
+            check_eq(engine->execute(R"(var z = 7; `${ z}`;)").as<std::string>(), "7");
+        });
+
+        test("template_string_splice_map_literal", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(`${ {"k": 1}["k"] }`;)").as<std::string>(), "1");
+            check_eq(engine->execute(R"(`${ {"a": {"b": 2}}["a"]["b"] }`;)").as<std::string>(), "2");
+        });
+
+        test("template_string_splice_no_runaway", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            // A following backtick string must stay a SEPARATE template (the broken
+            // depth count used to swallow the terminator and chain into it)
+            auto result = engine->execute(R"(var a = `${ {"k": 9}["k"] }`; var b = `ok`; a + b;)");
+            check_eq(result.as<std::string>(), "9ok");
+        });
+
+        test("map_literal_postfix_index", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            // Map literals are primaries now: postfix applies directly
+            check_eq((int64_t)1, engine->execute(R"({"k": 1}["k"];)").as_int());
+            check_eq((int64_t)2, engine->execute(R"({"a": 1, "b": 2}.size();)").as_int());
+        });
+
         test("template_string_escape_dollar", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);

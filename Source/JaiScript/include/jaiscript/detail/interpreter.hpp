@@ -407,22 +407,17 @@ namespace jai {
 
         string_symbolizer* get_string_symbolizer() const { return string_symbolizer_; }
         
-        // Access to current argument metadata for reference parameter support
-        // (raw pointers/indices - safe since metadata only lives during call)
-        const std::vector<arg_ref_metadata>& get_current_arg_metadata() const {
-            return current_arg_metadata_;
-        }
-
-        // External (C++) invocations of script functions must not see the metadata of
-        // whatever script call is in flight - reference params would bind its variables.
+        // External (C++) invocations of script functions must not see the pending
+        // call-site context of whatever script call is in flight - reference params
+        // would bind its variables. A one-pointer shelf replaces the old metadata stack.
         void push_external_call_scope() {
-            external_metadata_stack_.push_back(std::move(current_arg_metadata_));
-            current_arg_metadata_.clear();
+            external_ctx_stack_.push_back(pending_call_ctx_);
+            pending_call_ctx_ = nullptr;
         }
         void pop_external_call_scope() {
-            if (!external_metadata_stack_.empty()) {
-                current_arg_metadata_ = std::move(external_metadata_stack_.back());
-                external_metadata_stack_.pop_back();
+            if (!external_ctx_stack_.empty()) {
+                pending_call_ctx_ = external_ctx_stack_.back();
+                external_ctx_stack_.pop_back();
             }
         }
 
@@ -536,12 +531,11 @@ namespace jai {
         // Current environment for variable storage
         std::shared_ptr<environment> environment_;
 
-        // Current argument metadata for reference parameter passing
-        // Uses raw pointers/indices - safe since metadata only lives during call scope
-        std::vector<arg_ref_metadata> current_arg_metadata_;
-
-        // Saved metadata of in-flight script calls, shelved across external (C++) invocations
-        std::vector<std::vector<arg_ref_metadata>> external_metadata_stack_;
+        // Pending call-site context (set by visit_call around the invoke, consumed by
+        // the next call_function entered): ref params bind against the caller's
+        // variables through it. Save/restored as a single pointer by nested calls.
+        const detail::call_site_context* pending_call_ctx_ = nullptr;
+        std::vector<const detail::call_site_context*> external_ctx_stack_;
         
         // Optimized stack for expression evaluation results
         class script_valueStack {
@@ -993,10 +987,14 @@ namespace jai {
         // Function call helpers
         // Returns checked_result - exceptions only thrown at execute() boundary
         checked_result<script_value> call_function(const script_defined_function& function, const std::vector<script_value>& args);
-        // Reference-parameter binding from arg metadata, factored out of call_function so
-        // its locals don't sit in the per-recursion-level frame (Debug stack ceiling)
+        // Stateless reference-parameter binding from the call-site arg expression,
+        // factored out of call_function so its locals don't sit in the
+        // per-recursion-level frame (Debug stack ceiling)
         checked_result<void> bind_reference_parameter(const parameter& param, size_t frame_index,
-                                                      size_t arg_index, const std::shared_ptr<environment>& caller_env);
+                                                      const expression* argExpr,
+                                                      const std::shared_ptr<environment>& caller_env);
+        // Share-or-box against the caller's variable storage (cell model)
+        checked_result<void> bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot);
         void validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args);
 
         // Type conversion helpers (constructor-based conversions)

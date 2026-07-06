@@ -1846,45 +1846,11 @@ void engine::pop_external_call_scope() {
 }
 
 script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {
-    // Vestigial public API with zero callers: the one deliberate interpreter_backend
-    // dynamic_cast left outside interpreter-owned code — not worth a seam method until
-    // a non-interpreter backend needs arg-metadata access.
-    auto* interpreter_backend_ptr = dynamic_cast<interpreter_backend*>(impl->backend.get());
-    if (!interpreter_backend_ptr) {
-        return fallback; // Not using interpreter backend, use fallback
-    }
-
-    // Get the interpreter instance from the backend
-    interpreter* current_interpreter = interpreter_backend_ptr->get_interpreter();
-    if (!current_interpreter) {
-        return fallback; // No interpreter available, use fallback
-    }
-
-    // Access the current argument metadata
-    const auto& metadata = current_interpreter->get_current_arg_metadata();
-    if (arg_index >= metadata.size()) {
-        return fallback; // Index out of bounds, use fallback
-    }
-    
-    auto symbol_id = metadata[arg_index].symbol_id;
-    auto* env = metadata[arg_index].env;
-    if (symbol_id == UINT64_MAX || !env) {
-        return fallback; // No valid metadata for this argument, use fallback
-    }
-    
-    // Try to get pointer to the original variable (env is raw pointer from metadata)
-    script_value* target = env->get_value_ptr(symbol_id);
-    if (!target) {
-        return fallback; // Variable not found, use fallback
-    }
-
-    // Create reference wrapper to original variable
-    // Get shared_ptr from interpreter if the raw pointer matches current environment
-    std::shared_ptr<environment> env_shared;
-    if (env == current_interpreter->get_current_environment().get()) {
-        env_shared = current_interpreter->get_current_environment();
-    }
-    return script_value::make_reference(target, env_shared);
+    // Vestigial public API with zero callers. The arg-metadata channel it consulted was
+    // retired by the cell reference model (reference binding is stateless: the call site
+    // travels as an argument to the bind), so this now always answers the fallback.
+    (void)arg_index;
+    return fallback;
 }
 
 conversions::conversion_manager engine::get_conversion_manager() {

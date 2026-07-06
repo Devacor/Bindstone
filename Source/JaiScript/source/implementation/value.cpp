@@ -48,9 +48,10 @@ script_value::script_value(script_bool b, engine* eng) : type_info_(nullptr), en
 
 
 script_value::reference_holder::~reference_holder() {
-    if (has_cell) {
+    if (has_cell || has_map_key) {
         cell()->~script_value();
         has_cell = false;
+        has_map_key = false;
     }
 }
 
@@ -67,6 +68,27 @@ script_value script_value::make_cell_reference(script_value&& boxed, engine* eng
     auto ref = make_strong<reference_holder>();
     new (ref->cell_storage) script_value(std::move(boxed));
     ref->has_cell = true;
+    v.storage_ = ref;
+    return v;
+}
+
+script_value script_value::make_map_entry_reference(const strong_ptr<std::map<script_value, script_value>>& map_storage,
+                                                    const script_value& key, engine* eng, type_info_ptr value_type) {
+    if (!map_storage) {
+        throw runtime_error("Cannot create reference to null map");
+    }
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    script_value v(std::monostate{}, eng);
+    auto it = map_storage->find(key);
+    v.type_info_ = eng->get_type_info_reference(it != map_storage->end() ? it->second.get_type_info() : nullptr);
+    eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
+    auto ref = make_strong<reference_holder>();
+    new (ref->cell_storage) script_value(key.is_reference() ? key.deref() : key);
+    ref->has_map_key = true;
+    ref->container_map = map_storage;
+    ref->container_element_type = value_type;
     v.storage_ = ref;
     return v;
 }
@@ -584,6 +606,14 @@ const script_value& script_value::deref() const {
             // Cell reference: the holder owns the value - always alive, no liveness check
             return refHolder->cell()->deref();
         }
+        if (refHolder->has_map_key) {
+            // Map-entry reference: re-resolve via find(key) (pinned map, erase-safe)
+            auto it = refHolder->container_map->find(*refHolder->cell());
+            if (it == refHolder->container_map->end()) {
+                throw runtime_error("Reference to a removed map entry");
+            }
+            return it->second.deref();
+        }
         if (refHolder->container) {
             // Vector-element reference: recompute the element address from container+index
             // each time so it survives reallocation (push), and bounds-check so a shrink
@@ -627,6 +657,13 @@ script_value& script_value::deref() {
         if (refHolder->has_cell) {
             return refHolder->cell()->deref();
         }
+        if (refHolder->has_map_key) {
+            auto it = refHolder->container_map->find(*refHolder->cell());
+            if (it == refHolder->container_map->end()) {
+                throw runtime_error("Reference to a removed map entry");
+            }
+            return it->second.deref();
+        }
         if (refHolder->container) {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Reference to a removed array element");
@@ -660,6 +697,14 @@ void script_value::assign_through(const script_value& value) {
         }
         if (refHolder->has_cell) {
             *refHolder->cell() = value;
+            return;
+        }
+        if (refHolder->has_map_key) {
+            auto it = refHolder->container_map->find(*refHolder->cell());
+            if (it == refHolder->container_map->end()) {
+                throw runtime_error("Assignment to a removed map entry");
+            }
+            it->second = value;
             return;
         }
         if (refHolder->container) {
@@ -742,6 +787,14 @@ void script_value::assign_through(script_value&& value) {
         }
         if (refHolder->has_cell) {
             *refHolder->cell() = std::move(value);
+            return;
+        }
+        if (refHolder->has_map_key) {
+            auto it = refHolder->container_map->find(*refHolder->cell());
+            if (it == refHolder->container_map->end()) {
+                throw runtime_error("Assignment to a removed map entry");
+            }
+            it->second = std::move(value);
             return;
         }
         if (refHolder->container) {

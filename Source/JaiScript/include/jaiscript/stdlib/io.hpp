@@ -124,50 +124,6 @@ namespace stdlib {
         return result;
     }
     
-    inline std::string process_single_arg_escapes(const std::string& input) {
-        std::string result;
-        size_t pos = 0;
-        
-        while (pos < input.length()) {
-            size_t next_open = input.find('{', pos);
-            size_t next_close = input.find('}', pos);
-            
-            // Handle }} escaping
-            if (next_close != std::string::npos && 
-                (next_open == std::string::npos || next_close < next_open)) {
-                result += input.substr(pos, next_close - pos);
-                if (next_close + 1 < input.length() && input[next_close + 1] == '}') {
-                    result += '}';
-                    pos = next_close + 2;
-                    continue;
-                } else {
-                    result += '}';
-                    pos = next_close + 1;
-                    continue;
-                }
-            }
-            
-            // Handle {{ escaping
-            if (next_open != std::string::npos) {
-                result += input.substr(pos, next_open - pos);
-                if (next_open + 1 < input.length() && input[next_open + 1] == '{') {
-                    result += '{';
-                    pos = next_open + 2;
-                    continue;
-                } else {
-                    result += '{';
-                    pos = next_open + 1;
-                    continue;
-                }
-            }
-            
-            result += input.substr(pos);
-            break;
-        }
-        
-        return result;
-    }
-
     // Special types for controlling print behavior
     struct skip_newline_t {};
     struct skip_flush_t {};
@@ -243,6 +199,9 @@ namespace stdlib {
             }
 
             if (effective_args == 1) {
+                // Single-arg print is VERBATIM passthrough by design (Dev ruling 2026-07):
+                // {{ }} escapes only apply when format substitution runs — no reason to
+                // alter the string when there is nothing to substitute
                 out << args[0].to_string();
                 if (should_newline) {
                     out << std::endl;

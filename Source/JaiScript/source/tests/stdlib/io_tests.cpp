@@ -45,6 +45,27 @@ public:
             check(output.find("Value: 42") != std::string::npos);
         });
 
+        // RULED (2026-07): single-arg print is VERBATIM passthrough — {{ }} escape
+        // processing only runs when format substitution runs (format path with args).
+        // print is one shared registry entry, so both backends share this behavior.
+        test("print_single_arg_verbatim_braces", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto capture = std::make_shared<std::ostringstream>();
+            engine->set_output_stream(capture);
+            engine->execute(R"(print("{{x}}");)");
+            check_eq(std::string("{{x}}\n"), capture->str(), "single-arg print prints braces raw");
+        });
+
+        test("print_format_path_processes_escapes", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto capture = std::make_shared<std::ostringstream>();
+            engine->set_output_stream(capture);
+            engine->execute(R"(print("{{}} {0}", 7);)");
+            check_eq(std::string("{} 7\n"), capture->str(), "format path processes {{ }} escapes");
+        });
+
         test("output_capture_multiple_args", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);

@@ -201,9 +201,7 @@ private:
 		}
 	}
 
-	void animateDeathAndRemove() {
-		owner()->removeFromParent();
-	}
+	void animateDeathAndRemove(); // in battleEffect.cpp: fires the script death hook (needs GameInstance)
 
 	virtual void updateImplementation(double a_delta) override;
 };
@@ -229,9 +227,7 @@ protected:
 	}
 
 private:
-	void animateExplodeAndRemove() {
-		owner()->removeFromParent();
-	}
+	void animateExplodeAndRemove(); // in battleEffect.cpp: fires the script death hook (needs GameInstance)
 
 	void onNetworkSynchronize();
 

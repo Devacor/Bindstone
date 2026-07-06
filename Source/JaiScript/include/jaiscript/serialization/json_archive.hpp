@@ -9,6 +9,11 @@
 #include <charconv>     // std::to_chars for shortest round-trippable float output
 #include <string_view>
 #include <limits>
+#if !(defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L)
+#include <cerrno>       // strtod fallback: libc++ ships integer-only std::from_chars
+#include <clocale>
+#include <cstdlib>
+#endif
 
 // Maximum nesting depth for JSON TEXT parsing (from_json). Each level recurses a
 // couple of native stack frames, so this is intentionally well below
@@ -1180,6 +1185,34 @@ private:
         }
     }
 
+    // libc++ still ships integer-only std::from_chars; the floating-point overloads are
+    // absent, and the incomplete implementation deliberately leaves __cpp_lib_to_chars
+    // undefined — exactly the feature-test to key on. The fallback preserves the two
+    // from_chars behaviors parse_number_flat relies on (full-consumption ptr,
+    // errc::result_out_of_range): the caller pre-scans a strict JSON number charset, so
+    // strtod never sees whitespace/hex/inf/nan forms, ERANGE maps to result_out_of_range,
+    // and '.' is swapped for the host locale's decimal point so a comma-decimal locale
+    // cannot misparse.
+    struct double_parse_result { const char* ptr; std::errc ec; };
+    static double_parse_result from_chars_double(const char* first, const char* last, double& d) {
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+        auto r = std::from_chars(first, last, d);
+        return { r.ptr, r.ec };
+#else
+        std::string text(first, last);
+        const char locale_decimal = std::localeconv()->decimal_point[0];
+        if (locale_decimal != '.') {
+            for (auto& c : text) { if (c == '.') c = locale_decimal; }
+        }
+        errno = 0;
+        char* end = nullptr;
+        const double parsed = std::strtod(text.c_str(), &end);
+        if (end == text.c_str()) { return { first, std::errc::invalid_argument }; }
+        d = parsed;
+        return { first + (end - text.c_str()), errno == ERANGE ? std::errc::result_out_of_range : std::errc() };
+#endif
+    }
+
     void parse_number_flat() {
         const size_t start = pos_;
         bool has_decimal = false;
@@ -1210,7 +1243,7 @@ private:
         JNode v;
         if (has_decimal || has_exponent) {
             double d = 0.0;
-            auto r = std::from_chars(first, last, d);
+            auto r = from_chars_double(first, last, d);
             if (r.ptr != last || (r.ec != std::errc() && r.ec != std::errc::result_out_of_range)) {
                 throw serialization_error("Invalid numeric literal in JSON at position " + std::to_string(start));
             }
@@ -1223,7 +1256,7 @@ private:
                 v.tag = JTag::Int; v.u.i = iv;
             } else {
                 double d = 0.0;
-                auto r2 = std::from_chars(first, last, d);
+                auto r2 = from_chars_double(first, last, d);
                 if (r2.ptr != last || (r2.ec != std::errc() && r2.ec != std::errc::result_out_of_range)) {
                     throw serialization_error("Invalid integer literal in JSON at position " + std::to_string(start));
                 }

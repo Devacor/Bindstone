@@ -32,7 +32,7 @@ struct host_options {
 	int64_t seed = 20260705;
 	std::string backend = "vm";          // initially active backend
 	bool smoke = false;
-	int64_t frames = 1050;               // smoke frame budget
+	int64_t frames = 1300;               // smoke frame budget (covers all 10 scene entries)
 	bool precompiled = false;            // jaibite save/load boot path
 	std::string jaib_path = "demoreel.jaib";
 	int64_t capture = -1;                // scene index to text-capture (README material)
@@ -53,7 +53,8 @@ struct host_options {
 // main.jai is last and is NEVER hot-reloaded (it owns the persistent globals).
 const char* kSceneFiles[] = {
 	"util.jai", "reel.jai", "plasma.jai", "starfield.jai", "donut.jai",
-	"julia.jai", "fire.jai", "sand.jai", "boids.jai", "finale.jai", "main.jai",
+	"julia.jai", "pipes.jai", "fire.jai", "sand.jai", "boids.jai",
+	"kinstein.jai", "finale.jai", "main.jai",
 };
 
 double now_seconds() {
@@ -644,7 +645,7 @@ void print_usage() {
 		"  --fps N          frame pacing target (default 30)\n"
 		"  --w N / --h N    force console dimensions\n"
 		"  --smoke          headless determinism + perf run on BOTH backends\n"
-		"  --frames N       smoke frame budget (default 1050)\n"
+		"  --frames N       smoke frame budget (default 1300)\n"
 		"  --capture I      print scene I as a plain-text frame and exit\n"
 		"  --reload-test    headless hot-reload + backend-swap self-test\n"
 		"  --precompiled    boot from demoreel.jaib (saved on first run)\n"
@@ -659,7 +660,7 @@ void print_usage() {
 		"  --tol N          per-channel merge tolerance for --truecolor (default 8)\n"
 		"  --diff           row-diff redraw: skip rows unchanged since last frame\n"
 		"\nkeys: TAB backend swap | r hot reload | h HUD | f freeze | n/p/space scene skip |\n"
-		"      1-8 jump to scene | q/ESC quit");
+		"      1-9,0 jump to scene | q/ESC quit");
 }
 
 } // namespace

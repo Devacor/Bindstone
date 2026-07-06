@@ -1,6 +1,6 @@
 # jai_demoreel — a demoscene tech reel written in JaiScript
 
-Eight auto-advancing truecolor scenes, transitions, title cards, and a finale where
+Ten auto-advancing truecolor scenes, transitions, title cards, and a finale where
 the word JAISCRIPT ignites out of a wall of rainbow fire — every effect coded in
 `scenes/*.jai`. The C++ host (`main.cpp`) is a thin shell: a VT console, a
 monotonic clock, non-blocking keys, a seeded rng class, and the frame pump.
@@ -29,7 +29,7 @@ falling back to `demoreel_scenes/` copied next to the binary.
 jai_demoreel                     # the reel, VM backend active, 30 fps pacing
 jai_demoreel --backend interp    # start on the interpreter instead
 jai_demoreel --smoke             # headless: both backends, frame-hash parity + perf
-jai_demoreel --smoke --frames N  # smoke frame budget (default 1050)
+jai_demoreel --smoke --frames N  # smoke frame budget (default 1300)
 jai_demoreel --capture I         # print scene I as plain text (ANSI stripped)
 jai_demoreel --reload-test       # headless hot-reload + backend-swap self-test
 jai_demoreel --precompiled       # boot from demoreel.jaib (saved on first run)
@@ -44,7 +44,7 @@ Keys while running:
 | `h` | toggle the HUD (scene, ACTIVE BACKEND, frame ms, fps) |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
-| `1`..`8` | jump straight to a scene |
+| `1`..`9`, `0` | jump straight to a scene (`0` = scene 10) |
 | `q` / `ESC` | quit |
 
 The HUD shows the active backend and its frame cost, plus the last measured cost
@@ -58,10 +58,12 @@ of the other backend — press TAB and watch the ms number move.
 | 2 | STARFIELD | 3D perspective star streaming with speed-scaled trails (flat parallel arrays on purpose) |
 | 3 | DONUT | the rotating torus homage, z-buffered, luminance-shaded ASCII, molten copper |
 | 4 | JULIA | morphing Julia set (c orbits the cardioid), escape-count colored, half-res doubled columns |
-| 5 | FIRE | bottom-seeded convection fire that ignites into RAINBOW fire mid-scene (house signature) |
+| 5 | PIPEDREAM | the 3D Pipes screensaver homage: four pipes race a 16x12x16 voxel volume, ball joints at turns, orbiting camera, fill -> hold -> fade -> reseed. ~2% of joints spawn the jackodile's eye (a rainbow-flicker cell) — canon demanded a teapot |
 | 6 | POWDER | falling-sand toy: sand / water / ember / plant / smoke, each element a script class, spawners keep it evolving |
 | 7 | BOIDS | murmuration with fading trails and one hungry hawk |
-| 8 | FINALE | a fire wall out of which "JAISCRIPT" ignites, burns in rolling rainbow flame, and remains glowing as the fire dies |
+| 8 | KINSTEIN 3D | Wolfenstein-style DDA raycaster over an authored 24x24 keep: one ray per column, perpendicular-distance slices (no fisheye), N/S vs E/W face shading, stone/moss/gold walls + an animated rainbow-fire banner, scripted look-ahead flight path. The reel's compute stress scene |
+| 9 | FIRE | bottom-seeded convection fire that ignites into RAINBOW fire mid-scene (house signature) |
+| 10 | FINALE | a fire wall out of which "JAISCRIPT" ignites, burns in rolling rainbow flame, and remains glowing as the fire dies |
 
 Between scenes: dissolve / wipe / shutter transitions (two grids merged per cell
 into a combined palette). Title card with a demoscene handle on every scene.
@@ -69,21 +71,23 @@ into a combined palette). Title card with a demoscene handle on every scene.
 ## Measured numbers
 
 Release (`x64-Release BENCHMARKS`), 100x40 = 4,000 truecolor cells per frame,
-seed 20260705, fixed dt 1/30, whole reel incl. transitions (min of 3 runs of
-`--smoke --frames 2200`); 2026-07-05 VM-perf branch:
+seed 20260705, fixed dt 1/30, whole 10-scene reel incl. transitions
+(`--smoke --frames 1300`); 2026-07-06 VM-perf branch, post-rulings engine:
 
-| backend | ms/frame (mean) | fps | boot (parse) | boot (.jaib load) |
-| ------- | --------------- | --- | ------------ | ----------------- |
-| interpreter | 47.0 | ~21 | 7.8 ms | 3.5 ms |
-| **VM** | **39.8** | **~25** | 6.6 ms | 3.2 ms |
+| backend | ms/frame (mean) | fps | boot (parse) |
+| ------- | --------------- | --- | ------------ |
+| interpreter | 63.0 | ~16 | 11.6 ms |
+| **VM** | **60.5** | **~17** | 13.0 ms |
 
-- VM is **1.16-1.19x** faster than the interpreter over the whole reel. Most of a
-  frame is the shared render pipeline (palette-indexed string assembly through the
-  builtin container methods), which is backend-neutral; the VM's edge comes from
-  the scene sims (convection, escape iterations, boids pairs).
-- Parity: frame streams **byte-identical** across backends over 2,200 frames x3
-  and over 3,300 full-duration frames (covers the rainbow-fire window and every
-  finale phase). Debug build parity also green.
+- The whole-reel mean is dominated by the shared render pipeline (palette-indexed
+  string assembly through the builtin container methods), which is backend-
+  neutral; the VM's edge shows per scene — see the new-scene `--bench` splits
+  below. (The previous 8-scene table — 47.0 / 39.8 ms, VM 1.16x — predates the
+  two new scenes and an engine rulings pass; not directly comparable.)
+- Parity: frame streams **byte-identical** across backends over 1,300 frames —
+  every one of the ten scene entries, including both new scenes. Debug build
+  parity also green (40-frame spot check + per-scene exercise of PIPEDREAM and
+  KINSTEIN on both backends).
 - Debug build: ~843 / ~679 ms per frame (interpreter / VM) — iterate in Release
   for this demo.
 - `--reload-test`: hot reload of all scenes into both engines + TAB-style state
@@ -125,6 +129,21 @@ Measured on conhost (Release, 120 real frames per scene, ~110x29 window):
 | fire | 34.2 KB -> 9.7 KB (3.6x) | 23.4 -> 8.2 | 18.7 -> 27.8 |
 | finale | 29.9 KB -> 10.9 KB (3.0x) | 19.4 -> 9.7 | 13.4 -> 14.9 (sim-bound) |
 | starfield (`--diff`) | 5.3 KB -> 2.4 KB | 1.0 | 82 uncapped |
+
+The two new scenes, measured headless (`--bench 20 --scene I`, Release, 100x40,
+truecolor+tolerance mode — sim ms is the interesting split here):
+
+| scene | backend | sim ms | bytes/frame raw -> written | fps uncapped |
+| ----- | ------- | ------ | -------------------------- | ------------ |
+| PIPEDREAM (4) | vm | 35.3 | 18.9 KB -> 15.1 KB (1.25x) | 27.9 |
+| PIPEDREAM (4) | interpreter | 43.1 | 19.2 KB -> 15.3 KB (1.26x) | 22.9 |
+| KINSTEIN (7) | **vm** | **26.4** | 9.1 KB -> 9.1 KB (1.00x) | **37.3** |
+| KINSTEIN (7) | interpreter | 31.1 | 9.0 KB -> 9.0 KB (1.00x) | 31.7 |
+
+KINSTEIN is the cheapest frame in the reel to *write*: quantized distance shades
+over solid-bg slices mean the script's own run-length trick already emits ~9 KB
+a frame — the host filter finds nothing left to trim (1.00x). It is also the
+clearest VM-vs-interpreter sim gap on TAB (26.4 vs 31.1 ms).
 
 And if it still *feels* like one frame per second: check you're not running the
 Debug build (~0.7 s of sim per frame — see above).
@@ -186,6 +205,34 @@ BOIDS (`--capture 6` — the flock, trails, and the hawk `@`):
                                  .* /./ :/.  : .  .
                   @        :/      :*   .
                           . :/  :/   */
+```
+
+PIPEDREAM (`--capture 4`, ANSI stripped — voxel pipes mid-growth, ball joints
+at the turns, depth-shaded glyphs):
+
+```
+             88   88 oo  oo               OO          OO       @@oo @@o  88 ooo
+               OO  88OO 88ooOOO OO  OO   88           @@  88 oo             oo 88
+                     88o   oo88  OO **O  88O          @@   @@            @@oo O88
+                 88OO   oo  **             ooo        OO                      88
+                         **         OOO oo ooo        @@   @@             @@o   OO
+                  OO  OO  88         oOO   ooo+oo     OO                  +*oo
+                  @@8  OO  OO  88   88 OOo  oo+oo     @@   @@            +88o   OO
+                         OO     oo oOO oooooo++                OO       +-@@oo   OO
+                 @@88    oo  oo**oo+oOO8+oo88o*oo     @@   @@            @@  oo
+                    oo ooOO   +++ooooo888 +oo. oo            ** @@     8OO- OO O88OO
+```
+
+KINSTEIN 3D (brightness map of the raw frame — a one-point-perspective corridor,
+full-height near slices at the edges stepping down to the vanishing point):
+
+```
+%%%%%%%%%%%%%%%%%%%%%%#######******++++===---::       :--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%#######******++++===---::.......:--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%#######******++++===---:........:--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%#######******++++===--............-====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%#######******++++==..................==++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%#######******++........................++******#######%%%%%%%%%%%%%%%%%%%%%%%%
 ```
 
 FINALE afterglow (brightness map of the raw frame as the fire dies — the word
@@ -306,6 +353,19 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
    *methods* remain a parse error — that is a missing feature (the class-member
    parser never accepts `coroutine`), not a bug; needs a Dev decision to build.
    The finale still drives its sequence off scene time (works fine).
+
+10. **NEW (2026-07-06, post-rulings HEAD; interpreter only).** Plain
+    *assignment* of a bare array-element read into an int-typed local throws
+    `Type mismatch in assignment`; the *declaration* shape is fine, and the VM
+    accepts both. Hit in KINSTEIN's DDA loop; likely the new element-ref
+    (ref_lvalue) surface.
+    ```jaiscript
+    var a = [7];
+    int x = 0;
+    x = a[0];        // interpreter: Type mismatch in assignment
+    int y = a[0];    // fine on both backends
+    ```
+    Workaround (ships in kinstein.jai): read into a declared local, then assign.
 
 **Paper cuts:** error text reaching the host keeps `{0}` placeholders and drops
 script context; `override` is required to redefine a base method (good check,

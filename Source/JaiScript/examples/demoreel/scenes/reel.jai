@@ -35,7 +35,7 @@ class Reel {
 	bool hud = true;
 	bool paused = false;
 
-	int nscenes = 8;
+	int nscenes = 10;
 	var durs = [];
 	var cur = null;
 	var nxt = null;
@@ -69,9 +69,11 @@ class Reel {
 		durs.push(10.0);   // starfield
 		durs.push(11.0);   // donut
 		durs.push(11.0);   // julia
-		durs.push(13.0);   // fire
+		durs.push(14.0);   // pipedream (the breather)
 		durs.push(14.0);   // powder
 		durs.push(12.0);   // boids
+		durs.push(14.0);   // kinstein 3d
+		durs.push(13.0);   // fire
 		durs.push(17.0);   // finale
 		start_scene(0, 0.0);
 	}
@@ -81,9 +83,11 @@ class Reel {
 		if (idx == 1) { return Starfield(); }
 		if (idx == 2) { return Donut(); }
 		if (idx == 3) { return Julia(); }
-		if (idx == 4) { return Fire(); }
+		if (idx == 4) { return Pipes(); }
 		if (idx == 5) { return SandBox(); }
 		if (idx == 6) { return Boids(); }
+		if (idx == 7) { return Kinstein(); }
+		if (idx == 8) { return Fire(); }
 		return Finale();
 	}
 
@@ -153,10 +157,11 @@ class Reel {
 		else if (key == "p" || key == "left") { start_scene(cur_idx - 1, 0.0); }
 		else if (key.size() == 1) {
 			char c0 = key[0];
-			if (c0 >= '1' && c0 <= '8') {
+			if (c0 >= '1' && c0 <= '9') {
 				int d = key.to_int();
 				if (d <= nscenes) { start_scene(d - 1, 0.0); }
 			}
+			else if (c0 == '0') { start_scene(nscenes - 1, 0.0); }
 		}
 	}
 

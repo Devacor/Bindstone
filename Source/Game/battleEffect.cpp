@@ -137,6 +137,12 @@ void ServerBattleEffect::initialize() {
 	statTemplate.script(gameInstance.script()).spawn(self);
 }
 
+void ServerBattleEffect::animateDeathAndRemove() {
+	auto self = std::static_pointer_cast<ServerBattleEffect>(shared_from_this());
+	statTemplate.script(gameInstance.script()).death(self);
+	owner()->removeFromParent();
+}
+
 void ServerBattleEffect::updateImplementation(double a_delta) {
 	if (alive()) {
 		ourElapsedTime += a_delta;
@@ -192,6 +198,12 @@ void ClientBattleEffect::initialize() {
 	statTemplate.script(gameInstance.script()).spawn(self);
 	
 	onNetworkSynchronize();
+}
+
+void ClientBattleEffect::animateExplodeAndRemove() {
+	auto self = std::static_pointer_cast<ClientBattleEffect>(shared_from_this());
+	statTemplate.script(gameInstance.script()).death(self);
+	owner()->removeFromParent();
 }
 
 void ClientBattleEffect::onNetworkSynchronize() {

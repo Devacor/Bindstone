@@ -167,6 +167,19 @@ void ServerCreature::initialize() {
         gameInstance.registerCreature(self);
 }
 
+void ServerCreature::animateDeathAndRemove() {
+	auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
+	agent()->stop();
+	statTemplate.script(gameInstance.script()).death(self);
+	onDeathSignal(self);
+	spineAnimator->animate(*state->self()->animationName, false);
+	spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+		if (a_self->track(a_track).name() == state->self()->animationName) {
+			owner()->removeFromParent();
+		}
+	});
+}
+
 void ServerCreature::updateImplementation(double a_delta) {
 	if (alive()) {
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
@@ -379,6 +392,27 @@ void ClientCreature::initialize() {
 	gameInstance.registerCreature(self);
 	onAnimationChanged();
 	onNetworkSynchronize();
+}
+
+void ClientCreature::animateDeathAndRemove() {
+	auto self = std::static_pointer_cast<Creature>(shared_from_this());
+	statTemplate.script(gameInstance.script()).death(self);
+	onDeathSignal(self);
+	task().cancel();
+	if (owner()->position() != *state->self()->position) {
+		task().now("Tween", [&](MV::Task&, double a_dt) {
+			owner()->position(MV::moveToward(owner()->position(), *state->self()->position, static_cast<MV::PointPrecision>(a_dt) * 200.0f));
+			return owner()->position() != *state->self()->position;
+		});
+	}
+	task().then("animateAway", [&](MV::Task&) {
+		spineAnimator->animate(*state->self()->animationName, false);
+		spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+			if (a_self->track(a_track).name() == state->self()->animationName) {
+				owner()->removeFromParent();
+			}
+		});
+	});
 }
 
 void ClientCreature::onNetworkSynchronize() {

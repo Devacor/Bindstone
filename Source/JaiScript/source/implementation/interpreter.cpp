@@ -10898,10 +10898,11 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
         auto function_env = environment_;
         if (clear_this) {
+            // Only the CALLEE's own method scope env is cleared (pooled-env hygiene).
+            // A plain callee's env may be parented on the CALLER's method env - clearing
+            // through the parent poisoned the caller's this-binding (demoreel finding 1).
             if (function_env->is_method_env()) {
                 function_env->clear_this_reference();
-            } else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
-                function_env->get_parent()->clear_this_reference();
             }
         }
         environment_ = previousEnv;

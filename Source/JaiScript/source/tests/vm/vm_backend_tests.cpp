@@ -253,12 +253,10 @@ public:
 			}, "runaway recursion raises max_recursion_depth");
 		});
 
-		// Parity-locked quirk (verified on both backends 2026-07-03): when a method calls a
-		// plain top-level function, the callee's exit path clears the CALLER method scope's
-		// this-binding. Afterwards an unqualified field read throws undefined-variable and
-		// `this.x` reads through a nulled this (type mismatch). Any call-path rework must
-		// reproduce this bug-for-bug on both backends.
-		test("pinned_quirk_callee_clears_caller_this", [this]() {
+		// Fixed 2026-07 (demoreel finding 1): a plain-function call inside a method must
+		// NOT clear the caller method scope's this-binding — field reads and this.x keep
+		// working after the call, on both backends.
+		test("plain_callee_keeps_caller_this", [this]() {
 			const char* unqualified_field_read = R"(
 				int helper() { return 1; }
 				class P { int x = 5; int m() { helper(); return x; } }
@@ -274,24 +272,19 @@ public:
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
-				std::string unqualified_error;
-				try { e->execute(unqualified_field_read); }
-				catch (const std::exception& ex) { unqualified_error = ex.what(); }
-				check_true(unqualified_error.find("Undefined variable 'x'") != std::string::npos,
-					"unqualified field read after a plain-function call throws undefined variable");
-				std::string qualified_error;
-				try { e->execute(qualified_this_read); }
-				catch (const std::exception& ex) { qualified_error = ex.what(); }
-				check_true(qualified_error.find("Type mismatch") != std::string::npos,
-					"this.x after a plain-function call reads a nulled this");
+				check_eq((int64_t)5, e->execute(unqualified_field_read).as_int(),
+					"unqualified field read after a plain-function call");
+				check_eq((int64_t)5, e->execute(qualified_this_read).as_int(),
+					"this.x after a plain-function call");
 			}
 		});
 
 		// Stage 2 (compile-time lazy envs): plain in-loop callees whose bodies provably never
 		// touch the per-call scope environment skip creating it. These pin the parity contract
 		// on both backends and the compiler's fail-closed trigger table.
-		test("lazy_env_quirk_from_method_top_scope", [this]() {
-			// helper's body is lazy-eligible; the pinned caller-this-clear quirk must survive
+		test("lazy_env_callee_keeps_caller_this_from_method_top_scope", [this]() {
+			// helper's body is lazy-eligible (no env created): the caller method's this
+			// must survive the call on both backends
 			const char* src = R"(
 				int helper(int a) { return a + 1; }
 				class L { int x = 5; int m() { helper(1); return x; } }
@@ -301,11 +294,8 @@ public:
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
-				std::string error;
-				try { e->execute(src); }
-				catch (const std::exception& ex) { error = ex.what(); }
-				check_true(error.find("Undefined variable 'x'") != std::string::npos,
-					"lazy callee still clears the caller method's this");
+				check_eq((int64_t)5, e->execute(src).as_int(),
+					"field read after a lazy-elided plain call");
 			}
 		});
 

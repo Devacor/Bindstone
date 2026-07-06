@@ -284,7 +284,7 @@ namespace jai::vm {
         // Fills current_arg_metadata_ (already cleared/reserved) from the call site,
         // recording caller frame-slot coordinates for bare-identifier slot locals
         void build_call_arg_metadata(frame& f, const call_site& site, size_t argc);
-        void clear_this_on_frame_exit();
+        void clear_this_on_frame_exit(const std::shared_ptr<environment>& entry_env);
         script_value implicit_this_result(call_frame& locals);
         script_value implicit_result_for_record(call_record& rec);
         checked_result<script_value> convert_return_value(script_value result, const type_info_ptr& return_type);

@@ -8198,15 +8198,10 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 // + depth guard). Destroys the callee's script_value state NOW — deferring destruction
 // is observable.
 void vm_backend::pop_script_frame_core(call_record& rec) {
-	if (rec.env_lazy) {
-		// Single-level rule: prev_env plays the never-created entry env's parent, so only
-		// the immediate env is checked (reproduces the pinned caller-this-clear quirk;
-		// a parent check would look two levels up and diverge for block-scope callers)
-		if (environment_->is_method_env()) {
-			environment_->clear_this_reference();
-		}
-	} else {
-		clear_this_on_frame_exit();
+	if (!rec.env_lazy) {
+		// Lazy frames never created an env (environment_ is the CALLER's), so there is
+		// nothing to clear; clearing it poisoned a method caller's this-binding.
+		clear_this_on_frame_exit(rec.f.entry_env);
 	}
 	environment_ = std::move(rec.prev_env);
 	if (stack_.size() > rec.f.stack_base) {
@@ -8359,15 +8354,13 @@ void vm_backend::setup_callee_env(const script_defined_function& function, call_
 	}
 }
 
-// The parent branch also clears a CALLER method scope's this-binding when the exiting
-// frame is a plain function called from a method body — a parity-locked quirk both
-// backends share (pinned by "pinned_quirk_callee_clears_caller_this")
-void vm_backend::clear_this_on_frame_exit() {
-	auto function_env = environment_;
-	if (function_env->is_method_env()) {
-		function_env->clear_this_reference();
-	} else if (function_env->get_parent() && function_env->get_parent()->is_method_env()) {
-		function_env->get_parent()->clear_this_reference();
+// Pooled-env hygiene on frame exit: clear this on the FRAME'S OWN method scope env
+// only. The old environment_-parent walk also cleared a CALLER method scope's this
+// when the exiting frame was a plain function called from a method body (demoreel
+// finding 1); regression coverage: "free_call_in_method_keeps_*".
+void vm_backend::clear_this_on_frame_exit(const std::shared_ptr<environment>& entry_env) {
+	if (entry_env && entry_env->is_method_env()) {
+		entry_env->clear_this_reference();
 	}
 }
 
@@ -8705,7 +8698,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	auto cleanup = [&]() {
 		if (is_unwinding_ && !trace_captured_) capture_stack_trace();
-		clear_this_on_frame_exit();
+		clear_this_on_frame_exit(f.entry_env);
 		environment_ = previousEnv;
 		has_return_value_ = previousHasReturn;
 		return_value_ = std::move(previousReturn);

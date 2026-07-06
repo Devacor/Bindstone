@@ -80,7 +80,8 @@ namespace jai {
         scoped_method_environment(
             interpreter* interp,
             std::shared_ptr<environment> parent,
-            const script_value& this_obj);
+            const script_value& this_obj,
+            class_definition* access_ctx = nullptr);
 
         ~scoped_method_environment();
 
@@ -1039,7 +1040,7 @@ namespace jai {
 
         // Environment pooling functions (public: scoped_method_environment uses them)
         std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
-        std::shared_ptr<environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj);
+        std::shared_ptr<environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx = nullptr);
         void release_environment(std::shared_ptr<environment> env, bool clear_now = true);
         void reset_environment_pool();
     };

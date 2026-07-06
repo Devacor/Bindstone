@@ -581,7 +581,8 @@ namespace jai {
     public:
         enum member_visibility {
             Public,
-            Private
+            Private,
+            Protected
         };
 
         struct member {

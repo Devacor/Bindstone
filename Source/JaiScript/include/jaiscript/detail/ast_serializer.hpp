@@ -1043,7 +1043,7 @@ namespace jai::detail {
                     d->members.reserve(size_t(nm));
                     for (uint64_t i = 0; i < nm; ++i) {
                         uint8_t vis = u8();
-                        if (vis > uint8_t(class_decl::Private)) jaibite_fail("corrupt member visibility");
+                        if (vis > uint8_t(class_decl::Protected)) jaibite_fail("corrupt member visibility");
                         auto member_decl = decl_req();
                         d->members.push_back({ static_cast<class_decl::member_visibility>(vis), member_decl });
                     }

@@ -218,6 +218,15 @@ namespace jai::detail {
 				}
 				auto instance = std::static_pointer_cast<class_instance>(holder->data);
 				const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);
+				// Access enforcement at the bind site: the ref is minted in the CALLER's
+				// context, so a private field can't escape by-reference either
+				if (const class_definition* field_cls = instance->get_class_definition()) {
+					if (field_cls->chain_has_nonpublic()) [[unlikely]] {
+						auto access_ok = enforce_member_access(field_cls, member_id,
+							caller_env ? caller_env->find_access_context() : nullptr);
+						if (!access_ok) { return access_ok.error_value(); }
+					}
+				}
 				script_value* field_value = instance->find_field_value(member_id);
 				if (!field_value || !ref_field_is_script_backed(instance, member_id)) {
 					return ref_non_lvalue_error();

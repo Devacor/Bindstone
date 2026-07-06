@@ -319,4 +319,30 @@ inline bool class_definition::has_static_method_with_arity(uint64_t name_id, siz
     return false;
 }
 
+// Collect a class declaration's private:/protected: labels into the runtime access map
+// (both backends call this from their class-decl execution — parity by construction).
+// Constructors are exempt: visibility labels govern member access, not construction.
+template<typename Symbolizer>
+inline void apply_member_access_labels(class_definition& def, const class_decl& decl, Symbolizer& symbols) {
+    std::unordered_map<uint64_t, access_level> nonpublic;
+    for (const auto& member : decl.members) {
+        if (member.visibility == class_decl::Public || !member.declaration) continue;
+        uint64_t id = UINT64_MAX;
+        if (member.declaration->get_type() == node_type::variable_decl) {
+            auto* vd = static_cast<variable_decl*>(member.declaration.get());
+            id = vd->name_id != UINT64_MAX ? vd->name_id : symbols.intern(std::string(vd->name));
+        } else if (member.declaration->get_type() == node_type::function_decl) {
+            auto* fd = static_cast<function_decl*>(member.declaration.get());
+            if (fd->name == decl.name) continue;   // constructor
+            id = fd->name_id != UINT64_MAX ? fd->name_id : symbols.intern(std::string(fd->name));
+        }
+        if (id != UINT64_MAX) {
+            nonpublic.emplace(id, member.visibility == class_decl::Private
+                                      ? access_level::private_access
+                                      : access_level::protected_access);
+        }
+    }
+    def.set_nonpublic_members(std::move(nonpublic));
+}
+
 } // namespace jai

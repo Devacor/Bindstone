@@ -84,6 +84,8 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Static member not found";
         case runtime_error_code::multiple_inheritance:
             return "Multiple inheritance not supported";
+        case runtime_error_code::access_violation:
+            return "Member access violation";
 
         // File I/O errors
         case runtime_error_code::file_not_found:

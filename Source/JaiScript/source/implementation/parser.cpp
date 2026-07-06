@@ -2441,6 +2441,15 @@ checked_result<declaration_ptr> parser::class_declaration() {
             visibility = class_decl::Private;
             continue;
         }
+        if (match(token_type::protected_keyword)) {
+            auto colon_result = consume(token_type::colon, "Expected ':' after 'protected'");
+            if (!colon_result) {
+                synchronize();
+                continue;
+            }
+            visibility = class_decl::Protected;
+            continue;
+        }
 
         // Coroutine methods: 'coroutine' precedes a typed or 'function'-keyword method
         // (free-function syntax parity); constructors/destructors/fields reject below

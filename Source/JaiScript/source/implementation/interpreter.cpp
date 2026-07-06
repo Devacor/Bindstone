@@ -3806,6 +3806,11 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
         ? memberExpr->member_id
         : string_symbolizer_->intern(memberExpr->member);
 
+    if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
+        JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member_id,
+                                                    environment_->find_access_context()));
+    }
+
     auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
     script_value setter = target.method(setter_id);
     if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
@@ -5182,6 +5187,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
+                if (class_def->chain_has_nonpublic()) [[unlikely]] {
+                    JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), memberExpr->member_id,
+                                                                environment_->find_access_context()));
+                }
+
                 // Evaluate the value
                 JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
                 script_value value = pop_value();
@@ -6433,6 +6443,11 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
         auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
+        if (class_def->chain_has_nonpublic()) [[unlikely]] {
+            JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), expr->member_id,
+                                                        environment_->find_access_context()));
+        }
+
         // Try static method first (most common case for :: access)
         // get_static_method with false doesn't throw - returns null if not found
         script_value static_method = class_def->get_static_method(expr->member_id, false);
@@ -6521,6 +6536,11 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         if (!parent_def) {
             // super:: used in class with no parent
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
+        }
+
+        if (parent_def->chain_has_nonpublic()) [[unlikely]] {
+            JAISCRIPT_TRY(detail::enforce_member_access(parent_def.get(), expr->member_id,
+                                                        environment_->find_access_context()));
         }
 
         // Look for the method in the parent class (use pre-computed member_id from parser)
@@ -6779,6 +6799,11 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     if (!target) {
         // Cannot access member on non-class object
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+    }
+
+    if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
+        JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, expr->member_id,
+                                                    environment_->find_access_context()));
     }
 
     // Use pre-computed member_id from parser
@@ -9464,6 +9489,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         }
     }
 
+    // Record private:/protected: labels for runtime access enforcement
+    apply_member_access_labels(*class_def, *decl, *string_symbolizer_);
+
     // Collect field IDs defined in this class (before evaluating them)
     // This is needed for multiple inheritance conflict detection
     std::unordered_set<uint64_t> derived_field_names;
@@ -10191,6 +10219,7 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
             this_obj = std::move(this_result.value());
         }
         auto coro_env = std::make_shared<environment>(method_env->get_parent(), string_symbolizer_, this_obj);
+        coro_env->set_access_context(method_env->get_access_context());
         coro_env->define(this_id, this_obj);
         auto handle = std::make_shared<coroutine_handle>(engine_);
         handle->set_function(ast, args, coro_env);
@@ -10268,7 +10297,7 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
         case script_callable::kind_type::function:
             return call_function(*payload.fn, args);
         case script_callable::kind_type::method: {
-            auto method_env = get_pooled_method_environment(payload.definition_env, *payload.this_obj);
+            auto method_env = get_pooled_method_environment(payload.definition_env, *payload.this_obj, payload.cls.get());
             method_env->define("this", *payload.this_obj);
             auto result = execute_method_ast(payload.ast, method_env, args);
             // Always release the method environment back to the pool (even on error!)
@@ -10390,6 +10419,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // Use the captured definition environment as the parent
     auto init_env = std::make_shared<environment>(definition_env, string_symbolizer_);
     init_env->define("this", this_value);
+    init_env->set_access_context(class_def.get());   // field initializers are class-body code
 
     // Bind constructor parameters so they're available in initializer expressions
     // NOTE: Do NOT clone here - these params are just for field initializer evaluation
@@ -10481,6 +10511,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                 // Create environment for this level's argument evaluation
                                 auto level_env = std::make_shared<environment>(definition_env, string_symbolizer_);
                                 level_env->define("this", this_value);
+                                level_env->set_access_context(entry.script_class.get());
                                 for (size_t pi = 0; pi < entry.ctor->parameters.size() && pi < entry.args.size(); ++pi) {
                                     level_env->define(entry.ctor->parameters[pi].name, entry.args[pi]);
                                 }
@@ -10563,6 +10594,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                 // Create init environment for field initializers
                                 auto level_init_env = std::make_shared<environment>(definition_env, string_symbolizer_);
                                 level_init_env->define("this", this_value);
+                                level_init_env->set_access_context(it->script_class.get());
                                 for (size_t pi = 0; pi < it->ctor->parameters.size() && pi < it->args.size(); ++pi) {
                                     level_init_env->define(it->ctor->parameters[pi].name, it->args[pi]);
                                 }
@@ -10587,7 +10619,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                 scoped_method_environment method_env(
                                     this,
                                     definition_env,
-                                    this_value
+                                    this_value,
+                                    it->script_class.get()
                                 );
                                 auto ctor_result = execute_method_ast(it->ctor, method_env.get(), it->args);
                                 if (!ctor_result) return ctor_result.error_value();
@@ -10693,7 +10726,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
             scoped_method_environment target_method_env(
                 this,
                 definition_env,
-                this_value
+                this_value,
+                class_def.get()
             );
 
             auto target_result = execute_method_ast(target_ctor, target_method_env.get(), init_args);
@@ -10717,7 +10751,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     scoped_method_environment method_env(
         this,
         definition_env,
-        this_value
+        this_value,
+        class_def.get()
     );
 
     // Execute constructor as a method so it has access to 'this' and fields
@@ -10767,6 +10802,7 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
     // Evaluate field initializers with a regular environment that has 'this'
     auto init_env = std::make_shared<environment>(global_env, string_symbolizer_);
     init_env->define("this", this_value);
+    init_env->set_access_context(class_def.get());
     evaluate_field_initializers(instance, class_def, init_env);
 
     // Default constructor object wrapped
@@ -10777,9 +10813,10 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
 scoped_method_environment::scoped_method_environment(
     interpreter* interp,
     std::shared_ptr<environment> parent,
-    const script_value& this_obj)
+    const script_value& this_obj,
+    class_definition* access_ctx)
     : interp_(interp)
-    , env_(interp->get_pooled_method_environment(parent, this_obj))
+    , env_(interp->get_pooled_method_environment(parent, this_obj, access_ctx))
 {
     // Define 'this' as a regular variable for compatibility
     // method_environment::get() also has special handling for 'this'
@@ -10988,7 +11025,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             call_stack_[frame_index].set_this(this_obj);  // Uses set_this which sets is_method = true
             call_stack_[frame_index].closure_env = function.closure_env->get_parent();
             // Set environment to a method environment for 'this' field lookups in body
-            environment_ = get_pooled_method_environment(function.closure_env->get_parent(), this_obj);
+            environment_ = get_pooled_method_environment(function.closure_env->get_parent(), this_obj,
+                                                         function.closure_env->get_access_context());
         } else if (function.closure_env->is_static_method_env()) {
             // Static method - store class definition in frame
             call_stack_[frame_index].static_class_def = function.closure_env->get_class_definition();
@@ -11828,17 +11866,19 @@ void interpreter::release_environment(std::shared_ptr<environment> env, bool cle
     }
 }
 
-std::shared_ptr<environment> interpreter::get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj) {
+std::shared_ptr<environment> interpreter::get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx) {
     // Use unified pool - get an environment and reset it as a method environment
     if (environment_pool_index_ < environment_pool_.size()) {
         // Reuse existing environment from pool
         auto env = environment_pool_[environment_pool_index_++];
         // Reset as method environment with this object
         env->reset_as_method(parent, std::move(this_obj));
+        env->set_access_context(access_ctx);
         return env;
     } else {
         // Pool is exhausted, create new method environment and add to pool
         auto newEnv = std::make_shared<environment>(parent, string_symbolizer_, std::move(this_obj));
+        newEnv->set_access_context(access_ctx);
         environment_pool_.emplace_back(newEnv);
         ++environment_pool_index_;
         return newEnv;

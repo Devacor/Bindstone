@@ -639,6 +639,7 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
     kind_ = env_kind::standard;
     this_object_ = script_value::make_null(nullptr);
     class_def_.reset();
+    access_context_ = nullptr;
     bound_method_storage_ = script_value::make_null(nullptr);
 }
 
@@ -657,10 +658,11 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
 
     parent_ = parent;
 
-    // Set to method kind with this object
+    // Set to method kind with this object (caller stamps set_access_context after)
     kind_ = env_kind::method;
     this_object_ = std::move(this_obj);
     class_def_.reset();
+    access_context_ = nullptr;
     bound_method_storage_ = script_value::make_null(nullptr);
 }
 
@@ -683,6 +685,7 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
     kind_ = env_kind::static_method;
     this_object_ = script_value::make_null(nullptr);
     class_def_ = class_def;
+    access_context_ = class_def_.get();
     bound_method_storage_ = script_value::make_null(nullptr);
 }
 

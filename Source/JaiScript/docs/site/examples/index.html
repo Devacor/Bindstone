@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Examples — JaiScript docs</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html" class="active">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+
+<main class="content">
+<article class="chapter"><h1 id="the-example-games">The Example Games<a class="hlink" href="#the-example-games" aria-label="link">&#8203;</a></h1>
+<p>Three complete, playable programs live in <code>Source/JaiScript/examples/</code> — a roguelike, a first-person dungeon crawler, and a demoscene reel. In each, the C++ host is a deliberately thin shell (a VT console, a blocking <code>read_key()</code>, a seeded <code>Rng</code>, file IO); <strong>everything you see is script</strong>. All three double as cross-backend determinism tests: the same seed must produce byte-identical state hashes on the tree-walking interpreter and the bytecode VM.</p>
+<p>All are part of the normal JaiScript CMake build (<code>JAISCRIPT_BUILD_EXAMPLES=ON</code> by default). Play the Release builds — JaiScript in a Debug build runs ~25–40× slower.</p>
+<h2 id="jai-s-descent-examples-roguelike">JAI&#x27;S DESCENT (examples/roguelike)<a class="hlink" href="#jai-s-descent-examples-roguelike" aria-label="link">&#8203;</a></h2>
+<p>A complete ASCII roguelike whose <strong>entire game lives in JaiScript</strong> (~2,700 lines of script): dungeon generation, FOV, combat, monster AI, items and affixes, identify-by-use potions, leveling, saves via <code>to_json</code>/<code>from_json</code>, and the UI itself. Ten floors down, permadeath, a boss on 10 — Vexadrach the Hollow-Flame, who swallowed the wingless dragon Devacor&#x27;s rainbow fire and choked the color out of it. His telegraph→breath→recover choreography is a genuine <strong>coroutine</strong> holding its phase state across turns; victory releases the rainbow: the finale cycles all seven colors across the arena.</p>
+<p>Every swing is narrated. Your own HP is always exact; enemies keep a roguelike&#x27;s mystery:</p>
+<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture">The Grublin claws you for 4 (HP 20/28). A crushing hit!
+You slash the Orglis for 7 -- bloodied.
+JAI&#x27;s blessing! You slip the Grublin&#x27;s bite.
+Burning: -2 HP (HP 11/22), 2 turns left.</code></pre></div>
+<div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell"># from Source/JaiScript (VsDevCmd + Ninja, same as the test builds)
+cmake --build &quot;out/build/x64-Release BENCHMARKS&quot; --target jai_rogue   # PLAY THIS ONE
+
+jai_rogue.exe                     # new run, seed 1337, VM backend
+jai_rogue.exe --seed 7 --backend interpreter
+jai_rogue.exe --dev               # &#x27;R&#x27; re-imports scripts mid-game (hot reload)
+jai_rogue.exe --smoke --seed 99 --turns 250 --backend vm   # determinism autopilot</code></pre></div>
+<div class="tablewrap"><table><thead><tr><th>key</th><th>action</th></tr></thead><tbody><tr><td><code>w a s d</code> / <code>h j k l</code> / arrows</td><td>move / attack (cardinal)</td></tr><tr><td><code>y u b n</code></td><td>move / attack (diagonals)</td></tr><tr><td><code>.</code></td><td>wait</td></tr><tr><td><code>g</code></td><td>pick up</td></tr><tr><td><code>i</code></td><td>inventory — letter to inspect, then <code>e</code> use/equip, <code>d</code> drop</td></tr><tr><td><code>q</code></td><td>quaff first potion</td></tr><tr><td><code>E</code></td><td>equip the best upgrade in the pack</td></tr><tr><td><code>z</code></td><td>class skill (auto-targets nearest visible enemy)</td></tr><tr><td><code>&gt;</code></td><td>descend (on stairs)</td></tr><tr><td><code>c</code> / <code>?</code></td><td>character sheet / help</td></tr><tr><td><code>S</code> / <code>Q</code></td><td>save &amp; quit / quit</td></tr><tr><td><code>R</code></td><td>hot-reload scripts (with <code>--dev</code>)</td></tr></tbody></table></div>
+<p>Verified at the time of writing: six seeds × 1,500 turns hash-identical across backends, and a <code>--god --smoke --turns 3000</code> run reaches and kills Vexadrach on both (<code>victory: true</code>, same hash). Needs a Windows 10+ console at least 80×28.</p>
+<h2 id="grubwell-dungeons-of-the-unwashed-examples-crawler">GRUBWELL: dungeons of the unwashed (examples/crawler)<a class="hlink" href="#grubwell-dungeons-of-the-unwashed-examples-crawler" aria-label="link">&#8203;</a></h2>
+<p>A first-person, step-based dungeon crawler in the spirit of the 1991 shareware big-hairies — garish corridors, a compass, monsters that get <em>bigger</em> as they walk at you — written <strong>entirely in JaiScript</strong>. The view is a real one-ray-per-column DDA raycaster: walls shaded by torch distance, faces darkened by orientation, billboard sprites with per-column z-buffer occlusion. The game rules are deliberately identical to the roguelike (the shared script files are snapshots); the only new skill is remembering which way you&#x27;re pointing.</p>
+<p>A corridor with a Grublin blob at the end of it (plaintext capture, ANSI colors stripped):</p>
+<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture"> GRUBWELL -- dungeons of the unwashed --  Floor 1/10  Turn 10  ~ Mossrot Warrens ~
+%%%%%%%%%######%%%#                                             | Wanderer
+#########%%%%%%###%%#                                           | Jackodile-kin
+%%%%%%%%%######%%%##%%                                        %%| HP 28/28
+=======================                                   ======| ############
+%%%%%%%%%######%%%##%%#%#                             #%%%####%%|
+#########%%%%%%###%%##%#%                            %%###%%%%##| Fo 14/14
+%%%%%%%%%######%%%##%%#%#                            ##%%%####%%| ############
+=========================                            ===========| Lv 1  XP 0/15
+%%%%%%%%%######%%%##%%#%#%                    ####%####%%%####%%| Atk 6  Def 1
+#########%%%%%%###%%##%#%###%#ggggg#%#%##%#%%#%%%%#%%%%###%%%%##| Eva 10  Crt 5
+%%%%%%%%%######%%%##%%#%#%%%#%ggggg%#%#%%#%##%####%####%%%####%%| Gold 0
+=========================     ggggg                =============|
+%%%%%%%%%######%%%##%%#%#.....ggggg..................##%%%####%%|       N
+#########%%%%%%###%%##%#%                            %%###%%%%##|     W + E
+%%%%%%%%%######%%%##%%#%#............................##%%%####%%|       S
+========================                                ========| Face WEST
+%%%%%%%%%######%%%##%%#.....................................##%%| Wpn -
+#########%%%%%%###%%#                                           | Arm -
+%%%%%%%%%######%%%##............................................| Trk -</code></pre></div>
+<p>Two steps later it is very much no longer small (bump it to attack):</p>
+<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture"> GRUBWELL -- dungeons of the unwashed --  Floor 1/10  Turn 12  ~ Mossrot Warrens ~
+                                                                | Wanderer
+                                                                | Jackodile-kin
+%%                                                              | HP 25/28
+======                ggggggggggggggggggggg                     | ##########--
+%%####%%%#            ggggggggggggggggggggg                     | -3 HP (Grublin)
+##%%%%###%%##%        ggggggggggggggggggggg                     | Fo 14/14
+%%####%%%##%%##%#%    ggggggggggggggggggggg                     | ############
+======================ggggggggggggggggggggg             ========| Lv 1  XP 0/15
+%%####%%%##%%##%#%#%%#ggggggggggggggggggggg#%#####%##%#%##%##%%#| Atk 6  Def 1
+##%%%%###%%##%%#%#%##%ggggggggggggggggggggg%#%%%%%#%%#%#%%#%%##%| Eva 10  Crt 5
+%%####%%%##%%##%#%#%%#ggggggggggggggggggggg#%#####%##%#%##%##%%#| Gold 0
+======================ggggggggggggggggggggg        =============|
+%%####%%%##%%##%#%#%..ggggggggggggggggggggg.................#%%#|       N
+##%%%%###%%##%%#      ggggggggggggggggggggg                     |     W + E
+%%####%%%##%..........ggggggggggggggggggggg.....................|       S
+========              ggggggggggggggggggggg                     | Face WEST
+%%##..................ggggggggggggggggggggg.....................| Wpn -
+                      ggggggggggggggggggggg                     | Arm -
+......................ggggggggggggggggggggg.....................| Trk -
+                      ggggggggggggggggggggg                     |
+ The Grublin claws you for 3 (HP 25/28).</code></pre></div>
+<div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">cmake --build &quot;out/build/x64-Release BENCHMARKS&quot; --target jai_crawler   # PLAY THIS ONE
+
+jai_crawler.exe                     # new run, seed 1337, VM backend
+jai_crawler.exe --dev               # &#x27;R&#x27; re-imports scripts mid-game (hot reload)
+jai_crawler.exe --smoke --seed 99 --turns 1500 --backend interpreter</code></pre></div>
+<div class="tablewrap"><table><thead><tr><th>key</th><th>action</th></tr></thead><tbody><tr><td><code>w</code> / <code>up</code></td><td>step forward (into a monster = attack)</td></tr><tr><td><code>s</code> / <code>down</code></td><td>step back</td></tr><tr><td><code>a</code> <code>d</code> / <code>left</code> <code>right</code></td><td>turn 90 degrees</td></tr><tr><td><code>q</code> / <code>e</code></td><td>sidestep left / right</td></tr><tr><td><code>.</code></td><td>wait</td></tr><tr><td><code>m</code></td><td>minimap toggle (explored tiles + facing arrow)</td></tr><tr><td><code>g</code></td><td>pick up</td></tr><tr><td><code>i</code></td><td>inventory — letter to inspect, then <code>e</code> use/equip, <code>d</code> drop</td></tr><tr><td><code>p</code></td><td>quaff first potion</td></tr><tr><td><code>z</code></td><td>class skill — fires down your facing</td></tr><tr><td><code>&gt;</code></td><td>descend (on stairs)</td></tr><tr><td><code>S</code> / <code>Q</code></td><td>save &amp; quit / quit</td></tr><tr><td><code>R</code></td><td>hot-reload scripts (with <code>--dev</code>)</td></tr></tbody></table></div>
+<p>Verified: seeds 99 / 7 / 1337 / 4242 hash-identical across backends up to 1,500 turns, and a god-mode autopilot reaches floor 10 and kills Vexadrach on both backends (<code>victory: true</code>, same hash, turn 1016).</p>
+<h2 id="jai-demoreel-examples-demoreel">jai_demoreel (examples/demoreel)<a class="hlink" href="#jai-demoreel-examples-demoreel" aria-label="link">&#8203;</a></h2>
+<p>Ten auto-advancing truecolor scenes, transitions, title cards, and a finale where the word JAISCRIPT ignites out of a wall of rainbow fire — every effect coded in <code>scenes/*.jai</code>. The reel keeps <strong>two live engines</strong> warm — one interpreter, one VM — running the same scripts, and lets you flip between them mid-run with <code>TAB</code> while the HUD shows each backend&#x27;s frame cost. Press <code>r</code> and every scene hot-reloads into both engines without restarting.</p>
+<p>The scenes: PLASMA, STARFIELD, DONUT, JULIA, PIPEDREAM, POWDER, BOIDS, KINSTEIN 3D, FIRE, FINALE.</p>
+<p>DONUT (<code>--capture 2</code>, ANSI stripped — luminance-shaded torus):</p>
+<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture">     ,.--....., . .. . .. :......= ......!  ..   .    .*     ~    !
+     ,.,., .... .. . .-.. ............   ..   .   *     . ,   * :*
+      . .... ....... . .- ...:..... = ..   .!   .  . .    * ,
+      ...... ......... ...-......  ..  ...   .   ..   .  .   ,  ~ :!=
+      ..... ..... .............:...  ..;  .   ..   . ! .  .      !
+       .... . ... . ........-. ..  ..  ..  ..  =   .       . !,  -  :;=
+        ........  ..., ,......-.. ..  .  ;.  .   .   . !.          ! ~:
+         .,,,,-,,., .,.-...:.~.  .  :  .  ..  .  =.  .   .  .  !.  -   ;
+          .,--.~.:.:= ; .!.!...;. .. .~ .  .   .  .   .  .=  .  .  ,= - ;</code></pre></div>
+<p>BOIDS (<code>--capture 6</code> — the flock, trails, and the hawk <code>@</code>):</p>
+<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture">                                            ^ :  ^.^^
+                                         */^: ^^ .^ *
+                                      ./ . /:^:*^ ^  ^
+                                         /.:/ ^.^ ^  ^
+                                  /       /:*^.^. ^  :
+                                 .* /./ :/.  : .  .
+                  @        :/      :*   .
+                          . :/  :/   */</code></pre></div>
+<p>FINALE afterglow (brightness map of the raw frame as the fire dies — the word stays lit in rainbow flame):</p>
+<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture">               ....#..#####..###..########....#####..###..#####. .#.
+               ....#..#####..###..#####.##....###.#..##...###.#  .#.
+               ...##..#####..###...####.##....####...###..####   .#.
+               ..###..#. .#..###...####.##....#.#....###..#.     .#.
+                #..# .#. .#..###...#..# #.##..#. #...###..#.     .#.
+                  ##   #   # ##### ####   #### #   # ##### #       #</code></pre></div>
+<div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">cmake --build &quot;out/build/x64-Release BENCHMARKS&quot; --target jai_demoreel
+
+jai_demoreel                     # the reel, VM backend active, 30 fps pacing
+jai_demoreel --backend interp    # start on the interpreter instead
+jai_demoreel --smoke             # headless: both backends, frame-hash parity + perf
+jai_demoreel --capture I         # print scene I as plain text (ANSI stripped)
+jai_demoreel --precompiled       # boot from demoreel.jaib (saved on first run)</code></pre></div>
+<div class="tablewrap"><table><thead><tr><th>key</th><th>action</th></tr></thead><tbody><tr><td><code>TAB</code></td><td>swap live backend (interpreter ↔ VM); scene state re-synced</td></tr><tr><td><code>r</code></td><td>hot-reload every <code>scenes/*.jai</code> from disk into BOTH engines</td></tr><tr><td><code>h</code></td><td>toggle the HUD (scene, ACTIVE BACKEND, frame ms, fps)</td></tr><tr><td><code>f</code></td><td>freeze the clock (render keeps running)</td></tr><tr><td><code>n</code> / <code>p</code> / space / arrows</td><td>next / previous scene</td></tr><tr><td><code>1</code>..<code>9</code>, <code>0</code></td><td>jump straight to a scene (<code>0</code> = scene 10)</td></tr><tr><td><code>q</code> / <code>ESC</code></td><td>quit</td></tr></tbody></table></div>
+<p>Measured numbers — Release, 100×40 = 4,000 truecolor cells per frame, whole 10-scene reel including transitions (<code>--smoke --frames 1300</code>):</p>
+<div class="tablewrap"><table><thead><tr><th>backend</th><th>ms/frame (mean)</th><th>fps</th><th>boot (parse)</th></tr></thead><tbody><tr><td>interpreter</td><td>95.8</td><td>~10</td><td>16.3 ms</td></tr><tr><td><strong>VM</strong></td><td><strong>55.6</strong></td><td><strong>~18</strong></td><td>21.5 ms</td></tr></tbody></table></div>
+<p>The VM runs the whole reel <strong>1.72×</strong> faster than the interpreter. Parity: frame streams <strong>byte-identical</strong> across backends over 1,300 frames — and over a 2,660-frame full-duration run. All scene randomness goes through the host&#x27;s seeded rng, so a one-cell divergence between backends fails the run.</p></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

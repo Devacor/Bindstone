@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide — JaiScript docs</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
+<main class="content">
+<h1>The Language Guide</h1>
+<p>Eleven chapters covering the whole core language. Every code sample was executed on <strong>both</strong> backends (tree-walking interpreter and bytecode VM); the output shown beneath each example is the real, verified output.</p>
+<ol class="toc">
+<li><a href="01-hello.html">Hello &amp; Basics</a><p class="toc-desc">JaiScript is a C++-flavored embedded scripting language: snake_case, hot-reloadable, zero static state, and shipped with two interchangeable backends (a tree-walking interpreter and a bytecode VM) that are kept at ful&hellip;</p></li>
+<li><a href="02-type-ladder.html">The Type Ladder: typed, auto, var</a><p class="toc-desc">JaiScript has three rungs of typing strictness for variables (and class fields):</p></li>
+<li><a href="03-value-semantics.html">Value Semantics &amp; References</a><p class="toc-desc">Read this chapter before writing any JaiScript. The single most common ambush for new users lives here: JaiScript copies by default — everywhere. Assignment copies. Function arguments copy. Even class instances copy. &hellip;</p></li>
+<li><a href="04-operators.html">Operators &amp; Arithmetic</a><p class="toc-desc">String + concatenates (&quot;a&quot; + &quot;b&quot;), and + with a string operand stringifies via the usual coercions. Comparison on strings is lexicographic.</p></li>
+<li><a href="05-control-flow.html">Control Flow</a><p class="toc-desc">if/else, while, C-style for, range-based for, switch (break-by-default), break/continue, and try/catch/throw. All of it unwinds correctly out of loops and nested frames on both backends. (pinned: language/control_flow&hellip;</p></li>
+<li><a href="06-functions.html">Functions &amp; Lambdas</a><p class="toc-desc">Three equivalent declaration styles: function name(params) -&gt; type, auto name(params) (inferred return), and typed C-style. Parameters may be typed (enforced + converted like any typed target) or bare (dynamic). De&hellip;</p></li>
+<li><a href="07-classes.html">Classes</a><p class="toc-desc">Script classes: fields with initializers (run in declaration order), constructors with overloading and : this(...) delegation, inheritance with super, statics, and hot reload with instance migration. All methods are v&hellip;</p></li>
+<li><a href="08-coroutines.html">Coroutines</a><p class="toc-desc">Declare with the coroutine keyword; calling one returns a handle instead of running the body. handle.resume() runs to the next yield (returning the yielded value), handle.done() reports completion, and a final return &hellip;</p></li>
+<li><a href="09-containers-strings.html">Containers &amp; Strings</a><p class="toc-desc">Array literals use [...]; map literals use {key: value, ...}. Builtin methods for arrays, maps, strings, and pointers live in one registry shared by both backends (detail/builtin_methods.hpp, populated by init_builtin&hellip;</p></li>
+<li><a href="10-modules.html">Modules: include vs import</a><p class="toc-desc">Everything below is the verified current behavior. (pinned: language/include_import_tests.cpp — all 13 tests)</p></li>
+<li><a href="11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a><p class="toc-desc">The smaller conveniences: enums, namespaces, destructuring, the ternary operator, and null-safe access.</p></li>
+</ol>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

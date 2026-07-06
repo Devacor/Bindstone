@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Embedding — JaiScript docs</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li></ol></aside>
+<main class="content">
+<h1>Embedding &amp;amp; Engine Guide</h1>
+<p>How to put JaiScript inside a C++ engine: the two-line quickstart, binding classes, choosing a backend, precompiled <code>.jaib</code> bites, safety rails for untrusted script, static checking, hot reload, serialization, coroutine hosting, signals, and the honest performance numbers. All host snippets were compiled and run against the real library.</p>
+<ol class="toc">
+<li><a href="01-embedding-quickstart.html">Embedding Quickstart</a><p class="toc-desc">JaiScript&#x27;s whole integration pitch fits in two lines — it compiles into your project as a static lib plus headers, and an engine is just an object:</p></li>
+<li><a href="02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a><p class="toc-desc">jai::dynamic_binder&lt;T&gt; (include/jaiscript/core/dynamic_binder.hpp) is the fluent builder that registers a C++ class with an engine. One chain covers constructors, methods, properties, operators, statics, and inh&hellip;</p></li>
+<li><a href="03-backends.html">Backends: Interpreter vs VM</a><p class="toc-desc">One parser, one AST, two interchangeable execution backends (include/jaiscript/core/execution_backend.hpp):</p></li>
+<li><a href="04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a><p class="toc-desc">A jai::jaibite (include/jaiscript/core/jaibite.hpp) is an engine-bound, pre-parsed script handle: engine-&gt;jaibite(source) lexes and parses once; every bite.execute() after that skips straight to execution. On the V&hellip;</p></li>
+<li><a href="05-safety-rails.html">Safety Rails</a><p class="toc-desc">JaiScript&#x27;s sandbox position (docs/why_jaiscript.md §6, Dev ruling logged 2026-07): there is no sandbox API because safety is the default. A script can only touch what the host registered — the language ships no &hellip;</p></li>
+<li><a href="06-static-checking.html">Static Checking</a><p class="toc-desc">A backend-neutral AST checker (detail/type_checker.hpp + source/implementation/type_checker.cpp, spec in docs/static_checking.md) that runs once per unique source at parse-cache-entry creation — the same hook covers e&hellip;</p></li>
+<li><a href="07-hot-reload.html">Hot Reload</a><p class="toc-desc">Hot reload is not a bolt-on file watcher — it is what redefinition means in JaiScript. Executing a class Foo { ... } declaration when Foo already exists redefines the class and migrates every live instance in place. E&hellip;</p></li>
+<li><a href="08-serialization.html">Serialization</a><p class="toc-desc">Two layers, one system: script-level to_json/from_json builtins for script values, and a C++ archive framework (JSON + binary through one interface, include/jaiscript/serialization/, spec in docs/SERIALIZATION.md and &hellip;</p></li>
+<li><a href="09-coroutine-hosting.html">Coroutine Hosting</a><p class="toc-desc">Script coroutines are the engine&#x27;s built-in answer to per-entity behaviors, cutscenes, and multi-frame AI: calling a coroutine function returns a handle; resume() runs to the next yield, done() reports completion&hellip;</p></li>
+<li><a href="10-signals-properties.html">Signals &amp; Observable Properties</a><p class="toc-desc">Two small C++ frameworks ship with JaiScript and are how the MutedVision engine wires gameplay events to script: jai::signal (typed multicast events whose receivers can be C++ lambdas or script) and jai::observable_pr&hellip;</p></li>
+<li><a href="11-performance.html">Performance Notes</a><p class="toc-desc">Honest numbers, with their sources. The benchmark suites live in source/tests/performance/ (Release BENCHMARKS config, -DJAISCRIPT_ENABLE_BENCHMARKS=ON): benchmark_suite.cpp (&quot;Performance Benchmarks&quot;), squir&hellip;</p></li>
+</ol>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

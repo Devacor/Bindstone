@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hot Reload — JaiScript Embedding</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li class="current"><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="hot-reload">Hot Reload<a class="hlink" href="#hot-reload" aria-label="link">&#8203;</a></h1>
+<p>Hot reload is not a bolt-on file watcher — it is what <strong>redefinition means</strong> in JaiScript. Executing a <code>class Foo { ... }</code> declaration when <code>Foo</code> already exists redefines the class and <strong>migrates every live instance in place</strong>. Executing a <code>function f(...)</code> declaration rebinds the global. The host&#x27;s job is only to re-run the new source (<code>engine-&gt;execute(newSource)</code> / script-side <code>include</code>); the engine does the rest. The design promise (<code>docs/why_jaiscript.md</code> §5): <em>the reload always succeeds</em> — iteration speed is the point, an edit never bricks a running session.</p>
+<h2 id="instance-migration-rules">Instance migration rules<a class="hlink" href="#instance-migration-rules" aria-label="link">&#8203;</a></h2>
+<p>Verified live (<code>hosts/reload.cpp</code> — one engine, two executes):</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(R&quot;( class Player { int hp = 100; float speed = 1.0; string name = &quot;Unnamed&quot;; }
+                 var p = Player(); p.hp = 62; p.name = &quot;Alice&quot;; )&quot;);
+
+eng-&gt;execute(R&quot;( class Player {
+                     string hp = &quot;0&quot;;          // retyped
+                     string name = &quot;Unnamed&quot;;  // kept
+                     int level = 1;            // new
+                     // speed removed
+                     void hot_reload_migrate() { level = 5; }
+                 } )&quot;);</code></pre></div>
+<div class="codeblock cb-plain"><pre><code class="lang-plain">hp: string 62                  &lt;- retyped field CONVERTED (int 62 -&gt; &quot;62&quot;)
+name: Alice                    &lt;- same-name field KEPT its runtime value
+level (set by migrate hook): 5 &lt;- new field defaulted, then hook ran
+speed removed: 1               &lt;- removed field gone (access now throws)</code></pre></div>
+<p>The full matrix, each row pinned in <code>language/hot_reload_tests.cpp</code> and <code>language/hot_reload_correctness_tests.cpp</code> (both backends share <code>migrate_fields</code>, so behavior is identical):</p>
+<div class="tablewrap"><table><thead><tr><th>change</th><th>what happens to live instances</th><th>pinning test</th></tr></thead><tbody><tr><td>field kept (same name, same type)</td><td>value preserved — even if the initializer changed</td><td><code>same_type_initializer_change_keeps_value</code></td></tr><tr><td>field added</td><td>takes the new initializer</td><td><code>multiple_instances_hot_reload</code></td></tr><tr><td>field removed</td><td>gone; access throws</td><td><code>complex_field_migration</code></td></tr><tr><td>field <strong>retyped</strong></td><td>value <strong>converts permissively</strong> via the assignment table (int→string via to_string, float→int truncation, int→float widening); only a value with NO conversion falls back to the new initializer</td><td><code>field_type_change_converts_value</code>, <code>_numeric_conversions</code>, <code>_unconvertible_adopts_default</code> (the 2026-07 &quot;retype migration&quot; ruling: reload never bricks an instance)</td></tr><tr><td>method body changed</td><td>next call runs the new body, including via previously bound methods (no stale caches)</td><td><code>method_override_hot_reload</code>, <code>bound_method_not_stale_after_reload</code></td></tr><tr><td>static members</td><td><strong>runtime state preserved</strong>, not reset to the initializer; removed statics inaccessible; static method bodies update</td><td><code>static_state_preserved_across_reload</code>, <code>removed_static_inaccessible_after_reload</code>, <code>static_method_body_updates_on_reload</code></td></tr><tr><td>constructor overloads</td><td>survive (arity dispatch intact)</td><td><code>constructor_overload_survives_reload</code></td></tr><tr><td>base class reloaded</td><td>derived instances keep their own data, inherit new/retyped base fields (converted through the parent chain)</td><td><code>base_reload_preserves_derived_instance_data</code>, <code>inherited_field_type_change_converts_on_derived</code>, <code>inheritance_hot_reload</code>, <code>multi_level_inheritance_hot_reload</code></td></tr><tr><td>script class extending a <strong>C++ class</strong></td><td>the live C++ object (<code>_cpp_object</code>) is carried across — neither destructed nor rebuilt; inherited C++ methods stay callable</td><td><code>cpp_object_survives_field_changing_reload</code></td></tr></tbody></table></div>
+<p>Migration cost is linear in live instances and fields; 100 instances migrate fast enough to sit in a keypress handler (<code>hot_reload_tests.cpp::performance_stress_test</code>).</p>
+<h2 id="the-hot-reload-migrate-hook">The <code>hot_reload_migrate</code> hook<a class="hlink" href="#the-hot-reload-migrate-hook" aria-label="link">&#8203;</a></h2>
+<p>If the <strong>new</strong> class defines <code>void hot_reload_migrate()</code>, it runs once per live instance during the reload, <em>after</em> field migration — and inside the hook the old removed fields are still readable, which is what makes real data conversions possible:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config {
+    auto version = 2;
+    auto settings = {};          // new field
+    // flags removed
+    void hot_reload_migrate() {
+        if (this.flags == 42) {  // OLD field still visible here
+            this.settings = {&quot;debug&quot;: true, &quot;level&quot;: 5};
+        }
+    }
+}</code></pre></div>
+<p>Chained across versions v1→v2→v3→... each reload runs only the incoming class&#x27;s hook (<code>hot_reload_tests.cpp::hot_reload_migrate_lifecycle</code>). Robustness rules: an error in one instance&#x27;s hook doesn&#x27;t abort migration of the others (<code>migrate_hook_error_is_isolated</code>), and a hook that constructs new instances of the same class can&#x27;t hang the reload (<code>migrate_hook_constructing_instance_terminates</code> — the execution budget backstops it).</p>
+<h2 id="code-on-the-live-call-stack">Code on the live call stack<a class="hlink" href="#code-on-the-live-call-stack" aria-label="link">&#8203;</a></h2>
+<p>Redefining a function (or class) <strong>while it is executing</strong> — e.g. a host callback fires mid-script and re-executes a script file — follows one rule: <em>frames already on the stack finish with their old bodies; the global binding is replaced immediately, so recursion and all later calls resolve the new one; the new definition persists</em>.</p>
+<div class="codeblock cb-plain"><pre><code class="lang-plain">v1 damage(10): 10
+v2 damage(10): 30        &lt;- hosts/reload.cpp, verified</code></pre></div>
+<p>Pinned hard in <code>hot_reload_correctness_tests.cpp</code>: <code>function_redefined_mid_call_persists</code> (a recursive function swaps ITSELF mid-recursion: old frames complete on the old body, the recursive call already resolves the new one, and the new binding survives), <code>self_redefinition_mid_call_persists_after_return</code>, and <code>reentrant_execute_preserves_this_in_ctor_and_method</code> / <code>reentrant_execute_swallowed_throw_does_not_leak_into_outer_run</code> (a reentrant <code>execute()</code> neither clobbers the suspended outer run&#x27;s environment nor leaks its exceptions into it). Coroutines suspended at reload keep their old bodies until rebuilt.</p>
+<p>One pinned quirk (<code>class_reload_mid_recursion_keeps_globals_coherent</code>): a class method mid-recursion when its own class is reloaded fails to resolve sibling methods for the <em>remainder of that one call</em> (consistently, both backends) — afterwards the instance, the class, and new instances all work on the new bodies.</p>
+<h2 id="live-usage-the-games-dev-modes">Live usage: the games&#x27; <code>--dev</code> modes<a class="hlink" href="#live-usage-the-games-dev-modes" aria-label="link">&#8203;</a></h2>
+<p>Both shipped examples dogfood this:</p>
+<ul><li>**<code>examples/roguelike</code>** (<code>--dev</code>, key <code>R</code>): <code>reload_scripts()</code> in <code>scripts/main.jai</code> simply re-<code>include</code>s every rule file mid-game — &quot;Classes hot-reload with instance migration; live coroutines (monster brains) keep their old bodies until rebuilt. G and RNG live in state.jai, which is deliberately skipped&quot; (comment in the script). The pattern to copy: split <em>rules</em> (reloadable) from <em>state</em> (not re-executed).</li><li>**<code>examples/demoreel</code>**: live-coding — edit a scene file while it renders, reload on the fly.</li></ul>
+<p><code>include</code> re-runs a file every time by design (PHP-style template semantics); <code>import</code> is the run-once module system with <code>file_timestamp</code> default behavior (re-import when the file changed — i.e. import IS the file-watcher integration point), plus <code>engine::reset_import(s)</code> for forced invalidation and <code>set_import_behavior(once|always|file_timestamp)</code> (<code>engine.hpp</code>).</p>
+<h2 id="interaction-with-the-rest-of-the-engine">Interaction with the rest of the engine<a class="hlink" href="#interaction-with-the-rest-of-the-engine" aria-label="link">&#8203;</a></h2>
+<ul><li><strong>Source cache / static checker</strong>: new source text is a new parse-cache entry, so a checked engine re-checks reloaded code automatically (<code>static_check_tests.cpp::hot_reload_new_source_is_rechecked</code>).</li><li><strong>jaibite</strong>: class redefinition works across repeated bite executions too (<code>engine_tests.hpp::jaibite_class_redefinition_across_runs</code>).</li><li><strong>Serialization</strong>: for <em>C++-side</em> class evolution, versioned archives + <code>post_load_hook</code> are the analogous migration story (see Serialization chapter); <code>hot_reload_migrate</code> is the <em>script-side</em> twin for live sessions.</li></ul><nav class="prevnext"><a class="prev" href="../embedding/06-static-checking.html"><span>&larr; previous</span>Static Checking</a><a class="next" href="../embedding/08-serialization.html"><span>next &rarr;</span>Serialization</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

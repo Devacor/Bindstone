@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JaiScript — an embedded scripting language for C++ engines</title>
+<link rel="stylesheet" href="assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a><a href="open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+
+<main class="content">
+<div class="hero">
+  <h1 class="rainbow">JaiScript</h1>
+  <p class="tagline">An embedded scripting language for C++ engines: C++-flavored syntax, script classes with
+  hot reload, coroutines, gradual typing — and <strong>two interchangeable backends kept at full behavioral
+  parity</strong>, so the semantics are enforced by implementations arguing with each other rather than a
+  document nobody reads.</p>
+  <p class="sub">every example on this site was executed on both backends before it was written down</p>
+  <div class="hero-ctas">
+    <a class="btn btn-primary" href="guide/01-hello.html">Read the guide</a>
+    <a class="btn" href="embedding/01-embedding-quickstart.html">Embed it</a>
+    <a class="btn" href="examples/index.html">Play the examples</a>
+  </div>
+</div>
+
+<div class="home-section">
+<h2>Two lines to hello</h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto e = jai::engine::make();
+e-&gt;execute("print(\"hello\");");</code></pre></div>
+
+<p>It compiles as part of your project — a static lib plus headers, no global interpreter state anywhere.
+Bind a C++ class in a fluent chain, hand the script a budget and a memory cap, and iterate with hot reload:</p>
+
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hits = 0;          // enforced — assigning a string is an error
+auto name = "Jai";     // inferred, then enforced — locked to string
+var anything = 5;      // dynamic — the explicit, visible opt-out
+anything = "now a string";   // fine; you asked for this
+
+class Hero {
+    int hp = 10;
+    void heal(int amount) { hp += amount; }
+}
+function bump(int&amp; x) { x += 1; }   // mutation is visible at both ends
+
+auto h = Hero();
+h.heal(5);
+bump(h.hp);            // fields and elements bind by reference too
+print("hp = {}", h.hp);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp = 16</code></pre></div>
+</div>
+
+<div class="home-section">
+<h2>The seven pillars</h2>
+<div class="pillars">
+  <div class="pillar"><h3><span class="pnum">01</span>The type ladder</h3>
+    <p><code>int x</code> is enforced. <code>auto x</code> is inferred, then enforced. <code>var x</code> is
+    dynamic — a choice you can see in a diff, not a default you fall into. The optional static checker maps
+    onto it exactly: typed code gets compile-time errors, <code>var</code> opts out — like TypeScript's
+    <code>any</code>, but designed-in.</p>
+    <p><a href="guide/02-type-ladder.html">The Type Ladder →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">02</span>Value semantics, references by declaration</h3>
+    <p>Assignment, parameters, and returns copy. Nothing aliases at a distance; a function cannot mutate your
+    data unless its signature says <code>&amp;</code>. Deterministic saves, no spooky mutation, and
+    <code>to_json</code> of any value means what you think it means.</p>
+    <p><a href="guide/03-value-semantics.html">Value Semantics →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">03</span>Two implementations, one executable spec</h3>
+    <p>A tree-walking interpreter and a bytecode VM, required to agree byte-for-byte — including error text —
+    enforced by 1,500+ tests run against both, plus a differential fuzzer that files a bug whenever they
+    disagree. Semantics cannot rot silently.</p>
+    <p><a href="embedding/03-backends.html">Backends →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">04</span>Zero global state</h3>
+    <p>No statics, no singletons; every value carries its engine. Two engines on two threads need no locks,
+    tests cannot contaminate each other, and the planned parallel story falls out of this property instead of
+    fighting it.</p>
+    <p><a href="embedding/01-embedding-quickstart.html">Quickstart →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">05</span>Hot reload that never bricks</h3>
+    <p>Redefine a class mid-session and live instances migrate: fields keep values, changed types convert
+    permissively, new fields take their initializers. The reload <em>always succeeds</em>, because iteration
+    speed is the point. The roguelike reloads its own scripts mid-game on a keypress.</p>
+    <p><a href="embedding/07-hot-reload.html">Hot Reload →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">06</span>Safe at the boundary, by construction</h3>
+    <p>A script can only touch what the host registered — the binding surface <em>is</em> the allowlist.
+    Checked integer overflow, catchable recursion limits, an execution budget and a memory cap that a hostile
+    script cannot catch-and-swallow its way past. Untrusted scripts are a configuration, not a rewrite.</p>
+    <p><a href="embedding/05-safety-rails.html">Safety Rails →</a></p></div>
+  <div class="pillar"><h3><span class="pnum">07</span>Parse once, run anywhere</h3>
+    <p><code>engine-&gt;jaibite(source)</code> parses once, executes many, and <code>save("level.jaib")</code>
+    ships precompiled — symbols relocate on load, so one file serves any engine. Even naive
+    <code>execute(str)</code> in a loop pays the parse once via the source cache.</p>
+    <p><a href="embedding/04-jaibite.html">jaibite →</a></p></div>
+</div>
+</div>
+
+<div class="home-section">
+<h2>The receipts</h2>
+<div class="receipts">
+  <div class="receipt"><span class="big">1,500+</span><span class="what">tests green on both backends, every commit — plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
+  <div class="receipt"><span class="big">~45 ns</span><span class="what">per hot-loop iteration on the VM — loops fuse into superinstructions; the VM beats Squirrel on most head-to-head benchmarks (13W/6L)</span></div>
+  <div class="receipt"><span class="big">32 bytes</span><span class="what"><code>script_value</code> size, static-assert-gated — two per cache line</span></div>
+  <div class="receipt"><span class="big">~2,700 lines</span><span class="what">of JaiScript in a complete roguelike; plus a dungeon crawler and a 10-scene demoreel — all doubling as cross-backend determinism tests</span></div>
+  <div class="receipt"><span class="big">strict mode</span><span class="what">optional static checking: compiler-style diagnostics with line/column before a single statement runs</span></div>
+  <div class="receipt"><span class="big">0.38 µs</span><span class="what">warm <code>jaibite.execute()</code> on the VM for a tiny script; engine creation ~90 µs, so reuse engines</span></div>
+</div>
+</div>
+
+<div class="home-section">
+<h2>The honest tradeoffs</h2>
+<ul class="tradeoffs">
+  <li><strong>Copies cost.</strong> Value semantics means passing a big structure by value deep-copies it.
+  The idiom is <code>&amp;</code> parameters for anything heavy — cheap by design. If you write Python-shaped
+  code expecting reference semantics, your first hour will surprise you; read
+  <a href="guide/03-value-semantics.html">Value Semantics</a> first and it won't.</li>
+  <li><strong>Call-dense recursion is slower than Lua</strong> today (~5× on a fib microbenchmark). Most game
+  scripts are loop- and method-shaped, where the gap is small to none — the register-window VM redesign that
+  closes it is on the roadmap, not a hope.</li>
+  <li><strong>Two backends cost maintenance.</strong> That's the price of the executable spec, and shared
+  semantic kernels are steadily shrinking the duplicated surface.</li>
+  <li><strong>Some behaviors are still under design review.</strong> Writing these docs from the test suite
+  surfaced 13 of them — they're documented as observed, not papered over:
+  <a href="open-questions.html">Open Questions</a>.</li>
+</ul>
+</div>
+
+<div class="home-section">
+<h2>Who it's for</h2>
+<p>Teams embedding scripting in a C++ engine who want iteration speed (hot reload, script classes), safety
+rails on by default, types that scale from prototype (<code>var</code>) to production (<code>int</code> +
+strict checking) <em>within the same file</em>, and a language whose behavior is enforced by two
+implementations arguing with each other. It was built alongside a real engine (MutedVision / Bindstone),
+hardened by adversarial review and differential fuzzing, and dogfooded by building
+<a href="examples/index.html">real, playable things</a> in it.</p>
+</div>
+
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="assets/search-index.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

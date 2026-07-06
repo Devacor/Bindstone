@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hello &amp; Basics — JaiScript Guide</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html" class="active">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li class="current"><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="hello-basics">Hello &amp; Basics<a class="hlink" href="#hello-basics" aria-label="link">&#8203;</a></h1>
+<p>JaiScript is a C++-flavored embedded scripting language: snake_case, hot-reloadable, zero static state, and shipped with <strong>two interchangeable backends</strong> (a tree-walking interpreter and a bytecode VM) that are kept at full test parity. Every example in these docs was executed on <strong>both</strong> backends; unless a divergence is called out, the output shown is identical on each.</p>
+<h2 id="running-a-script-from-c">Running a script from C++<a class="hlink" href="#running-a-script-from-c" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
+#include &lt;jaiscript/stdlib/stdlib.hpp&gt;
+
+auto eng = jai::engine::make();                 // shared_ptr&lt;engine&gt;
+// eng-&gt;set_backend(jai::backend_type::vm);     // optional: bytecode VM (before first execute)
+jai::stdlib::register_all(eng);                 // print, format, to_string, type_of, to_json, ...
+jai::script_value r = eng-&gt;execute(&quot;2 + 2&quot;);
+int v = r.as_int();                             // 4</code></pre></div>
+<p>Two things to know from the start:</p>
+<ol><li>**The last expression&#x27;s value is the result of <code>execute()</code>.** No <code>return</code> needed at top level.</li><li><code>set_backend()</code> must be called <strong>before</strong> the first <code>execute()</code> (forbidden after).</li></ol>
+<h2 id="values-and-literals">Values and literals<a class="hlink" href="#values-and-literals" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto i = 42;            // integer (64-bit)
+auto f = 3.14;          // float (double)
+auto s = &quot;hello&quot;;       // string
+auto c = &#x27;x&#x27;;           // char
+auto b = true;          // bool
+auto n = null;          // null
+print(type_of(i), &quot; &quot;, type_of(f), &quot; &quot;, type_of(s), &quot; &quot;, type_of(c), &quot; &quot;, type_of(b), &quot; &quot;, type_of(n));
+print(&quot;hex: {}, binary: {}, exponent: {}&quot;, 0xFF, 0b1010, 2.5e3);
+i + f;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int float string char bool null
+hex: 255, binary: 10, exponent: 2500.000000
+== result: 45.140000</code></pre></div>
+<p>Integers are 64-bit (<code>int64</code>), floats are doubles. Hex (<code>0xFF</code>) and binary (<code>0b1010</code>) integer literals work, as do exponent floats (<code>2.5e3</code>). Strings support the usual escapes (<code>\n</code>, <code>\&quot;</code>, <code>\\</code>). <em>(pinned: semantics/lexer_tests.cpp, semantics/type_info_tests.cpp)</em></p>
+<h2 id="comments-and-the-implicit-result">Comments and the implicit result<a class="hlink" href="#comments-and-the-implicit-result" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// single-line comment
+/* multi-line
+   comment */
+auto x = 10; // trailing comment
+x * 2;  // the last expression&#x27;s value is what execute() returns</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 20</code></pre></div>
+<h2 id="print-and-format">print and format<a class="hlink" href="#print-and-format" aria-label="link">&#8203;</a></h2>
+<p><code>print</code> and <code>format</code> are registered by <code>jai::stdlib::register_all</code> as variadic host functions (they are the canonical example of variadics, which live on the host side — see the Functions chapter). <em>(pinned: stdlib/io_tests.cpp)</em></p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;plain string&quot;);
+print(&quot;several&quot;, &quot; &quot;, &quot;args&quot;, &quot; &quot;, &quot;concatenate&quot;);
+print(&quot;sequential: {} + {} = {}&quot;, 2, 3, 2 + 3);
+print(&quot;positional: {1} before {0}&quot;, &quot;cart&quot;, &quot;horse&quot;);
+print(&quot;literal {{braces}} in a formatted call: {}&quot;, true);
+auto msg = format(&quot;format() returns: {}&quot;, 99);
+print(msg);
+print(&quot;no newline &quot;, skip_newline);
+print(&quot;continues the line&quot;);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">plain string
+several args concatenate
+sequential: 2 + 3 = 5
+positional: horse before cart
+literal {braces} in a formatted call: true
+format() returns: 99
+no newline continues the line
+== result: null</code></pre></div>
+<p>Rules:</p>
+<ul><li><code>print(value)</code> — one argument: printed as-is (no <code>{}</code> processing).</li><li><code>print(fmt, args...)</code> — if the first argument contains <code>{}</code> or <code>{n}</code> placeholders, it is treated as a format string: <code>{}</code> consumes the next argument, <code>{0}</code>/<code>{1}</code> are positional (0-based over the args after the format string), <code>{{</code>/<code>}}</code> escape braces.</li><li><code>print(a, b, c)</code> — if the first argument has <strong>no</strong> placeholders, all arguments are concatenated.</li><li>Trailing <code>skip_newline</code> suppresses the newline; <code>skip_flush</code> suppresses newline and flush.</li><li><code>format(...)</code> follows the same rules but returns the string instead of printing.</li></ul>
+<p>Note: brace escaping (<code>{{</code>) only applies on the <em>format path</em> (multiple arguments with placeholders). A single-argument <code>print(&quot;{{x}}&quot;)</code> prints the braces literally.</p>
+<h2 id="stringifying-values">Stringifying values<a class="hlink" href="#stringifying-values" aria-label="link">&#8203;</a></h2>
+<p><code>to_string(x)</code> converts any value to a string; floats print with six decimals (<code>3.14</code> → <code>&quot;3.140000&quot;</code>). For containers, <code>to_string</code> prints only a tag (<code>[array]</code>, <code>[map]</code>) — use <code>to_json(x)</code> when you want the contents:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1,2,3];
+print(nums);
+print(to_json(nums));
+print(to_json({&quot;a&quot;: 1}));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[array]
+[1,2,3]
+{&quot;a&quot;:1}</code></pre></div>
+<p><code>type_of(x)</code> returns one of: <code>null bool int float char string array map function object reference weak_ptr</code>.</p><nav class="prevnext"><span></span><a class="next" href="../guide/02-type-ladder.html"><span>next &rarr;</span>The Type Ladder: typed, auto, var</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

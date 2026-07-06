@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serialization — JaiScript Embedding</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li class="current"><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="serialization">Serialization<a class="hlink" href="#serialization" aria-label="link">&#8203;</a></h1>
+<p>Two layers, one system: <strong>script-level</strong> <code>to_json</code>/<code>from_json</code> builtins for script values, and a <strong>C++ archive framework</strong> (JSON + binary through one interface, <code>include/jaiscript/serialization/</code>, spec in <code>docs/SERIALIZATION.md</code> and <code>docs/JaiScript_BinarySerialization.md</code>) for host types — designed as the Cereal replacement, with compatible member/free <code>serialize</code>/<code>save</code>/<code>load</code> dispatch.</p>
+<h2 id="script-side-to-json-from-json">Script side: <code>to_json</code> / <code>from_json</code><a class="hlink" href="#script-side-to-json-from-json" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// snippets/json_roundtrip.jai — verified, both backends identical
+class Player {
+    int hp = 0;
+    float speed = 0.0;
+    string name = &quot;&quot;;
+}
+auto p = Player();
+p.hp = 42; p.speed = 1.5; p.name = &quot;hero&quot;;
+
+var j = to_json(p);
+print(j);                      // {&quot;_type_&quot;:&quot;Player&quot;,&quot;hp&quot;:42,&quot;speed&quot;:1.5,&quot;name&quot;:&quot;hero&quot;}
+
+var q = from_json(j);          // reconstructs a Player via the _type_ discriminator
+print(type_of(q.hp) + &quot; &quot; + to_string(q.hp) + &quot;, &quot; + q.name);   // int 42, hero
+
+// Typed fields ENFORCE on the way in: a float payload into an int field converts
+// through the same table &#x27;=&#x27; uses (7.9 -&gt; 7).
+var r = from_json(&quot;{\&quot;_type_\&quot;: \&quot;Player\&quot;, \&quot;hp\&quot;: 7.9, \&quot;speed\&quot;: 2, \&quot;name\&quot;: \&quot;clone\&quot;}&quot;);
+print(type_of(r.hp) + &quot; &quot; + to_string(r.hp) + &quot;, &quot; + type_of(r.speed));  // int 7, float
+
+// Plain values and containers round-trip too.
+var m = from_json(to_json({&quot;a&quot;: [1, 2.5, &quot;three&quot;, true, null]}));
+print(to_json(m));             // {&quot;a&quot;:[1,2.5,&quot;three&quot;,true,null]}</code></pre></div>
+<p>Key facts, each pinned:</p>
+<ul><li><strong>Typed-field enforcement on deserialize</strong>: declared field types are stored on the class definition, and <em>every</em> write path — including <code>from_json</code> — converts through the same field kernel that <code>=</code> uses (float→int truncates, int→string via to_string; <code>var</code> fields stay dynamic). Pinned by <code>semantics/strong_types_tests.cpp</code> (&quot;JSON round-trip preserves typed fields&quot;, &quot;JSON float into int field truncates&quot;).</li><li>The class must be defined (or registered) in the engine before <code>from_json</code> sees its <code>_type_</code>; an unknown <code>_type_</code> yields plain data rather than an instance.</li><li>Floats round-trip at <strong>full precision</strong> (<code>std::to_chars</code> shortest-round-trip; <code>-0.0</code>, infinities handled — fuzz fix FZ-NEG-ZERO, <code>convenience_function_tests.cpp:: json_infinity_roundtrips</code>).</li><li>Hostile-text hardening: parse depth capped at <code>JAI_MAX_JSON_PARSE_DEPTH = 128</code>, trailing garbage rejected, invalid unicode escapes are serialization errors, lone surrogates become replacement chars (<code>json_reader_*</code> tests).</li></ul>
+<h2 id="c-side-the-convenience-api">C++ side: the convenience API<a class="hlink" href="#c-side-the-convenience-api" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// hosts/serialize.cpp — compiled and run, verified
+#include &lt;jaiscript/serialization/convenience.hpp&gt;
+
+struct SaveGame {
+    int level = 0; double time_played = 0; std::string hero; std::vector&lt;int&gt; inventory;
+    template&lt;typename Archive&gt;
+    void serialize(Archive&amp; ar) {          // one method, both directions, both formats
+        ar(&quot;level&quot;, level);
+        ar(&quot;time_played&quot;, time_played);
+        ar(&quot;hero&quot;, hero);
+        ar(&quot;inventory&quot;, inventory);
+    }
+};
+
+SaveGame save{7, 123.5, &quot;Alice&quot;, {1, 2, 3}};
+std::string json = jai::to_json(*eng, save);                  // human-readable
+SaveGame loaded  = jai::from_json&lt;SaveGame&gt;(*eng, json);
+
+std::vector&lt;uint8_t&gt; blob = jai::to_binary(*eng, save);       // compact little-endian
+SaveGame fromBin = jai::from_binary&lt;SaveGame&gt;(*eng, blob);    // 114 bytes for this demo</code></pre></div>
+<p>Verified output (JSON is pretty-printed over several lines by default — <code>indent</code> parameter; condensed here):</p>
+<div class="codeblock cb-plain"><pre><code class="lang-plain">{ &quot;_type_&quot;: &quot;&quot;, &quot;level&quot;: 7, &quot;time_played&quot;: 123.5, &quot;hero&quot;: &quot;Alice&quot;, &quot;inventory&quot;: [1, 2, 3] }
+loaded: level=7 hero=Alice items=3
+binary: 114 bytes, hero=Alice</code></pre></div>
+<p>Also available: <code>to_binary_string</code>/<code>from_binary_string</code>, <code>to_base64</code>/<code>from_base64</code>, and <code>Context&amp;</code> overloads that thread a user context pointer to nested <code>load</code> calls (<code>json_with_user_context</code>). The binary format is explicitly little-endian portable (<code>binary_little_endian_portable</code>).</p>
+<h3 id="dispatch-priority-cereal-style-provide-either-serialize-or-save-load">Dispatch priority (Cereal-style — provide either <code>serialize</code> OR <code>save</code>/<code>load</code>)<a class="hlink" href="#dispatch-priority-cereal-style-provide-either-serialize-or-save-load" aria-label="link">&#8203;</a></h3>
+<p>For a type <code>T</code> the archive picks, in order: native handling (primitives, <code>std::vector/ map/unordered_map/array/pair</code>, <code>shared_ptr/weak_ptr/unique_ptr</code>) → member <code>save</code>/<code>load</code> → member <code>serialize</code> → free <code>save</code>/<code>load</code> via ADL → free <code>serialize</code> via ADL → <code>JAI_STATIC_BINDER</code> compile-time properties → automatic <code>property_owner&lt;T&gt;</code> fallback (all <code>JAI_PROPERTY</code> fields). No match = <code>static_assert</code>. For smart pointers to non-default-constructible types, <code>load_and_construct</code> (member or ADL) is checked first. (<code>docs/SERIALIZATION.md</code>; exercised across <code>serialization/convenience_function_tests.cpp</code> — <code>member_serialize_json/binary</code>, <code>explicit_save_load_json/binary</code>, <code>property_owner_json/binary_roundtrip</code>, <code>blended_*</code>.)</p>
+<p>Private members: <code>friend jai::access</code> (<code>private_serialize_friend_jai_access</code>).</p>
+<h3 id="smart-pointers-polymorphism-graphs">Smart pointers, polymorphism, graphs<a class="hlink" href="#smart-pointers-polymorphism-graphs" aria-label="link">&#8203;</a></h3>
+<ul><li><code>shared_ptr</code> <strong>dedupe</strong>: aliased pointers serialize once (<code>$id</code>) and re-alias on load (<code>shared_ptr_json_roundtrip</code> asserts the loaded copies share one object).</li><li><code>weak_ptr</code> reconstruction works even for <strong>forward references</strong> (the weak_ptr appears in the stream before its owner) — <code>weak_ptr_forward_reference_json/binary</code>, <code>serialization/weak_ptr_backref_tests.cpp</code>.</li><li><strong>Polymorphic roots</strong>: <code>shared_ptr&lt;Base&gt;</code> holding a Derived writes a <code>$type</code> discriminator and reconstructs the derived type on load, gated by registered assignability edges (<code>dynamic_binder::base_class</code> records them; suites <code>polymorphic_serialization_tests.cpp</code>, <code>inheritance_serialization_tests.cpp</code>, <code>factory_deserialization_tests.cpp</code>).</li><li><strong>Versioning/migration</strong>: <code>.version(n)</code> on the binder stamps class versions; <code>.post_load_hook([](T&amp; self, int version){ ... })</code> runs after load for migration; <code>.deserialization_factory(...)</code> constructs non-default-constructible types (archive-only / context-only / context+archive signatures auto-detected).</li></ul>
+<h3 id="security-posture-untrusted-payloads">Security posture (untrusted payloads)<a class="hlink" href="#security-posture-untrusted-payloads" aria-label="link">&#8203;</a></h3>
+<p><code>serialization/serialization_security_tests.cpp</code> pins that deserialization <strong>never executes</strong> payload-controlled names: hostile <code>_type_</code>/property names in JSON, binary, and base64 are data, not code (<code>from_json_type_name_not_executed</code>, <code>from_json_property_name_not_executed</code>, <code>from_binary_type_name_not_executed</code>, <code>from_base64_type_name_not_executed</code>), and oversized array/map length prefixes in binary data are rejected instead of pre-allocated (<code>binary_oversized_array_length_rejected</code>, <code>binary_oversized_map_length_rejected</code>).</p>
+<h2 id="which-layer-to-use">Which layer to use<a class="hlink" href="#which-layer-to-use" aria-label="link">&#8203;</a></h2>
+<ul><li>Script gameplay state (the roguelike&#x27;s save file is exactly this): script-side <code>to_json(G)</code> / <code>from_json(text)</code> — one line each way, typed fields re-enforced on load.</li><li>Host/engine objects, editor documents, network payloads: the C++ archives — JSON while debugging, <code>to_binary</code> when size/speed matter, same <code>serialize</code> method either way.</li><li>Pre-parsed script code is its own format: <code>.jaib</code> via <code>jaibite::save</code> (see the jaibite chapter) — ASTs, not values.</li></ul><nav class="prevnext"><a class="prev" href="../embedding/07-hot-reload.html"><span>&larr; previous</span>Hot Reload</a><a class="next" href="../embedding/09-coroutine-hosting.html"><span>next &rarr;</span>Coroutine Hosting</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

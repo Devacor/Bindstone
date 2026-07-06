@@ -210,34 +210,20 @@ namespace {
 		return value.clone();
 	}
 
-	// Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: share the
-	// holder, except constrained element refs re-derive an unconstrained alias (auto&
-	// drops the element-type constraint - pinned decl semantics)
+	// Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: SHARE
+	// the holder, constraint included. RULED (2026-07-06): element/field/map-entry refs
+	// keep their bind-time type constraint through a ref decl — auto& over an
+	// array<int> element enforces int on store exactly like direct element assignment
+	// (reverses the e43f8a6f constraint-dropping pin). Sharing also keeps container
+	// re-resolution (realloc/shrink safe). KEEP BYTE-PARALLEL with decl_ref_alias.
 	checked_result<script_value> vm_decl_ref_alias(const script_value& source, engine* eng) {
+		(void)eng;
 		auto refHolder = source.get_reference_holder();
 		if (!refHolder) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 		}
 		if (!refHolder->has_cell && !refHolder->has_map_key && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
-		}
-		if (refHolder->container_element_type) {
-			if (refHolder->container) {
-				if (refHolder->container_index >= refHolder->container->size()) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
-				}
-				return script_value::make_element_reference(refHolder->container, refHolder->container_index, refHolder->sourceEnv.lock(), eng, nullptr);
-			}
-			if (refHolder->owner_instance) {
-				if (!refHolder->owner_instance->find_field_value(refHolder->field_id)) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
-				}
-				return script_value::make_field_reference(refHolder->owner_instance, refHolder->field_id, eng, nullptr);
-			}
-			if (refHolder->has_map_key) {
-				return script_value::make_map_entry_reference(refHolder->container_map, *refHolder->cell(), eng, nullptr);
-			}
-			return script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock(), eng);
 		}
 		return script_value(source);
 	}
@@ -7452,8 +7438,19 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 			return execution_limit_failure();
 		}
 		if (proto.is_reference) {
-			// Reallocation-safe container+index reference, never a raw element pointer
-			element = script_value::make_element_reference(array_storage, state.index, environment_, engine_, nullptr);
+			// Reallocation-safe container+index reference, never a raw element pointer.
+			// RULED (2026-07-06): the ref carries the container's declared element type —
+			// for (auto& x : intArr) x = "s" errors like intArr[i] = "s"; var (any-tagged)
+			// containers stay unconstrained. KEEP BYTE-PARALLEL with the interpreter twin.
+			type_info_ptr element_constraint = nullptr;
+			if (auto tag = state.container->get_type_info(); tag && tag->base_type == script_value_type::jai_array_type) {
+				type_info_ptr et = tag->element_type();
+				if (et && et->base_type != script_value_type::jai_any_type &&
+				    et->base_type != script_value_type::jai_null_type) {
+					element_constraint = et;
+				}
+			}
+			element = script_value::make_element_reference(array_storage, state.index, environment_, engine_, element_constraint);
 		} else {
 			element = (*array_storage)[state.index].clone();
 		}

@@ -9,12 +9,9 @@
 // ref declarations, or through the owning object's own fields. Every helper
 // below that mutates (or reads a 4000-cell grid) takes var&.
 //
-// NOTE (engine bug found while building this): calling a FREE script function or
-// lambda from inside a class method breaks the method's implicit-self scope for
-// the rest of the method — every later field read/write dies with "Undefined
-// variable". Method calls, constructor calls, builtins, and host calls are safe.
-// So the shared helpers live on a Gfx CLASS (global instance `gfx` in main.jai)
-// instead of free functions. Minimal repro in README.md; both backends affected.
+// NOTE: the free-call/self-scope engine bug this file originally worked around
+// (free function or lambda calls poisoning a method's implicit-self) is FIXED;
+// the Gfx-class structure is kept because it reads well, not out of necessity.
 
 class Palette {
 	var full = [];   // escape prefix + glyph
@@ -91,10 +88,9 @@ class Gfx {
 		var bare = pal.bare;
 		var rows = [];
 		int idx = 0;
-		int prev = -1;      // method-level: assigned from nested scopes (VM slot bug workaround)
 		for (int y = 0; y < h; ++y) {
 			parts.clear();
-			prev = -1;
+			int prev = -1;   // loop-body local assigned from the nested x-loop (finding 2 FIXED: exercises the slot-reserve fix every frame)
 			for (int x = 0; x < w; ++x) {
 				int c = grid[idx];
 				idx = idx + 1;

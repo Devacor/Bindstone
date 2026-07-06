@@ -1,7 +1,7 @@
 // Scene interface + the Reel manager: timed auto-advance, transitions, title
 // cards, HUD. Everything the host calls funnels through Reel.frame().
-// (Scene construction goes through make_scene's if-chain instead of an array of
-// factory lambdas: lambda calls trip the free-call/self-scope engine bug — see util.jai.)
+// (Scene construction stays an if-chain; the free-call/self-scope bug that forced
+// it is FIXED — see util.jai.)
 
 class Scene {
 	string name = "SCENE";
@@ -54,8 +54,6 @@ class Reel {
 	var grid_b = null;
 	var grid_m = null;
 	var parts = [];
-	var graveyard = [];   // retired scenes parked, not freed: destroying a scene
-	                      // instance mid-run segfaults the interpreter (README bug list)
 
 	Reel(int w_, int h_, int seed_, string backend_, bool smoke_, bool hud_) {
 		w = w_;
@@ -95,10 +93,7 @@ class Reel {
 
 	void start_scene(int idx, float at_t) {
 		cur_idx = ((idx % nscenes) + nscenes) % nscenes;
-		if (cur != null) { graveyard.push(cur); }
-		if (nxt != null) { graveyard.push(nxt); }
-		cur = null;    // interpreter locks a var field to the held object's class; reset first
-		cur = make_scene(cur_idx);
+		cur = make_scene(cur_idx);   // retired scene destroyed here (finding 7 FIXED: no graveyard needed)
 		cur.setup(w, h, seed + cur_idx * 7919);
 		dur_cur = dur_for(cur_idx);
 		scene_t = at_t;
@@ -108,15 +103,12 @@ class Reel {
 		trans_t = 0.0;
 	}
 
-	// runs at the top of the frame AFTER the one that finished the transition:
-	// doing the cur/nxt handover in frame() itself corrupted frame()'s locals
-	// (same VM slot bug family), so it lives in this deliberately local-free method.
+	// runs at the top of the frame AFTER the one that finished the transition
+	// (the VM slot bug that once corrupted frame()'s locals here is FIXED).
 	void complete_transition() {
 		finish_pending = false;
 		in_trans = false;
-		graveyard.push(cur);
-		cur = null;
-		cur = nxt;
+		cur = nxt;   // outgoing scene destroyed here (finding 7 FIXED)
 		nxt = null;
 		cur_idx = pending_idx;
 		dur_cur = dur_for(cur_idx);

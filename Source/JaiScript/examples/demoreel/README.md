@@ -182,7 +182,15 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
 
 **Bugs worked around (each with a small repro):**
 
-1. **Free-function / lambda calls inside class methods poison implicit-self**
+> **Triage update (2026-07-05, VM-perf `b5c118de..`):** every finding below was
+> reproduced (or bisected) at HEAD and resolved; pinning regression tests live in
+> `source/tests/language/demoreel_regression_tests.cpp`. The reel itself now
+> exercises the fixed paths: the graveyard is gone (scenes are destroyed at every
+> transition), `render_rows` declares `prev` in the loop body again, and plasma
+> passes raw `c[0], c[1], c[2]` element args into typed params.
+
+1. **FIXED** (`53526626`: frame exit clears only the frame's OWN method env).
+   ~~Free-function / lambda calls inside class methods poison implicit-self~~
    (both backends). After `g = mk();` where `mk` is a free script function,
    every later field read/write in that method throws `Undefined variable`, and
    `this` stops being an object. Method calls, constructor calls, builtins, and
@@ -194,8 +202,10 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
    Workaround: shared helpers live on a `Gfx` class (global instance `gfx`);
    scene factories are an if-chain method instead of an array of lambdas.
 
-2. **VM: loop-body locals assigned from a nested scope corrupt the enclosing
-   loop** (method context only). An inner `for` assigning an outer-loop body
+2. **FIXED** (`b5c118de`: method frames reserved 0 slots, so a mid-loop DECL_VAR
+   reallocated the locals vector and dangled the counted-for cached pointers).
+   ~~VM: loop-body locals assigned from a nested scope corrupt the enclosing
+   loop~~ (method context only). An inner `for` assigning an outer-loop body
    local makes the outer loop run once — or forever. A plain `if` (no `else`)
    assigning a loop-body local does the same; `if/else`, `while`, and range-for
    are fine. Method-level locals are immune.
@@ -215,44 +225,47 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
    local name in sibling if/else branches also aliased slots (nondeterministic
    across process runs) — hoisted too.
 
-3. **Interpreter: `++x` on an enclosing-scope local inside a for body throws
-   `Undefined variable 'x'`** (VM fine; `x = x + 1` fine on both).
+3. **FIXED** (was already fixed at HEAD by `b80f12fd`: interp ++/-- resolves
+   slot-based locals). ~~Interpreter: `++x` on an enclosing-scope local inside a
+   for body throws `Undefined variable 'x'`~~ (VM fine; `x = x + 1` fine on both).
 
-4. **Typed locals don't convert.** `int d = 4.7;` and `float f = 3;` both die
-   with `bad variant access`; typed *fields* silently store the wrong type (an
-   `int` field will hold `4.7`). Typed **parameters and returns convert
-   correctly** (truncation toward zero). The host exposes `itrunc()`/`ifloor()`
-   because script has no float→int cast at all (`floor()` returns float).
+4. **FIXED for locals** (`9e5fea2f`: typed declarations and slot stores convert
+   like assignment — `int d = 4.7` truncates to 4). Typed *fields* remain dynamic
+   (declared field types are discarded at runtime; both backends agree) — pending
+   a Dev ruling, pinned by `typed_field_assignment_stays_dynamic_parity`. The
+   host still exposes `itrunc()`/`ifloor()`; script has no explicit float→int
+   cast expression.
 
-5. **Raw element / nested-field arguments misresolve against typed parameters.**
-   `p.add_bg(c[0], c[1], c[2])` → `No matching overload found` when `c` holds
-   floats and the params are `int`; a nested-field arg (`other_obj.field` as a
-   `string` param) made the surrounding host-invoked callable silently return
-   null. Unpacking into a local or wrapping in any expression works.
+5. **FIXED** (`5ef9c0be`: overload matching derefs lvalue reference arguments).
+   ~~Raw element / nested-field arguments misresolve against typed parameters~~ —
+   `p.add_bg(c[0], c[1], c[2])` resolves and converts; host candidates too.
 
-6. **`var` fields class-lock on script objects — interpreter only.** Reassigning
-   a field holding a `Plasma` with a `Starfield` throws `Incompatible class
-   types` on the interpreter; the VM allows it (a semantic parity divergence).
-   Workaround: `cur = null; cur = nxt;`.
+6. **NO LONGER REPRODUCES at HEAD** (likely lived in the uncommitted engine state
+   this reel was built against). ~~`var` fields class-lock on script objects —
+   interpreter only.~~ `var` fields stay dynamic on both backends; pinned by
+   `var_field_retypes_across_script_classes` (member and unqualified in-method
+   shapes). The `cur = null;` resets were removed from the reel.
 
-7. **Destroying a script-class instance mid-run segfaults the interpreter**
-   (Release) — dropping the outgoing scene at a transition was a hard crash;
-   retired scenes are parked in a `graveyard` array instead.
+7. **NO LONGER REPRODUCES at HEAD** (verified with the graveyard removed over a
+   2,200-frame Release run on both backends, byte-identical; also re-verified
+   against the pre-fix engine — the crash lived in the uncommitted engine state
+   this reel was built against). ~~Destroying a script-class instance mid-run
+   segfaults the interpreter~~ — the graveyard is gone; scenes are destroyed at
+   every transition now.
 
-8. **Progressive corruption with delayed detonation** (interpreter): very large
-   methods (many block scopes) and a map literal + computed-key subscript inside
-   `build()` plant corruption that explodes hundreds of frames later as OOB /
-   `Invalid operands` errors whose messages show raw unsubstituted `{0}`/`{1}`
-   placeholders. Workarounds: `SandBox.update` split into
-   `do_spawn/do_fall/do_smoke`, the finale font became an if-chain method.
+8. **BELIEVED FIXED by `b5c118de`** (same root as finding 2: method frames
+   reserved 0 slots, so many-block-scope methods reallocated their locals vector
+   mid-frame — any held pointer/reference into it dangled with exactly this
+   delayed-detonation signature). ~~Progressive corruption with delayed
+   detonation~~ — not reproducible at HEAD (the original pre-workaround scene
+   shapes no longer exist to retest byte-for-byte); the split methods stay.
 
-9. **Coroutines:** creating one inside a host-invoked callable (`demo_jump`)
-   made every subsequent host callable on that engine silently return null;
-   coroutine *methods* are a parse error (coroutines must be free functions,
-   which collides with bug 1). The finale's phase sequencing was originally a
-   coroutine (`coroutine int finale_seq(var f)` polling the scene clock — a
-   lovely fit); after the callable-poisoning above it now drives its timed
-   sequence off scene time directly.
+9. **Host-callable poisoning NO LONGER REPRODUCES at HEAD** (fixed by
+   `74b438d8`: reentrant execute isolation — saved call/value stacks, no mid-run
+   pool reset); pinned by `coroutine_in_host_callable_no_state_leak`. Coroutine
+   *methods* remain a parse error — that is a missing feature (the class-member
+   parser never accepts `coroutine`), not a bug; needs a Dev decision to build.
+   The finale still drives its sequence off scene time (works fine).
 
 **Paper cuts:** error text reaching the host keeps `{0}` placeholders and drops
 script context; `override` is required to redefine a base method (good check,

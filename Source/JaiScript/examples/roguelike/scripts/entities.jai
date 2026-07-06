@@ -168,6 +168,16 @@ class Player : Entity {
 // value is baked into the entity's fields, which makes save/load exact (the
 // record rides along and reverts on schedule after loading).
 
+var EFFECT_FADE = {
+	"burn": "The flames on you gutter out.",
+	"regen": "The knitting warmth ebbs.",
+	"rage": "Your rage cools.",
+	"stoneskin": "Your stoneskin crumbles away.",
+	"blessed": "JAI's blessing lifts.",
+	"curl": "You uncurl.",
+	"wither": "The hex unravels."
+};
+
 function effect_stat_delta(string kind, int power) -> var {
 	switch (kind) {
 		case "rage": return ["atk", power];
@@ -226,11 +236,28 @@ function tick_effects(var& target) -> void {
 			case "burn": {
 				var dmg = power;
 				if (target.glyph == "@" && target.trait == "scaleblood") { dmg = imax(1, dmg / 2); }
+				var left = target.effects[i]["turns"] - 1;
+				var left_note = "fading";
+				if (left == 1) { left_note = "1 turn left"; }
+				else if (left > 1) { left_note = to_string(left) + " turns left"; }
+				if (target.glyph == "@") {
+					var after = player_hp_after(dmg);
+					log_msg(col("91", `Burning: -${dmg} HP (HP ${after}/${G.player.total_max_hp()}), ${left_note}.`));
+				} else if (is_visible(target.x, target.y)) {
+					log_msg(col("91", mon_subject(target) + ` burns for ${dmg}` + health_note(imax(0, target.hp - dmg), target.max_hp) + "."));
+				}
 				hurt_entity(target, dmg, "burning");
 				break;
 			}
 			case "regen": {
-				heal_entity(target, power);
+				if (target.glyph == "@") {
+					var cap = target.total_max_hp();
+					var healed = imin(cap, target.hp + power) - target.hp;
+					target.hp = target.hp + healed;
+					if (healed > 0) { log_msg(col("92", `Regen knits you: +${healed} HP (HP ${target.hp}/${cap}).`)); }
+				} else {
+					heal_entity(target, power);
+				}
 				break;
 			}
 		}
@@ -238,6 +265,10 @@ function tick_effects(var& target) -> void {
 		target.effects[i]["turns"] = target.effects[i]["turns"] - 1;
 		if (target.effects[i]["turns"] <= 0) {
 			expire_effect(target, kind, power);
+			if (target.glyph == "@") {
+				var fade_note = EFFECT_FADE.has(kind) ? EFFECT_FADE[kind] : kind + " fades.";
+				log_msg(col("90", "(" + fade_note + ")"));
+			}
 		} else {
 			kept.push(target.effects[i]);
 		}

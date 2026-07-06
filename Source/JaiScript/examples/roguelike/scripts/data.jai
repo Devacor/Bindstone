@@ -12,7 +12,7 @@ var SPECIES = [
 		"trait_blurb": "+20 evasion while below a quarter health. Clever escapes are a birthright."
 	},
 	{
-		"id": "drake", "name": "Drake-kin",
+		"id": "drake", "name": "Drask-kin",
 		"blurb": "Wingless dragonfolk. They insist the wings are 'in the mail'.",
 		"hp": 6, "atk": 0, "def": 0, "eva": 0, "crit": 0, "focus": 0,
 		"trait": "scaleblood", "trait_name": "Scaleblood",

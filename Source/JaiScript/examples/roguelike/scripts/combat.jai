@@ -22,12 +22,71 @@ function entity_crit(var& e) -> int {
 	return e.crit;
 }
 
+// Enemy health reads as a descriptor -- a roguelike keeps some mystery.
+// Exact numbers are the player's privilege.
+function health_word(int hp, int cap) -> string {
+	if (hp >= cap) { return "unscathed"; }
+	if (hp * 10 >= cap * 7) { return "scuffed"; }
+	if (hp * 10 >= cap * 4) { return "bloodied"; }
+	if (hp * 10 >= cap * 2) { return "wavering"; }
+	return "near death";
+}
+
+// " -- bloodied" suffix for a hit that leaves the enemy standing; empty on a kill
+// (on_monster_death announces that better than a descriptor could).
+function health_note(int hp_after, int cap) -> string {
+	if (hp_after <= 0) { return ""; }
+	return " -- " + health_word(hp_after, cap);
+}
+
+// Predicted post-hit HP for message lines logged before hurt_entity applies the
+// damage (mirrors hurt_entity's god/stubborn rules so the log never lies).
+function player_hp_after(int dmg) -> int {
+	if (G.player.god) { return G.player.hp; }
+	var after = G.player.hp - dmg;
+	if (after <= 0 && G.player.trait == "stubborn" && !G.player.stubborn_spent) { return 1; }
+	return imax(0, after);
+}
+
+function player_attack_verb() -> string {
+	var w = G.player.weapon;
+	if (w == null) { return "pummel"; }
+	if (w.name.find("Pike") >= 0) { return "skewer"; }
+	if (w.name.find("Shiv") >= 0) { return "shank"; }
+	if (w.name.find("Brand") >= 0) { return "sear"; }
+	return "slash";
+}
+
+// "the Grublin" / "Vexadrach the Hollow-Flame" — named uniques drop the article
+function mon_subject(var& m) -> string {
+	if (m.behavior == "boss") { return m.name; }
+	return "The " + m.name;
+}
+
+function mon_object(var& m) -> string {
+	if (m.behavior == "boss") { return m.name; }
+	return "the " + m.name;
+}
+
+// noun forms of the monster attack verbs, for "you slip the X's <noun>" lines
+var VERB_NOUNS = {
+	"bites": "bite", "claws": "claws", "rakes": "talons", "engulfs": "lunge",
+	"chomps": "chomp", "swats": "swat", "pelts": "volley", "savages": "fury"
+};
+
+function verb_noun(string verb) -> string {
+	if (VERB_NOUNS.has(verb)) { return VERB_NOUNS[verb]; }
+	return "attack";
+}
+
 // Damage funnel. Every hit point lost in the game passes through here.
 function hurt_entity(var& target, int amount, string source) -> void {
 	if (!target.alive) { return; }
 	if (target.glyph == "@") {
 		if (target.god) { return; }
 		target.hp = target.hp - amount;
+		G.last_dmg = G.last_dmg + amount;
+		G.last_dmg_src = source;
 		if (target.trait == "curl" && target.hp * 3 < target.total_max_hp() && !target.has_effect("curl")) {
 			add_effect(target, "curl", 5, 3);
 			log_msg(col("90", "You curl: scales lock into a living shield. (+3 def)"));
@@ -61,7 +120,7 @@ function heal_entity(var& target, int amount) -> void {
 }
 
 function on_monster_death(var& monster, string source) -> void {
-	log_msg(col("92", `The ${monster.name} is destroyed!`));
+	log_msg(col("92", mon_subject(monster) + " is destroyed!"));
 	if (monster.behavior == "boss") {
 		G.boss_slain = true;
 		return; // victory ceremony runs from the game loop
@@ -81,7 +140,7 @@ function on_monster_death(var& monster, string source) -> void {
 		drop.x = monster.x;
 		drop.y = monster.y;
 		G.ground.push(drop);
-		log_msg(`The ${monster.name} drops something.`);
+		log_msg(mon_subject(monster) + " drops something.");
 	}
 }
 
@@ -101,8 +160,11 @@ function gain_xp(int amount) -> void {
 function attack(var& attacker, var& defender, string verb) -> void {
 	var dodge = entity_eva(defender);
 	if (RNG.chance(iclamp(dodge, 0, 60))) {
-		if (defender.glyph == "@") { log_msg(`You slip aside from the ${attacker.name}.`); }
-		else { log_msg(`The ${defender.name} skitters out of reach.`); }
+		if (defender.glyph == "@") {
+			log_msg(col("96", `JAI's blessing! You slip ${mon_object(attacker)}'s ${verb_noun(verb)}.`));
+		} else {
+			log_msg(mon_subject(defender) + ` twists aside -- your ${verb} misses.`);
+		}
 		return;
 	}
 	var dmg = entity_atk(attacker) + RNG.roll(-1, 2) - entity_def(defender);
@@ -110,25 +172,28 @@ function attack(var& attacker, var& defender, string verb) -> void {
 	var crit = RNG.chance(iclamp(entity_crit(attacker), 0, 60));
 	if (crit) { dmg = dmg * 2; }
 	if (attacker.glyph == "@") {
-		var crit_note = crit ? col("93", " Critical!") : "";
-		log_msg(`You ${verb} the ${defender.name} for ${dmg}.${crit_note}`);
+		var after = imax(0, defender.hp - dmg);
+		var crit_note = crit ? col("93", "Critical! ") : "";
+		log_msg(crit_note + `You ${verb} ` + mon_object(defender) + ` for ${dmg}` + health_note(after, defender.max_hp) + ".");
 		// weapon burn affix
 		if (attacker.equip_bonus("burn") > 0 && RNG.chance(attacker.equip_bonus("burn"))) {
 			add_effect(defender, "burn", 3, 2);
-			log_msg(col("91", `The ${defender.name} catches fire!`));
+			log_msg(col("91", `Your weapon's ember bites deep -- ` + mon_object(defender) + ` is burning!`));
 		}
 	} else {
-		var crit_note = crit ? " It hurts extra." : "";
-		log_msg(`The ${attacker.name} ${verb} you for ${dmg}.${crit_note}`);
+		var after = player_hp_after(dmg);
+		var crit_note = crit ? col("91", " A crushing hit!") : "";
+		log_msg(mon_subject(attacker) + ` ${verb} you for ` + col("91", `${dmg}`)
+			+ ` (HP ${after}/${G.player.total_max_hp()}).` + crit_note);
 	}
 	hurt_entity(defender, dmg, attacker.name);
 	if (attacker.glyph != "@" && attacker.burns && defender.alive && RNG.chance(25)) {
 		add_effect(defender, "burn", 3, 2);
-		log_msg(col("91", "Gray fire clings to you!"));
+		log_msg(col("91", "Gray fire clings to you! (Burning: -2 HP/turn, 3 turns)"));
 	}
 	if (attacker.glyph != "@" && attacker.withers && defender.alive && RNG.chance(35)) {
 		add_effect(defender, "wither", 8, 2);
-		log_msg(col("95", "Curse-dust settles into your joints. (-atk/-def)"));
+		log_msg(col("95", "Curse-dust settles into your joints. (-2 atk/def, 8 turns)"));
 	}
 }
 
@@ -160,7 +225,8 @@ function use_skill() -> bool {
 			if (ti < 0) { log_msg("Nothing in slamming range."); return false; }
 			if (!spend_focus(G.player.focus, G.player.skill_cost)) { log_msg("Not enough focus."); return false; }
 			var dmg = imax(1, (G.player.total_atk() * 5) / 2 - entity_def(G.monsters[ti]));
-			log_msg(col("96", `BULWARK SLAM! The ${G.monsters[ti].name} takes ${dmg}.`));
+			var after = imax(0, G.monsters[ti].hp - dmg);
+			log_msg(col("96", `BULWARK SLAM! ` + mon_subject(G.monsters[ti]) + ` takes ${dmg}` + health_note(after, G.monsters[ti].max_hp) + "."));
 			hurt_entity(G.monsters[ti], dmg, "a bulwark slam");
 			return true;
 		}
@@ -169,9 +235,13 @@ function use_skill() -> bool {
 			if (ti < 0) { log_msg("No target in sight."); return false; }
 			if (!spend_focus(G.player.focus, G.player.skill_cost)) { log_msg("Not enough focus."); return false; }
 			var dmg = imax(1, G.player.total_atk() + 3 - entity_def(G.monsters[ti]));
-			log_msg(col("91", `Emberbolt sears the ${G.monsters[ti].name} for ${dmg}!`));
+			var after = imax(0, G.monsters[ti].hp - dmg);
+			log_msg(col("91", `Emberbolt sears ` + mon_object(G.monsters[ti]) + ` for ${dmg}` + health_note(after, G.monsters[ti].max_hp) + "!"));
 			hurt_entity(G.monsters[ti], dmg, "an emberbolt");
-			if (G.monsters[ti].alive) { add_effect(G.monsters[ti], "burn", 3, 2); }
+			if (G.monsters[ti].alive) {
+				add_effect(G.monsters[ti], "burn", 3, 2);
+				log_msg(col("91", mon_subject(G.monsters[ti]) + " is burning. (-2 HP/turn, 3 turns)"));
+			}
 			return true;
 		}
 		case "thornvolley": {
@@ -179,7 +249,8 @@ function use_skill() -> bool {
 			if (ti < 0) { log_msg("No target in sight."); return false; }
 			if (!spend_focus(G.player.focus, G.player.skill_cost)) { log_msg("Not enough focus."); return false; }
 			var dmg = imax(1, G.player.total_atk() - entity_def(G.monsters[ti]));
-			log_msg(col("92", `Thorns skewer the ${G.monsters[ti].name} for ${dmg}!`));
+			var after = imax(0, G.monsters[ti].hp - dmg);
+			log_msg(col("92", `Thorns skewer ` + mon_object(G.monsters[ti]) + ` for ${dmg}` + health_note(after, G.monsters[ti].max_hp) + "!"));
 			hurt_entity(G.monsters[ti], dmg, "a thorn volley");
 			return true;
 		}
@@ -189,7 +260,7 @@ function use_skill() -> bool {
 			if (!spend_focus(G.player.focus, G.player.skill_cost)) { log_msg("Not enough focus."); return false; }
 			add_effect(G.monsters[ti], "wither", 8, 2);
 			heal_entity(G.player, 3);
-			log_msg(col("95", `The ${G.monsters[ti].name} wilts; you sip its vigor. (+3 HP)`));
+			log_msg(col("95", mon_subject(G.monsters[ti]) + ` wilts (-2 atk/def, 8 turns); you sip its vigor (+3 HP, ${G.player.hp}/${G.player.total_max_hp()}).`));
 			return true;
 		}
 	}

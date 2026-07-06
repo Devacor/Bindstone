@@ -7,13 +7,22 @@ var PANEL_W = 15;
 function eol() -> string { return ESC + "[K"; }
 
 function present(var lines) -> string {
-	var frame = "";
-	for (auto line : lines) {
-		frame = frame + line + eol() + "\n";
-	}
-	frame = frame + ESC + "[J";
+	var line_end = eol() + "\n";
+	var frame = lines.join(line_end) + line_end + ESC + "[J";
 	draw(frame);
 	return frame;
+}
+
+// Coloring a glyph costs five string concats; the palette is tiny. Build each
+// colored cell once and reuse it forever (join() then stitches rows in C++).
+var CELL_CACHE = {};
+
+function ccell(string color_code, string glyph) -> string {
+	var cache_key = color_code + glyph;
+	if (CELL_CACHE.has(cache_key)) { return CELL_CACHE[cache_key]; }
+	var cell = col(color_code, glyph);
+	CELL_CACHE[cache_key] = cell;
+	return cell;
 }
 
 function bar(int cur, int cap, int width, string color_on) -> string {
@@ -44,6 +53,7 @@ function tile_color(int t) -> string {
 }
 
 function render_game() -> void {
+	// frame_mark();   // --time probe: turn logic ends here, frame build begins
 	var lines = [];
 	var p = G.player;
 	var god_tag = p.god ? col("95", " [GOD]") : "";
@@ -83,10 +93,12 @@ function render_game() -> void {
 		lines.push(row + col("90", "|") + side);
 	}
 
-	// message log: last 5
+	// message log: last 5. Loop var is mi, NOT i: an earlier nested-scope `var i`
+	// makes a later `for (int i ...)` body silently never run (slot aliasing bug,
+	// both backends, 2026-07) — reported; renamed around it.
 	var start = imax(0, G.msgs.size() - 5);
-	for (int i = start; i < G.msgs.size(); ++i) {
-		lines.push(" " + G.msgs[i]);
+	for (int mi = start; mi < G.msgs.size(); ++mi) {
+		lines.push(" " + G.msgs[mi]);
 	}
 	present(lines);
 }
@@ -100,6 +112,11 @@ function build_panel() -> var {
 	lines.push("");
 	lines.push(` HP ${p.hp}/${p.total_max_hp()}`);
 	lines.push(" " + bar(p.hp, p.total_max_hp(), 12, p.hp * 4 < p.total_max_hp() ? "91" : "92"));
+	if (G.last_dmg > 0) {
+		lines.push(" " + col("91", `-${G.last_dmg} HP`) + col("90", ` (${G.last_dmg_src})`));
+	} else {
+		lines.push("");
+	}
 	lines.push(` Fo ${p.focus}/${p.total_max_focus()}`);
 	lines.push(" " + bar(p.focus, p.total_max_focus(), 12, "96"));
 	lines.push(` Lv ${p.level}  XP ${p.xp}/${p.xp_next()}`);
@@ -111,7 +128,7 @@ function build_panel() -> var {
 	lines.push(" Arm " + gear_label(p.armor));
 	lines.push(" Trk " + gear_label(p.trinket));
 	var fx_line = " ";
-	for (auto fx : p.effects) { fx_line = fx_line + fx["kind"] + " "; }
+	for (auto fx : p.effects) { fx_line = fx_line + fx["kind"] + ":" + to_string(fx["turns"]) + " "; }
 	lines.push(col("95", fx_line));
 	lines.push(" " + col("90", "? for help"));
 	return lines;
@@ -144,7 +161,7 @@ function help_screen() -> void {
 	var lines = [];
 	lines.push(col("93", " JAI'S DESCENT - keys"));
 	lines.push("");
-	lines.push("  move/attack   h j k l  y u b n   (or arrows)");
+	lines.push("  move/attack   w a s d / h j k l / arrows   (diagonals: y u b n)");
 	lines.push("  wait          .");
 	lines.push("  pick up       g");
 	lines.push("  inventory     i   (letter to inspect, then e=use/equip d=drop)");
@@ -298,9 +315,8 @@ coroutine string rainbow_frames(int bx, int by) {
 		}
 		lines.push("");
 		lines.push("  " + rainbow_text("THE RAINBOW FIRE REMEMBERS ITS MAKER"));
-		var joined = "";
-		for (auto line : lines) { joined = joined + line + eol() + "\n"; }
-		yield joined;
+		var line_end = eol() + "\n";
+		yield lines.join(line_end) + line_end;
 	}
 	return "";
 }

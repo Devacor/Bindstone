@@ -15,6 +15,8 @@ class Game {
 	bool smoke = false;
 	string death_cause = "misadventure";
 	int hash = 2166136261;
+	int last_dmg = 0;           // damage the player took since their last action
+	string last_dmg_src = "";   // loudest recent source, shown in the side panel
 	int stairs_x = -1;
 	int stairs_y = -1;
 	bool statue_used = false;
@@ -180,7 +182,7 @@ function player_move(int dx, int dy) -> bool {
 			G.monsters[ti].disguised = false;
 			log_msg(col("91", "That loot has TEETH. Grinnest!"));
 		}
-		attack(G.player, G.monsters[ti], "strike");
+		attack(G.player, G.monsters[ti], player_attack_verb());
 		return true;
 	}
 	if (!is_walkable(nx, ny)) { return false; }
@@ -350,6 +352,8 @@ function game_loop() -> void {
 		var acted = handle_key(key);
 		if (G.over) { break; }
 		if (acted) {
+			G.last_dmg = 0;
+			G.last_dmg_src = "";
 			monsters_act();
 			if (!G.over) { world_tick(); }
 			G.turn = G.turn + 1;
@@ -735,4 +739,7 @@ function print_run_summary(string label) -> void {
 	host_log(`weapon: ${wname}  armor: ${aname}`);
 	host_log(`victory: ${G.victory}  dead: ${!p.alive}  cause: ${G.death_cause}`);
 	host_log(`STATE_HASH: ${G.hash}`);
+	// last few log lines: lets scripted/smoke runs eyeball the combat narration
+	var mstart = imax(0, G.msgs.size() - 6);
+	for (int mi = mstart; mi < G.msgs.size(); ++mi) { host_log("  log| " + G.msgs[mi]); }
 }

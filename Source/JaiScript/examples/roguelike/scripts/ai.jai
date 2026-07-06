@@ -168,8 +168,13 @@ coroutine void boss_script(int boss_id) {
 					&& sees_player(G.monsters[bi])) {
 				log_msg(col("90", "HOLLOW FIRE: heatless light, lightless heat."));
 				var dmg = imax(2, G.monsters[bi].atk - entity_def(G.player) + RNG.roll(0, 3));
+				var after = player_hp_after(dmg);
+				log_msg(col("91", `The gray torrent sears you for ${dmg} (HP ${after}/${G.player.total_max_hp()}).`));
 				hurt_entity(G.player, dmg, "hollow fire");
-				if (G.player.alive) { add_effect(G.player, "burn", 3, 2); }
+				if (G.player.alive) {
+					add_effect(G.player, "burn", 3, 2);
+					log_msg(col("91", "You are burning! (-2 HP/turn, 3 turns)"));
+				}
 			} else {
 				log_msg(col("90", "The gray torrent scorches empty stone. You were elsewhere."));
 			}

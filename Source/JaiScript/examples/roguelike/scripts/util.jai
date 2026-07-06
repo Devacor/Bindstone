@@ -21,10 +21,12 @@ function mix32(int h, int v) -> int {
 	return ((x & 0xFFFFFFFF) * 16777619) & 0xFFFFFFFF;
 }
 
-// Movement keys -> [dx, dy]. Classic vi keys plus diagonals plus arrows.
+// Movement keys -> [dx, dy]. Classic vi keys plus diagonals plus arrows,
+// plus wasd for cardinal moves (diagonals stay on yubn).
 var DIR_KEYS = {
 	"h": [-1, 0], "l": [1, 0], "k": [0, -1], "j": [0, 1],
 	"y": [-1, -1], "u": [1, -1], "b": [-1, 1], "n": [1, 1],
+	"w": [0, -1], "a": [-1, 0], "s": [0, 1], "d": [1, 0],
 	"left": [-1, 0], "right": [1, 0], "up": [0, -1], "down": [0, 1]
 };
 

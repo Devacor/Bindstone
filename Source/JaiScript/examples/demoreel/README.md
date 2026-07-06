@@ -1,6 +1,6 @@
 # jai_demoreel — a demoscene tech reel written in JaiScript
 
-Ten auto-advancing truecolor scenes, transitions, title cards, and a finale where
+Thirteen auto-advancing truecolor scenes, transitions, title cards, and a finale where
 the word JAISCRIPT ignites out of a wall of rainbow fire — every effect coded in
 `scenes/*.jai`. The C++ host (`main.cpp`) is a thin shell: a VT console, a
 monotonic clock, non-blocking keys, a seeded rng class, and the frame pump.
@@ -29,7 +29,7 @@ falling back to `demoreel_scenes/` copied next to the binary.
 jai_demoreel                     # the reel, VM backend active, 30 fps pacing
 jai_demoreel --backend interp    # start on the interpreter instead
 jai_demoreel --smoke             # headless: both backends, frame-hash parity + perf
-jai_demoreel --smoke --frames N  # smoke frame budget (default 1300)
+jai_demoreel --smoke --frames N  # smoke frame budget (default 1700)
 jai_demoreel --capture I         # print scene I as plain text (ANSI stripped)
 jai_demoreel --reload-test       # headless hot-reload + backend-swap self-test
 jai_demoreel --precompiled       # boot from demoreel.jaib (saved on first run)
@@ -44,7 +44,7 @@ Keys while running:
 | `h` | toggle the HUD (scene, ACTIVE BACKEND, frame ms, fps) |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
-| `1`..`9`, `0` | jump straight to a scene (`0` = scene 10) |
+| `1`..`9`, `0` | jump straight to a scene (`0` = scene 13, the finale) |
 | `q` / `ESC` | quit |
 
 The HUD shows the active backend and its frame cost, plus the last measured cost
@@ -62,8 +62,11 @@ of the other backend — press TAB and watch the ms number move.
 | 6 | POWDER | falling-sand toy: sand / water / ember / plant / smoke, each element a script class, spawners keep it evolving |
 | 7 | BOIDS | murmuration with fading trails and one hungry hawk |
 | 8 | KINSTEIN 3D | Wolfenstein-style DDA raycaster over an authored 24x24 keep: one ray per column, perpendicular-distance slices (no fisheye), N/S vs E/W face shading, stone/moss/gold walls + an animated rainbow-fire banner. Billboard Grublins and Orglis brutes garrison the route (wall-occluded per column, distance-scaled, idle wobble); the scripted camera auto-fires on line-of-sight cone lock — muzzle flash, rainbow tracer, hit-flash, gib scatter, kill tally. Enemies respawn each lap. The reel's compute stress scene |
-| 9 | FIRE | bottom-seeded convection fire that ignites into RAINBOW fire mid-scene (house signature) |
-| 10 | FINALE | a fire wall out of which "JAISCRIPT" ignites, burns in rolling rainbow flame, and remains glowing as the fire dies |
+| 9 | CANYONRUN | the Comanche (1992) VoxelSpace algorithm: a 128x128 wrapping heightmap grown by diamond-square (pure integer hashing), a river canyon carved along a wrapping sine meander, height bands + north-light slope shading baked into a packed color/height map. Rendered front-to-back per depth line with a per-column y-buffer, the inner loop pure 16.16 fixed-point integer adds — zero host calls, zero float math. The camera flies the river's own meander formula, banking into turns (per-column horizon roll) and diving on an altitude wave with terrain-clearance lookahead |
+| 10 | SPONGEWORKS | a raymarched Menger sponge: per-pixel signed-distance sphere tracing of the KIFS fold (abs / sort / x3 — no sqrt, no mod, no host calls), exact face normals recovered by ONE tracked re-fold (the fold is abs+permutation, so the folded box's gradient axis maps back through the swaps), SDF-probe ambient occlusion, distance fog, six face palettes. Half resolution into a persistent buffer, 4-phase Bayer temporal update, and per-pixel temporal reprojection (last hit distance warm-starts the march). The reel's floating-point stress: the VM showcase |
+| 11 | BANNERFALL | Verlet cloth: a 26x11 grid (structural + shear, Jakobsen sqrt-free relaxation, constraint topology as index arithmetic — the hot loop has zero host calls) flying a rainbow weave with the gold JAI sigil from a pole. Real surface-normal lighting (edge cross products, alpha-max magnitude — no normalize). The arc is state-driven physics: calm ripple, rising gale, the hoist seam TEARS thread by thread (weakest at the top, so it peels downward; tears render as holes the moment they happen), the gust dies as the last thread parts, and the free banner tumbles and bursts into ember scraps on a pre-shuffled tear order |
+| 12 | FIRE | bottom-seeded convection fire that ignites into RAINBOW fire mid-scene (house signature) |
+| 13 | FINALE | a fire wall out of which "JAISCRIPT" ignites, burns in rolling rainbow flame, and remains glowing as the fire dies |
 
 Between scenes: dissolve / wipe / shutter transitions (two grids merged per cell
 into a combined palette). Title card with a demoscene handle on every scene.
@@ -71,28 +74,30 @@ into a combined palette). Title card with a demoscene handle on every scene.
 ## Measured numbers
 
 Release (`x64-Release BENCHMARKS`), 100x40 = 4,000 truecolor cells per frame,
-seed 20260705, fixed dt 1/30, whole 10-scene reel incl. transitions
-(`--smoke --frames 1300`); 2026-07-06 VM-perf branch, post-rulings engine:
+seed 20260705, fixed dt 1/30, whole 13-scene reel incl. transitions
+(`--smoke`, 1,700 frames); 2026-07-06 VM-perf branch, quiet machine
+(~10% ambient load — the earlier 10-scene table was taken while other agents
+were compiling on this box and ran ~2x hot; treat absolute ms across README
+revisions with suspicion, ratios and hashes are the stable part):
 
 | backend | ms/frame (mean) | fps | boot (parse) |
 | ------- | --------------- | --- | ------------ |
-| interpreter | 95.8 | ~10 | 16.3 ms |
-| **VM** | **55.6** | **~18** | 21.5 ms |
+| interpreter | 47.1 | ~21 | 18.8 ms |
+| **VM** | **36.8** | **~27** | 17.3 ms |
 
-- The VM now runs the whole reel **1.72x** faster than the interpreter — the
-  widest gap this reel has measured. (The previous 8-scene table — 47.0 / 39.8
-  ms, VM 1.16x — predates the two new scenes and several engine passes on the
-  VM-perf branch; not directly comparable.)
-- Parity: frame streams **byte-identical** across backends over 1,300 frames —
-  every one of the ten scene entries, including both new scenes — and over a
-  2,660-frame full-duration run that covers PIPEDREAM's complete
-  fill/hold/wipe/reseed generation and KINSTEIN's combat window. Debug build
-  parity also green (40-frame spot check + per-scene exercise of PIPEDREAM and
-  KINSTEIN on both backends).
-- Debug build: ~843 / ~679 ms per frame (interpreter / VM) — iterate in Release
-  for this demo.
+- VM 1.28x over the interpreter for the whole 13-scene reel. The three new
+  climax scenes are array-element-bound (terrain maps, cloth positions, pixel
+  buffers) where the two backends are closer than in pure control flow —
+  PIPEDREAM-style scripted logic remains the widest per-scene gap.
+- Parity: frame streams **byte-identical** across backends over 1,700 frames —
+  every one of the thirteen scene entries (hash `499577b411b67162`), covering
+  CANYONRUN's terrain march, SPONGEWORKS' temporal-reprojected raymarch, and
+  BANNERFALL's full physics arc; plus the earlier 2,660-frame full-duration
+  run for PIPEDREAM/KINSTEIN. Debug build parity also green historically —
+  iterate in Release for this demo (Debug ran ~0.7-0.8 s/frame on the 10-scene
+  reel).
 - `--reload-test`: hot reload of all scenes into both engines + TAB-style state
-  sync, green.
+  sync, green (13 scenes).
 
 ## Console performance (the write is half the frame)
 
@@ -147,6 +152,30 @@ a frame — the host filter finds nothing left to trim (1.00x). PIPEDREAM shows
 the widest per-scene TAB gap (25.6 vs 39.7 ms sim, VM 1.55x) — its incremental
 splat pass is pure scripted control flow, exactly where the VM pulls ahead.
 Both scenes hold comfortably above 20 fps on both backends in Release.
+
+The technical climax block (`--bench 30 --scene I`, Release, 100x40, truecolor
+mode, min of 3 runs at high process priority, quiet machine ~10% ambient —
+KINSTEIN re-measured the same session as the in-family reference: vm 14.7 /
+interpreter 19.2 ms sim):
+
+| scene | backend | sim ms | bytes/frame raw -> written | fps uncapped |
+| ----- | ------- | ------ | -------------------------- | ------------ |
+| CANYONRUN (9) | **vm** | **29.3** | 11.4 KB -> 11.4 KB (1.00x) | **~33** |
+| CANYONRUN (9) | interpreter | 35.2 | 11.3 KB -> 11.3 KB (1.00x) | ~28 |
+| SPONGEWORKS (10) | **vm** | **32.5** | 13.7 KB -> 13.4 KB (1.02x) | **~30** |
+| SPONGEWORKS (10) | interpreter | 43.1 | 13.8 KB -> 13.5 KB (1.02x) | ~23 |
+| BANNERFALL (11) | **vm** | **39.9** | 10.2 KB -> 10.2 KB (1.00x) | **~24** |
+| BANNERFALL (11) | interpreter | 54.6 | 10.0 KB -> 10.1 KB (1.00x) | ~18 |
+
+All three hold 15+ fps on BOTH backends. BANNERFALL shows the widest VM gap of
+the three (1.37x — the Verlet constraint solver is exactly the branchy
+element-heavy loop the VM chews through), SPONGEWORKS 1.32x (per-pixel float
+fold math), CANYONRUN 1.20x (its inner loop is integer adds and grid fills, the
+most backend-neutral work in the reel). Honest-tuning ledger: SPONGEWORKS runs
+half-res 2x2 blocks with a 4-phase temporal update and 14-step ray budget;
+BANNERFALL runs 2 relaxation passes (structural both, shear on the first) on a
+26x11 grid — four passes of a 34x13 grid looked marginally better and cost
+double; CANYONRUN marches 44 depth lines with a 6-bank haze quantization.
 
 And if it still *feels* like one frame per second: check you're not running the
 Debug build (~0.7 s of sim per frame — see above).
@@ -261,8 +290,58 @@ stays lit in rainbow flame):
                   ##   #   # ##### ####   #### #   # ##### #       #
 ```
 
-(PLASMA / JULIA / FIRE / POWDER are solid background-color scenes — stripping the
-ANSI leaves only spaces, so they don't caption well in text. Run the reel.)
+SPONGEWORKS (brightness map of the raw frame — the raymarched Menger sponge
+mid-orbit: the perforated top face catches the light, the recesses fall into
+SDF-probe shadow, and the darkest cells are rays that spent their step budget
+deep in a crevice):
+
+```
+        ..                                ==========
+        ..                                ==========
+                ..        ********....**************  ****......**************
+                ..        ********....**************  ****......**************
+        **********..  ..######  ####..........  ..  ..........################**********....
+        **********..  ..######  ####..........  ..  ..........################**********....
+      ........################....  ....##########......  ######........##########........
+      ........################....  ....##########......  ######........##########........
+      ....................####################  ############################..............
+      ....................####################  ############################..............
+        ................  ............######################  ######................  ..
+        ................  ............######################  ######................  ..
+        ....--##........  ........................@@@@@@  @@@@..........................
+        ....--##........  ........................@@@@@@  @@@@..........................
+          ................  ....................................::..........##..........
+          ................  ....................................::..........##..........
+```
+
+BANNERFALL (brightness map of the raw frame just after the hoist seam starts
+to tear — the banner streams right of the bare pole segment it has already
+peeled from; in color it is a rainbow weave carrying the gold JAI sigil):
+
+```
+
+              %
+              :
+              =                                             --
+              :                                           ==---
+              =                                          -++***
+              :                                         .--++++
+..............=.......................................-==-==---.....................................
+..............:...................................==---==*==***.....................................
+..............=............:++++++...........::--.=+===**--=***.....................................
+..............:........::::==+***===......::-::..::+==++==+****.....................................
+..............=......====+++++++***=.==:::::-:-----**=++==***+++....................................
+..............:....=========--.==----%%%--::**---%%***++******+++...................................
+..............=***@==--++%%%-++**----**:--::%%--%%%--==+******+++...................................
+..............:****.++++++%++==**----**:::::%%-------++++*****+++...................................
+..............=*******++==-------------:::--------===++++*****......................................
+..............:***********++++-------------:------===+++++..........................................
+```
+
+(PLASMA / JULIA / FIRE / POWDER / CANYONRUN are solid background-color scenes —
+stripping the ANSI leaves only spaces, and CANYONRUN's drama is entirely in its
+truecolor terrain bands and distance haze, so they don't caption well in text.
+Run the reel.)
 
 ## Language feedback (dogfooding notes — recorded honestly)
 
@@ -394,6 +473,38 @@ canon-accurate static camera makes the screen image persistent, so the scene
 splats only the ~dozen voxels grown per frame into a kept buffer instead of
 re-projecting the whole volume (160+ ms -> fire-scene cost). KINSTEIN keeps its
 per-blob helper but does one sqrt per sprite ROW instead of float math per cell.
+
+**Perf lessons (2026-07-06, the technical climax block — all A/B-measured with
+throwaway micro-scenes in a scratch copy of the reel):**
+
+- **Array assignment deep-copies — `var&` reference declarations are the hot-loop
+  idiom.** `var alias = field_array;` copies the whole array (value semantics,
+  exactly as the notes above warn), so writes through it silently vanish:
+  SPONGEWORKS' persistent pixel buffer stopped persisting and BANNERFALL's
+  physics froze, while every parity hash stayed green (consistently wrong again).
+  `var& alias = field_array;` binds a true reference — writes land, and element
+  access through it costs about HALF a field access (see next point). All three
+  new scenes bind every hot array this way at the top of update/render.
+- **Field access resolves through the environment chain — ~2x a local slot.**
+  20k field-array reads cost ~1.8 us each vs ~0.9 us through a `var&` local
+  (Release, VM). Hot scalars (`w`, `h`, masks, camera vectors) are worth copying
+  to locals too; SPONGEWORKS' ray loop reads 11 camera fields per ray otherwise.
+- **A declaration costs ~0.3-0.7 us — hoist or inline in tight loops.** The
+  cloth solver dropped from ~13 locals per constraint to 5 (element reads inlined
+  into expressions, corrections written as compound stores) for a measurable win
+  across its ~2.2k solves x 2 passes per frame.
+- **Compound element stores (`arr[i] += v`) are ~2x cheaper than read+write
+  pairs** (~0.7 us vs ~1.4 us) — one lvalue resolve instead of two. The Verlet
+  relaxation writes all six endpoint corrections that way.
+- **Temporal reprojection works in script.** SPONGEWORKS caches each pixel's
+  last hit distance and warm-starts the next march 15% short of it — most
+  surface rays converge in a few steps. Free real speedup, but it broke
+  step-count AO (step counts stop correlating with occlusion, adjacent pixels
+  speckle) — the fix was one extra SDF probe along the normal instead.
+- **Shift operators exist and floor correctly for non-negative operands** —
+  CANYONRUN's fixed-point inner loop keeps its coordinates offset positive so
+  `>> 16` is an exact floor with no host `ifloor` calls (the whole depth-march
+  inner loop runs without a single host call or float op).
 
 **What carried the demo:** parity discipline is real — thousands of frames
 byte-identical across two completely different execution engines, in Debug and

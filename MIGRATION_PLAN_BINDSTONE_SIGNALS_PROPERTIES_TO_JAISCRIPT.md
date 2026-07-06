@@ -1,5 +1,9 @@
 # Migration Plan: Bindstone Signals & Properties → JaiScript
 
+> **DONE as of 2026-07 — see the Bindstone integration audit.** Signals (`jai::signal`), properties
+> (`jai::property_owner` across the scene graph), and serialization shipped as JaiScript modules and
+> Bindstone runs on them. Historical plan below; details may be stale.
+
 ## Overview
 
 Migrate Bindstone's property and signal systems into JaiScript as generic, reusable modules. This completes JaiScript's vision as a composable toolkit for C++ reflection, serialization, and scripting.

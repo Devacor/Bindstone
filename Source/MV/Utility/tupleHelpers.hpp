@@ -8,37 +8,36 @@
 namespace MV {
 	namespace Detail {
 		template<class T>
-		std::reference_wrapper<T> prepareForChaiscript(T& a_value) {
+		std::reference_wrapper<T> prepareForScript(T& a_value) {
 			return{ a_value };
 		}
 		template<class T>
-		T* prepareForChaiscript(T* a_value) {
+		T* prepareForScript(T* a_value) {
 			return a_value;
 		}
 
-		//may be able to convert these to string_view when chaiscript gets support and it becomes standard.
-		inline std::string prepareForChaiscript(char* a_cstring) {
+		inline std::string prepareForScript(char* a_cstring) {
 			return{ a_cstring };
 		}
 
-		inline std::string prepareForChaiscript(const char* a_cstring) {
+		inline std::string prepareForScript(const char* a_cstring) {
 			return{ a_cstring };
 		}
 
 		template<class T>
-		T* prepareForChaiscript(std::unique_ptr<T>& a_value) {
+		T* prepareForScript(std::unique_ptr<T>& a_value) {
 			return a_value.get();
 		}
 		template<class T>
-		T* prepareForChaiscript(std::weak_ptr<T>& a_value) {
+		T* prepareForScript(std::weak_ptr<T>& a_value) {
 			return{ !a_value.expired() ? a_value.lock().get() : nullptr };
 		}
 		template<class T>
-		std::shared_ptr<T> prepareForChaiscript(std::shared_ptr<T>& a_value) {
+		std::shared_ptr<T> prepareForScript(std::shared_ptr<T>& a_value) {
 			return{ a_value };
 		}
 		template<class T>
-		const std::shared_ptr<T> prepareForChaiscript(const std::shared_ptr<T>& a_value) {
+		const std::shared_ptr<T> prepareForScript(const std::shared_ptr<T>& a_value) {
 			return{ a_value };
 		}
 	}
@@ -47,19 +46,18 @@ namespace MV {
 	struct TupleAggregator {
 		static void addToVector(const Tuple& t, std::vector<T> &a_aggregate) {
 			TupleAggregator<T, Tuple, N - 1>::addToVector(t, a_aggregate);
-			a_aggregate.emplace_back(Detail::prepareForChaiscript(std::get<N - 1>(t)));
+			a_aggregate.emplace_back(Detail::prepareForScript(std::get<N - 1>(t)));
 		}
 	};
 
 	template<class T, class Tuple>
 	struct TupleAggregator<T, Tuple, 1> {
 		static void addToVector(const Tuple& t, std::vector<T> &a_aggregate) {
-			a_aggregate.emplace_back(Detail::prepareForChaiscript(std::get<0>(t)));
+			a_aggregate.emplace_back(Detail::prepareForScript(std::get<0>(t)));
 		}
 	};
 
-	//Converts a tuple to a vector of pointers to the elements in the tuple.
-	//Works with std::any or chaiscript::Boxed_Value etc.
+	//Converts a tuple to a vector of pointers to the elements in the tuple (e.g. std::any).
 	template<class T, class... Args>
 	std::vector<T> toVector(const std::tuple<Args...>& t) {
 		std::vector<T> result;

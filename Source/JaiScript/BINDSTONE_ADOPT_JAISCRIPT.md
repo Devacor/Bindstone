@@ -1,5 +1,10 @@
 # ChaiScript to JaiScript Migration Plan
 
+> **DONE as of 2026-07 — see the Bindstone integration audit.** The ChaiScript hook files and all 39
+> `.script` files are converted (76+ `jai::registrar` sites), `External/ChaiScript-6.1.0/` is deleted,
+> and every engine is built via `MV::makeScriptEngine()` (VM backend). Historical plan below; file
+> lists and instructions may be stale.
+
 ## Overview
 
 Replace ChaiScript with JaiScript throughout Bindstone, leveraging the property system for automatic bindings where possible.

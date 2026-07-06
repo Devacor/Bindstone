@@ -8,8 +8,8 @@ Submodules:
 - `Network` – networking utilities (`network.h`, `webServer.h`, etc.).
 - `Physics` – physics components (wraps Box2D).
 - `Render` – rendering system and scene graph (`Scene` subfolder holds `Node`, `Sprite`, etc.).
-- `Script` – wraps ChaiScript; see `script.cxx`/`script.h`.
-- `Serialization` – cereal based helpers.
+- `Script` – JaiScript eval wrapper + `makeScriptEngine()` policy factory (`script.h`; impl in `Source/Game/Script/script.cpp`).
+- `Serialization` – JaiScript-archive helpers (`serialize.h`).
 - `Utility` – misc helpers (thread pools, logging, async tasks, properties, etc.).
 
 The engine was written by Devacor (Michael Hamilton).

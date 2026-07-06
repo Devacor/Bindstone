@@ -1,5 +1,9 @@
 # ChaiScript to JaiScript Migration Plan
 
+> **DONE as of 2026-07 — see the Bindstone integration audit.** ChaiScript and Cereal are fully
+> replaced in live Bindstone code; engines are constructed through `MV::makeScriptEngine()`.
+> Historical plan below; details may be stale.
+
 ## Overview
 
 Replace ChaiScript with JaiScript throughout Bindstone, leveraging:

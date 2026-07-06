@@ -1,5 +1,9 @@
 # ChaiScript to JaiScript Migration Plan
 
+> **DONE as of 2026-07 — see the Bindstone integration audit.** All phases shipped: hooks, scripts,
+> and serialization are on JaiScript; ChaiScript/Cereal are gone from live code. Historical plan
+> below; details may be stale.
+
 ## Overview
 
 Replace ChaiScript with JaiScript throughout Bindstone, leveraging the property system for automatic bindings where possible.

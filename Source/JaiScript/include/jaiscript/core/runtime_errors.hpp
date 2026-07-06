@@ -56,6 +56,7 @@ namespace jai {
         member_not_found = 72,
         static_member_not_found = 73,
         multiple_inheritance = 74,
+        access_violation = 75,
 
         // File I/O errors (81-90)
         file_not_found = 81,

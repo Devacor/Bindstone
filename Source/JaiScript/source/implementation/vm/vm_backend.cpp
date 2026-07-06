@@ -1158,14 +1158,17 @@ std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<envir
 	return std::make_shared<environment>(std::move(parent), symbolizer_);
 }
 
-std::shared_ptr<environment> vm_backend::acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj) {
+std::shared_ptr<environment> vm_backend::acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx) {
 	if (!scope_env_pool_.empty()) {
 		auto env = std::move(scope_env_pool_.back());
 		scope_env_pool_.pop_back();
 		env->reset_as_method(std::move(parent), std::move(this_obj));
+		env->set_access_context(access_ctx);
 		return env;
 	}
-	return std::make_shared<environment>(std::move(parent), symbolizer_, std::move(this_obj));
+	auto env = std::make_shared<environment>(std::move(parent), symbolizer_, std::move(this_obj));
+	env->set_access_context(access_ctx);
+	return env;
 }
 
 std::shared_ptr<environment> vm_backend::acquire_static_scope_env(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def) {
@@ -5176,6 +5179,10 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 		if (!parent_def) {
 			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
 		}
+		if (parent_def->chain_has_nonpublic()) [[unlikely]] {
+			JAISCRIPT_TRY(detail::enforce_member_access(parent_def.get(), expr->member_id,
+			                                            environment_->find_access_context()));
+		}
 		script_value method = make_null();
 		try {
 			method = parent_def->get_method(expr->member_id);
@@ -5366,6 +5373,11 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 	}
 
 	uint64_t member_id = expr->member_id;
+
+	if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
+		JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member_id,
+		                                            environment_->find_access_context()));
+	}
 
 	if (target.class_def && target.class_def->has_property_getters()) {
 		try {
@@ -5605,6 +5617,11 @@ checked_result<void> vm_backend::static_member_value(member_expr* expr, script_v
 
 	auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
+	if (class_def->chain_has_nonpublic()) [[unlikely]] {
+		JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), expr->member_id,
+		                                            environment_->find_access_context()));
+	}
+
 	script_value static_method = class_def->get_static_method(expr->member_id, false);
 	if (!static_method.is_null()) {
 		out = static_method;
@@ -5662,6 +5679,11 @@ checked_result<void> vm_backend::assign_member(const script_value& object_value,
 	uint64_t member_id = member->member_id != UINT64_MAX
 		? member->member_id
 		: symbolizer_->intern(member->member);
+
+	if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
+		JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member_id,
+		                                            environment_->find_access_context()));
+	}
 
 	auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(member_id);
 	script_value setter = target.method(setter_id);
@@ -5742,6 +5764,11 @@ checked_result<void> vm_backend::exec_set_static(frame& f, const vm_instruction&
 	}
 
 	auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
+
+	if (class_def->chain_has_nonpublic()) [[unlikely]] {
+		JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), member->member_id,
+		                                            environment_->find_access_context()));
+	}
 
 	if (!class_def->set_static_field(member->member_id, value.clone())) {
 		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
@@ -5954,6 +5981,10 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 				builtins_.shared_ptr_methods.find(member->member_id) != builtins_.shared_ptr_methods.end();
 			if (holder && holder->type_id != coroutine_handle_type_id_ && !shared_ptr_builtin) {
 				auto target = resolve_member_target(objv);
+				if (target && target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
+					JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member->member_id,
+					                                            environment_->find_access_context()));
+				}
 				if (target && target.class_def && !target.class_def->has_property_getters() &&
 				    !target.has_field(member->member_id)) {
 					script_value method_val = target.method(member->member_id);
@@ -6296,6 +6327,9 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 			}
 		}
 	}
+
+	// Record private:/protected: labels for runtime access enforcement
+	apply_member_access_labels(*class_def, *decl, *symbolizer_);
 
 	std::unordered_set<uint64_t> derived_field_names;
 	for (const auto& member : decl->members) {
@@ -6740,6 +6774,7 @@ checked_result<script_value> vm_backend::execute_method_ast(const std::shared_pt
 			this_obj = std::move(this_result.value());
 		}
 		auto coro_env = std::make_shared<environment>(method_env->get_parent(), symbolizer_, this_obj);
+		coro_env->set_access_context(method_env->get_access_context());
 		coro_env->define(this_id_, this_obj);
 		auto handle = std::make_shared<coroutine_handle>(engine_);
 		handle->set_function(ast, args, coro_env);
@@ -6864,6 +6899,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 
 	auto init_env = std::make_shared<environment>(definition_env, symbolizer_);
 	init_env->define("this", this_value);
+	init_env->set_access_context(class_def.get());   // field initializers are class-body code
 
 	if (matching_ctor->parameters.size() != args.size()) {
 		return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
@@ -6922,6 +6958,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 
 								auto level_env = std::make_shared<environment>(definition_env, symbolizer_);
 								level_env->define("this", this_value);
+								level_env->set_access_context(entry.script_class.get());
 								for (size_t pi = 0; pi < entry.ctor->parameters.size() && pi < entry.args.size(); ++pi) {
 									level_env->define(std::string(entry.ctor->parameters[pi].name), entry.args[pi]);
 								}
@@ -6990,6 +7027,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 							for (auto it = ctor_chain.rbegin(); it != ctor_chain.rend(); ++it) {
 								auto level_init_env = std::make_shared<environment>(definition_env, symbolizer_);
 								level_init_env->define("this", this_value);
+								level_init_env->set_access_context(it->script_class.get());
 								for (size_t pi = 0; pi < it->ctor->parameters.size() && pi < it->args.size(); ++pi) {
 									level_init_env->define(std::string(it->ctor->parameters[pi].name), it->args[pi]);
 								}
@@ -7005,6 +7043,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 								}
 
 								auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
+								method_env->set_access_context(it->script_class.get());
 								method_env->define("this", this_value);
 								auto ctor_result = execute_method_ast(it->ctor, method_env, it->args);
 								if (!ctor_result) return ctor_result.error_value();
@@ -7082,6 +7121,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 			delegated_to_this = true;
 
 			auto target_method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
+			target_method_env->set_access_context(class_def.get());
 			target_method_env->define("this", this_value);
 
 			auto target_result = execute_method_ast(target_ctor, target_method_env, init_args);
@@ -7094,6 +7134,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	}
 
 	auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
+	method_env->set_access_context(class_def.get());
 	method_env->define("this", this_value);
 
 	auto result = execute_method_ast(matching_ctor, method_env, args);
@@ -7125,6 +7166,7 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 
 	auto init_env = std::make_shared<environment>(global_env, symbolizer_);
 	init_env->define("this", this_value);
+	init_env->set_access_context(class_def.get());
 	evaluate_field_initializers(instance, class_def, init_env);
 
 	return this_value;
@@ -8046,7 +8088,7 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 			if (!payload.this_obj) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Method payload without 'this' receiver");
 			}
-			auto method_env = acquire_method_scope_env(payload.definition_env, *payload.this_obj);
+			auto method_env = acquire_method_scope_env(payload.definition_env, *payload.this_obj, payload.cls.get());
 			method_env->define(this_id_, *payload.this_obj);
 			auto result = execute_method_ast(payload.ast, method_env, args);
 			release_scope_env(std::move(method_env));
@@ -8261,7 +8303,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		// are bypassed dead weight
 		rec.locals.set_this(receiver);
 		rec.locals.closure_env = dispatch.definition_env;
-		environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver));
+		environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
 	} catch (...) {
 		rec.callee_pin = make_null();
 		rec.return_type = nullptr;
@@ -8453,7 +8495,8 @@ void vm_backend::setup_callee_env(const script_defined_function& function, call_
 			auto this_obj = function.closure_env->get_this_object();
 			locals.set_this(this_obj);
 			locals.closure_env = function.closure_env->get_parent();
-			environment_ = acquire_method_scope_env(function.closure_env->get_parent(), std::move(this_obj));
+			environment_ = acquire_method_scope_env(function.closure_env->get_parent(), std::move(this_obj),
+			                                        function.closure_env->get_access_context());
 		} else if (function.closure_env->is_static_method_env()) {
 			locals.static_class_def = function.closure_env->get_class_definition();
 			locals.is_static_method = true;

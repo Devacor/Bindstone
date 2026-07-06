@@ -125,8 +125,8 @@ classMember = accessLabel
             | methodDeclaration
             | fieldDeclaration
 
-// Parsed and serialized, but enforced NOWHERE — see design note 12
-accessLabel = ("public" | "private") ":"
+// ENFORCED at member access — see design note 12
+accessLabel = ("public" | "private" | "protected") ":"
 
 constructorDeclaration = IDENTIFIER "(" parameterList? ")" (":" ctorInitializer ("," ctorInitializer)*)? blockStatement
 
@@ -621,8 +621,19 @@ string healthLevel = health > 75 ? "healthy" :
 10. **Super Access**: `super::` to call parent class methods; `: super(...)`/`: this(...)` for
     constructor delegation (the ONLY initializer-list forms).
 11. **Switch Semantics**: Break-by-default. Use `fallthrough;` for explicit fall-through.
-12. **Visibility**: `public:`/`private:` labels parse and serialize but are **not enforced** —
-    all members are effectively public at runtime.
+12. **Visibility**: `public:`/`private:`/`protected:` labels are **enforced at member
+    access** on both backends: private = the declaring class's methods only; protected =
+    declaring class + subclasses; default is public. Lambdas defined inside a method
+    inherit that class's access; free functions and top-level code see public members
+    only. Violations raise a catchable error ("Cannot access private member 'x' of
+    class 'C'"). Scope notes: constructors are exempt (labels govern member access, not
+    construction); operator methods dispatch through operators regardless of labels;
+    unqualified self-field reads inside methods resolve through the instance scope and
+    are not re-checked (explicit `this.x` is); the host C++ API (`get_field`/`set_field`,
+    serialization, reflection) is deliberately unrestricted. Hot reload is permissive:
+    enforcement consults the class's CURRENT definition at access time. Enforcement
+    costs one flag test on classes with no nonpublic members (measured: within
+    benchmark noise), so there is no engine toggle.
 13. **Collection Literals**: arrays always use `[...]`; maps use `{...}` with either
     `{key, value}` entries or JSON-style `key: value` pairs.
 14. **Subscript Operations**: Full support for array/map subscripting with both read and write

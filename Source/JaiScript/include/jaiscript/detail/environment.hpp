@@ -69,7 +69,8 @@ namespace jai {
             : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::static_method),
               class_def_(class_def),
               this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
-              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
+              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)),
+              access_context_(class_def.get()) {
             validate_parent_chain(parent);
             bump_env_epoch();
         }
@@ -149,6 +150,20 @@ namespace jai {
         // Static method environment accessors (only valid when kind == static_method)
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
 
+        // Access-enforcement context: the class whose method/ctor body this scope env
+        // executes (stamped by the backend at method-scope creation; nullptr elsewhere).
+        // Lambdas inherit through the parent chain — the walk only runs on the
+        // enforcement slow path (target class has nonpublic members). Raw pointer:
+        // class_definitions are engine-lifetime and hot reload mutates them in place.
+        void set_access_context(class_definition* cls) { access_context_ = cls; }
+        class_definition* get_access_context() const { return access_context_; }
+        const class_definition* find_access_context() const {
+            for (const environment* env = this; env; env = env->parent_.get()) {
+                if (env->access_context_) return env->access_context_;
+            }
+            return nullptr;
+        }
+
         // Clear all values but keep parent chain intact (for proper scope cleanup)
         void clear_values();
 
@@ -215,6 +230,10 @@ namespace jai {
 
         // For static method environments: the class definition for static field access
         std::shared_ptr<class_definition> class_def_;
+
+        // Access-enforcement context (see set_access_context above). NOT owning: the
+        // pooled-env reset paths null it so a recycled env never leaks a stale context.
+        class_definition* access_context_ = nullptr;
 
         // Storage for bound methods (used by method and static_method kinds)
         mutable script_value bound_method_storage_;

@@ -715,6 +715,7 @@ public:
             }
         }
         field_defaults_cache_valid_ = false;
+        refresh_access_chain_flag();
     }
 
     [[nodiscard]] bool add_parent(std::shared_ptr<class_definition> parent) {
@@ -738,6 +739,7 @@ public:
         if (parent->has_property_getters()) {
             has_property_getters_ = true;
         }
+        refresh_access_chain_flag();
 
         return true;
     }
@@ -759,6 +761,7 @@ public:
                 }
             }
         }
+        refresh_access_chain_flag();
 
         return true;
     }
@@ -923,6 +926,64 @@ public:
 
     void set_default_access(access_level access) { default_access_ = access; }
     access_level get_default_access() const { return default_access_; }
+
+    // === Script member access enforcement (public:/private:/protected: labels) ===
+    // nonpublic_members_ holds ONLY the private/protected member ids THIS class declares
+    // (fields, methods, statics). chain_has_nonpublic_ is the hot-path guard: true when
+    // this class or any ancestor declares a nonpublic member — maintained eagerly at
+    // class (re)definition and parent wiring, propagated down through derived_classes_,
+    // so the common all-public case costs one bool load per member access.
+    void set_nonpublic_members(std::unordered_map<uint64_t, access_level> members) {
+        nonpublic_members_ = std::move(members);
+        refresh_access_chain_flag();
+    }
+
+    bool chain_has_nonpublic() const { return chain_has_nonpublic_; }
+
+    // Walks the inheritance chain for the class DECLARING member_id as nonpublic.
+    // nullptr = the member is public everywhere (or unknown — access checks pass).
+    const class_definition* find_nonpublic_declarer(uint64_t member_id, access_level& level_out) const {
+        auto it = nonpublic_members_.find(member_id);
+        if (it != nonpublic_members_.end()) {
+            level_out = it->second;
+            return this;
+        }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (const auto* declarer = parent->find_nonpublic_declarer(member_id, level_out)) {
+                    return declarer;
+                }
+            }
+        }
+        if (cpp_base_class_) {
+            return cpp_base_class_->find_nonpublic_declarer(member_id, level_out);
+        }
+        return nullptr;
+    }
+
+    bool derives_from(const class_definition* base) const {
+        if (this == base) return true;
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->derives_from(base)) return true;
+        }
+        return cpp_base_class_ && cpp_base_class_->derives_from(base);
+    }
+
+    void refresh_access_chain_flag() {
+        bool flag = !nonpublic_members_.empty();
+        if (!flag) {
+            for (const auto& parent : parent_classes_) {
+                if (parent && parent->chain_has_nonpublic_) { flag = true; break; }
+            }
+            if (!flag && cpp_base_class_ && cpp_base_class_->chain_has_nonpublic_) flag = true;
+        }
+        chain_has_nonpublic_ = flag;
+        for (const auto& weak_derived : derived_classes_) {
+            if (auto derived = weak_derived.lock()) {
+                derived->refresh_access_chain_flag();
+            }
+        }
+    }
 
     using copy_function = std::function<std::shared_ptr<void>(const void*)>;
 
@@ -1265,6 +1326,8 @@ private:
 
     class_type class_type_;
     access_level default_access_ = access_level::public_access;
+    std::unordered_map<uint64_t, access_level> nonpublic_members_;
+    bool chain_has_nonpublic_ = false;
 
     std::shared_ptr<class_definition> cpp_base_class_;
 
@@ -1502,6 +1565,29 @@ inline std::optional<script_value> try_convert_field_value(const script_value& v
         return std::nullopt;
     }
     return std::nullopt;
+}
+
+// Script-surface member access enforcement kernel — the ONE check both backends call
+// verbatim at every member get/set/compound/call site (parity by construction).
+// ctx = the class whose method body is currently executing (nullptr at top level /
+// free functions). Rules: private = declaring class only; protected = declaring class
+// and its subclasses. Host C++ APIs (get_field/set_field/get_fields, serialization)
+// never call this — the host side stays unrestricted by design.
+inline checked_result<void> enforce_member_access(const class_definition* cls, uint64_t member_id,
+                                                  const class_definition* ctx) {
+    access_level level = access_level::public_access;
+    const class_definition* declarer = cls->find_nonpublic_declarer(member_id, level);
+    if (!declarer || declarer == ctx) {
+        return {};
+    }
+    if (level == access_level::protected_access && ctx && ctx->derives_from(declarer)) {
+        return {};
+    }
+    return checked_result<void>(make_error_code(runtime_error_code::access_violation),
+        level == access_level::private_access
+            ? "Cannot access private member '{0}' of class '{1}'"
+            : "Cannot access protected member '{0}' of class '{1}'",
+        member_id, declarer->get_type_id());
 }
 
 } // namespace detail

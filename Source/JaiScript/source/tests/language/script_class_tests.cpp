@@ -875,6 +875,155 @@ public:
                                             : "interp new-without-parens rejected");
             }
         });
+
+        // === Member access enforcement (private:/protected:/public: labels) ===
+        // RULED (2026-07): private = declaring class's methods only; protected = declaring
+        // class + subclasses; lambdas defined in a method inherit its class's access; free
+        // functions/top level are public-only. Host C++ APIs stay unrestricted.
+        test("member_access_enforcement_matrix", [this]() {
+            const char* src = R"(
+                class C {
+                private:
+                    int secret = 7;
+                    int hidden_helper() { return secret * 2; }
+                protected:
+                    int prot = 8;
+                public:
+                    int pub = 9;
+                    int peek() { return this.secret + this.prot + hidden_helper(); }
+                    function lam() { var f = [this]() { return this.secret; }; return f(); }
+                }
+                class D : C {
+                    int useProt() { return this.prot + 1; }
+                }
+                function freeProbe(o) { return o.secret; }
+                class Other { int poke(o) { return o.secret; } }
+                var c = C();
+                var d = D();
+                var out = "" + c.peek() + "|" + c.pub + "|" + c.lam() + "|" + d.useProt();
+                try { var a = c.secret; out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
+                try { var b = c.prot; out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
+                try { var h = c.hidden_helper(); out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
+                try { var f = freeProbe(c); out = out + "|LEAK"; } catch (e) { out = out + "|free:" + e; }
+                try { var o = Other().poke(c); out = out + "|LEAK"; } catch (e) { out = out + "|other:" + e; }
+                try { c.secret = 1; out = out + "|WROTE"; } catch (e) { out = out + "|w:" + e; }
+                try { c.prot += 1; out = out + "|COMPOUND"; } catch (e) { out = out + "|cw:" + e; }
+                out;
+            )";
+            const std::string expected =
+                "29|9|7|9"
+                "|Cannot access private member 'secret' of class 'C'"
+                "|Cannot access protected member 'prot' of class 'C'"
+                "|Cannot access private member 'hidden_helper' of class 'C'"
+                "|free:Cannot access private member 'secret' of class 'C'"
+                "|other:Cannot access private member 'secret' of class 'C'"
+                "|w:Cannot access private member 'secret' of class 'C'"
+                "|cw:Cannot access protected member 'prot' of class 'C'";
+            std::string outputs[2];
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(e);
+                outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
+            }
+            check_eq(expected, outputs[0], "interp access matrix");
+            check_eq(outputs[0], outputs[1], "access matrix parity (byte-identical incl. error text)");
+        });
+
+        test("member_access_private_in_base_vs_derived", [this]() {
+            // Derived methods cannot touch Base-private (C++ rule); protected passes.
+            // super:: private method errors, super:: protected/public passes.
+            const char* src = R"(
+                class Base {
+                private:
+                    int core = 1;
+                    int corem() { return 11; }
+                protected:
+                    int sharedv = 2;
+                    int sharedm() { return 22; }
+                }
+                class Derived : Base {
+                    int okProt() { return this.sharedv + super::sharedm(); }
+                    int badPriv() { return this.core; }
+                    int badPrivM() { return super::corem(); }
+                }
+                var d = Derived();
+                var out = "" + d.okProt();
+                try { var a = d.badPriv(); out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
+                try { var b = d.badPrivM(); out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
+                out;
+            )";
+            const std::string expected =
+                "24"
+                "|Cannot access private member 'core' of class 'Base'"
+                "|Cannot access private member 'corem' of class 'Base'";
+            std::string outputs[2];
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
+            }
+            check_eq(expected, outputs[0], "interp base/derived access");
+            check_eq(outputs[0], outputs[1], "base/derived access parity");
+        });
+
+        test("member_access_statics_and_ref_binding", [this]() {
+            const char* src = R"(
+                class S {
+                private:
+                    static int counter = 5;
+                    int f = 3;
+                public:
+                    static function bump() { counter += 1; return counter; }
+                }
+                function wantsRef(int& r) { r = 99; }
+                var out = "" + S::bump();
+                try { var a = S::counter; out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
+                try { S::counter = 0; out = out + "|WROTE"; } catch (e) { out = out + "|w:" + e; }
+                var s = S();
+                try { wantsRef(s.f); out = out + "|BOUND"; } catch (e) { out = out + "|ref:" + e; }
+                out;
+            )";
+            const std::string expected =
+                "6"
+                "|Cannot access private member 'counter' of class 'S'"
+                "|w:Cannot access private member 'counter' of class 'S'"
+                "|ref:Cannot access private member 'f' of class 'S'";
+            std::string outputs[2];
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
+            }
+            check_eq(expected, outputs[0], "interp statics/ref access");
+            check_eq(outputs[0], outputs[1], "statics/ref access parity");
+        });
+
+        test("member_access_hot_reload_and_host_api", [this]() {
+            // Hot reload is permissive: enforcement consults the CURRENT class_definition
+            // at access time — instances keep working, new accesses follow new labels.
+            // Host C++ get_field stays unrestricted by design.
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(e);
+                e->execute("class R { public: int v = 4; } var r = R();");
+                check_eq((int64_t)4, e->execute("r.v").as_int(), "public before reload");
+                // reload flips v to private
+                e->execute("class R { private: int v = 4; public: int look() { return v; } }");
+                auto blocked = e->execute("var msg = \"\"; try { var x = r.v; msg = \"leak\"; } catch (err) { msg = err; } msg");
+                check_eq(std::string("Cannot access private member 'v' of class 'R'"),
+                         blocked.as<std::string>(), use_vm ? "vm reload enforces" : "interp reload enforces");
+                check_eq((int64_t)4, e->execute("r.look()").as_int(), "instance keeps working via method");
+                // host C++ API is unrestricted
+                auto rv = e->execute("r");
+                auto holder = rv.get_object_holder();
+                check_not_null(holder.get(), "instance holder");
+                auto instance = std::static_pointer_cast<jai::class_instance>(holder->data);
+                uint64_t v_id = e->symbolize("v");
+                check_eq((int64_t)4, instance->get_field(v_id).as_int(), "host get_field bypasses enforcement");
+            }
+        });
     }
 };
 

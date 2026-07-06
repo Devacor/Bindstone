@@ -53,6 +53,7 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"yield", token_type::yield_keyword},
     {"enum", token_type::enum_keyword},
     {"new", token_type::new_keyword},
+    {"protected", token_type::protected_keyword},
 };
 
 lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename)

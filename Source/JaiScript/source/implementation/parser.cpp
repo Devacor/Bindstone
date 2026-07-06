@@ -571,6 +571,13 @@ checked_result<token> parser::consume(token_type type, const std::string& messag
 
 // Primary expressions
 checked_result<expression_ptr> parser::primary() {
+    // Map literals parse as a PRIMARY so postfix applies ({"k":1}["k"], {..}.size());
+    // they used to short-circuit at assignment level, which silently rejected any
+    // postfix on a literal (grammar.md's own splice example was unparseable)
+    if (check(token_type::left_brace) && looks_like_map_literal()) {
+        return parse_map_literal();
+    }
+
     // Literals
     if (match(token_type::true_keyword)) {
         script_value val(script_value::ast_literal_tag{}, true);
@@ -1084,12 +1091,6 @@ checked_result<expression_ptr> parser::expression() {
 }
 
 checked_result<expression_ptr> parser::assignment() {
-    // Check for map literals first (both C++ and JSON style)
-    // Only try to parse as map if it looks like one, to avoid exception-based control flow
-    if (check(token_type::left_brace) && looks_like_map_literal()) {
-        return parse_map_literal();
-    }
-
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, ternary());
 
     if (match({token_type::equal, token_type::plus_equal, token_type::minus_equal,

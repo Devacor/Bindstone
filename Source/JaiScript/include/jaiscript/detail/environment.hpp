@@ -318,40 +318,17 @@ namespace jai {
             return *this_object_ptr;
         }
 
-        /// Liveness token for references bound to this frame's slot storage: it dies
-        /// with the frame (or its pooled record's recycling), so an escaped reference
-        /// errors cleanly instead of dangling into freed/reused slot storage.
-        std::shared_ptr<environment> ref_anchor;
-
-        const std::shared_ptr<environment>& ensure_ref_anchor(string_symbolizer* symbolizer) {
-            if (!ref_anchor) {
-                ref_anchor = std::make_shared<environment>(symbolizer);
-            }
-            return ref_anchor;
-        }
     };
 
-    /// Per-argument call-site metadata for reference-parameter binding. When the
-    /// argument was a bare identifier resolving to a caller frame slot, the slot
-    /// coordinates are recorded too (env lookup alone would miss slot locals and walk
-    /// to an unrelated same-named outer variable). The vm records the caller's
-    /// call_frame directly (its records are address-stable); the interpreter records
-    /// an index into its call_stack_ (whose frames move on vector growth).
-    struct arg_ref_metadata {
-        uint64_t symbol_id = UINT64_MAX;
-        environment* env = nullptr;
-        call_frame* caller_locals = nullptr;
-        size_t caller_frame_index = SIZE_MAX;
-        size_t slot = SIZE_MAX;
-        // Ref-bindable lvalue argument (f(obj.field), f(arr[i]), chains): the arg's AST,
-        // resolved at bind time by detail::resolve_ref_lvalue (pinned by chunk::nodes /
-        // the live function body)
-        const expression* lvalue_expr = nullptr;
-
-        arg_ref_metadata() = default;
-        arg_ref_metadata(uint64_t symbol, environment* environment_ptr)
-            : symbol_id(symbol), env(environment_ptr) {}
-    };
+    namespace detail {
+        /// Call-site context handed from the caller's invoke to the callee's parameter
+        /// binding (a single save/restored pointer, consumed once): the argument
+        /// expressions live in the caller's AST and outlive the call; the caller's
+        /// environment is the callee's previousEnv at bind time.
+        struct call_site_context {
+            const std::vector<expression_ptr>* arg_exprs = nullptr;
+        };
+    }
 
     // Script-defined function storage
     struct script_defined_function {

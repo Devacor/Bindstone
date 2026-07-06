@@ -503,20 +503,22 @@ void lexer::scan_template_string() {
 
             int brace_depth = 1;
             while (!is_at_end() && brace_depth > 0) {
-                if (peek() == '}') {
-                    brace_depth--;
-                    if (brace_depth == 0) {
-                        advance(); // consume closing }
-                        break;
-                    }
-                } else if (peek() == '{') {
-                    brace_depth++;
-                }
-
                 // Recursive next_token() is safe here because pending_tokens_
-                // is not being used (we're building into local `result`)
+                // is not being used (we're building into local `result`).
+                // Depth bookkeeping happens on the LEXED brace tokens, not raw peeks:
+                // whitespace before a brace made next_token() consume it without a
+                // depth adjustment (`${ x }` was a parse error, and a space-prefixed
+                // '{' swallowed the splice terminator).
                 token expr_tok = next_token();
                 if (expr_tok.type == token_type::eof || expr_tok.type == token_type::error) break;
+                if (expr_tok.type == token_type::left_brace) {
+                    ++brace_depth;
+                } else if (expr_tok.type == token_type::right_brace) {
+                    --brace_depth;
+                    if (brace_depth == 0) {
+                        break;   // splice terminator: not part of the expression
+                    }
+                }
                 result.push_back(expr_tok);
             }
 

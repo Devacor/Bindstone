@@ -91,6 +91,14 @@ namespace jai::detail {
 				cur = holder->cell();
 				continue;
 			}
+			if (holder->has_map_key) {
+				auto it = holder->container_map->find(*holder->cell());
+				if (it == holder->container_map->end()) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed map entry");
+				}
+				cur = &it->second;
+				continue;
+			}
 			if (holder->container) {
 				if (holder->container_index >= holder->container->size()) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");

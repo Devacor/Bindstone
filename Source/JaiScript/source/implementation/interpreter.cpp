@@ -63,7 +63,7 @@ namespace {
         if (!refHolder) {
             return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
         }
-        if (!refHolder->has_cell && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
+        if (!refHolder->has_cell && !refHolder->has_map_key && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
         }
         if (refHolder->container_element_type) {
@@ -78,6 +78,9 @@ namespace {
                     return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
                 }
                 return script_value::make_field_reference(refHolder->owner_instance, refHolder->field_id, eng, nullptr);
+            }
+            if (refHolder->has_map_key) {
+                return script_value::make_map_entry_reference(refHolder->container_map, *refHolder->cell(), eng, nullptr);
             }
             return script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock(), eng);
         }
@@ -3475,11 +3478,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                         value_ref.set_engine(left.get_engine());
                     }
 
-                    script_value* element_ptr = &value_ref;
                     // Get value type constraint from the map's type_info for validation on assignment
                     auto map_type_info = left.get_type_info();
                     type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-                    script_value ref_value = script_value::make_reference(element_ptr, environment_, engine_, value_type);
+                    // Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
+                    script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, engine_, value_type);
                     push_value(ref_value);
                 } else if (is_lvalue) {
                     // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
@@ -3494,7 +3497,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                         }
                         auto map_type_info = left.get_type_info();
                         type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-                        push_value(script_value::make_reference(&value_ref, environment_, engine_, value_type));
+                        push_value(script_value::make_map_entry_reference(left.get_map_storage(), right, engine_, value_type));
                     } else {
                         // Missing key on a read: yield null WITHOUT inserting.
                         push_value(script_value(std::monostate{}, engine_));
@@ -5241,6 +5244,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Get the actual target through the reference
                     auto refHolder = target_ref.get_reference_holder();
                     script_value* target_ptr = refHolder->target;
+                    if (!target_ptr && refHolder->has_map_key) {
+                        // Map-entry mode carries no raw target: re-resolve via find(key)
+                        auto map_it = refHolder->container_map->find(*refHolder->cell());
+                        if (map_it != refHolder->container_map->end()) { target_ptr = &map_it->second; }
+                    }
                     if (!target_ptr) {
                         return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
                     }
@@ -6125,115 +6133,62 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     std::vector<script_value> arguments;
     arguments.reserve(expr->arguments.size());
 
-    // Only track argument metadata if there are arguments (optimization for method chaining)
-    const bool has_args = !expr->arguments.empty();
-
-    // Save previous metadata for nested call support (raw pointers - no shared_ptr overhead)
-    std::vector<arg_ref_metadata> saved_metadata;
-    if (has_args) {
-        saved_metadata = std::move(current_arg_metadata_);
-        current_arg_metadata_.clear();
-        current_arg_metadata_.reserve(expr->arguments.size());
-
-        for (const auto& argExpr : expr->arguments) {
-            // Check if this is a simple identifier (needed for references)
-            if (argExpr->get_type() == node_type::identifier_expr) {
-                auto* identExpr = static_cast<identifier_expr*>(argExpr.get());
-                // Reuse the parser-assigned interned symbol id instead of re-interning
-                // (a string hash + map probe) on every call. Cache it on first use for
-                // the rare case the parser left it unset.
-                uint64_t symbol_id = identExpr->symbol_id;
-                if (symbol_id == UINT64_MAX) {
-                    symbol_id = string_symbolizer_->intern(identExpr->name);
-                    identExpr->symbol_id = symbol_id;
-                }
-                arg_ref_metadata meta(symbol_id, environment_.get());
-                // Frame-slot local: record its coordinates so a reference parameter can
-                // bind to the slot itself (env lookup would miss it and walk to an
-                // unrelated same-named outer variable)
-                if (identExpr->slot_index != SIZE_MAX && !call_stack_.empty() &&
-                    call_stack_.back().get_local(identExpr->slot_index) != nullptr) {
-                    meta.caller_frame_index = call_stack_.size() - 1;
-                    meta.slot = identExpr->slot_index;
-                }
-                current_arg_metadata_.push_back(meta);
-            } else if (detail::is_ref_bindable_lvalue(argExpr.get())) {
-                // Field/subscript/chain lvalue: record the arg AST for bind-time
-                // resolution (only consumed by reference parameters)
-                arg_ref_metadata meta(UINT64_MAX, environment_.get());
-                if (!call_stack_.empty()) {
-                    meta.caller_frame_index = call_stack_.size() - 1;
-                }
-                meta.lvalue_expr = argExpr.get();
-                current_arg_metadata_.push_back(meta);
-            } else {
-                // Not an identifier - can't take reference
-                current_arg_metadata_.emplace_back();
-            }
-
-            // Evaluate argument with exception handling
-            try {
-                JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
-                arguments.emplace_back(std::move(pop_value()));
-                if (is_unwinding_) {
-                    current_arg_metadata_ = std::move(saved_metadata);
-                    push_value(make_value());
-                    return {};
-                }
-            } catch (const script_exception& e) {
-                // Restore metadata before returning
-                current_arg_metadata_ = std::move(saved_metadata);
-                // Convert to interpreter exception state
-                active_exception_value_ = make_value(std::string(e.what()));
-                current_exception_ = e;
-                is_unwinding_ = true;
-                push_value(make_value());  // Push null for the failed call
-                return {};
-            } catch (const std::runtime_error& e) {
-                // Restore metadata before returning
-                current_arg_metadata_ = std::move(saved_metadata);
-                // Convert runtime errors to script exceptions
-                active_exception_value_ = make_value(std::string(e.what()));
-                current_exception_ = script_exception(e.what());
-                is_unwinding_ = true;
-                push_value(make_value());  // Push null for the failed call
+    for (const auto& argExpr : expr->arguments) {
+        // Evaluate argument with exception handling
+        try {
+            JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+            arguments.emplace_back(std::move(pop_value()));
+            if (is_unwinding_) {
+                push_value(make_value());
                 return {};
             }
+        } catch (const script_exception& e) {
+            // Convert to interpreter exception state
+            active_exception_value_ = make_value(std::string(e.what()));
+            current_exception_ = e;
+            is_unwinding_ = true;
+            push_value(make_value());  // Push null for the failed call
+            return {};
+        } catch (const std::runtime_error& e) {
+            // Convert runtime errors to script exceptions
+            active_exception_value_ = make_value(std::string(e.what()));
+            current_exception_ = script_exception(e.what());
+            is_unwinding_ = true;
+            push_value(make_value());  // Push null for the failed call
+            return {};
         }
     }
 
     // Call the function - now returns checked_result instead of throwing. C++ callables
     // may still throw (conversion failures, game-side exceptions) - convert those to
     // script exceptions here so nothing propagates raw through the interpreter.
+    // The call-site context rides a single save/restored pointer: the next call_function
+    // entered consumes it to bind reference parameters against the caller's variables
+    // (the arg expressions outlive the call - they live in this frame).
     const script_function& func = callee.as_function();
+    detail::call_site_context ctx{&expr->arguments};
+    const detail::call_site_context* saved_ctx = pending_call_ctx_;
+    pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
     std::optional<checked_result<script_value>> callOutcome;
     try {
         callOutcome.emplace(func(arguments));
     } catch (const script_exception& e) {
-        if (has_args) {
-            current_arg_metadata_ = std::move(saved_metadata);
-        }
+        pending_call_ctx_ = saved_ctx;
         active_exception_value_ = make_value(std::string(e.what()));
         current_exception_ = e;
         is_unwinding_ = true;
         push_value(make_value());
         return {};
     } catch (const std::exception& e) {
-        if (has_args) {
-            current_arg_metadata_ = std::move(saved_metadata);
-        }
+        pending_call_ctx_ = saved_ctx;
         active_exception_value_ = make_value(std::string(e.what()));
         current_exception_ = script_exception(e.what());
         is_unwinding_ = true;
         push_value(make_value());
         return {};
     }
+    pending_call_ctx_ = saved_ctx;
     checked_result<script_value>& result_checked = *callOutcome;
-
-    // Restore previous metadata after call completes
-    if (has_args) {
-        current_arg_metadata_ = std::move(saved_metadata);
-    }
 
     // Check if function call succeeded
     if (!result_checked) {
@@ -8275,14 +8230,18 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
                             script_value* var_ptr = environment_->get_value_ptr(var_id);
 
-                            // Bind end value pointer (if variable) AFTER environment setup
-                            script_int* end_ptr = nullptr;
+                            // Bind end value pointer (if variable) AFTER environment setup.
+                            // Resolve through references at prep (escape-boxed vars: the
+                            // cell inner is heap-stable) and keep the script_value* so the
+                            // per-iteration guard can re-check the storage kind - a mid-loop
+                            // box-on-demand of the variable demotes gracefully.
+                            script_value* end_target = nullptr;
                             script_int end_val = end_literal;
                             if (end_var_id != UINT64_MAX) {
                                 script_value* end_sv = environment_->get_value_ptr(end_var_id);
-                                if (end_sv && end_sv->raw_storage_index() == script_value::TYPEID_INT) {
-                                    end_ptr = &end_sv->unchecked_as_int_ref();
-                                } else {
+                                if (end_sv) { end_target = &end_sv->deref(); }
+                                if (!end_target || end_target->raw_storage_index() != script_value::TYPEID_INT ||
+                                    end_target->is_cpp_bound()) {
                                     // End variable not int - fall back to slow path
                                     release_environment(loop_env);
                                     environment_ = previous;
@@ -8291,12 +8250,12 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             }
 
                             // Bind step value pointer (if variable)
-                            script_int* step_ptr = nullptr;
+                            script_value* step_target = nullptr;
                             if (step_var_id != UINT64_MAX) {
                                 script_value* step_sv = environment_->get_value_ptr(step_var_id);
-                                if (step_sv && step_sv->raw_storage_index() == script_value::TYPEID_INT) {
-                                    step_ptr = &step_sv->unchecked_as_int_ref();
-                                } else {
+                                if (step_sv) { step_target = &step_sv->deref(); }
+                                if (!step_target || step_target->raw_storage_index() != script_value::TYPEID_INT ||
+                                    step_target->is_cpp_bound()) {
                                     // Step variable not int - fall back to slow path
                                     release_environment(loop_env);
                                     environment_ = previous;
@@ -8330,7 +8289,13 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                     return execution_limit_failure();
                                 }
 
-                                script_int current_end = end_ptr ? *end_ptr : end_val;
+                                // Storage-kind guard on cached targets (box-on-demand safety)
+                                if ((end_target && end_target->raw_storage_index() != 1) ||
+                                    (step_target && step_target->raw_storage_index() != 1)) [[unlikely]] {
+                                    fell_through = true;
+                                    break;
+                                }
+                                script_int current_end = end_target ? end_target->unchecked_as_int() : end_val;
                                 if (!cmp(i, current_end)) break;
 
                                 // Type validation - if type changed, fall back to slow path
@@ -8397,7 +8362,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                 }
                                 i = var_ptr->unchecked_as_int();
 
-                                script_int step = step_ptr ? *step_ptr : step_value;
+                                script_int step = step_target ? step_target->unchecked_as_int() : step_value;
                                 script_int next;
                                 const bool step_overflow = step_subtract
                                     ? !ints::try_sub(i, step, next)
@@ -8809,10 +8774,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     std::vector<script_value> args;
 
                     if (stmt->is_reference) {
-                        // For references, create a pair with a reference to the map value
-                        script_value* value_ptr = const_cast<script_value*>(&it->second);
+                        // For references, create a pair with a map-entry reference to the value
                         args.push_back(it->first);  // Don't clone - just pass the key
-                        args.push_back(script_value::make_reference(value_ptr, environment_, engine_));
+                        args.push_back(script_value::make_map_entry_reference(map_storage, it->first, engine_, nullptr));
                     } else {
                         // For copies, clone key and value
                         args.push_back(it->first.clone());
@@ -10853,45 +10817,69 @@ script_value interpreter::bind_parameter(
     return (semantics == parameter_semantics::value) ? arg.clone() : arg;
 }
 
-// Reference-parameter binding from the recorded arg metadata. Kept out of call_function
-// so its locals stay off the per-recursion-level native frame (Debug stack ceiling).
-checked_result<void> interpreter::bind_reference_parameter(const parameter& param, size_t frame_index,
-                                                           size_t arg_index, const std::shared_ptr<environment>& caller_env) {
-    const arg_ref_metadata& meta = get_current_arg_metadata()[arg_index];
-
-    // Caller frame-slot local: bind straight to the slot storage, anchored to the
-    // caller frame's lifetime (env lookup can't see slot locals and would walk to an
-    // unrelated same-named outer variable)
-    if (meta.caller_frame_index < call_stack_.size() && meta.slot != SIZE_MAX) {
-        auto& caller_frame = call_stack_[meta.caller_frame_index];
-        script_value* slotPtr = caller_frame.get_local(meta.slot);
-        if (slotPtr) {
-            if (slotPtr->is_reference()) {
-                if (!slotPtr->get_reference_holder()) {
-                    return checked_result<void>(
-                        make_error_code(runtime_error_code::invalid_reference),
-                        "Reference target is null"
-                    );
-                }
-                // Share the holder: zero alloc, and element refs keep their container
-                // re-resolution instead of a stale flattened pointer
-                call_stack_[frame_index].set_local(param.slot_index, script_value(*slotPtr));
-            } else {
-                script_value refValue = script_value::make_reference(slotPtr, caller_frame.ensure_ref_anchor(string_symbolizer_));
-                call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
-            }
-            return {};
+// Ref-param bind against the caller's variable storage: shares an existing reference
+// holder (cells alias), or boxes the value on demand (cell) when the variable predates
+// its escape mark. KEEP BYTE-PARALLEL with vm_backend::bind_reference_to_storage.
+checked_result<void> interpreter::bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot) {
+    if (storage.is_reference()) {
+        if (!storage.get_reference_holder()) {
+            return checked_result<void>(
+                make_error_code(runtime_error_code::invalid_reference),
+                "Reference target is null");
         }
+        // Share the holder: zero alloc; cells alias the same box, element/field refs
+        // keep their container/instance re-resolution
+        call_stack_[frame_index].set_local(param_slot, script_value(storage));
+        return {};
+    }
+    // Box on demand: the variable predates its escape mark (cross-execute global, C++
+    // define, dynamic shape). Its storage becomes the cell - reads/stores already handle
+    // the boxed form (cold path: first ref bind only).
+    script_value inner = std::move(storage);
+    storage = script_value::make_cell_reference(std::move(inner), engine_);
+    call_stack_[frame_index].set_local(param_slot, script_value(storage));
+    return {};
+}
+
+// Stateless ref-param binding straight from the call-site arg expression. Kept out of
+// call_function so its locals stay off the per-recursion-level native frame (Debug
+// stack ceiling). KEEP BYTE-PARALLEL with vm_backend::bind_parameters' ref branch.
+checked_result<void> interpreter::bind_reference_parameter(const parameter& param, size_t frame_index,
+                                                           const expression* argExpr,
+                                                           const std::shared_ptr<environment>& caller_env) {
+    call_frame* caller_locals = frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr;
+
+    if (argExpr && argExpr->get_type() == node_type::identifier_expr) {
+        auto* identExpr = static_cast<const identifier_expr*>(argExpr);
+        uint64_t symbol_id = identExpr->symbol_id;
+        if (symbol_id == UINT64_MAX) {
+            symbol_id = string_symbolizer_->intern(identExpr->name);
+            const_cast<identifier_expr*>(identExpr)->symbol_id = symbol_id;
+        }
+
+        // Caller frame-slot local (env lookup can't see slot locals and would walk to
+        // an unrelated same-named outer variable)
+        if (identExpr->slot_index != SIZE_MAX && caller_locals) {
+            if (script_value* slotPtr = caller_locals->get_local(identExpr->slot_index)) {
+                return bind_reference_to_storage(*slotPtr, frame_index, param.slot_index);
+            }
+        }
+
+        script_value* argPtr = caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr;
+        if (!argPtr) {
+            return checked_result<void>(
+                make_error_code(runtime_error_code::undefined_variable),
+                "Cannot take reference of undefined variable"
+            );
+        }
+        return bind_reference_to_storage(*argPtr, frame_index, param.slot_index);
     }
 
     // Field/subscript/chain lvalue argument: resolve through the shared helper into
-    // an owner-pinned reference (Tier 1). Frame pointer re-resolved at bind time -
-    // call_stack_ frames move when the vector grows.
-    if (meta.lvalue_expr) {
-        call_frame* caller_locals = meta.caller_frame_index < call_stack_.size()
-            ? &call_stack_[meta.caller_frame_index] : nullptr;
-        auto resolved = detail::resolve_ref_lvalue(meta.lvalue_expr, caller_locals,
-                                                   meta.env, caller_env, engine_, string_symbolizer_);
+    // an owner-pinned reference (Tier 1)
+    if (argExpr && detail::is_ref_bindable_lvalue(argExpr)) {
+        auto resolved = detail::resolve_ref_lvalue(argExpr, caller_locals,
+                                                   caller_env.get(), caller_env, engine_, string_symbolizer_);
         if (!resolved) {
             return resolved.error_value();
         }
@@ -10899,67 +10887,10 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         return {};
     }
 
-    if (meta.symbol_id == UINT64_MAX || meta.env == nullptr) {
-        // No metadata - can't create reference
-        return checked_result<void>(
-            make_error_code(runtime_error_code::invalid_reference),
-            "Cannot pass non-lvalue to reference parameter"
-        );
-    }
-
-    // Get pointer to the argument (env is raw pointer from metadata)
-    environment* env = meta.env;
-    script_value* argPtr = env->get_value_ptr(meta.symbol_id);
-    if (!argPtr) {
-        return checked_result<void>(
-            make_error_code(runtime_error_code::undefined_variable),
-            "Cannot take reference of undefined variable"
-        );
-    }
-
-    // If the argument is itself a reference, share its holder
-    if (argPtr->is_reference()) {
-        if (!argPtr->get_reference_holder()) {
-            return checked_result<void>(
-                make_error_code(runtime_error_code::invalid_reference),
-                "Reference target is null"
-            );
-        }
-        call_stack_[frame_index].set_local(param.slot_index, script_value(*argPtr));
-        return {};
-    }
-
-    // Recover the env's shared_ptr: the caller env chain covers block, method and
-    // function-body scopes (the metadata env is the caller's environment at the call
-    // site); call frames and global remain fallbacks
-    std::shared_ptr<environment> env_shared;
-    for (auto p = caller_env; p; p = p->get_parent()) {
-        if (p.get() == env) {
-            env_shared = p;
-            break;
-        }
-    }
-    if (!env_shared && env == environment_.get()) {
-        env_shared = environment_;
-    }
-    if (!env_shared) {
-        for (size_t fi = frame_index; fi > 0; --fi) {
-            auto& frame = call_stack_[fi - 1];
-            if (frame.closure_env.get() == env) {
-                env_shared = frame.closure_env;
-                break;
-            }
-        }
-        if (!env_shared) {
-            auto global_env = get_global_environment();
-            if (global_env.get() == env) {
-                env_shared = global_env;
-            }
-        }
-    }
-    script_value refValue = script_value::make_reference(argPtr, env_shared);
-    call_stack_[frame_index].set_local(param.slot_index, std::move(refValue));
-    return {};
+    return checked_result<void>(
+        make_error_code(runtime_error_code::invalid_reference),
+        "Cannot pass non-lvalue to reference parameter"
+    );
 }
 
 // Function call implementation - returns checked_result for consistent error handling
@@ -10991,6 +10922,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         call_depth_guard(int& d) : depth(d) { ++depth; }
         ~call_depth_guard() { --depth; }
     } depth_guard(current_call_depth_);
+
+    // Consume the pending call-site context (set by visit_call around the invoke): ref
+    // params bind against the caller's variables through it. Consumed exactly once -
+    // nested calls set their own; external (C++) invocations arrive with none.
+    const detail::call_site_context* call_ctx = pending_call_ctx_;
+    pending_call_ctx_ = nullptr;
 
     {
         size_t required_params = 0;
@@ -11129,11 +11066,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         // Use pre-cached symbol ID (parameter binding optimization)
         // Symbol IDs are cached at function definition time in visit_function_decl
         if (param.is_reference) {
-            // For reference parameters, create a reference value
-            // References still go into environment since they need special tracking
-            const auto& current_arg_metadata = get_current_arg_metadata();
-            if (!current_arg_metadata.empty() && i < current_arg_metadata.size()) {
-                auto bound = bind_reference_parameter(param, frame_index, i, previousEnv);
+            if (call_ctx && i < call_ctx->arg_exprs->size()) {
+                auto bound = bind_reference_parameter(param, frame_index,
+                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv);
                 if (!bound) {
                     cleanup();
                     return bound.error_value();
@@ -11723,10 +11658,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
         // A first resume nested inside another call's argument list must not see that
         // call's in-flight arg metadata (a zero-arg .resume() never saves/clears it)
-        auto enclosing_metadata = std::move(current_arg_metadata_);
-        current_arg_metadata_.clear();
         auto call_result = call_function(scriptFunc, handle.get_args());
-        current_arg_metadata_ = std::move(enclosing_metadata);
 
         if (hasYieldRequest_) {
             // call_function already saved state into this coroutine

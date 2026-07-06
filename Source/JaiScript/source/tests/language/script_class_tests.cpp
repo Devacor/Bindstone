@@ -761,6 +761,120 @@ public:
 
             check(exception_thrown);  // Verify diamond inheritance was rejected
         });
+
+        // `new T(args)` is pure sugar for shared_ptr<T>(args) construction (Dev ruling
+        // 2026-07): same new_expr, same tagging, reference semantics opt-in. A 'var'
+        // decl keeps the shared_ptr marker (var p = new P() IS shared_ptr<P> p = P()).
+        test("new_keyword_shared_ptr_sugar_basics", [this]() {
+            const char* src = R"(
+                class P { int x = 3; P() { x = 3; } P(int v) { x = v; } }
+                var p = new P(7);
+                var q = p;
+                q.x = 99;
+                shared_ptr<P> typed = new P(5);
+                auto viaExpr = [](:o) -> { return o.x; };
+                to_string(p.x) + "|" + to_string(q.x) + "|" + to_string(typed.x)
+                    + "|" + to_string(viaExpr(new P(41)));
+            )";
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(e);
+                check_eq(std::string("99|99|5|41"), e->execute(src).as<std::string>(),
+                         use_vm ? "vm new sugar" : "interp new sugar");
+            }
+        });
+
+        test("new_keyword_matches_shared_ptr_spelling", [this]() {
+            // new P() and shared_ptr<P>(...) are the same expression: same type_of,
+            // same sharing behavior, brace form included
+            const char* src = R"(
+                class P { int x = 1; P() { x = 1; } }
+                var a = new P();
+                var b = shared_ptr<P>();
+                var braced = new P{};
+                var aliasA = a;
+                aliasA.x = 10;
+                var aliasB = b;
+                aliasB.x = 20;
+                (type_of(a) == type_of(b) ? "same" : "diff") + "|" + to_string(a.x)
+                    + "|" + to_string(b.x) + "|" + to_string(braced.x);
+            )";
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(e);
+                check_eq(std::string("same|10|20|1"), e->execute(src).as<std::string>(),
+                         use_vm ? "vm spelling parity" : "interp spelling parity");
+            }
+        });
+
+        test("new_keyword_inheritance_upcast", [this]() {
+            // new Derived into shared_ptr<Base> follows today's decl upcast rules
+            const char* src = R"(
+                class Base { int v = 1; Base() { v = 1; } }
+                class Derived : Base { Derived() : super() { v = 2; } }
+                shared_ptr<Base> b = new Derived();
+                var alias = b;
+                alias.v = 42;
+                b.v;
+            )";
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                check_eq((int64_t)42, e->execute(src).as_int(),
+                         use_vm ? "vm upcast" : "interp upcast");
+            }
+        });
+
+        test("new_keyword_registered_cpp_class", [this]() {
+            // new works for registered C++ classes exactly like shared_ptr<T>(...)
+            struct counter_probe { int n = 0; };
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                dynamic_binder<counter_probe>(*e, "CounterProbe")
+                    .constructor<>()
+                    .property("n", &counter_probe::n)
+                    .build();
+                const char* src = R"(
+                    var c = new CounterProbe();
+                    var alias = c;
+                    alias.n = 13;
+                    c.n;
+                )";
+                check_eq((int64_t)13, e->execute(src).as_int(),
+                         use_vm ? "vm cpp class new" : "interp cpp class new");
+            }
+        });
+
+        test("new_keyword_statement_and_error_shapes", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                // statement position: constructs and discards without error
+                const char* stmt_src = R"(
+                    class P { int x = 0; P() { x = 0; } }
+                    new P();
+                    7;
+                )";
+                check_eq((int64_t)7, e->execute(stmt_src).as_int(),
+                         use_vm ? "vm stmt new" : "interp stmt new");
+                // `new P;` without an argument list is a parse error (rejected either
+                // as a throw or a null result depending on recovery)
+                auto e2 = engine::make();
+                if (use_vm) { e2->set_backend(jai::backend_type::vm); }
+                bool rejected = false;
+                try {
+                    auto r = e2->execute("class P { int x = 0; } var p = new P;");
+                    rejected = r.is_null();
+                } catch (const std::exception&) {
+                    rejected = true;
+                }
+                check_true(rejected, use_vm ? "vm new-without-parens rejected"
+                                            : "interp new-without-parens rejected");
+            }
+        });
     }
 };
 

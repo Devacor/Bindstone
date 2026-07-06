@@ -5668,8 +5668,15 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 }
                 value = std::move(enforced.value());
             }
-            // Set declared type - this locks the variable's type
-            value.set_type_info(decl->type);
+            // Set declared type - this locks the variable's type. Exception: a 'var' decl
+            // keeps a shared_ptr-tagged initializer's marker — `var p = new P()` IS
+            // `shared_ptr<P> p = P()` (Dev ruling 2026-07), so the reference-semantics
+            // tag must survive the decl instead of flattening to 'any'
+            if (decl->type->base_type != script_value_type::jai_any_type ||
+                !value.get_type_info() ||
+                value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
+                value.set_type_info(decl->type);
+            }
         } else if (decl->initializer && value.get_type_info()) {
             // auto with initializer - type is inferred from value and locked
             // Value already has type_info from make_value() or evaluation

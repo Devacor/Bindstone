@@ -634,6 +634,50 @@ checked_result<expression_ptr> parser::primary() {
         return std::make_shared<member_expr>(methodName.location, superExpr, methodName.lexeme, member_id, false);
     }
 
+    // new T(args) / new T{args}: pure sugar for shared_ptr<T>(args) construction —
+    // the same new_expr the shared_ptr<T>(...) spelling produces (idempotent when T
+    // is already shared_ptr<...>)
+    if (match(token_type::new_keyword)) {
+        token newToken = previous();
+        JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
+
+        type_info_ptr type = pointee_type;
+        if (!pointee_type || pointee_type->base_type != script_value_type::jai_shared_ptr_type) {
+            type_info info(script_value_type::jai_shared_ptr_type);
+            info.type_params.push_back(pointee_type);
+            if (pointee_type) {
+                info.type_name = pointee_type->type_name;
+            } else {
+                info.type_name = "shared_ptr";
+            }
+            info.id = symbolizer_->intern(info.canonical_name());
+            type = store_type_info(std::move(info));
+        }
+
+        if (!check(token_type::left_paren) && !check(token_type::left_brace)) {
+            report_error("Expected '(' or '{' after type in 'new' expression", peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
+        bool is_brace = check(token_type::left_brace);
+        advance(); // consume '(' or '{'
+
+        std::vector<expression_ptr> arguments;
+        if (!check(is_brace ? token_type::right_brace : token_type::right_paren)) {
+            arguments.reserve(4);
+            do {
+                JAISCRIPT_TRY_ASSIGN(auto arg, expression());
+                arguments.push_back(std::move(arg));
+            } while (match(token_type::comma));
+        }
+
+        if (is_brace) {
+            JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after constructor arguments"));
+        } else {
+            JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after constructor arguments"));
+        }
+        return std::make_shared<new_expr>(newToken.location, type, std::move(arguments));
+    }
+
     // Check if a keyword is being used as a namespace identifier (e.g., string::length)
     // This must come before identifier handling
     if (peek().type != token_type::identifier && peek().type != token_type::eof) {

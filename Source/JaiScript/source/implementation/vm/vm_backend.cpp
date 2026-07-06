@@ -4565,7 +4565,10 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 
 	if (decl->type) {
 		// Typed declarations convert their initializer exactly like assignment does
-		// (int d = 4.7 truncates instead of storing a mistagged float payload)
+		// (int d = 4.7 truncates instead of storing a mistagged float payload).
+		// Exception: a 'var' decl keeps a shared_ptr-tagged initializer's marker —
+		// `var p = new P()` IS `shared_ptr<P> p = P()` (Dev ruling 2026-07), so the
+		// reference-semantics tag must survive the decl instead of flattening to 'any'
 		if (has_init) {
 			auto enforced = enforce_type_compatibility(std::move(value), decl->type);
 			if (!enforced) {
@@ -4573,7 +4576,11 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 			}
 			value = std::move(enforced.value());
 		}
-		value.set_type_info(decl->type);
+		if (decl->type->base_type != script_value_type::jai_any_type ||
+		    !value.get_type_info() ||
+		    value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
+			value.set_type_info(decl->type);
+		}
 	}
 
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);

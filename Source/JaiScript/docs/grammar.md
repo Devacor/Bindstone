@@ -15,14 +15,16 @@ Exactly the lexer's keyword table (`lexer::keywords_` in `lexer.cpp`):
 ```
 array auto bool break case catch char class const continue coroutine
 default else enum fallthrough false float for function if import
-include int map namespace null nullptr override private public return
-shared_ptr static string super switch this throw true try var void
-weak_ptr while yield
+include int map namespace new null nullptr override private public
+return shared_ptr static string super switch this throw true try var
+void weak_ptr while yield
 ```
 
 Notes:
 - `nullptr` is an alias for `null` (both lex to the null literal).
-- There is **no `new` keyword**. Objects are constructed with `Type(args)` or `Type{args}`.
+- `new T(args)` is **pure sugar for `shared_ptr<T>(args)` construction** — the
+  reference-semantics opt-in (see "new expressions" below). Plain value-semantics
+  construction stays `Type(args)` / `Type{args}`.
 - `const` is accepted only where documented below (range-`for` bindings). It does not apply to
   parameters or general variable declarations.
 - A leading `#` before `include`/`import` is skipped by the lexer, so `#include "x"` and
@@ -281,10 +283,14 @@ primaryExpression = literal
                   | IDENTIFIER
                   | "this"
                   | "super"
+                  | newExpression
                   | "(" expression ")"
                   | lambdaExpression
                   | arrayLiteral
                   | mapLiteral
+
+// Sugar: `new T(args)` ≡ `shared_ptr<T>(args)` (idempotent when T is already shared_ptr<...>)
+newExpression = "new" type ( "(" argumentList? ")" | "{" argumentList? "}" )
 
 literal = INTEGER_LITERAL
         | FLOAT_LITERAL
@@ -520,6 +526,10 @@ array<map<string, int>> locations = [
 
 weak_ptr<Creature> target;
 shared_ptr<Creature> leader = boss;      // explicit reference semantics (no clone on assign)
+
+var boss2 = new Creature("Boss");        // `new` = shared_ptr sugar: boss2 is a
+auto ally = boss2;                        // shared_ptr<Creature>; copies alias, so
+ally.health = 50;                         // boss2.health is 50 too
 ```
 
 ### Control Flow
@@ -603,8 +613,11 @@ string healthLevel = health > 75 ? "healthy" :
 8. **Virtual by Default**: All methods are virtual; `override` on class methods is optional
    documentation. Replacing a same-name/same-arity **namespace function**, however, REQUIRES
    `override` (silent replacement is an error without it).
-9. **No `new`**: construction is `Type(args)` or `Type{args}`; script objects have shared
-   reference semantics.
+9. **`new` is shared_ptr sugar**: `new T(args)` (or `new T{args}`) is exactly
+   `shared_ptr<T>(args)` — it constructs a `T` and tags the result with reference
+   semantics, so copies share instead of clone. A `var`/`auto` declaration keeps the
+   marker: `var p = new P();` IS `shared_ptr<P> p = P();`. Plain construction stays
+   `Type(args)` / `Type{args}` (value semantics).
 10. **Super Access**: `super::` to call parent class methods; `: super(...)`/`: this(...)` for
     constructor delegation (the ONLY initializer-list forms).
 11. **Switch Semantics**: Break-by-default. Use `fallthrough;` for explicit fall-through.

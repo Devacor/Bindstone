@@ -1,224 +1,263 @@
-# Parallel execution design (isolate pool + in-execute parallel_for)
+# Parallel execution design (`parallel_for` on one engine, thread_storage pads)
 
 Status: DESIGN ONLY — nothing below is implemented unless it carries a source anchor.
-Names introduced here (`jai::parallel_pool`, `parallel_for`, `.thread_shareable()`, `channel`)
-do not exist in the tree yet. Everything with a `file:line` anchor was verified against
-VM-perf as of this writing. Red-pen freely.
+Names introduced here (`parallel_for`, `thread_storage`, `thread_count()`, the binding
+annotations) do not exist in the tree yet. Everything with a `file:line` anchor was verified
+against VM-perf as of this writing. Dev rulings 2026-07-06 are final where marked RULED.
 
 ## 0. Ground truth: script values can never be shared live across threads
 
-`strong_ptr` is **purely non-atomic** — `strong_ptr.hpp:29` ("Purely non-atomic for maximum
-single-threaded performance. Thread safety is handled at a higher level (critical sections,
-partitioning, etc.)"), plain `size_t strong_count/weak_count` at :37-38, class doc :115-130.
-Every heavy `script_value` alternative (array/map/string/object) rides it. Consequence that
-drives this whole design: **reads are writes**. Copying a handle bumps a non-atomic count, and
-script-level reads produce handle copies constantly — so "the body only reads `a`" is NOT a
-safety argument. There is no read-only fast lane; two threads touching the same live value is
-a data race, full stop.
+`strong_ptr` is **purely non-atomic** — `core/strong_ptr.hpp:29` ("Purely non-atomic for
+maximum single-threaded performance"), plain `size_t strong_count/weak_count` at :37-38, class
+doc :115-130 ("Thread safety is the caller's responsibility (critical sections, partitioning,
+etc.)"). Every heavy `script_value` alternative (array/map/string/object) rides it. Consequence
+that drives this whole design: **reads are writes**. Copying a handle bumps a non-atomic count,
+and script-level reads produce handle copies constantly — so "the body only reads `a`" is NOT a
+safety argument by itself. Two threads touching the same live value is a data race, full stop.
+Safety must come from partitioning: each thread's reachable set is exclusive, or it got a clone.
 
 The matching asset: **zero static state**. Every `script_value` carries an `engine*`
 (invariants.md §1: "`engine_` and `type_info_` are **the language**"); no non-const
-statics/thread_locals anywhere (CLAUDE.md code guidelines). Two engines share nothing, so
-*separate engines on separate threads are already mutually thread-safe today*. Parallelism is
-therefore built from engine isolation + explicit crossings, never from shared mutable values.
+statics/thread_locals anywhere (CLAUDE.md code guidelines). All engine-shared machinery is
+instance state, so "what a worker may touch" is enumerable and gateable.
 
-## 1. Tier 1 — host-level isolates: `jai::parallel_pool` (new)
+## 1. RULED: one engine, the Emitter pattern
 
-N persistent worker threads, **one engine pinned per thread for the thread's lifetime**.
-Pinning matters: worker engines accumulate prelude state, so tasks must land on a thread whose
-engine is already provisioned — a job-hopping pool with no thread affinity doesn't fit.
-
-**Layering flag (source pushes back on the discussed shape):** the discussion said "over
-`MV::ThreadPool`" (`Source/MV/Utility/threadPool.hpp:14`; also `asioThreadPool.h`). But
-JaiScript is the base library — MV includes JaiScript (signals, engine), never the reverse; a
-JaiScript→MV dependency inverts the layering. And `MV::ThreadPool::Job` has no thread
-affinity, which the pinned-engine model requires. Proposal: `parallel_pool` owns plain
-`std::thread` workers inside JaiScript; MV/Bindstone wraps or forwards to it. Dev to rule.
-
-### Worker provisioning: jaibite prelude
-
-Each worker engine loads the shared prelude (functions/classes the tasks need) via the jaibite
-binary path: `jaibite::save_bytes()` on the source engine, `engine::jaibite_load_bytes()` per
-worker. Cross-engine relocation is exactly what that machinery was built for — symbols are
-written as string-table indices and re-interned into the loading engine, type_info re-interned
-structurally, the VM chunk never serialized (recompiles lazily): `detail/ast_serializer.hpp:6-17`,
-`engine.hpp:115-129`, landed 80fd619b. `registration_fingerprint()` (engine.hpp:126-129) gives a
-free staleness check: a worker whose fingerprint differs from the main engine needs
-re-provisioning before it takes tasks.
-
-### Inputs
-
-Per-task snapshots, two grades:
-- `script_value::clone()` (value.hpp:164) — deep copy (CLAUDE.md: "clone() = deep copy, copy =
-  shallow"), rebound to the worker engine.
-- `serialization/binary_archive.hpp` round-trip for anything that must cross as bytes (host VFS,
-  future process isolation).
-
-Big immutable assets skip both: bind `std::shared_ptr<const T>` into every worker via
-`dynamic_binder`. Each engine gets its *own handle* (per-engine `script_value`s, so no strong_ptr
-sharing); the `std::shared_ptr` control block is atomic, so cross-thread handle lifetime is sound;
-`const T` makes immutability compiler-enforced at the binding surface. Registration is opt-in via
-a `.thread_shareable()` flag on `dynamic_binder` (**new — does not exist**; today's binder has no
-thread-safety notion, verified by grep). The flag is the host's promise that `const` methods on T
-are genuinely thread-safe (no lazy caches, no mutable members).
-
-### Results
-
-Serialized worker-side (clone or binary archive), deserialized into the main engine at harvest.
-API shape: a future per task, plus a `channel` type (**new**) for streaming partial results.
-Locks exist only in C++ — the pool's queue and result slots. **No script-visible locking
-primitives, ever.** A mutex in a game script is a deadlock a designer ships; if two tasks need
-to coordinate, they do it through task boundaries (submit/await), not shared state.
-
-### Per-task containment
-
-Already built (eb4108a2): `execution_budget` and `memory_cap` are per-engine (`engine.hpp:167-185`)
-and the terminal-error latch (`detail/execution_limits.hpp:17-54`) unwinds past every script
-catch to the host execute() boundary. Precision on "un-swallowable": budget overruns latch
-terminal ALWAYS; memory-cap gives the script exactly ONE catchable raise per execute (counter
-re-arms so it can free caches), the second raise latches terminal (execution_limits.hpp:57-70,
-Dev's ruling recorded there). Either way the worker engine survives and the failure surfaces as
-that task's failed future — a livelocking or allocation-bombing task cannot take the pool down.
-
-## 2. Tier 2 — in-language structured fork-join: `parallel_for` (new)
-
-Tier 1 is host plumbing. The language feature is:
+There is **ONE engine**. No worker-engine mirrors, no jaibite provisioning, no per-worker
+prelude state for `parallel_for` (the isolate-pool tier is demoted to the appendix). The model
+is the one the engine already ships in C++ — `Emitter` particle threading
+(`Source/MV/Render/Scene/emitter.h:359-368`): a `std::vector<ThreadData> threadData` indexed by
+group, each worker writes **only** `threadData[a_groupIndex]` (emitter.cpp:179-211), shared
+state is read-only during the region, and the main thread merges the pads after the join
+(`loadParticlePointsFromGroups`, emitter.h:348).
 
 ```jaiscript
 parallel_for (auto x : a) {
-    results ← one value per iteration          // ordered bucket, see below
+    thread_storage.total = thread_storage.total + cost(x);   // own pad only
 }
+// after the join, thread_storage is the array of pads:
+auto sum = 0;
+for (auto pad : thread_storage) { sum += pad.total; }
 ```
 
-One engine, otherwise single-threaded as always. At the `parallel_for`, execution fans out to
-hidden pool workers, the calling thread parks at the barrier, workers fan in, and per-iteration
-results land in **ordered buckets** (indexed by iteration) readable after the join. No
-`async`/`await`, no detached threads, no handles to leak: strictly structured fork-join.
+### The contract
 
-### The contract: semantic equivalence
+During the region the script may **READ anything in scope** and may **WRITE ONLY
+`thread_storage`** — inside the body it names the executing thread's own pad. Any other store —
+global, outer local, shared object field, and transitively through called functions — is a
+**runtime error** ("cannot write enclosing state in a parallel body"). One rule buys transitive
+purity: a callee that mutates a global or a captured map hits the same wall, so there is no
+"pure function" annotation, coloring, or whole-program analysis.
 
-`parallel_for` ≡ sequential `for` with the same body restrictions. Parallelism is observable
-ONLY as elapsed time — same results, same error text, same print output, same engine state
-after. This is what makes it a language feature instead of a footgun, and it is directly
-testable (see Testing).
+After the join, `thread_storage` is an ordinary array of per-thread pads (size = worker count;
+`thread_count()` builtin), readable and mergeable by the main thread like any array. Pads are
+**per-`parallel_for`**: fresh (empty) at each loop's fork; contents persist after the join until
+the next `parallel_for`. Each pad starts as an empty map; the body writes fields onto it.
 
-### Why zero-copy fan-out is even possible
+A `parallel_for` has exactly **two output channels**: the pads (data results) and the ordered
+world-write command buffer for annotated C++ bindings (§5). Nothing else escapes the region.
 
-Naive "the body doesn't write to `a`, so workers can read it in place" fails on §0: reads bump
-non-atomic refcounts. The rescue is that the fork barrier is a **single-threaded moment**. At
-the barrier, run an O(n) alias walk over `a`'s element subtrees, collecting each element's set
-of reachable strong_ptr control-block pointers (plus the set reachable from the body's captured
-enclosing reads):
+No `async`/`await`, no detached threads, no handles to leak: strictly structured fork-join. The
+calling thread parks at the barrier; workers fan in.
 
-- **Disjoint sets** → exclusive-subtree handoff: element i's subtree is touched by exactly one
-  worker, so its refcount traffic is single-threaded *per subtree*. Zero-copy reads, zero
-  atomics, zero locks — partitioning, exactly the higher-level discipline strong_ptr.hpp:30
-  says it was designed for.
-- **Any overlap** (element↔element or element↔captured) → those elements deep-clone at the
-  barrier. Correctness NEVER depends on the fast path; aliasing only costs a clone.
+## 2. Prerequisite: per-thread execution contexts inside the one engine
 
-Value semantics makes alias-freedom the common case: assignment and parameter passing deep-copy
-by default (docs/JaiScript_DeepCopyDesign.md — "all assignments and parameter passing create
-deep copies"), so aliases exist only where someone made one on purpose (references, ref params,
-`for (auto& x : ...)` — `reference_holder`, value.hpp:1581-1583). References additionally
-carry `weak_ptr<environment> sourceEnv` and frame-lifetime anchors (invariants.md §3), which do
-not survive a thread crossing — a ref reachable from an element forces that element onto the
-clone path unconditionally.
+One shared engine means the engine's internals are shared, and today they all assume a single
+executing thread. Before ANY script body runs off-thread, each worker needs its own execution
+context, and the residual shared structures need a concurrency stance. Engine-internal work
+items — this is the real cost center of the whole feature:
 
-### Writes
+- **Per-worker execution state**: value/call stacks, in-flight call records, and the vm's
+  per-run state must be per-context, not per-engine (today the engine reuses one persistent
+  interpreter and pools call records on the assumption of one runner).
+- **Environment/value pools**: pooled environments and env-lookup caches assume single-threaded
+  mutation — per-context pools, or the region freezes the shared ones.
+- **Symbol interner**: `string_symbolizer` is engine-bound (string_symbolizer.hpp:79-83
+  documents the engine-wide env-shape epoch riding on it) — read-mostly during the region,
+  short lock on the rare runtime intern.
+- **Parse cache / class definitions / vm chunks**: frozen for the region (no defines, no hot
+  reload mid-loop); the write wall (§4c) already forbids the script-visible mutations.
+- **Budget/memory accounting**: `execution_limits` is per-engine instance state
+  (`detail/execution_limits.hpp:15-17`) — per-worker accounting that rolls up, so one worker's
+  allocation bomb raises on that worker (§6).
 
-- **Iteration-locals: free.** They live in the worker's own frames.
-- **Per-iteration result: one bucket slot per index.** Disjoint by construction, so lock-free
-  without cleverness; the join hands the buckets back in iteration order.
-- **ANY write to enclosing state: runtime error** — "cannot write enclosing state in a parallel
-  body". Enforced at the store chokepoints (slot/symbol/ref stores) for frames below the fork,
-  in both backends via a shared `detail/` kernel (invariants.md §6 — parity by construction, not
-  twins). This one rule also buys transitive purity: a called function that tries to mutate a
-  global or a captured map hits the same wall at runtime, so there is no separate "pure
-  function" annotation, coloring, or whole-program analysis.
+## 3. RULED: scheduling is static chunks (determinism)
 
-### Workers under the hood
+Iterations are pre-partitioned into **contiguous per-thread chunks** before the fork. Same
+input + seed ⇒ byte-identical `thread_storage` contents — replayable, smoke-hashable. This is
+the point: **deterministic pads** replace the old sequential-equivalence contract as the
+testable guarantee (§8 Testing).
 
-Tier 2 runs on Tier 1's pool: hidden worker engines mirroring the program's functions/classes
-via prelude jaibites, invalidated by epoch on hot reload (same pattern as the existing
-env-shape epoch, `string_symbolizer.hpp:79-83`; mirrors rebuild lazily on the next
-`parallel_for` after a reload). Per-element handling by type:
+Rejected for now: dynamic work-stealing. It balances load better but makes pad contents depend
+on the race (which thread got iteration i), destroying determinism. Revisit only with a design
+that keeps iteration→pad assignment fixed.
 
-- Primitives, arrays, maps, strings: alias-walk fast path (zero-copy handoff) or barrier clone.
-- **Script-class instances: always the clone path.** `class_definition` is engine-scoped
-  (symbol IDs, method tables, hot-reload machinery — class_definition.hpp:383-396, migration
-  :1077); instances cannot be zero-copy-read from an engine that holds a different definition
-  object. Clone + worker-side re-bind against the mirror's definition.
-- Bound C++ functions/objects: callable in a parallel body only if registered
-  `.thread_shareable()` (§1). Everything else raises at the call site.
-- `yield` inside a parallel body: error. Coroutine fibers/continuations are per-engine and a
-  parked barrier cannot resume them coherently.
-- `print`: buffered per-iteration, replayed in iteration order at the join — required by
-  semantic equivalence (the fuzz harness compares printed output, fuzz_harness.hpp:3-5).
+## 4. Read safety under non-atomic refcounts
 
-### Testing
+Three mechanisms, one per hazard class:
 
-The differential fuzz harness already runs one generated program on both backends and
-byte-compares result + printed output + error text + engine-alive-after, fully deterministic
-from a uint64 seed (`source/tests/fuzz/fuzz_harness.hpp:3-6`, seeded splitmix64 rng :35-51).
-Extend it with a third leg: generate `parallel_for` bodies (including deliberate aliasing,
-enclosing-write attempts, throws mid-iteration), run sequential-vs-parallel on the same seed,
-byte-compare. Determinism holds because generation is seed-driven and any future script-visible
-rng gets a per-task seed. Divergences log to `known_divergences.md` like today.
+- **(a) The iterated container** — static contiguous chunks + a barrier alias-walk. At the fork
+  (a single-threaded moment), an O(n) walk over the container's element subtrees collects each
+  chunk's reachable strong_ptr control-block set. Disjoint chunks ⇒ each thread's chunk is its
+  **exclusive reachable set** ⇒ zero-copy element reads, no atomics — the partitioning
+  discipline core/strong_ptr.hpp:115-130 was designed for. Any cross-chunk alias (or alias into
+  a capture) deep-clones that element at the barrier; correctness never depends on the fast
+  path. Value semantics makes alias-freedom the common case (docs/JaiScript_DeepCopyDesign.md —
+  assignments and parameter passing deep-copy), so aliases exist only where someone made one on
+  purpose (`reference_holder`, value.hpp:1586). References carry `weak_ptr<environment>
+  sourceEnv` and frame-lifetime anchors (invariants.md §3) that do not survive a thread
+  crossing — a ref reachable from an element forces that element onto the clone path.
+- **(b) Everything else read from outer scope** (captures, globals, config objects) —
+  **first-touch gate**: on a thread's first touch of each outer variable, a short global lock +
+  `script_value::clone()` (value.hpp:164 — deep copy) into that thread's read cache; lock-free
+  thereafter. Cost proportional to *variables touched*, not iterations.
+- **(c) Writes** — checked at the store chokepoints (slot/symbol/ref stores) via the executing
+  context's parallel flag, in both backends through a shared `detail/` kernel (invariants.md
+  §6 — parity by construction, not twins).
 
-## 3. Rejected: shared-memory script threading
+## 5. Bound C++: the phase discipline (three-level binding annotation)
 
-Atomics/mutexes on script values were rejected outright. Atomic refcounts tax every copy in
-every single-threaded script — the copy is THE hot operation, and the whole VM-perf effort has
-been about shaving exactly that path; fences also poison the pooled call records, env-lookup
-caches, and interned-symbol machinery that assume single-threaded mutation. And the payoff is a
-programming model (locks, ordering, torn invariants) that game scripts demonstrably don't need
-and can't debug. Isolation + explicit crossings gives parallelism without charging scripts that
-never use it.
+Bound functions/methods get a registrar-level thread annotation; unannotated bindings raise at
+the call site inside a parallel body (today's binder has no thread-safety notion — every level
+is a host promise):
 
-## 4. Honest costs
+- **`self_only`** — touches only its receiver. Callable in parallel bodies; the receiver is
+  chunk-owned or pad-owned, so it inherits the partitioning safety.
+- **`read_world`** — reads world state but writes none. Callable during the parallel phase
+  precisely because **nobody writes world state during it** — the phase discipline, not
+  per-object locking, is what makes the reads safe.
+- **`write_world`** — NOT executed inline. The call and its arguments (captured by clone at
+  enqueue) go into an **ordered command buffer**, applied serially in **ITERATION order** after
+  the join. World effects stay deterministic under static chunks, and the world never mutates
+  under a reader.
 
-- **Snapshot cloning per task** (Tier 1) and per aliased element (Tier 2). Mitigations:
-  `shared_ptr<const T>` for the big read-only assets; chunked `parallel_for` (one worker gets a
-  contiguous index range → one handoff/clone per chunk, not per element).
-- **Worker mirror maintenance**: every hot reload invalidates N mirrors; rebuild is a jaibite
-  reload per worker (lazy, but it's real work and it's on the reload path Dev uses constantly).
-- **Alias walk is O(reachable) at every fork.** Cheap for flat arrays of primitives, real for
-  deep object graphs; chunking amortizes it but doesn't remove it.
-- **Two engines' worth of memory per worker thread** (engine + mirrors + snapshots in flight).
+So the frame shape is: **parallel phase** = read world + write own pad/self + enqueue;
+**serial phase** = apply the queue in order. Script-side world writes stay flatly forbidden
+(§1) — the command buffer is the only sanctioned world-mutation channel out of a region.
 
-## 5. Open questions for Dev
+Honest cost: annotating the ~76 existing registrar sites (dynamic_binder methods/properties
+across MV/Bindstone) — mechanical but real, and each annotation is a reviewed claim.
 
-1. Chunk-size heuristic: fixed count, `n / workers`, or cost-model-per-element? Who owns it —
-   language default with an optional hint, or explicit in the syntax?
-2. Does v1 `parallel_for` iterate only arrays, or also maps/ranges? (Maps make ordered buckets
-   and the alias walk hairier.)
-3. `channel` API shape for Tier 1 streaming results — or does v1 ship futures-only?
-4. Is `parallel_pool` public host API, or purely Tier 2's private substrate at first?
-5. Pool ownership per §1's layering flag: JaiScript-owned threads, or an injected host executor
-   interface that MV::ThreadPool can implement?
-6. Captured enclosing reads in Tier 2: alias-walk them for zero-copy like elements, or always
-   snapshot-clone the captured set (simpler, slower)? Draft above assumes walk-them.
+## 6. Errors
 
-## 6. Sequencing sketch
+Any iteration's throw fails the whole `parallel_for`: workers finish or abandon their chunks,
+the command buffer is discarded, and the join re-raises the **FIRST error in ITERATION order** —
+deterministic under static chunks (thread T's first error has a known iteration index; the join
+takes the minimum). The terminal rails apply per worker: `execution_budget`
+(engine.hpp:198-203) and `memory_cap` (engine.hpp:209-214) with the terminal-error latch
+(`detail/execution_limits.hpp:18-27`; the one-catchable-raise memory ruling at :61-70) — a
+livelocking or allocation-bombing body fails the loop, not the process.
 
-1. **Pool + isolates** (~1.5k lines + tests): parallel_pool, pinned worker engines, jaibite
-   provisioning, clone-in/clone-out futures, containment wiring. Gate: foundry suite exercising
-   N tasks × failure modes (throw, budget, memory-cap terminal) with the main engine and all
-   sibling futures unharmed.
-2. **`.thread_shareable()` + shared const assets** (~300 lines): binder flag, per-engine handle
-   binding, call-site enforcement. Gate: concurrent const-method hammering under TSan-equivalent
-   stress on a real bound type.
-3. **`parallel_for` sequential-semantics first** (~1k lines): parse, both backends, buckets,
-   enclosing-write wall, print buffering — running on ONE thread. Gate: full foundry green on
-   both backends with parallel_for lowered to sequential; this pins the semantics before any
-   concurrency exists.
-4. **Alias walk + handoff + real fan-out** (~1.5k lines): control-block set walk, clone
-   fallback, chunking, barrier. Gate: the differential fuzzer's third leg (§2 Testing) seed-swept
-   overnight, zero divergences; plus targeted alias-torture foundry tests.
-5. **Perf pass**: prove the zero-copy path actually beats clone-everything on representative
-   workloads (Foundry benchmarks are ±50% integer-µs — invariants.md §7 — so use dedicated
-   micro-benches for the walk itself).
+## 7. RULED: threads are `jai::thread_pool` (hoisted from MV)
 
-Tier 2 ships only after Tier 1's gates; step 3 before step 4 is the load-bearing ordering —
-semantics are frozen while everything is still single-threaded and debuggable.
+JaiScript owns the pool (answers old open question 5). `MV::ThreadPool`
+(`Source/MV/Utility/threadPool.hpp:14`) is being hoisted **into** JaiScript as
+`include/jaiscript/detail/thread_pool.hpp` (landing now via a portability agent) with a
+pinned-worker mode; that header is the `parallel_for` substrate, and MV wraps or forwards to
+it. Standard C++ only (`std::thread`/`std::mutex`/`std::condition_variable`), no OS APIs —
+JaiScript stays the base library; the old JaiScript→MV layering inversion is dead.
+
+## 8. Kept invariants
+
+- **No script-visible locking primitives, ever.** A mutex in a game script is a deadlock a
+  designer ships. Coordination is the join + pad merge + command buffer, nothing else.
+- **No `yield` in parallel bodies** — error. Coroutine fibers/continuations cannot resume
+  coherently across a parked barrier.
+- **`print` buffered per thread**, replayed in iteration order at the join (contiguous chunks
+  make that a concatenation in chunk order). Required because the fuzz harness byte-compares
+  printed output (fuzz_harness.hpp:3-6).
+- **Per-thread seeded rng streams** — any script-visible rng derives a per-chunk seed, keeping
+  pads deterministic.
+- **Bound C++ callable only under a thread annotation** (§5); everything else raises at the
+  call site.
+- **Testing: deterministic pads ARE the contract.** The differential fuzz harness already runs
+  one generated program on both backends and byte-compares result + printed output + error
+  text + engine-alive-after, fully seed-deterministic (`source/tests/fuzz/fuzz_harness.hpp:3-6`,
+  splitmix64 rng :35-42). New leg: generate `parallel_for` bodies (deliberate aliasing,
+  enclosing-write attempts, throws mid-iteration), run the same program with 1 thread vs N
+  threads on the same seed, byte-compare `thread_storage` contents + print + error text.
+  Divergences log to `known_divergences.md` like today.
+
+## 9. Rejected
+
+- **Shared-memory script threading** (atomics/mutexes on script values): atomic refcounts tax
+  every copy in every single-threaded script — the copy is THE hot operation the whole VM-perf
+  effort shaves; fences also poison the pooled call records, env-lookup caches, and
+  interned-symbol machinery that assume single-threaded mutation. The payoff is a programming
+  model (locks, ordering, torn invariants) game scripts can't debug.
+- **Dynamic work-stealing** (§3): nondeterministic pads.
+- **Multiple engines as the `parallel_for` substrate** (RULED out): mirror maintenance on every
+  hot reload, jaibite re-provisioning, engine-scoped class definitions forcing clones of every
+  instance, and N engines' worth of memory — all to get isolation the write-wall + first-touch
+  gate provide on one engine. Isolates survive only as the appendix.
+
+## 10. Honest costs & applicability
+
+- **Per-thread execution contexts (§2) are the bulk of the engineering**, not the loop itself.
+- **Barrier alias walk is O(reachable) over the container at every fork** — cheap for flat
+  arrays of primitives, real for deep object graphs.
+- **First-touch gate**: one lock + deep clone per (thread × outer variable touched); big
+  read-only assets can still bind as `std::shared_ptr<const T>` per the appendix to skip
+  cloning.
+- **Static chunks can load-imbalance** (one expensive chunk gates the join) — the price of
+  determinism, mitigable by chunk-size choice (open question 1).
+- **Registrar annotation sweep** (~76 sites, §5).
+- **Per-thread pads + read caches** are live memory until the next `parallel_for`.
+- **Applicability, honestly**: in Bindstone's actual frame profile, script update is not the
+  hot path — pathfinding, spine, and particles are, and those parallelize in C++ behind
+  bindings (the Emitter already does) without touching script semantics. `parallel_for` is a
+  language capability play more than Bindstone's cheapest frame-time win; size the effort
+  accordingly.
+
+## 11. Open questions for Dev
+
+1. Chunk size within static scheduling: exactly `n / thread_count()`, or a finer fixed grain
+   (still statically assigned) to soften imbalance? Language default with an optional hint, or
+   explicit in the syntax?
+2. v1 iteration domains: arrays only, or also maps/ranges? (Maps make chunk boundaries and the
+   alias walk hairier.)
+3. Captured-read gate tuning: first-touch lock+clone as drafted, or snapshot the whole captured
+   set up front at the barrier (simpler, pays for untouched variables)?
+4. May a body mutate its OWN loop element in place (`for (auto& x : ...)` style), alongside the
+   pad? Disjoint ownership says likely yes under static chunks + the alias walk — the element is
+   the thread's exclusive property — but it widens the write wall's definition of "own".
+
+## 12. Sequencing sketch
+
+1. **`jai::thread_pool` lands** (in flight, §7) with pinned-worker mode + foundry coverage.
+2. **`parallel_for` sequential-semantics first** (~1k lines): parse, both backends,
+   `thread_storage` pads, the enclosing-write wall, binding annotations + command buffer,
+   print buffering, `thread_count()` — running on ONE thread. Gate: full foundry green on both
+   backends with `parallel_for` lowered to sequential; semantics frozen while everything is
+   still single-threaded and debuggable.
+3. **Per-thread execution contexts** (§2): the engine-internal refactor, gated by the existing
+   full suite staying green single-threaded.
+4. **Static chunking + alias walk + first-touch gate + real fan-out** (~1.5k lines): chunk
+   partition, control-block set walk, clone fallback, read caches, barrier, iteration-order
+   error selection + buffer apply. Gate: the fuzzer's 1-vs-N leg (§8) seed-swept overnight,
+   zero divergences; plus targeted alias-torture foundry tests.
+5. **Perf pass**: prove zero-copy chunk reads beat clone-everything on representative workloads
+   (Foundry benchmarks are ±50% integer-µs — invariants.md §7 — use dedicated micro-benches for
+   the walk itself).
+
+Step 2 before steps 3-4 is the load-bearing ordering.
+
+## Appendix: possible future — background jobs on separate engines
+
+NOT the `parallel_for` substrate (RULED). Kept as a sketch for long-running background work
+(pathfinding batches, procedural generation) if it's ever needed:
+
+- N pinned worker threads, one engine per thread for the thread's lifetime (workers accumulate
+  prelude state, so tasks need thread affinity).
+- Provisioning via the jaibite binary path: `jaibite::save_bytes()` on the source engine,
+  `engine::jaibite_load_bytes()` per worker — symbols re-interned into the loading engine,
+  type_info re-interned structurally, VM chunk recompiles lazily (engine.hpp:116-125, landed
+  80fd619b); `registration_fingerprint()` (engine.hpp:127-130) gives a free staleness check.
+- Crossings by value only: `script_value::clone()` or `serialization/binary_archive.hpp`
+  round-trip; big immutable assets bind `std::shared_ptr<const T>` into each engine via a
+  `.thread_shareable()` binder flag (atomic control block carries lifetime; `const T` enforces
+  immutability at the binding surface).
+- Per-task containment already built (eb4108a2): per-engine budget/memory rails + the terminal
+  latch mean a failed task surfaces as a failed future, never takes the pool down.
+- Script-class instances always cross by clone — `class_definition` is engine-scoped (symbol
+  IDs interned per engine, hot-reload migration machinery: class_definition.hpp:87-90, :1078-1080).

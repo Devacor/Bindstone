@@ -373,6 +373,19 @@ namespace jai {
             }
         }
 
+        // Store-boundary normalization (§12 all-detach ruling, 2026-07): a bound
+        // PRIMITIVE stored into a container slot or member detaches to a snapshot —
+        // write-through belongs to the registered NAME (and refs/captures/by-ref params
+        // bound to it), never to stored copies. Opaque host tokens (semantic NULL) keep
+        // their box (§13: object-like handles; decoding would flatten them to null).
+        // Call sites guard on raw_storage_index() == TYPEID_CPP_BOUND first (hot paths).
+        script_value detached_for_store() const {
+            if (raw_storage_index() == TYPEID_CPP_BOUND && bound_semantic_index() != TYPEID_NULL) {
+                return bound_decoded_temp();
+            }
+            return *this;
+        }
+
     private:
         struct cpp_bound_holder;  // defined next to object_holder below
         // Invoke these ON THE DEREF'D value: a reference-to-bound holds a reference_holder

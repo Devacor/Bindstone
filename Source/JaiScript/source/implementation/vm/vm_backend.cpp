@@ -1207,7 +1207,12 @@ void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
 	const size_t n = ins.a;
 	array.reserve(n);
 	const size_t base = stack_.size() - n;
+	// All-detach ruling (2026-07, #12): literal construction is a store boundary -
+	// bound primitives snapshot (KEEP BYTE-PARALLEL with the interpreter array literal)
 	for (size_t i = 0; i < n; ++i) {
+		if (stack_[base + i].raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+			stack_[base + i] = stack_[base + i].detached_for_store();
+		}
 		array.push_back(std::move(stack_[base + i]));
 	}
 	stack_.erase(stack_.begin() + base, stack_.end());
@@ -1219,6 +1224,13 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 	auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
 	const size_t n = ins.a;
 	const size_t base = stack_.size() - n * 2;
+	// All-detach ruling (2026-07, #12): literal construction is a store boundary -
+	// bound primitives snapshot (KEEP BYTE-PARALLEL with the interpreter map literal)
+	for (size_t i = 0; i < n * 2; ++i) {
+		if (stack_[base + i].raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+			stack_[base + i] = stack_[base + i].detached_for_store();
+		}
+	}
 	for (size_t i = 0; i < n; ++i) {
 		map.insert_or_assign(std::move(stack_[base + i * 2]), std::move(stack_[base + i * 2 + 1]));
 	}
@@ -3054,6 +3066,11 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 					}
 					// Typed fields enforce like locals (declared type; auto infers)
 					if (!assigned_to_member) {
+						// All-detach ruling (2026-07, #12): the implicit-this MOVE path
+						// stores a detached snapshot like the explicit o.f = spelling
+						if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+							value = value.detached_for_store();
+						}
 						if (rhs_lvalue) {
 							auto enforced = instance->enforce_field_write(sym, clone_for_assignment(value));
 							if (!enforced) {
@@ -3073,6 +3090,10 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 				} else {
 					auto class_def = instance->get_class_definition();
 					if (class_def) {
+						// All-detach (#12): implicit static store snapshots too
+						if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+							value = value.detached_for_store();
+						}
 						if (rhs_lvalue) {
 							if (class_def->set_static_field(sym, value.clone())) {
 								assigned_to_member = true;

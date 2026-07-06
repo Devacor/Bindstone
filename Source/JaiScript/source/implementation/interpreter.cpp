@@ -5123,6 +5123,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 // Not a C++ property or no setter - use regular field assignment
                                 // (typed fields enforce like locals)
                                 if (!assigned_to_member) {
+                                    // All-detach ruling (2026-07, #12): the implicit-this
+                                    // MOVE path stores a detached snapshot like the
+                                    // explicit o.f = spelling (was the one live-member hole)
+                                    if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                                        value = value.detached_for_store();
+                                    }
                                     if (is_lvalue_read) {
                                         auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(value));
                                         if (!enforced) {
@@ -5144,6 +5150,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             else {
                                 auto class_def = instance->get_class_definition();
                                 if (class_def) {
+                                    // All-detach (#12): implicit static store snapshots too
+                                    if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                                        value = value.detached_for_store();
+                                    }
                                     if (is_lvalue_read) {
                                         if (class_def->set_static_field(identifier->symbol_id, value.clone())) {
                                             assigned_to_member = true;
@@ -7869,10 +7879,17 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
     // Reserve capacity to avoid reallocations (optimization)
     array.reserve(expr->elements.size());
 
-    // Evaluate each element and add to array
+    // Evaluate each element and add to array. All-detach ruling (2026-07, open
+    // question #12): literal construction is a store boundary - bound primitives
+    // snapshot like every assignment-shaped store (KEEP BYTE-PARALLEL with
+    // vm_backend::exec_array)
     for (const auto& element : expr->elements) {
         JAISCRIPT_TRY(dispatch_expr(element.get()));
-        array.push_back(pop_value());
+        script_value elem = pop_value();
+        if (elem.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+            elem = elem.detached_for_store();
+        }
+        array.push_back(std::move(elem));
     }
 
     push_value(std::move(arrayValue));
@@ -7899,6 +7916,15 @@ checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr)
         // Evaluate value
         JAISCRIPT_TRY(dispatch_expr(entry.second.get()));
         script_value value = pop_value();
+
+        // All-detach ruling (2026-07, #12): literal construction is a store boundary -
+        // bound primitives snapshot (KEEP BYTE-PARALLEL with vm_backend::exec_map)
+        if (key.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+            key = key.detached_for_store();
+        }
+        if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+            value = value.detached_for_store();
+        }
 
         // Insert into map
         map.insert_or_assign(std::move(key), std::move(value));

@@ -4662,6 +4662,16 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (frameLocal->is_reference()) {
                         JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_));
                     } else {
+                        // Slot locals enforce their locked type like the environment path does
+                        type_info_ptr slot_type = frameLocal->get_type_info();
+                        auto enforced = enforce_type_compatibility(std::move(value), slot_type, identifier->name);
+                        if (!enforced) {
+                            return enforced.error_value();
+                        }
+                        value = std::move(enforced.value());
+                        if (slot_type && slot_type->base_type == script_value_type::jai_any_type) {
+                            value.set_type_info(slot_type);
+                        }
                         // Direct assignment to call frame local
                         *frameLocal = std::move(value.clone());
                     }
@@ -5530,6 +5540,15 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         // - auto without initializer: Keep nullptr (first assignment will lock type)
         if (decl->type) {
             // Explicit type declaration (int x, float y, var z, etc.)
+            // Typed declarations convert their initializer exactly like assignment does
+            // (int d = 4.7 truncates instead of storing a mistagged float payload)
+            if (decl->initializer) {
+                auto enforced = enforce_type_compatibility(std::move(value), decl->type, decl->name);
+                if (!enforced) {
+                    return enforced.error_value();
+                }
+                value = std::move(enforced.value());
+            }
             // Set declared type - this locks the variable's type
             value.set_type_info(decl->type);
         } else if (decl->initializer && value.get_type_info()) {

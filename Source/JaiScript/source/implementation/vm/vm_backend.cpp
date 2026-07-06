@@ -2712,6 +2712,16 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 			if (frameLocal->is_reference()) {
 				JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
 			} else {
+				// Slot locals enforce their locked type like the env path below does
+				type_info_ptr slot_type = frameLocal->get_type_info();
+				auto enforced = enforce_type_compatibility(std::move(value), slot_type);
+				if (!enforced) {
+					return enforced.error_value();
+				}
+				value = std::move(enforced.value());
+				if (slot_type && slot_type->base_type == script_value_type::jai_any_type) {
+					value.set_type_info(slot_type);
+				}
 				*frameLocal = std::move(value.clone());
 			}
 			stack_.push_back(std::move(value));
@@ -4423,6 +4433,15 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 	}
 
 	if (decl->type) {
+		// Typed declarations convert their initializer exactly like assignment does
+		// (int d = 4.7 truncates instead of storing a mistagged float payload)
+		if (has_init) {
+			auto enforced = enforce_type_compatibility(std::move(value), decl->type);
+			if (!enforced) {
+				return enforced.error_value();
+			}
+			value = std::move(enforced.value());
+		}
 		value.set_type_info(decl->type);
 	}
 

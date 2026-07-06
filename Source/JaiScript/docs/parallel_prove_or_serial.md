@@ -6,7 +6,7 @@ serial fallback) is dead: a `parallel_for` body either satisfies the contract or
 never quietly runs serial. What survives fork-independently: the §3 checklist repurposed as
 *early static diagnostics* for the same contract violations (erroring at parse time instead of
 runtime is aligned with the ruling; silent fallback is not), the §4 prerequisites (ordered
-reductions non-negotiable), and the §5 pmap-first sequencing. Body kept unedited below as the
+reductions non-negotiable), and the §5 parallel_transform-first sequencing. Body kept unedited below as the
 decision record.
 
 Was: COMPANION PROPOSAL to `parallel_design.md` (rewritten 30d3aa28) — not a replacement.
@@ -135,12 +135,15 @@ Mostly restating §2/§6 obligations with three sharpenings:
 - Everything else per §2 as ruled: per-worker execution contexts, env/value pools, interner
   locking, frozen parse cache/class defs/chunks during the region.
 
-## 5. Sequencing recommendation: `pmap` first (v0)
+## 5. Sequencing recommendation: `parallel_transform` first (v0)
+
+(RULED 2026-07-06: the v0 builtin is named **`parallel_transform`** — Dev rejected `pmap`;
+"transform" speaks C++ (`std::transform`) and avoids colliding with the map container.)
 
 Before `parallel_for` touches objects, ship the narrowest possible surface that still forces
 the per-thread engine internals to exist and harden:
 
-- A **`pmap`-style builtin** (or the `parallel_for` keyword restricted to this tier):
+- A **`parallel_transform(arr, fn)` builtin** (or the `parallel_for` keyword restricted to this tier):
   value-semantic elements only (int64/double/string/char/bool and arrays/maps of the same — no
   objects, no references), body admitted only if it is a pure function of the element by the
   §3 checklist (no bindings at all in v0, or `self_only` on the element).
@@ -148,7 +151,7 @@ the per-thread engine internals to exist and harden:
   skippable (nothing reachable is shared), there is no annotation sweep dependency, no command
   buffer needed, and no object-identity questions — yet it still requires per-worker execution
   contexts, static chunking, per-worker budget/cap rails, pad determinism, and the 1-vs-N fuzz
-  leg. Every scary part that remains after `pmap` is green is by construction an *object* /
+  leg. Every scary part that remains after `parallel_transform` is green is by construction an *object* /
   *aliasing* / *binding* problem, not an engine-internals problem.
 - Fit against `parallel_design.md` §12: lands between step 3 (per-thread contexts) and step 4
   (alias walk + first-touch + full fan-out) — i.e. step 3.5, "real threads on the trivial

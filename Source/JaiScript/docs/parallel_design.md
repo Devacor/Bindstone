@@ -4,6 +4,8 @@ Status: DESIGN ONLY — nothing below is implemented unless it carries a source 
 Names introduced here (`parallel_for`, `thread_storage`, `thread_count()`, the binding
 annotations) do not exist in the tree yet. Everything with a `file:line` anchor was verified
 against VM-perf as of this writing. Dev rulings 2026-07-06 are final where marked RULED.
+All four §11 questions are now RULED — the only remaining open sub-item is the Q1 weight-hint
+syntax spelling (final call at implementation).
 
 ## 0. Ground truth: script values can never be shared live across threads
 
@@ -42,10 +44,13 @@ for (auto pad : thread_storage) { sum += pad.total; }
 
 ### The contract
 
-During the region the script may **READ anything in scope** and may **WRITE ONLY
-`thread_storage`** — inside the body it names the executing thread's own pad. Any other store —
-global, outer local, shared object field, and transitively through called functions — is a
-**runtime error** ("cannot write enclosing state in a parallel body"). One rule buys transitive
+During the region the script may **READ anything in scope** and may **WRITE ONLY its own
+state**: `thread_storage` (inside the body it names the executing thread's own pad), the body's
+locals, and — when iterating by reference (`parallel_for (auto& x : arr)`) — the thread's **own
+loop element**, mutable in place (RULED, §11 Q4: under static chunks + the barrier alias walk
+the element is the thread's exclusive property). Any other store — global, outer local, shared
+object field, and transitively through called functions — is a **runtime error** ("cannot write
+enclosing state in a parallel body"). One rule buys transitive
 purity: a callee that mutates a global or a captured map hits the same wall, so there is no
 "pure function" annotation, coloring, or whole-program analysis.
 
@@ -64,8 +69,10 @@ calling thread parks at the barrier; workers fan in.
 
 One shared engine means the engine's internals are shared, and today they all assume a single
 executing thread. Before ANY script body runs off-thread, each worker needs its own execution
-context, and the residual shared structures need a concurrency stance. Engine-internal work
-items — this is the real cost center of the whole feature:
+context, and the residual shared structures need a concurrency stance. All of it is bound by
+the zero-ambient-cost invariant (§11 Q3): context setup/teardown is charged to the
+`parallel_for` call, never to sequential execution. Engine-internal work items — this is the
+real cost center of the whole feature:
 
 - **Per-worker execution state**: value/call stacks, in-flight call records, and the vm's
   per-run state must be per-context, not per-engine (today the engine reuses one persistent
@@ -83,8 +90,9 @@ items — this is the real cost center of the whole feature:
 
 ## 3. RULED: scheduling is static chunks (determinism)
 
-Iterations are pre-partitioned into **contiguous per-thread chunks** before the fork. Same
-input + seed ⇒ byte-identical `thread_storage` contents — replayable, smoke-hashable. This is
+Iterations are pre-partitioned into **contiguous per-thread chunks** before the fork — exactly
+`n / thread_count()` by default, boundary-shifted by the optional weight hint (RULED, §11 Q1).
+Same input + seed ⇒ byte-identical `thread_storage` contents — replayable, smoke-hashable. This is
 the point: **deterministic pads** replace the old sequential-equivalence contract as the
 testable guarantee (§8 Testing).
 
@@ -117,7 +125,9 @@ Three mechanisms, one per hazard class:
   thereafter. Cost proportional to *variables touched*, not iterations.
 - **(c) Writes** — checked at the store chokepoints (slot/symbol/ref stores) via the executing
   context's parallel flag, in both backends through a shared `detail/` kernel (invariants.md
-  §6 — parity by construction, not twins).
+  §6 — parity by construction, not twins). The check admits stores to **own** state — the
+  thread's pad, the body's locals, and the thread's own loop element (§11 Q4) — and rejects
+  everything else.
 
 ## 5. Bound C++: the phase discipline (three-level binding annotation)
 
@@ -204,7 +214,8 @@ JaiScript stays the base library; the old JaiScript→MV layering inversion is d
   read-only assets can still bind as `std::shared_ptr<const T>` per the appendix to skip
   cloning.
 - **Static chunks can load-imbalance** (one expensive chunk gates the join) — the price of
-  determinism, mitigable by chunk-size choice (open question 1).
+  determinism, mitigated by the optional weight hint (§11 Q1), which itself costs an O(n)
+  single-threaded evaluation at the barrier when present.
 - **Registrar annotation sweep** (~76 sites, §5).
 - **Per-thread pads + read caches** are live memory until the next `parallel_for`.
 - **Applicability, honestly**: in Bindstone's actual frame profile, script update is not the
@@ -213,18 +224,72 @@ JaiScript stays the base library; the old JaiScript→MV layering inversion is d
   language capability play more than Bindstone's cheapest frame-time win; size the effort
   accordingly.
 
-## 11. Open questions for Dev
+## 11. RULED: the four open questions (Dev, 2026-07-06)
 
-1. Chunk size within static scheduling: exactly `n / thread_count()`, or a finer fixed grain
-   (still statically assigned) to soften imbalance? Language default with an optional hint, or
-   explicit in the syntax?
-2. v1 iteration domains: arrays only, or also maps/ranges? (Maps make chunk boundaries and the
-   alias walk hairier.)
-3. Captured-read gate tuning: first-touch lock+clone as drafted, or snapshot the whole captured
-   set up front at the barrier (simpler, pays for untouched variables)?
-4. May a body mutate its OWN loop element in place (`for (auto& x : ...)` style), alongside the
-   pad? Disjoint ownership says likely yes under static chunks + the alias walk — the element is
-   the thread's exclusive property — but it widens the write wall's definition of "own".
+Question text kept for history; rulings are final. The one genuinely open sub-item is the Q1
+weight-hint syntax spelling, deferred to the implementation pass.
+
+### Q1 — chunk grain. RULED: `n / thread_count()` contiguous chunks + optional per-index weight hint
+
+> Was: exactly `n / thread_count()`, or a finer fixed grain (still statically assigned) to
+> soften imbalance? Language default with an optional hint, or explicit in the syntax?
+
+Default = exactly `n / thread_count()` contiguous chunks, no tuning knob. The imbalance answer
+is an **optional per-index weight hint** — Dev's motivating example: parsing an array of JSON
+strings, weight by text length so chunks balance by **effort**, not element count. Semantics
+when the hint is supplied:
+
+- The weight expression evaluates **per element at the barrier** — single-threaded, before
+  fan-out — and contiguous chunk boundaries are chosen to equalize cumulative weight.
+- The O(n) weight evaluation is paid only when a hint is present; hint-less loops keep the flat
+  split at zero added cost.
+- The hint expression must be **side-effect-free** — the same rule as the body's read
+  discipline; it runs under the barrier's single-threaded safety anyway, but a mutating hint is
+  still an error.
+
+Dev wants "a really *really* easy OPTIONAL syntax" for the hint. Candidate spellings for the
+implementation pass to choose from (**syntax final call at implementation**):
+
+1. Inline `weighted` clause — `parallel_for (auto& x : arr weighted x.size()) { ... }`. Pro:
+   the hint sits right next to the loop variable it uses; con: a contextual keyword inside the
+   range clause.
+2. Trailing `by` clause — `parallel_for (auto& x : arr) by x.size() { ... }`. Pro: the range
+   clause stays untouched; con: the hint dangles between header and body.
+3. Second header expression — `parallel_for (auto& x : arr; x.size()) { ... }`. Pro: pure
+   punctuation, no new keyword; con: least discoverable, and the semicolon reads C-style-for.
+
+### Q2 — iteration domains. RULED: arrays only in v1
+
+> Was: arrays only, or also maps/ranges? (Maps make chunk boundaries and the alias walk
+> hairier.)
+
+Arrays only — "that's a fine restriction." Maps/ranges deferred; the parenthetical above stands
+as the reason (map chunk boundaries + the alias walk get hairier for nothing v1 needs).
+
+### Q3 — captured-read gate. RULED: first-touch lock+clone as drafted
+
+> Was: first-touch lock+clone as drafted, or snapshot the whole captured set up front at the
+> barrier (simpler, pays for untouched variables)?
+
+First-touch lock+clone (§4b) stands — it is the cheapest option. The ruling adds a hard
+constraint of its own:
+
+> **INVARIANT — zero concurrency cost outside `parallel_for`.** No lock, atomic, or
+> synchronization consideration may exist anywhere in the engine except while a parallel region
+> is actively executing. The first-touch gate's mutex exists only inside the region; sequential
+> code paths must be provably untouched. This binds the per-thread execution contexts (§2)
+> too: their setup/teardown costs belong to the `parallel_for` call, never ambient.
+
+### Q4 — own-element mutation. RULED: yes
+
+> Was: may a body mutate its OWN loop element in place (`for (auto& x : ...)` style), alongside
+> the pad? Disjoint ownership says likely yes under static chunks + the alias walk — the element
+> is the thread's exclusive property — but it widens the write wall's definition of "own".
+
+Yes — `parallel_for (auto& x : arr)` may mutate its own loop element in place; under static
+chunks + the barrier alias walk the element is the thread's exclusive property. The write
+wall's definition of "own" = the thread's pad + its own loop element + body-locals. The
+contract (§1) and the write check (§4c) are updated to match.
 
 ## 12. Sequencing sketch
 
@@ -237,8 +302,8 @@ JaiScript stays the base library; the old JaiScript→MV layering inversion is d
 3. **Per-thread execution contexts** (§2): the engine-internal refactor, gated by the existing
    full suite staying green single-threaded.
 4. **Static chunking + alias walk + first-touch gate + real fan-out** (~1.5k lines): chunk
-   partition, control-block set walk, clone fallback, read caches, barrier, iteration-order
-   error selection + buffer apply. Gate: the fuzzer's 1-vs-N leg (§8) seed-swept overnight,
+   partition (flat + weighted, §11 Q1), control-block set walk, clone fallback, read caches,
+   barrier, iteration-order error selection + buffer apply. Gate: the fuzzer's 1-vs-N leg (§8) seed-swept overnight,
    zero divergences; plus targeted alias-torture foundry tests.
 5. **Perf pass**: prove zero-copy chunk reads beat clone-everything on representative workloads
    (Foundry benchmarks are ±50% integer-µs — invariants.md §7 — use dedicated micro-benches for

@@ -24,11 +24,8 @@ class Plasma : Scene {
 		for (int i = 0; i < ncolors; ++i) {
 			float ph = i * 6.28318530718 / ncolors;
 			var c = gfx.rainbow_rgb(ph);
-			// unpack first: raw array-element args miss typed-param overloads (README bug list)
-			float cr = c[0];
-			float cg = c[1];
-			float cb = c[2];
-			pal.add_bg(cr, cg, cb);
+			// raw element args into typed params (finding 5 FIXED: exercises overload deref)
+			pal.add_bg(c[0], c[1], c[2]);
 		}
 	}
 

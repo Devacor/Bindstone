@@ -97,6 +97,79 @@ public:
     }
     
     void forge_tests() override {
+        // RULED (2026-07, open question #9, option C): use_count() reports the OUTER
+        // holder count — the layer script alias copies bump and script weak_ptr expiry
+        // follows. cpp_ref_count() preserves the old inner number (C++-side shares).
+        // The alias-ladder must be byte-identical on BOTH backends (the builtin
+        // subtracts a per-backend transient offset — these pins hold it stable).
+        test("use_count_reports_script_alias_ladder", [this]() {
+            const char* src = R"(
+                class T { int x = 1; }
+                shared_ptr<T> a = T();
+                var r1 = a.use_count();
+                var u1 = a.unique();
+                var b = a;
+                var r2 = a.use_count();
+                var u2 = a.unique();
+                var c2 = b;
+                var r3 = a.use_count();
+                var viaAlias = c2.use_count();
+                to_string(r1) + "|" + to_string(u1) + "|" + to_string(r2) + "|"
+                    + to_string(u2) + "|" + to_string(r3) + "|" + to_string(viaAlias);
+            )";
+            std::string outputs[2];
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                stdlib::register_all(*e);
+                outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
+            }
+            check_eq(std::string("1|true|2|false|3|3"), outputs[0], "interp alias ladder");
+            check_eq(outputs[0], outputs[1], "alias ladder parity (calibrated offsets hold)");
+        });
+
+        test("use_count_correlates_with_weak_ptr_expiry", [this]() {
+            // The count use_count() now reports is the SAME layer weak_ptr expiry
+            // follows: while any alias keeps the count >= 1 the weak_ptr stays alive
+            const char* src = R"(
+                class T { int x = 1; }
+                shared_ptr<T> a = T();
+                weak_ptr<T> w = a;
+                var b = a;
+                to_string(a.use_count()) + ":" + to_string(w.expired());
+            )";
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                stdlib::register_all(*e);
+                check_eq(std::string("2:false"), e->execute(src).as<std::string>(),
+                         use_vm ? "vm weak correlation" : "interp weak correlation");
+            }
+        });
+
+        test("cpp_ref_count_sees_cpp_extraction", [this]() {
+            // cpp_ref_count() preserves the pre-ruling number: script aliases leave it
+            // at 1; a C++-side share (holder->data copy) bumps it
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                stdlib::register_all(*e);
+                e->execute(R"(
+                    class T { int x = 1; }
+                    shared_ptr<T> a = T();
+                    var b = a;
+                )");
+                check_eq((int64_t)1, e->execute("a.cpp_ref_count()").as_int(),
+                         use_vm ? "vm inner count ignores aliases" : "interp inner count ignores aliases");
+                auto held = e->execute("a");
+                auto holder = held.get_object_holder();
+                check_not_null(holder.get(), "holder");
+                auto cpp_share = holder->data;   // the C++-side share the old number counted
+                check_eq((int64_t)2, e->execute("a.cpp_ref_count()").as_int(),
+                         use_vm ? "vm inner count sees C++ share" : "interp inner count sees C++ share");
+            }
+        });
+
         /* Temporarily disabled - crashes in full suite
         test("weak_ptr_basic_syntax", [this]() {
             auto eng = make_engine();

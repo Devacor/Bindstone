@@ -28,6 +28,19 @@ Enforced: negative `is_constructible` static_asserts (strong_ptr_tests.cpp:224-2
 `0x0DEADCB0` on dealloc — a canary assert means a dead/foreign block, i.e. someone minted a
 handle outside make_strong or used it after free.
 
+## 2b. Frame slot storage never reallocates mid-frame
+
+`call_frame::locals` is a plain vector, and the VM caches raw `script_value*` into it across
+loop iterations (`counted_for_state.var/end_ptr/step_ptr`, vm_backend.cpp `exec_cfor_prep`);
+references can also target it. Sound only because EVERY path that creates a frame reserves the
+parser's full `local_count` up front (`reserve_locals(std::max(function.local_count,
+body_chunk->local_count))` — push_script_frame, push_method_frame, call_script_function,
+coroutine states; both backends' `execute_method_ast` must pass `ast->local_count` through).
+The 2026-07 failure mode: method frames compiled/reserved with local_count 0, so a loop-body
+`DECL_VAR` push_back reallocated the vector and the cached counted-for pointers read freed
+memory (demoreel finding 2 — silent wrong loop counts, Release; delayed detonation shapes).
+Never add a frame-creation path that skips the full-slot reserve.
+
 ## 3. Ref-anchor environments are never pooled/reused
 
 References carry `weak_ptr<environment> sourceEnv` (`reference_holder`, value.hpp:1581-1583).

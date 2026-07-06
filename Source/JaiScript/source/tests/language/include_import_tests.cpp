@@ -387,9 +387,80 @@ public:
             
             // Since we're using 'once' behavior, importing again should not change anything
             check_eq(eng->execute("module_letter").as<std::string>(), "B");
-            
+
             cleanup_temp_file(moduleA);
             cleanup_temp_file(moduleB);
+        });
+
+        // === include in expression position (Dev ruling 2026-07: include returns its value) ===
+        // `var cfg = include "file.jai";` evaluates to the included file's result — exactly
+        // what engine::execute returns for that source. Statement-position include is
+        // unchanged (value discarded). include always RUNS the file (no cache), so its
+        // value is always fresh — no interaction with import's once-cache.
+        test("include_expression_returns_value", [&]() {
+            auto config_file = create_temp_file("expr_config.jai", R"(
+                { "width": 800, "height": 600 };
+            )");
+            auto expr_file = create_temp_file("expr_calc.jai", R"(
+                var acc = 0;
+                for (int i = 1; i <= 4; i++) { acc += i; }
+                acc * 10;
+            )");
+            for (bool use_vm : {false, true}) {
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                auto r = eng->execute(R"(
+                    var cfg = include "expr_config.jai";
+                    auto calc = include "expr_calc.jai";
+                    cfg["width"] + cfg["height"] + calc;
+                )");
+                check_eq((int64_t)1500, r.as_int(), use_vm ? "vm include value" : "interp include value");
+            }
+            cleanup_temp_file(config_file);
+            cleanup_temp_file(expr_file);
+        });
+
+        test("include_expression_dynamic_path_and_nesting", [&]() {
+            auto leaf = create_temp_file("expr_leaf.jai", "21;");
+            for (bool use_vm : {false, true}) {
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                // computed path form in expression position + in-call use
+                auto r = eng->execute(R"(
+                    function twice(v) { return v * 2; }
+                    var part = "leaf";
+                    twice(include("expr_" + part + ".jai"));
+                )");
+                check_eq((int64_t)42, r.as_int(), use_vm ? "vm dynamic include" : "interp dynamic include");
+            }
+            cleanup_temp_file(leaf);
+        });
+
+        test("include_statement_position_unchanged", [&]() {
+            // Statement include still runs for side effects and DISCARDS its value; it
+            // also always re-runs (fresh evaluation each time, unlike import)
+            auto counter_file = create_temp_file("expr_counter.jai", R"(
+                bump_count();
+                777;
+            )");
+            for (bool use_vm : {false, true}) {
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                int bumps = 0;
+                eng->add_function("bump_count", [&bumps]() { bumps++; });
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                auto r = eng->execute(R"(
+                    include "expr_counter.jai";
+                    include "expr_counter.jai";
+                    var v = include "expr_counter.jai";
+                    v;
+                )");
+                check_eq((int64_t)777, r.as_int(), "expression include still returns");
+                check_eq(3, bumps, use_vm ? "vm include always runs" : "interp include always runs");
+            }
+            cleanup_temp_file(counter_file);
         });
     }
 };

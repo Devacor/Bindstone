@@ -284,6 +284,7 @@ primaryExpression = literal
                   | "this"
                   | "super"
                   | newExpression
+                  | includeExpression
                   | "(" expression ")"
                   | lambdaExpression
                   | arrayLiteral
@@ -291,6 +292,10 @@ primaryExpression = literal
 
 // Sugar: `new T(args)` ≡ `shared_ptr<T>(args)` (idempotent when T is already shared_ptr<...>)
 newExpression = "new" type ( "(" argumentList? ")" | "{" argumentList? "}" )
+
+// include in expression position evaluates to the included file's result value
+// (its last top-level expression — exactly what engine::execute returns for it)
+includeExpression = "include" (STRING_LITERAL | "<" path ">" | "(" expression ")")
 
 literal = INTEGER_LITERAL
         | FLOAT_LITERAL
@@ -453,8 +458,11 @@ namespace game::combat {
 enum Color { red, green, blue }
 auto c = Color::green;
 
-include "setup.jai";     // PHP-template style: ALWAYS runs the file's code in place,
-                          // and may produce a value (the file's last/returned value)
+include "setup.jai";     // PHP-template style: ALWAYS runs the file's code in place;
+                          // statement position discards the file's value
+var cfg = include "config.jai";   // expression position: evaluates to the file's result
+                                   // (its last top-level expression) — the data-file idiom.
+                                   // include never caches, so the value is always fresh.
 import "creature.jai";   // module style: cached per path — declarations (classes, functions,
                           // namespaces) load ONCE; never produces a value
 import(pathExpression);   // computed paths work for both; so does `#include <lib.jai>`

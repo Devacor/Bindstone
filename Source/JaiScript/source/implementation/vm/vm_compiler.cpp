@@ -1077,6 +1077,21 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 	case node_type::new_expr:
 		compile_new(std::static_pointer_cast<new_expr>(expr));
 		return;
+	case node_type::include_expr: {
+		// Expression-position include: same op_include as the statement form, minus the
+		// trailing op_pop — the included file's result IS the expression value
+		auto* inc = static_cast<include_expr*>(expr.get());
+		uint32_t path_msg = k_invalid_u32;
+		uint32_t is_expr = 0;
+		if (inc->path_expr) {
+			compile_expression(inc->path_expr);
+			is_expr = 1;
+		} else {
+			path_msg = add_message(inc->path);
+		}
+		emit(opcode::op_include, path_msg, is_expr);
+		return;
+	}
 	case node_type::this_expr:
 		emit(opcode::op_this);
 		return;

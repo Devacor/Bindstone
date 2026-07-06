@@ -179,19 +179,22 @@ class Reel {
 		gfx.overlay_center(rows, w, mid + 1, "", band);
 	}
 
-	void hud_overlay(var& rows, float fps, float ms_self, float ms_other) {
+	// ms_sim = script update + frame string; ms_draw = host console write.
+	// The headline number is their SUM — the honest wall cost of a frame.
+	void hud_overlay(var& rows, float fps, float ms_sim, float ms_draw, float ms_other) {
 		string other = backend == "vm" ? "interp" : "vm";
 		string ms_o = "";
-		if (ms_other > 0.0) { ms_o = "  (" + other + " " + gfx.fmt1(ms_other) + "ms)"; }
-		string flow = paused ? "  [FROZEN]" : "";
-		string txt = " JAISCRIPT DEMOREEL  " + (cur_idx + 1) + "/" + nscenes + " " + cur.name +
-			"  |  " + backend + " " + gfx.fmt1(ms_self) + "ms" + ms_o +
-			"  |  " + gfx.fmt1(fps) + " fps" + flow +
-			"  |  tab swap / r reload / h hud / f freeze / n-p scene / q quit";
+		if (ms_other > 0.0) { ms_o = " (" + other + " " + gfx.fmt1(ms_other) + ")"; }
+		string flow = paused ? " [FROZEN]" : "";
+		string txt = " JAISCRIPT DEMOREEL " + (cur_idx + 1) + "/" + nscenes + " " + cur.name +
+			" | " + backend + " " + gfx.fmt1(ms_sim + ms_draw) + "ms = sim " + gfx.fmt1(ms_sim) +
+			" + draw " + gfx.fmt1(ms_draw) + ms_o +
+			" | " + gfx.fmt1(fps) + " fps" + flow +
+			" | tab r h f n p q";
 		gfx.overlay_left(rows, w, 0, txt, ESC + "[48;2;24;16;48m" + ESC + "[38;2;235;235;255m");
 	}
 
-	string frame(float t, float dt, string key, float fps, float ms_self, float ms_other) {
+	string frame(float t, float dt, string key, float fps, float ms_sim, float ms_draw, float ms_other) {
 		if (finish_pending) { complete_transition(); }
 		handle_key(key);
 		float step = paused ? 0.0 : dt;
@@ -216,7 +219,7 @@ class Reel {
 			rows = gfx.render_rows(grid, cur.pal, w, h, parts);
 		}
 		if (!in_trans && !finish_pending && scene_t < title_len) { title_overlay(rows); }
-		if (hud) { hud_overlay(rows, fps, ms_self, ms_other); }
+		if (hud) { hud_overlay(rows, fps, ms_sim, ms_draw, ms_other); }
 		return rows.join("\n");
 	}
 }

@@ -27,7 +27,7 @@ namespace jai {
         switch_keyword, case_keyword, default_keyword, fallthrough_keyword,
         include_keyword, import_keyword,
         coroutine_keyword, yield_keyword,
-        enum_keyword,
+        enum_keyword, new_keyword,
 
         plus, minus, star, slash, percent,
         plus_equal, minus_equal, star_equal, slash_equal, percent_equal,

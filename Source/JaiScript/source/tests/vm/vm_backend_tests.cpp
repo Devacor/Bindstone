@@ -2517,7 +2517,12 @@ public:
 		});
 
 		// Tier 3(b): the exact-class-match conversion skip must keep value semantics -
-		// exact match still deep-clones, subclass and shared_ptr args keep the full path
+		// exact match still deep-clones; subclass args keep the full path.
+		// RULED (2026-07, `new` sugar): a 'var' decl keeps a shared_ptr-tagged
+		// initializer's marker (var sp = shared_ptr<P>() ≡ shared_ptr<P> sp = P()), so
+		// sp's arg tag forces sharing through the exact-class param (14,14) — matching
+		// what the decl-typed spelling always did. Was 14,4 when the var decl flattened
+		// the tag to 'any'.
 		test("tier3_exact_class_param_still_clones", [this, run_both_backends]() {
 			const char* src = R"(
 				class P { int v = 1; }
@@ -2535,7 +2540,7 @@ public:
 				"" + r1 + "," + a.v + "|" + r2 + "," + q.v + "|" + r3 + "," + sp.v + "|" + sh.v;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("15,5|13,3|14,4|107"), i_out, "interp exact-class clone semantics");
+			check_eq(std::string("15,5|13,3|14,14|107"), i_out, "interp exact-class clone semantics");
 			check_eq(i_out, v_out, "exact-class clone parity");
 		});
 

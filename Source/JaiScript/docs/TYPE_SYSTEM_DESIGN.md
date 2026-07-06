@@ -297,7 +297,11 @@ a.same_as(c);             // false (different objects, even with same contents)
 
 ### How It Works Internally
 
-All objects are stored as `shared_ptr<object_holder>` internally (for memory management), but:
+> NOTE: this subsection describes internals that the in-flight CELLS refactor is rewriting —
+> treat the mechanism (not the observable semantics) as provisional.
+
+All objects are stored as an `object_holder` behind a non-atomic `strong_ptr` internally (the
+thin-value fold replaced the old `shared_ptr` storage; see `thin_value_spec.md`), but:
 - **Default objects** have VALUE semantics - they clone on assignment
 - **`shared_ptr<T>` marked objects** have REFERENCE semantics - no clone on assignment
 
@@ -435,16 +439,20 @@ auto m = {{"a", 1}, {2, 3}};  // Mixed string/int keys - allowed?
 int x = 3.14;    // Truncates to 3 (no warning)
 float y = 5;     // Widens to 5.0
 
-auto a = 5;      // int
-a = 3.14;        // ERROR: float not assignable to int (type locked)
+auto a = 5;      // locked to int
+a = 3.14;        // OK: truncates to 3 — locked int ACCEPTS float via C++-style conversion
+a = "hello";     // ERROR: no conversion from string to int
 
 var b = 5;       // any
 b = 3.14;        // OK: var allows any type
 ```
 
-**Strength**: Consistent with C++ expectations.
+**Strength**: Consistent with C++ expectations (a locked/declared `int` converts numerics the
+way a C++ `int` would; only genuinely incompatible types error).
 
-**Trade-off**: Silent truncation can hide bugs. Consider: explicit `int(3.14)` cast requirement?
+**Trade-off**: Silent truncation can hide bugs. The strictness surface for that is the opt-in
+static checker (`static_checking.md` — warn/strict modes flag narrowing at parse time), not a
+runtime cast requirement. Typed class FIELDS are now enforced exactly like typed locals.
 
 ## Known Gaps and Future Considerations
 

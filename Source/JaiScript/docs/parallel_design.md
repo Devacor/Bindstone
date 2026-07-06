@@ -94,6 +94,10 @@ that keeps iteration→pad assignment fixed.
 
 ## 4. Read safety under non-atomic refcounts
 
+> CELLS caveat on (a): the alias rationale below cites the old `reference_holder` mechanism —
+> the in-flight CELLS refactor replaces that machinery; the conclusion likely survives, the
+> cited mechanism won't.
+
 Three mechanisms, one per hazard class:
 
 - **(a) The iterated container** — static contiguous chunks + a barrier alias-walk. At the fork
@@ -151,10 +155,10 @@ livelocking or allocation-bombing body fails the loop, not the process.
 ## 7. RULED: threads are `jai::thread_pool` (hoisted from MV)
 
 JaiScript owns the pool (answers old open question 5). `MV::ThreadPool`
-(`Source/MV/Utility/threadPool.hpp:14`) is being hoisted **into** JaiScript as
-`include/jaiscript/detail/thread_pool.hpp` (landing now via a portability agent) with a
-pinned-worker mode; that header is the `parallel_for` substrate, and MV wraps or forwards to
-it. Standard C++ only (`std::thread`/`std::mutex`/`std::condition_variable`), no OS APIs —
+(`Source/MV/Utility/threadPool.hpp:14`) was hoisted **into** JaiScript —
+`include/jaiscript/detail/thread_pool.hpp` has LANDED (shared queue + pinned `submit_to`; it
+cites this doc) with a pinned-worker mode; that header is the `parallel_for` substrate, and MV
+wraps or forwards to it. Standard C++ only (`std::thread`/`std::mutex`/`std::condition_variable`), no OS APIs —
 JaiScript stays the base library; the old JaiScript→MV layering inversion is dead.
 
 ## 8. Kept invariants
@@ -224,7 +228,7 @@ JaiScript stays the base library; the old JaiScript→MV layering inversion is d
 
 ## 12. Sequencing sketch
 
-1. **`jai::thread_pool` lands** (in flight, §7) with pinned-worker mode + foundry coverage.
+1. **`jai::thread_pool` lands** (DONE — `detail/thread_pool.hpp`, §7) with pinned-worker mode + foundry coverage.
 2. **`parallel_for` sequential-semantics first** (~1k lines): parse, both backends,
    `thread_storage` pads, the enclosing-write wall, binding annotations + command buffer,
    print buffering, `thread_count()` — running on ONE thread. Gate: full foundry green on both

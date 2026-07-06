@@ -105,11 +105,11 @@ jai::make_dynamic_binder<MyClass>(engine, "MyClass")
 
 ### After (snake_case)
 ```cpp
-jai::engine engine;
-jai::script_value result = engine.execute("2 + 2");
+auto engine = jai::engine::make();   // ctor is private; engines are always shared_ptr
+jai::script_value result = engine->execute("2 + 2");
 script_int val = result.as<script_int>();
 
-jai::make_dynamic_binder<MyClass>(engine, "MyClass")
+jai::dynamic_binder<MyClass>(engine, "MyClass")
     .constructor<script_int, script_float>()
     .method("set_value", &MyClass::set_value)
     .build();
@@ -122,11 +122,7 @@ jai::make_dynamic_binder<MyClass>(engine, "MyClass")
 3. **Clarity**: `script_` prefix clearly identifies JaiScript types
 4. **Namespace Harmony**: `jai::script_int` vs `jai::jai_int` (redundant)
 
-## Migration Commands Used
+## Migration History
 
-The migration was completed using several automated scripts:
-- `rename_classes_to_snake_case.sh` - Core class name conversion
-- `convert_type_aliases.sh` - Type alias standardization  
-- `convert_remaining_pascalcase.sh` - Final cleanup of all remaining names
-
-All 53 test files were successfully updated and compilation verified.
+The January 2025 PascalCase→snake_case migration was completed with one-off scripts (long since
+deleted); all tests were updated and verified at the time.

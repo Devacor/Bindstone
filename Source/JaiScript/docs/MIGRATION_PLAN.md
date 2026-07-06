@@ -124,6 +124,9 @@ Convert 39 .script files from ChaiScript to JaiScript syntax.
 
 ## Files to Create
 
+> **Never created — the hooks were converted IN PLACE instead** (e.g. `Source/MV/Render/renderHooks.cxx`
+> now contains the JaiScript bindings under the original filename). Table kept for history.
+
 | File | Purpose |
 |------|---------|
 | `Source/MV/Utility/jaiUtilityHooks.cxx` | JaiScript utility bindings |
@@ -149,6 +152,9 @@ Convert 39 .script files from ChaiScript to JaiScript syntax.
 - `External/ChaiScript-6.1.0/` directory
 
 ## ObservableProperty TODO
+
+> **SHIPPED** — `jai::observable_property<T>` exists at
+> `include/jaiscript/properties/observable_property.hpp` with exactly the sketched shape.
 
 The JaiScript property system is missing `ObservableProperty<T>` with signal support. This should be added before migrating classes that use observable properties:
 

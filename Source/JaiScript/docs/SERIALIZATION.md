@@ -11,6 +11,11 @@ JaiScript provides a dual-format serialization system supporting both **binary**
 3. **Handle complex scenarios** - Non-default-constructible types, shared_ptr deduplication, weak_ptr reconstruction
 4. **Remain extensible** - Custom serialization logic can compose with automatic property serialization
 
+> **Scope note:** this doc covers the C++ **value** archive system (`jai_archive`). Serializing
+> parsed **scripts** (AST + compiled bytecode) is a separate subsystem — jaibite save/load
+> (`engine::jaibite()`, `jaibite::save()`, `engine::jaibite_load()`); see
+> `execution_mode_metrics.md`.
+
 ## Quick Reference: Dispatch Priority
 
 ```
@@ -284,12 +289,6 @@ For types that must work with both serialization systems:
 class MyComponent {
     int m_value;
 
-    // One-parameter forwarders for JaiScript detection
-    template<class Archive>
-    void save(Archive& ar) const { save(ar, 0); }
-    template<class Archive>
-    void load(Archive& ar) { load(ar, 0); }
-
     template<class Archive>
     void save(Archive& ar, std::uint32_t version) const {
         if constexpr (jai::serialization::jai_archive<Archive>) {
@@ -312,12 +311,13 @@ class MyComponent {
 };
 ```
 
-**IMPORTANT:** The one-parameter forwarders (`save(Archive&)` and `load(Archive&)`) are **required** for JaiScript's method detection traits. Without them, JaiScript's `has_member_save_v<T>` and `has_member_load_v<T>` will return false because they check for the one-parameter signature:
-
-```cpp
-// JaiScript's detection checks for THIS signature:
-decltype(std::declval<const T&>().save(std::declval<archive_writer&>()))
-```
+Cereal-style versioned signatures — `save(Archive&, std::uint32_t)` / `load(Archive&,
+std::uint32_t)` — are **detected natively and preferred**: the detection traits
+(`has_versioned_save_method` / `has_simple_save_method`, combined in `has_save_method` in
+`archive_impl.hpp`, via the `jai::access` wrappers) probe both arities and dispatch the
+versioned overload with the archive's version when it exists. One-parameter forwarders
+(`save(Archive& ar) const { save(ar, 0); }`) are **no longer required** — they're optional
+legacy shims and can be deleted.
 
 ### Pattern 6: Free Functions via ADL
 

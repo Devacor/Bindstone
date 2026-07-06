@@ -284,6 +284,21 @@ public:
 					h.cur.tag
 				)");
 				check_eq((int64_t)2, r.as_int(), backend_tag(use_vm) + "var field reassigned across classes");
+				auto r2 = e->execute(R"(
+					class A6b { int tag = 1; }
+					class B6b { int tag = 2; }
+					class H6b {
+						var cur = null;
+						var nxt = null;
+						void init() { cur = A6b(); nxt = B6b(); }
+						void swap() { cur = nxt; nxt = null; }
+					}
+					var hb = H6b();
+					hb.init();
+					hb.swap();
+					hb.cur.tag
+				)");
+				check_eq((int64_t)2, r2.as_int(), backend_tag(use_vm) + "unqualified in-method var field cross-class handover");
 			}
 		});
 

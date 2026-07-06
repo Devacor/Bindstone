@@ -88,3 +88,9 @@ if(JAISCRIPT_BUILD_EXAMPLES)
     add_subdirectory(examples/demoreel)
 endif()
 # --- end jai_demoreel ---
+
+# --- jai_crawler (examples/crawler): GRUBWELL, first-person dungeon crawler ---
+if(JAISCRIPT_BUILD_EXAMPLES)
+    add_subdirectory(examples/crawler)
+endif()
+# --- end jai_crawler ---

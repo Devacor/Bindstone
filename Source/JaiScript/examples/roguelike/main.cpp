@@ -6,6 +6,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <deque>
@@ -30,10 +31,78 @@ struct host_options {
 	bool god = false;
 	bool load = false;
 	bool quiet = false;          // suppress frame drawing (smoke implies quiet)
+	bool time_turns = false;     // measure key->frame latency; summary on exit
 	int64_t turns = 250;         // smoke turn budget
 	std::string scripted_input;  // keys fed to read_key(); empty = interactive
 	std::string scripts_dir;
 	std::string save_path = "jai_rogue_save.json";
+};
+
+// --time latency probe: read_key return -> frame_mark (turn logic) ->
+// draw entry (frame string build) -> fwrite+fflush (console blit).
+struct turn_perf {
+	using clock = std::chrono::steady_clock;
+	bool enabled = false;
+	bool key_pending = false;
+	bool frame_pending = false;
+	clock::time_point key_stamp{};
+	clock::time_point frame_stamp{};
+	int turns = 0;
+	double logic_sum = 0, logic_max = 0, logic_min = 1e9;
+	double build_sum = 0, build_max = 0, build_min = 1e9;
+	double blit_sum = 0, blit_max = 0, blit_min = 1e9;
+
+	static double ms_between(clock::time_point a, clock::time_point b) {
+		return std::chrono::duration<double, std::milli>(b - a).count();
+	}
+
+	void on_key() {
+		if (!enabled) { return; }
+		key_stamp = clock::now();
+		key_pending = true;
+		frame_pending = false;
+	}
+
+	void on_frame_mark() {
+		if (!enabled || !key_pending) { return; }
+		frame_stamp = clock::now();
+		frame_pending = true;
+	}
+
+	// returns true if this draw closes a measured turn (caller then times the blit)
+	bool on_draw_begin() {
+		if (!enabled || !key_pending) { return false; }
+		auto now = clock::now();
+		double logic = frame_pending ? ms_between(key_stamp, frame_stamp) : ms_between(key_stamp, now);
+		double build = frame_pending ? ms_between(frame_stamp, now) : 0.0;
+		logic_sum += logic; if (logic > logic_max) { logic_max = logic; } if (logic < logic_min) { logic_min = logic; }
+		build_sum += build; if (build > build_max) { build_max = build; } if (build < build_min) { build_min = build; }
+		++turns;
+		key_pending = false;
+		frame_pending = false;
+		return true;
+	}
+
+	void on_blit(double ms) {
+		blit_sum += ms;
+		if (ms > blit_max) { blit_max = ms; }
+		if (ms < blit_min) { blit_min = ms; }
+	}
+
+	void report() const {
+		if (!enabled || turns == 0) { return; }
+		std::fprintf(stderr,
+			"\n--time over %d key->frame turns (ms):\n"
+			"  turn logic   min %7.3f  avg %7.3f  max %8.3f\n"
+			"  frame build  min %7.3f  avg %7.3f  max %8.3f\n"
+			"  console blit min %7.3f  avg %7.3f  max %8.3f\n"
+			"  total        avg %7.3f\n",
+			turns,
+			logic_min, logic_sum / turns, logic_max,
+			build_min, build_sum / turns, build_max,
+			blit_min, blit_sum / turns, blit_max,
+			(logic_sum + build_sum + blit_sum) / turns);
+	}
 };
 
 struct console_host {
@@ -41,6 +110,7 @@ struct console_host {
 	bool quiet = false;
 	std::deque<std::string> scripted;
 	bool input_was_scripted = false;
+	turn_perf perf;
 
 	void init() {
 #ifdef _WIN32
@@ -66,6 +136,8 @@ struct console_host {
 
 	void draw(const std::string& frame) {
 		if (quiet) { return; }
+		bool measured = perf.on_draw_begin();
+		auto blit_start = turn_perf::clock::now();
 		std::string out;
 		out.reserve(frame.size() + 8);
 		out += "\x1b[H";
@@ -73,6 +145,7 @@ struct console_host {
 		out += "\x1b[0m";
 		std::fwrite(out.data(), 1, out.size(), stdout);
 		std::fflush(stdout);
+		if (measured) { perf.on_blit(turn_perf::ms_between(blit_start, turn_perf::clock::now())); }
 	}
 
 	void clear() {
@@ -82,6 +155,12 @@ struct console_host {
 	}
 
 	std::string read_key() {
+		std::string k = read_key_impl();
+		perf.on_key();
+		return k;
+	}
+
+	std::string read_key_impl() {
 		if (input_was_scripted) {
 			if (scripted.empty()) { return "Q"; }  // scripted run finished: hard quit
 			std::string k = scripted.front();
@@ -195,6 +274,7 @@ void print_usage() {
 		"  --turns N       smoke turn budget (default 250)\n"
 		"  --input KEYS    scripted keys fed to read_key() (e.g. \"jjllg.>\"; ';'=enter '^'=esc)\n"
 		"  --quiet         suppress frame drawing (useful with --input)\n"
+		"  --time          measure key->frame latency; prints a summary on exit\n"
 		"  --dev           enable in-game script hot reload on 'R'\n"
 		"  --god           god mode (no damage, monstrous stats)\n"
 		"  --load          continue from the save file\n"
@@ -221,6 +301,7 @@ int main(int argc, char** argv) {
 		else if (a == "--turns") { opt.turns = std::stoll(next_arg("--turns")); }
 		else if (a == "--input") { opt.scripted_input = next_arg("--input"); }
 		else if (a == "--quiet") { opt.quiet = true; }
+		else if (a == "--time") { opt.time_turns = true; }
 		else if (a == "--dev") { opt.dev = true; }
 		else if (a == "--god") { opt.god = true; }
 		else if (a == "--load") { opt.load = true; }
@@ -232,6 +313,7 @@ int main(int argc, char** argv) {
 
 	console_host console;
 	console.quiet = opt.smoke || opt.quiet;
+	console.perf.enabled = opt.time_turns;
 	if (!opt.scripted_input.empty()) {
 		console.input_was_scripted = true;
 		for (char c : opt.scripted_input) { console.scripted.emplace_back(1, c); }
@@ -258,6 +340,7 @@ int main(int argc, char** argv) {
 	eng->add_function("draw", [&console](const std::string& frame) { console.draw(frame); });
 	eng->add_function("clear_screen", [&console]() { console.clear(); });
 	eng->add_function("read_key", [&console]() -> std::string { return console.read_key(); });
+	eng->add_function("frame_mark", [&console]() { console.perf.on_frame_mark(); });
 	eng->add_function("chr", [](jai::script_int code) -> std::string {
 		return std::string(1, static_cast<char>(code & 0x7F));
 	});
@@ -321,5 +404,6 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	console.shutdown();
+	console.perf.report();
 	return exit_code;
 }

@@ -151,6 +151,34 @@ public:
 			}
 		});
 
+		// Finding 2 tail (parser): the flat name->slot map leaked inner-scope names to
+		// the enclosing scope — shadowed locals hijacked the outer name after the block
+		// closed ("sibling scopes' same-named locals alias" family; also hit by jai_rogue).
+		test("inner_scope_locals_do_not_leak_to_outer_reads", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = demoreel_engine(use_vm);
+				auto r = e->execute(R"(
+					function shadow1() -> int {
+						int v = 1;
+						{ int v = 2; }
+						return v;
+					}
+					function shadow2() -> int {
+						int v = 1;
+						for (int i = 0; i < 3; ++i) { int v = 10 + i; }
+						return v;
+					}
+					function shadow3() -> int {
+						int v = 1;
+						for (auto v : [7, 8, 9]) { }
+						return v;
+					}
+					shadow1() * 10000 + shadow2() * 100 + shadow3()
+				)");
+				check_eq((int64_t)10101, r.as_int(), backend_tag(use_vm) + "block/for-body/range-for shadowing restores the outer local");
+			}
+		});
+
 		// Finding 3 (interpreter): ++x on an enclosing-scope local inside a for body.
 		test("preincrement_outer_local_in_for_body", [this]() {
 			for (bool use_vm : {false, true}) {

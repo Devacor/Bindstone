@@ -1,5 +1,13 @@
 # JaiScript Binary Serialization System
 
+> **HISTORICAL VISION — the shipped system lives under different names; see SERIALIZATION.md.**
+> What actually shipped:
+> - `.version(3)` → shipped as `dynamic_binder::version(uint32_t)` (`dynamic_binder.hpp`)
+> - `serialize_construct` → shipped as `dynamic_binder::deserialization_factory(...)`
+> - the JSON/binary format → shipped as the `jai_archive` system, documented in SERIALIZATION.md
+> - the network layer (`network_archive`, delta-sync, `to_binary()`/`sync()`, `MV_PROPERTY`
+>   auto-import) → NEVER BUILT (`network_flags` exists only as unconsumed scaffolding)
+
 ## Vision: Unified Property-Based Serialization
 
 JaiScript's serialization system aims to unify Bindstone's existing property framework with multi-format serialization, providing a single source of truth for object metadata that drives JSON, binary, and network replication automatically.

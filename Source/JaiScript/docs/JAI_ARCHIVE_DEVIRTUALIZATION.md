@@ -1,5 +1,12 @@
 # JaiScript Archive Devirtualization
 
+> **DONE as of 2026-07 — fully shipped, including this doc's own "Remaining Work" items:**
+> `write_unique_ptr`/`read_unique_ptr` are templated (`property_serialization.hpp`) and the
+> legacy virtual `archive_writer`/`archive_reader` base classes are DELETED. CRTP bases live
+> across the serialization headers; versioned save/load detection has since evolved via the
+> `jai::access` wrappers. The "Current State (Problem)" section below describes a world that no
+> longer exists — historical plan. The Cereal-coexistence section remains live guidance.
+
 This document outlines the plan to eliminate virtual dispatch from JaiScript's serialization hot path, matching Cereal's performance characteristics.
 
 ## Current State (Problem)

@@ -1,5 +1,10 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/strong_ptr.hpp>
+#include <jaiscript/detail/thread_pool.hpp>
+#include <atomic>
+#include <chrono>
+#include <map>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -370,6 +375,110 @@ public:
     }
 };
 
+class thread_pool_tests : public suite {
+public:
+    thread_pool_tests() : suite("thread_pool") {}
+
+    void forge_tests() override {
+        test("construction_and_teardown", [this]() {
+            thread_pool one(1);
+            check_eq(one.worker_count(), size_t(1));
+            thread_pool four(4);
+            check_eq(four.worker_count(), size_t(4));
+            thread_pool defaulted;
+            check(defaulted.worker_count() >= 1);
+        });  // all three destruct here with no submitted work
+
+        test("n_tasks_complete", [this]() {
+            thread_pool pool(4);
+            std::atomic<int> completed{0};
+            for (int i = 0; i < 200; ++i) {
+                pool.submit([&completed] { ++completed; });
+            }
+            pool.wait_idle();
+            check_eq(completed.load(), 200);
+        });
+
+        test("pinned_tasks_run_on_consistent_threads", [this]() {
+            thread_pool pool(3);
+            std::vector<std::vector<std::thread::id>> seen(pool.worker_count());
+            for (int round = 0; round < 20; ++round) {
+                for (size_t w = 0; w < pool.worker_count(); ++w) {
+                    pool.submit_to(w, [&seen, w] { seen[w].push_back(std::this_thread::get_id()); });
+                }
+            }
+            pool.wait_idle();
+            for (size_t w = 0; w < pool.worker_count(); ++w) {
+                check_eq(seen[w].size(), size_t(20));
+                for (const auto& id : seen[w]) {
+                    check(id == pool.worker_thread_id(w));
+                }
+            }
+            // distinct workers really are distinct threads
+            check(pool.worker_thread_id(0) != pool.worker_thread_id(1));
+            check(pool.worker_thread_id(1) != pool.worker_thread_id(2));
+        });
+
+        test("pinned_tasks_preserve_submission_order", [this]() {
+            thread_pool pool(2);
+            std::vector<int> order;
+            for (int i = 0; i < 50; ++i) {
+                pool.submit_to(0, [&order, i] { order.push_back(i); });  // single consumer: no lock needed
+            }
+            pool.wait_idle();
+            check_eq(order.size(), size_t(50));
+            for (int i = 0; i < 50; ++i) { check_eq(order[size_t(i)], i); }
+        });
+
+        test("task_exceptions_do_not_kill_workers", [this]() {
+            thread_pool pool(2);
+            std::atomic<int> caught{0};
+            std::atomic<int> completed{0};
+            pool.on_exception([&caught](std::exception_ptr) { ++caught; });
+            for (int i = 0; i < 10; ++i) {
+                pool.submit([] { throw std::runtime_error("task boom"); });
+            }
+            pool.wait_idle();
+            check_eq(caught.load(), 10);
+            // both workers (and the pinned path) still alive and working afterwards
+            for (int i = 0; i < 20; ++i) { pool.submit([&completed] { ++completed; }); }
+            pool.submit_to(0, [&completed] { ++completed; });
+            pool.submit_to(1, [&completed] { ++completed; });
+            pool.wait_idle();
+            check_eq(completed.load(), 22);
+        });
+
+        test("unhandled_task_exception_is_swallowed", [this]() {
+            thread_pool pool(1);
+            pool.submit([] { throw std::runtime_error("no handler installed"); });
+            pool.wait_idle();
+            std::atomic<bool> alive{false};
+            pool.submit([&alive] { alive = true; });
+            pool.wait_idle();
+            check_true(alive.load());
+        });
+
+        test("clean_shutdown_with_pending_tasks", [this]() {
+            std::atomic<int> started{0};
+            {
+                thread_pool pool(2);
+                for (int i = 0; i < 100; ++i) {
+                    pool.submit([&started] {
+                        ++started;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    });
+                    pool.submit_to(i % 2, [&started] {
+                        ++started;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    });
+                }
+            }  // destructor: drops queued tasks, finishes in-flight ones, joins — must not hang
+            check(started.load() <= 200);
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 FOUNDRY_REGISTER(jai::foundry::tests::strong_ptr_tests)
+FOUNDRY_REGISTER(jai::foundry::tests::thread_pool_tests)

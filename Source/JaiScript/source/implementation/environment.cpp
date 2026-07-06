@@ -433,7 +433,12 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
                             }
                         }
                     }
-                    instance->set_field(id, clone_for_assignment(value));
+                    // Typed fields enforce like locals (declared type; auto infers)
+                    auto enforced = instance->enforce_field_write(id, clone_for_assignment(value));
+                    if (!enforced) {
+                        return enforced.error_value();
+                    }
+                    instance->set_field_unchecked(id, enforced.value());
                     return {};
                 }
             }
@@ -511,7 +516,12 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
                             }
                         }
                     }
-                    instance->set_field(id, std::move(value));
+                    // Typed fields enforce like locals (declared type; auto infers)
+                    auto enforced = instance->enforce_field_write(id, std::move(value));
+                    if (!enforced) {
+                        return enforced.error_value();
+                    }
+                    instance->set_field_unchecked(id, enforced.value());
                     return {};
                 }
             }

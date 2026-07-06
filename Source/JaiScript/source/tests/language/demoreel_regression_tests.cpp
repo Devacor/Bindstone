@@ -234,12 +234,10 @@ public:
 			}
 		});
 
-		// PINNED (pending Dev ruling): field declared types are DISCARDED at runtime — the
-		// class stores only initializer ASTs, so a typed field behaves dynamically on
-		// assignment (an int field silently holds 4.7). Both backends agree. Enforcing
-		// would need per-field declared-type storage in class_definition (+ hot-reload
-		// migration); until then this pins the parity of the current behavior.
-		test("typed_field_assignment_stays_dynamic_parity", [this]() {
+		// RULED (2026-07): typed class fields enforce like locals — the declared type is
+		// stored on the class definition and every field write converts through the same
+		// table '=' uses (an int field truncates 4.7 to 4); 'var' fields stay dynamic.
+		test("typed_field_assignment_converts_parity", [this]() {
 			for (bool use_vm : {false, true}) {
 				auto e = demoreel_engine(use_vm);
 				auto r = e->execute(R"(
@@ -248,8 +246,8 @@ public:
 					f.a = 4.7;
 					f.a
 				)");
-				check_true(r.is_float(), backend_tag(use_vm) + "int field currently holds the raw float (dynamic fields)");
-				check_near(4.7, r.as<double>(), 1e-12);
+				check_true(r.is_int(), backend_tag(use_vm) + "int field truncates a float assign");
+				check_eq((int64_t)4, r.as_int(), backend_tag(use_vm) + "4.7 -> 4");
 			}
 		});
 

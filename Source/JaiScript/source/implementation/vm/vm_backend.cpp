@@ -2990,11 +2990,20 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 							}
 						}
 					}
+					// Typed fields enforce like locals (declared type; auto infers)
 					if (!assigned_to_member) {
 						if (rhs_lvalue) {
-							instance->set_field(sym, clone_for_assignment(value));
+							auto enforced = instance->enforce_field_write(sym, clone_for_assignment(value));
+							if (!enforced) {
+								return enforced.error_value();
+							}
+							instance->set_field_unchecked(sym, enforced.value());
 						} else {
-							instance->set_field(sym, std::move(value));
+							auto enforced = instance->enforce_field_write(sym, std::move(value));
+							if (!enforced) {
+								return enforced.error_value();
+							}
+							instance->set_field_unchecked(sym, enforced.value());
 							value = instance->get_field(sym);
 						}
 						assigned_to_member = true;
@@ -3342,7 +3351,11 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 		if (op_symbol_id != 0) {
 			auto custom_result = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_result.has_value()) {
-				instance->set_field(sym, clone_for_assignment(custom_result.value()));
+				auto enforced = instance->enforce_field_write(sym, clone_for_assignment(custom_result.value()));
+				if (!enforced) {
+					return enforced.error_value();
+				}
+				instance->set_field_unchecked(sym, enforced.value());
 				if (!no_result) { stack_.push_back(std::move(custom_result.value())); }
 				return {};
 			}
@@ -3432,7 +3445,13 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 			return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
 	}
 
-	instance->set_field(sym, clone_for_assignment(resultValue));
+	// Store the enforced (declared-type converted) value; the expression result stays the
+	// promoted value, matching member/element compound semantics
+	auto enforced = instance->enforce_field_write(sym, clone_for_assignment(resultValue));
+	if (!enforced) {
+		return enforced.error_value();
+	}
+	instance->set_field_unchecked(sym, enforced.value());
 	if (!no_result) { stack_.push_back(std::move(resultValue)); }
 	return {};
 }
@@ -5629,7 +5648,12 @@ checked_result<void> vm_backend::assign_member(const script_value& object_value,
 			return result.error_value();
 		}
 	} else if (target.has_field(member_id)) {
-		target.instance->set_field(member_id, clone_for_assignment(value));
+		// Typed fields enforce like locals
+		auto enforced = target.instance->enforce_field_write(member_id, clone_for_assignment(value));
+		if (!enforced) {
+			return enforced.error_value();
+		}
+		target.instance->set_field_unchecked(member_id, enforced.value());
 	} else {
 		std::string member_str(member->member);
 		raise_script_exception("Cannot assign to non-existent member '" + member_str + "'", member->location);
@@ -6172,6 +6196,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 	}
 
 	std::unordered_map<uint64_t, script_value> new_field_defaults;
+	std::unordered_map<uint64_t, type_info_ptr> new_field_types; // declared types (typed fields enforce like locals)
 	std::unordered_map<uint64_t, script_value> new_methods;
 	std::unordered_map<uint64_t, script_value> new_static_methods;
 	std::set<uint64_t> new_static_field_ids;
@@ -6329,6 +6354,10 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 						class_def->add_field_initializer_ast(field_id, initializer_ast);
 					}
 					new_field_defaults[field_id] = default_val;
+					// Declared type ('auto' parses as null and infers; 'var' stores the any tag)
+					if (var_decl->type) {
+						new_field_types[field_id] = var_decl->type;
+					}
 				}
 			}
 
@@ -6451,12 +6480,22 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 						"Property setter requires 'this' and value");
 				}
 				auto instance = args[0].as<std::shared_ptr<class_instance>>();
-				instance->set_field(field_id, args[1]);
-				return args[1];
+				// Typed fields enforce like locals (declared type; auto infers from the
+				// initialized value); the converted value is what gets stored and returned
+				auto enforced = instance->enforce_field_write(field_id, args[1]);
+				if (!enforced) {
+					return enforced;
+				}
+				instance->set_field_unchecked(field_id, enforced.value());
+				return std::move(enforced.value());
 			};
 			auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(field_id);
 			new_methods[setter_id] = script_value::make_function(setter, engine_);
 		}
+
+		// Declared types install first so redefine_class flags a retype as fields_changed
+		// and migrate_fields converts against the NEW types (retype ruling)
+		class_def->replace_field_declared_types(std::move(new_field_types));
 
 		class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_);
 
@@ -6472,6 +6511,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 
 		environment_->clear_all_parent_caches();
 	} else {
+		class_def->replace_field_declared_types(std::move(new_field_types));
 		for (const auto& [field_id, default_val] : new_field_defaults) {
 			std::string field_name(symbolizer_->get_string(field_id));
 			class_def->add_field(field_name, default_val);
@@ -6493,8 +6533,14 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 						"Property setter requires 'this' and value");
 				}
 				auto instance = args[0].as<std::shared_ptr<class_instance>>();
-				instance->set_field(field_id, args[1]);
-				return args[1];
+				// Typed fields enforce like locals (declared type; auto infers from the
+				// initialized value); the converted value is what gets stored and returned
+				auto enforced = instance->enforce_field_write(field_id, args[1]);
+				if (!enforced) {
+					return enforced;
+				}
+				instance->set_field_unchecked(field_id, enforced.value());
+				return std::move(enforced.value());
 			};
 			auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(field_id);
 			class_def->add_method_by_id(setter_id, setter);

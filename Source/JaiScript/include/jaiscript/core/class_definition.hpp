@@ -6,11 +6,18 @@
 #include "engine.hpp"
 #include <set>
 #include <algorithm>
+#include <optional>
 
 namespace jai {
 
 class function_decl;
 class environment;
+
+namespace detail {
+    // Field-write conversion kernel (defined below class_definition): the ONE table for
+    // declared-type class fields across every write path.
+    inline std::optional<script_value> try_convert_field_value(const script_value& value_in, type_info_ptr target_type, engine* eng);
+}
 
 enum class access_level {
     public_access,
@@ -33,7 +40,13 @@ public:
 
     ~class_instance();
 
-    void set_field(uint64_t id, const script_value& value) {
+    // Enforcing write (C++ API surface): converts to the field's declared type like '='
+    // on locals, throws runtime_error on an impossible conversion. Null passes through
+    // (typed-null placeholders: create_instance defaults, uninitialized fields).
+    // Defined out-of-line (needs class_definition + the conversion kernel).
+    void set_field(uint64_t id, const script_value& value);
+
+    void set_field_unchecked(uint64_t id, const script_value& value) {
         auto it = fields_.find(id);
         if (it != fields_.end() && it->second.is_reference()) {
             it->second.deref() = value;
@@ -41,6 +54,12 @@ public:
             fields_.insert_or_assign(id, value);
         }
     }
+
+    // Script-write enforcement: declared-type fields convert like '=' on locals or error
+    // with the locals-identical text; 'var' (any) fields pass through; undeclared ('auto')
+    // fields infer from the current value's tag then enforce. Callers store the returned
+    // value via set_field_unchecked. Defined out-of-line.
+    checked_result<script_value> enforce_field_write(uint64_t id, script_value value) const;
 
     const script_value& get_field(uint64_t id, bool throw_if_missing = true) const;
     script_value& get_field(uint64_t id, bool throw_if_missing = true);
@@ -65,42 +84,10 @@ public:
 
     const std::string& get_class_name() const { return class_name_; }
 
+    // Hot-reload field migration; defined out-of-line (needs class_definition + the
+    // conversion kernel for declared-type retypes).
     void migrate_fields(const std::set<uint64_t>& old_field_ids,
-                       const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
-        std::unordered_map<uint64_t, script_value> new_fields;
-        new_fields.reserve(new_field_defaults.size() + 1);
-
-        for (const auto& [id, default_value] : new_field_defaults) {
-            auto it = fields_.find(id);
-            // Keep the existing runtime value, EXCEPT when the field's declared type changed: a
-            // non-null new default whose kind differs from the held value means the old value is
-            // no longer type-compatible (an int field reloaded as string), so adopt the new
-            // default. A null default carries no type (an uninitialized field's slot), so it can
-            // never trigger a reset. Compared against the instance's actual value — NOT the old
-            // stored default, which for instance fields is a null placeholder until first reload.
-            bool retyped = !default_value.is_null() && it != fields_.end() &&
-                it->second.deref().current_type() != default_value.deref().current_type();
-            if (it != fields_.end() && !retyped) {
-                new_fields.emplace(id, std::move(it->second));
-            } else {
-                new_fields.emplace(id, default_value.clone());
-            }
-        }
-
-        // The C++ base object lives in a runtime-only field (_cpp_object) that never appears
-        // in the declared field defaults. Carry it across so a field-changing reload of a
-        // script class extending a C++ class doesn't drop (and destruct) the C++ object and
-        // leave inherited C++ methods uncallable.
-        uint64_t cpp_id = get_cpp_object_field_id();
-        if (cpp_id != 0 && new_fields.find(cpp_id) == new_fields.end()) {
-            auto it = fields_.find(cpp_id);
-            if (it != fields_.end()) {
-                new_fields.emplace(cpp_id, std::move(it->second));
-            }
-        }
-
-        fields_ = std::move(new_fields);
-    }
+                       const std::unordered_map<uint64_t, script_value>& new_field_defaults);
 
     script_value get_method(uint64_t id, bool throw_if_missing = true) const;
 
@@ -366,6 +353,50 @@ public:
         uint64_t name_id = eng->symbolize(name);
         field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
         field_defaults_cache_valid_ = false;
+    }
+
+    // Declared field types (ruling 2026-07: typed fields enforce like locals). 'auto'
+    // fields store no entry (they infer from the initialized value); 'var' stores the
+    // any tag explicitly (dynamic stays dynamic). Replaced wholesale on definition and
+    // on hot reload; a semantic change flags the next redefine_class as fields_changed
+    // so instances re-migrate (converting per the retype ruling).
+    void replace_field_declared_types(std::unordered_map<uint64_t, type_info_ptr> new_types) {
+        auto same_type = [](type_info_ptr a, type_info_ptr b) {
+            if (!a || !b) return a == b;
+            return a->base_type == b->base_type && a->type_name == b->type_name;
+        };
+        bool changed = field_declared_types_.size() != new_types.size();
+        if (!changed) {
+            for (const auto& [id, t] : new_types) {
+                auto it = field_declared_types_.find(id);
+                if (it == field_declared_types_.end() || !same_type(it->second, t)) {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        field_declared_types_ = std::move(new_types);
+        if (changed) {
+            declared_types_dirty_ = true;
+        }
+    }
+
+    type_info_ptr get_field_declared_type(uint64_t id) const {
+        auto it = field_declared_types_.find(id);
+        if (it != field_declared_types_.end()) {
+            return it->second;
+        }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (type_info_ptr t = parent->get_field_declared_type(id)) {
+                    return t;
+                }
+            }
+        }
+        if (cpp_base_class_) {
+            return cpp_base_class_->get_field_declared_type(id);
+        }
+        return nullptr;
     }
 
     void add_static_field(uint64_t id, const script_value& initial_value) {
@@ -1027,6 +1058,13 @@ public:
             }
         }
 
+        // A declared-type change (int f -> string f) with an identical id-set is invisible
+        // to the comparisons above; replace_field_declared_types flagged it.
+        if (declared_types_dirty_) {
+            fields_changed = true;
+            declared_types_dirty_ = false;
+        }
+
         std::set<uint64_t> old_fields;
         if (fields_changed) {
             for (const auto& [id, _] : field_defaults_) {
@@ -1212,6 +1250,8 @@ private:
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> static_method_overloads_;
     std::unordered_map<uint64_t, std::vector<size_t>> static_method_arities_;
     std::unordered_map<uint64_t, script_value> field_defaults_;
+    std::unordered_map<uint64_t, type_info_ptr> field_declared_types_;
+    bool declared_types_dirty_ = false;
     std::unordered_map<uint64_t, script_value> static_field_values_;
     std::unordered_set<uint64_t> static_fields_;
     std::vector<std::shared_ptr<class_definition>> parent_classes_;
@@ -1321,6 +1361,241 @@ inline std::shared_ptr<class_definition> make_script_class_definition(const std:
 }
 
 // Out-of-line class_instance implementations (need class_definition to be complete)
+
+namespace detail {
+
+// Field-write conversion kernel: the ONE table for declared-type class fields (script
+// writes on both backends, synthesized setters, the C++ set_field API, and hot-reload
+// migration). Returns the STORE-READY value (primitives convert and re-tag to the
+// declared type; pointer-ish and container values keep their own tag — JaiScript
+// objects travel as object OR shared_ptr wrappers over the same holder, so retagging
+// would lie about the storage). Primitive conversions mirror the backends'
+// enforce_type_compatibility; object/shared_ptr acceptance mirrors the field-reference
+// gate (ref_field_constraint_compatible) so direct writes and writes through a bound
+// ref can't diverge. No constructor-based conversions and no object to_bool() (both
+// run script). Returns nullopt when no conversion exists.
+inline std::optional<script_value> try_convert_field_value(const script_value& value_in, type_info_ptr target_type, engine* eng) {
+    const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
+    if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
+        return value;
+    }
+    auto source_type = value.type();
+    auto target = target_type->base_type;
+    if (source_type == target && target != script_value_type::jai_object_type) {
+        if (target == script_value_type::jai_array_type || target == script_value_type::jai_map_type ||
+            target == script_value_type::jai_shared_ptr_type || target == script_value_type::jai_weak_ptr_type) {
+            return value;   // keep the value's own tag
+        }
+        script_value tagged(value);
+        tagged.set_type_info(target_type);
+        return tagged;
+    }
+    if (target == script_value_type::jai_int_type) {
+        if (source_type == script_value_type::jai_float_type) {
+            script_value converted(static_cast<script_int>(value.unchecked_as_float()), eng);
+            converted.set_type_info(target_type);
+            return converted;
+        }
+        if (source_type == script_value_type::jai_bool_type) {
+            script_value converted(static_cast<script_int>(value.unchecked_as_bool() ? 1 : 0), eng);
+            converted.set_type_info(target_type);
+            return converted;
+        }
+        return std::nullopt;
+    }
+    if (target == script_value_type::jai_float_type) {
+        if (source_type == script_value_type::jai_int_type) {
+            script_value converted(static_cast<script_float>(value.unchecked_as_int()), eng);
+            converted.set_type_info(target_type);
+            return converted;
+        }
+        if (source_type == script_value_type::jai_bool_type) {
+            script_value converted(static_cast<script_float>(value.unchecked_as_bool() ? 1.0 : 0.0), eng);
+            converted.set_type_info(target_type);
+            return converted;
+        }
+        return std::nullopt;
+    }
+    if (target == script_value_type::jai_bool_type) {
+        // is_truthy minus the object to_bool() tail (that consult runs script; objects
+        // don't convert into bool fields)
+        std::optional<bool> truthy;
+        switch (value.raw_storage_index()) {
+            case script_value::TYPEID_NULL: truthy = false; break;
+            case script_value::TYPEID_INT: truthy = value.unchecked_as_int() != 0; break;
+            case script_value::TYPEID_FLOAT: truthy = value.unchecked_as_float() != 0.0; break;
+            case script_value::TYPEID_STRING: truthy = !value.unchecked_as_string().empty(); break;
+            case script_value::TYPEID_CHAR: truthy = true; break;
+            default: break;
+        }
+        if (!truthy) {
+            return std::nullopt;
+        }
+        script_value converted(*truthy, eng);
+        converted.set_type_info(target_type);
+        return converted;
+    }
+    if (target == script_value_type::jai_string_type) {
+        script_value converted(value.to_string(), eng);
+        converted.set_type_info(target_type);
+        return converted;
+    }
+    if (source_type == script_value_type::jai_null_type) {
+        if (target == script_value_type::jai_object_type ||
+            target == script_value_type::jai_shared_ptr_type ||
+            target == script_value_type::jai_weak_ptr_type) {
+            script_value null_val(std::monostate{}, eng);
+            null_val.set_type_info(target_type);
+            return null_val;
+        }
+        return std::nullopt;
+    }
+    if (target == script_value_type::jai_object_type || target == script_value_type::jai_shared_ptr_type) {
+        // Empty pointer wrappers (shared_ptr<S>()) are null-like: storable as-is
+        if ((source_type == script_value_type::jai_shared_ptr_type ||
+             source_type == script_value_type::jai_weak_ptr_type ||
+             source_type == script_value_type::jai_object_type) &&
+            value.get_object_holder() == nullptr) {
+            return value;
+        }
+        auto holder = value.get_object_holder();
+        if (!holder) {
+            return std::nullopt;
+        }
+        if (target_type->type_name.empty()) {
+            return value;
+        }
+        // shared_ptr targets: a dynamic (var/untagged) holder is ground truth
+        if (target == script_value_type::jai_shared_ptr_type) {
+            auto tag = value.get_type_info();
+            if (!tag || tag->base_type == script_value_type::jai_any_type) {
+                return value;
+            }
+        }
+        const class_definition* class_def = nullptr;
+        std::shared_ptr<class_definition> engine_def;
+        if (holder->is_class_instance_wrapper && holder->data) {
+            class_def = std::static_pointer_cast<class_instance>(holder->data)->get_class_definition();
+        } else if (eng) {
+            engine_def = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id)
+                                                       : eng->get_class_definition(holder->type_name);
+            class_def = engine_def.get();
+        }
+        if (class_def && class_def->is_subtype_of(target_type->type_name)) {
+            return value;
+        }
+        if (holder->type_name == target_type->type_name) {
+            return value;
+        }
+        auto tag = value.get_type_info();
+        if (tag && tag->base_type != script_value_type::jai_any_type &&
+            tag->type_name == target_type->type_name) {
+            return value;
+        }
+        // Untagged object values keep the permissive fallback (matches the ref-field gate)
+        if (source_type == script_value_type::jai_object_type && !tag) {
+            return value;
+        }
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+} // namespace detail
+
+inline checked_result<script_value> class_instance::enforce_field_write(uint64_t id, script_value value) const {
+    if (!class_def_) {
+        return std::move(value);
+    }
+    type_info_ptr declared = class_def_->get_field_declared_type(id);
+    if (!declared) {
+        // auto fields: inferred from the initialized value's tag, then enforced like locals
+        const script_value* cur = find_field_value(id);
+        type_info_ptr tag = (cur && !cur->is_reference()) ? cur->get_type_info() : nullptr;
+        if (!tag || tag->base_type == script_value_type::jai_any_type ||
+            tag->base_type == script_value_type::jai_null_type) {
+            return std::move(value);
+        }
+        declared = tag;
+    } else if (declared->base_type == script_value_type::jai_any_type) {
+        return std::move(value);
+    }
+    auto converted = detail::try_convert_field_value(value, declared, engine_);
+    if (!converted) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
+            "Type mismatch in assignment", declared->id);
+    }
+    return std::move(*converted);
+}
+
+inline void class_instance::set_field(uint64_t id, const script_value& value) {
+    // Null passes through: typed-null placeholders (create_instance defaults,
+    // uninitialized fields) must remain storable from C++.
+    if (class_def_ && !value.is_null()) {
+        if (type_info_ptr declared = class_def_->get_field_declared_type(id);
+            declared && declared->base_type != script_value_type::jai_any_type) {
+            auto converted = detail::try_convert_field_value(value, declared, engine_);
+            if (!converted) {
+                throw runtime_error("Type mismatch in assignment");
+            }
+            set_field_unchecked(id, *converted);
+            return;
+        }
+    }
+    set_field_unchecked(id, value);
+}
+
+inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_ids,
+                                           const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
+    (void)old_field_ids;
+    std::unordered_map<uint64_t, script_value> new_fields;
+    new_fields.reserve(new_field_defaults.size() + 1);
+
+    for (const auto& [id, default_value] : new_field_defaults) {
+        auto it = fields_.find(id);
+        type_info_ptr declared = class_def_ ? class_def_->get_field_declared_type(id) : nullptr;
+        if (it != fields_.end() && !it->second.is_reference() && !it->second.is_null() &&
+            declared && declared->base_type != script_value_type::jai_any_type) {
+            // Hot-reload retype ruling (2026-07): a declared-type change CONVERTS the live
+            // value wherever the assignment table allows (float->int truncates, int->string
+            // via to_string, subtype objects stay); only a value with NO conversion (object
+            // into int, string into int) falls back to the new initializer default. Reloads
+            // stay permissive and never brick an instance. Same-type fields pass through the
+            // kernel's same-type fast path and keep their value.
+            if (auto converted = detail::try_convert_field_value(it->second, declared, engine_)) {
+                new_fields.emplace(id, std::move(*converted));
+            } else {
+                new_fields.emplace(id, default_value.clone());
+            }
+            continue;
+        }
+        // Undeclared ('auto') / var / reference / null-valued fields keep the tag heuristic:
+        // keep the existing runtime value, EXCEPT when a non-null new default's kind differs
+        // from the held value (an auto field reloaded with a different-typed initializer), so
+        // adopt the new default. A null default carries no type and never triggers a reset.
+        bool retyped = !default_value.is_null() && it != fields_.end() &&
+            it->second.deref().current_type() != default_value.deref().current_type();
+        if (it != fields_.end() && !retyped) {
+            new_fields.emplace(id, std::move(it->second));
+        } else {
+            new_fields.emplace(id, default_value.clone());
+        }
+    }
+
+    // The C++ base object lives in a runtime-only field (_cpp_object) that never appears
+    // in the declared field defaults. Carry it across so a field-changing reload of a
+    // script class extending a C++ class doesn't drop (and destruct) the C++ object and
+    // leave inherited C++ methods uncallable.
+    uint64_t cpp_id = get_cpp_object_field_id();
+    if (cpp_id != 0 && new_fields.find(cpp_id) == new_fields.end()) {
+        auto it = fields_.find(cpp_id);
+        if (it != fields_.end()) {
+            new_fields.emplace(cpp_id, std::move(it->second));
+        }
+    }
+
+    fields_ = std::move(new_fields);
+}
 
 inline bool class_instance::is_script_class() const {
     return class_def_ && class_def_->is_script_class();

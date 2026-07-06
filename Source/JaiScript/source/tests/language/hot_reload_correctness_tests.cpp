@@ -63,15 +63,34 @@ public:
             check_eq(eng->execute("d.nb").as<int>(), 7);  // new inherited field added
         });
 
-        // Changing a field's declared type on reload (int -> string) must adopt the new-typed
-        // default, not keep the stale old-typed value. The retype leaves the field-id set
-        // identical, so `fields_changed` stayed false and migration was skipped — the type
-        // change is detected against the live instance value instead.
-        test("field_type_change_resets_value", [&]() {
+        // RETYPE MIGRATION RULING (2026-07): changing a field's declared type on reload
+        // CONVERTS the live value wherever the assignment conversion table allows
+        // (int -> string via to_string, float -> int truncation, int -> float widening);
+        // only a value with NO conversion (object into int, non-numeric string into int)
+        // falls back to the new initializer default. Hot reload stays permissive and never
+        // bricks an instance. Both backends share migrate_fields, so behavior is identical.
+        test("field_type_change_converts_value", [&]() {
             auto eng = make_engine();
             eng->execute(R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )");
-            eng->execute("class Box { string val = \"\"; }"); // int -> string
-            check_eq(std::string(""), eng->execute("b.val").as<std::string>());
+            eng->execute("class Box { string val = \"\"; }"); // int -> string: converts
+            check_eq(std::string("42"), eng->execute("b.val").as<std::string>());
+        });
+
+        test("field_type_change_numeric_conversions", [&]() {
+            auto eng = make_engine();
+            eng->execute(R"( class Box { float f = 0.0; int i = 0; } auto b = Box(); b.f = 6.9; b.i = 3; )");
+            eng->execute("class Box { int f = 0; float i = 0.0; }"); // float<->int swap
+            check_eq(eng->execute("b.f").as<int>(), 6);      // 6.9 truncates toward zero
+            check_eq(eng->execute("b.i").as<double>(), 3.0); // widened
+        });
+
+        // No conversion exists (non-numeric string into int): fall back to the NEW default
+        // instead of erroring the reload.
+        test("field_type_change_unconvertible_adopts_default", [&]() {
+            auto eng = make_engine();
+            eng->execute(R"( class Box { string s = ""; } auto b = Box(); b.s = "hello"; )");
+            eng->execute("class Box { int s = 5; }"); // string -> int: no conversion
+            check_eq(eng->execute("b.s").as<int>(), 5);
         });
 
         // The flip side: only a *type* change resets. Changing an initializer to a new value of
@@ -84,9 +103,10 @@ public:
             check_eq(eng->execute("b.val").as<int>(), 42); // runtime value preserved, not reset
         });
 
-        // An inherited field whose declared type changes when the BASE reloads must reset on the
-        // derived instance too — the retype is propagated through update_instances_from_base.
-        test("inherited_field_type_change_resets_on_derived", [&]() {
+        // An inherited field whose declared type changes when the BASE reloads converts on
+        // the derived instance too (retype ruling) — propagated through
+        // update_instances_from_base, resolving the declared type through the parent chain.
+        test("inherited_field_type_change_converts_on_derived", [&]() {
             auto eng = make_engine();
             eng->execute(R"(
                 class Base { int bv = 0; }
@@ -96,7 +116,7 @@ public:
                 d.dv = 99;
             )");
             eng->execute("class Base { string bv = \"\"; }"); // inherited bv int -> string
-            check_eq(std::string(""), eng->execute("d.bv").as<std::string>()); // retyped, reset
+            check_eq(std::string("42"), eng->execute("d.bv").as<std::string>()); // retyped, converted
             check_eq(eng->execute("d.dv").as<int>(), 99); // derived-own data preserved
         });
 

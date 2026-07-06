@@ -58,10 +58,10 @@ of the other backend — press TAB and watch the ms number move.
 | 2 | STARFIELD | 3D perspective star streaming with speed-scaled trails (flat parallel arrays on purpose) |
 | 3 | DONUT | the rotating torus homage, z-buffered, luminance-shaded ASCII, molten copper |
 | 4 | JULIA | morphing Julia set (c orbits the cardioid), escape-count colored, half-res doubled columns |
-| 5 | PIPEDREAM | the 3D Pipes screensaver homage: four pipes race a 16x12x16 voxel volume, ball joints at turns, orbiting camera, fill -> hold -> fade -> reseed. ~2% of joints spawn the jackodile's eye (a rainbow-flicker cell) — canon demanded a teapot |
+| 5 | PIPEDREAM | the 3D Pipes screensaver homage: four THICK pipes (block-glyph splats, midpoint-filled tubes) grow one segment per tick through a 16x12x16 voxel volume, glossy elbow balls at every turn, never intersecting. The camera holds still for a whole generation — fill, hold, CRT wipe, reseed from a NEW angle. ~2% of elbows spawn the jackodile's eye (a rainbow-shimmering ball) — canon demanded a teapot |
 | 6 | POWDER | falling-sand toy: sand / water / ember / plant / smoke, each element a script class, spawners keep it evolving |
 | 7 | BOIDS | murmuration with fading trails and one hungry hawk |
-| 8 | KINSTEIN 3D | Wolfenstein-style DDA raycaster over an authored 24x24 keep: one ray per column, perpendicular-distance slices (no fisheye), N/S vs E/W face shading, stone/moss/gold walls + an animated rainbow-fire banner, scripted look-ahead flight path. The reel's compute stress scene |
+| 8 | KINSTEIN 3D | Wolfenstein-style DDA raycaster over an authored 24x24 keep: one ray per column, perpendicular-distance slices (no fisheye), N/S vs E/W face shading, stone/moss/gold walls + an animated rainbow-fire banner. Billboard Grublins and Orglis brutes garrison the route (wall-occluded per column, distance-scaled, idle wobble); the scripted camera auto-fires on line-of-sight cone lock — muzzle flash, rainbow tracer, hit-flash, gib scatter, kill tally. Enemies respawn each lap. The reel's compute stress scene |
 | 9 | FIRE | bottom-seeded convection fire that ignites into RAINBOW fire mid-scene (house signature) |
 | 10 | FINALE | a fire wall out of which "JAISCRIPT" ignites, burns in rolling rainbow flame, and remains glowing as the fire dies |
 
@@ -76,16 +76,17 @@ seed 20260705, fixed dt 1/30, whole 10-scene reel incl. transitions
 
 | backend | ms/frame (mean) | fps | boot (parse) |
 | ------- | --------------- | --- | ------------ |
-| interpreter | 63.0 | ~16 | 11.6 ms |
-| **VM** | **60.5** | **~17** | 13.0 ms |
+| interpreter | 95.8 | ~10 | 16.3 ms |
+| **VM** | **55.6** | **~18** | 21.5 ms |
 
-- The whole-reel mean is dominated by the shared render pipeline (palette-indexed
-  string assembly through the builtin container methods), which is backend-
-  neutral; the VM's edge shows per scene — see the new-scene `--bench` splits
-  below. (The previous 8-scene table — 47.0 / 39.8 ms, VM 1.16x — predates the
-  two new scenes and an engine rulings pass; not directly comparable.)
+- The VM now runs the whole reel **1.72x** faster than the interpreter — the
+  widest gap this reel has measured. (The previous 8-scene table — 47.0 / 39.8
+  ms, VM 1.16x — predates the two new scenes and several engine passes on the
+  VM-perf branch; not directly comparable.)
 - Parity: frame streams **byte-identical** across backends over 1,300 frames —
-  every one of the ten scene entries, including both new scenes. Debug build
+  every one of the ten scene entries, including both new scenes — and over a
+  2,660-frame full-duration run that covers PIPEDREAM's complete
+  fill/hold/wipe/reseed generation and KINSTEIN's combat window. Debug build
   parity also green (40-frame spot check + per-scene exercise of PIPEDREAM and
   KINSTEIN on both backends).
 - Debug build: ~843 / ~679 ms per frame (interpreter / VM) — iterate in Release
@@ -130,20 +131,22 @@ Measured on conhost (Release, 120 real frames per scene, ~110x29 window):
 | finale | 29.9 KB -> 10.9 KB (3.0x) | 19.4 -> 9.7 | 13.4 -> 14.9 (sim-bound) |
 | starfield (`--diff`) | 5.3 KB -> 2.4 KB | 1.0 | 82 uncapped |
 
-The two new scenes, measured headless (`--bench 20 --scene I`, Release, 100x40,
-truecolor+tolerance mode — sim ms is the interesting split here):
+The two new scenes, measured headless (`--bench 30 --scene I`, Release, 100x40,
+truecolor+tolerance mode, quiet machine — sim ms is the interesting split here):
 
 | scene | backend | sim ms | bytes/frame raw -> written | fps uncapped |
 | ----- | ------- | ------ | -------------------------- | ------------ |
-| PIPEDREAM (4) | vm | 35.3 | 18.9 KB -> 15.1 KB (1.25x) | 27.9 |
-| PIPEDREAM (4) | interpreter | 43.1 | 19.2 KB -> 15.3 KB (1.26x) | 22.9 |
-| KINSTEIN (7) | **vm** | **26.4** | 9.1 KB -> 9.1 KB (1.00x) | **37.3** |
-| KINSTEIN (7) | interpreter | 31.1 | 9.0 KB -> 9.0 KB (1.00x) | 31.7 |
+| PIPEDREAM (4) | **vm** | **25.6** | 14.8 KB -> 14.4 KB (1.02x) | **38.3** |
+| PIPEDREAM (4) | interpreter | 39.7 | 14.9 KB -> 14.5 KB (1.02x) | 24.8 |
+| KINSTEIN (7) | **vm** | **28.4** | 9.0 KB -> 9.0 KB (1.00x) | **34.2** |
+| KINSTEIN (7) | interpreter | 32.2 | 9.0 KB -> 9.0 KB (1.00x) | 30.7 |
 
 KINSTEIN is the cheapest frame in the reel to *write*: quantized distance shades
 over solid-bg slices mean the script's own run-length trick already emits ~9 KB
-a frame — the host filter finds nothing left to trim (1.00x). It is also the
-clearest VM-vs-interpreter sim gap on TAB (26.4 vs 31.1 ms).
+a frame — the host filter finds nothing left to trim (1.00x). PIPEDREAM shows
+the widest per-scene TAB gap (25.6 vs 39.7 ms sim, VM 1.55x) — its incremental
+splat pass is pure scripted control flow, exactly where the VM pulls ahead.
+Both scenes hold comfortably above 20 fps on both backends in Release.
 
 And if it still *feels* like one frame per second: check you're not running the
 Debug build (~0.7 s of sim per frame — see above).
@@ -207,32 +210,43 @@ BOIDS (`--capture 6` — the flock, trails, and the hawk `@`):
                           . :/  :/   */
 ```
 
-PIPEDREAM (`--capture 4`, ANSI stripped — voxel pipes mid-growth, ball joints
-at the turns, depth-shaded glyphs):
+PIPEDREAM (brightness map of the raw frame near fill — thick interlocking tubes;
+the brightest cells are the glossy elbow balls; every generation reseeds from a
+new static camera angle):
 
 ```
-             88   88 oo  oo               OO          OO       @@oo @@o  88 ooo
-               OO  88OO 88ooOOO OO  OO   88           @@  88 oo             oo 88
-                     88o   oo88  OO **O  88O          @@   @@            @@oo O88
-                 88OO   oo  **             ooo        OO                      88
-                         **         OOO oo ooo        @@   @@             @@o   OO
-                  OO  OO  88         oOO   ooo+oo     OO                  +*oo
-                  @@8  OO  OO  88   88 OOo  oo+oo     @@   @@            +88o   OO
-                         OO     oo oOO oooooo++                OO       +-@@oo   OO
-                 @@88    oo  oo**oo+oOO8+oo88o*oo     @@   @@            @@  oo
-                    oo ooOO   +++ooooo888 +oo. oo            ** @@     8OO- OO O88OO
+                  ####@@%%@@%%@@@@@@@#################@@@@@@@@@@@@@@**@@%%%****### %%%
+             ********#%%%%%%%@@@@#########@@########@@@#@@@@@@@@@@@@**@@%%% ***  ###%%
+             *+****   %%%%%%%@########################@#####@@@@@@@@@#@@%%  ***    ##
+             ++++**++ %@@%%###############@@########@@@#####@@@@@@@@@@@*%%  ****   #%%%
+            **++++   +%@%%%###@#########@@############@#######@@@@@@@##***%% *** %##%%%
+            ****++   %%%%%#@#########@@##@############@########@@@@@@@@@**** *** ##%
+            ######   %%%%%########@**%%%#@@@########@@@########@@@@@@@@@##**%%%%**#
+           %%%#### **%%%%**@#####****%%##@####@@@@@###@@@@@######@@@@@@@##***********
+           %%%****** %%%@##@#####**%%%%@@@@@##@@@@@#@@@#@@@@@####@@@@@***************  ###
+           ** %%%    %%%@#@@@####*********@@##@@@@@#@@@##########@@@@@@@@%%  @@@@*****++##
+          ***       %%%@@@@@@######@@@@@##@@@@@###@@@@@#####@@@###@@@@@@@@@@@@@######@+##
+          **       @@@@@@@@@@@#####@@@@@##########@@@@@###@@@@@###%%% @@@@@@@####@###@###+
 ```
 
 KINSTEIN 3D (brightness map of the raw frame — a one-point-perspective corridor,
-full-height near slices at the edges stepping down to the vanishing point):
+full-height near slices at the edges stepping down to the vanishing point; the
+bright center column is a rainbow tracer mid-kill, the dots around it gib
+scatter where the Grublin stood, and the `-+-` at the bottom is the gun):
 
 ```
-%%%%%%%%%%%%%%%%%%%%%%#######******++++===---::       :--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%#######******++++===---::.......:--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%#######******++++===---:........:--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%#######******++++===--............-====++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%#######******++++==..................==++++******#######%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%#######******++........................++******#######%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#####..............................................#####%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******++++===---::       :--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******++++===---:. .. .. :--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******++++===---:....@...:--====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******++++===--......%.....-====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******++++===-.......+......====++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******++++==.........=........==++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******++++...........+..........++++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******++.............#............++******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######******...............@..............******#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######****.................%................****#######%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%#######:::::::::::::::::::::+::::::::::::::::::::#######%%%%%%%%%%%%%%%%%%%%%%
 ```
 
 FINALE afterglow (brightness map of the raw frame as the fire dies — the word
@@ -370,6 +384,16 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
 **Paper cuts:** error text reaching the host keeps `{0}` placeholders and drops
 script context; `override` is required to redefine a base method (good check,
 surprising the first time); no script-side float→int cast.
+
+**Perf lesson (2026-07-06, PIPEDREAM):** a script *method call* costs on the
+order of tens of microseconds — an empty-bodied helper invoked ~1,500x per frame
+cost ~60 ms before its body ran a single op (measured by gutting the method).
+Fine-grained helpers in per-cell loops are a trap; either inline the work or
+restructure so the call count collapses. PIPEDREAM's fix was architectural: the
+canon-accurate static camera makes the screen image persistent, so the scene
+splats only the ~dozen voxels grown per frame into a kept buffer instead of
+re-projecting the whole volume (160+ ms -> fire-scene cost). KINSTEIN keeps its
+per-blob helper but does one sqrt per sprite ROW instead of float math per cell.
 
 **What carried the demo:** parity discipline is real — thousands of frames
 byte-identical across two completely different execution engines, in Debug and

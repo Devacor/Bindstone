@@ -211,7 +211,13 @@ The design trades a single type comparison at assignment/declaration for elimina
 
 ## Future Considerations
 
-1. **Type annotations in function parameters**: `fn foo(x: int) { }`
-2. **Return type declarations**: `fn bar() -> int { return 5; }`
-3. **Const declarations**: `const x = 5;` (locked and immutable)
-4. **Union types**: `var x: int | string;`
+1. ✅ **Typed function parameters** — SHIPPED with C-style syntax: `int foo(int x) { }` (plus the
+   shorthands `int: x` and `:x`; see `grammar.md`), not the speculated `fn foo(x: int)` form.
+2. ✅ **Return type declarations** — SHIPPED: `int bar() { return 5; }` and trailing
+   `auto bar() -> int { ... }`.
+3. **Const declarations**: `const x = 5;` — still open. `const` currently parses ONLY on
+   range-`for` bindings (`for (const auto& x : xs)`).
+4. **Union types**: `var x: int | string;` — still open.
+
+For compile-time enforcement of this ladder (off/warn/strict, narrowing diagnostics, jaibite
+`checked_clean()`), see **`static_checking.md`** — the static companion to this runtime doc.

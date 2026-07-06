@@ -1,208 +1,66 @@
 # JaiScript Roadmap
 
-## Type System Gaps
+Updated 2026-07. Shipped work is listed once with commit refs and then dropped from the live
+sections; the old (2025) pillar ordering is dead.
 
-### High Priority
+## Shipped (formerly roadmap pillars)
 
-#### shared_ptr<T> Auto-Unwrap Assignment (COMPLETED)
-**Current**: `shared_ptr<T>` doesn't delegate assignment to T's operator=
-**Expected**: Value-like RHS should auto-unwrap to underlying object
-```javascript
-class Counter {
-    int value = 0;
-    auto operator=(int v) { value = v; }
-}
+- **Serialization** ✅ — pointer deduplication with cycle handling (`archive_impl.hpp`), binary +
+  JSON formats, versioning (see `SERIALIZATION.md`); jaibite binary save/load of parsed scripts
+  (`80fd619b`).
+- **VM Completion** ✅ — full-parity bytecode VM: exception handling (`94311244`), reference
+  semantics via the shared lvalue kernel `detail/ref_lvalue.hpp` (`e43f8a6f`, `b637fa18`).
+  Run everything with `--backend=vm`; MV defaults to the VM.
+- **shared_ptr<T> auto-unwrap assignment** ✅ — delegates to T's `operator=` per the detection
+  rules in `TYPE_SYSTEM_DESIGN.md`.
+- **Explicit-truncation strictness** ✅ obviated — runtime keeps the C++-conversion ruling
+  (`9e5fea2f`, `5f7482d5`); the strictness surface is opt-in static checking off/warn/strict
+  (`2301d5ce`, `static_checking.md`).
+- **Test-coverage asks** ✅ exceeded — the differential interpreter-vs-VM fuzzer (`f3cd4206`)
+  plus ~1600 Foundry tests green on both backends.
 
-auto a = shared_ptr<Counter>(5);
-auto b = a;
-a = 10;           // Should call Counter::operator=(int)
-print(b.value);   // Should be 10 (shared mutation)
-```
+## Live roadmap (in rough order)
 
-**Detection Rules**:
-- `null` → Pointer op: nullify
-- `shared_ptr<U>` where U : T → Pointer op: reassign
-- Same type T → Value op: copy contents
-- Different type → Value op: call operator= if exists
+1. **CELLS reference-model refactor** — IN FLIGHT (uncommitted on VM-perf): unify the four-mode
+   `reference_holder` around cell storage. After it lands: write the replacement
+   reference-model doc and re-verify `invariants.md` §3.
+2. **`parallel_for` / `pmap`** — designed and ruled (prove-it-or-stay-serial (A), 2026-07-06);
+   see `parallel_design.md` + `parallel_prove_or_serial.md`. Step 1 (thread pool,
+   `detail/thread_pool.hpp`) has landed.
+3. **Flat-stack VM** — move the VM off environment-backed frames toward a flat value stack for
+   the remaining interpreter-vs-VM perf gap.
+4. **QoL bundle** (Dev rulings):
+   - `format()` / template-string hardening
+   - `import` hardening: content-hash-based cache invalidation, cycle detection,
+     import-as-namespace
+   - "did you mean ...?" suggestions on unknown identifiers/members
 
-See TYPE_SYSTEM_DESIGN.md "Assignment Semantics" section for full specification.
+## Type system — genuinely open
 
-#### Map Key Homogeneity
-**Current**: Map keys can be mixed types with `auto`
-**Expected**: `auto` maps should enforce homogeneous keys like arrays
-```javascript
-auto m = {{"a", 1}, {2, 3}};  // Should error: mixed key types
-```
-
-#### Smart Pointer Type Validation
-**Current**: `weak_ptr<T>` and `shared_ptr<T>` don't validate T at runtime
-**Expected**: Type parameter should be checked on assignment
-```javascript
-weak_ptr<Creature> ref = OtherClass();  // Should error
-```
-
-#### Deduced Type Tracking for array<auto>
-**Current**: `array<auto>` validates homogeneity but doesn't track the deduced type
-**Expected**: After declaration, type should be locked for push/insert operations
-```javascript
-array<auto> nums = [1, 2, 3];  // Deduced: array<int>
-nums.push("x");                 // Should error: string into int array
-```
-
-### Medium Priority
-
-#### Const Support
-**Current**: No const keyword
-**Expected**: Immutable declarations
-```javascript
-const int x = 5;
-const array<int> nums = [1, 2, 3];
-```
-
-#### Explicit Truncation Warning/Error Option
-**Current**: `int x = 3.14` silently truncates
-**Option**: Configurable strictness level or require explicit cast
-
-### Lower Priority
-
-#### Union Types
-```javascript
-int | null maybe;
-string | int flexible;
-```
-
-#### Type Narrowing
-```javascript
-if (x is int) {
-    // x known as int in this scope
-}
-```
-
-#### Generic Functions
-```javascript
-function<T> identity(T x) -> T { return x; }
-```
-
-## Standard Library Additions
-
-### Box<T> Utility Type
-**Purpose**: Enable shared mutation of primitives via `shared_ptr<Box<T>>`
-```javascript
-class Box<T> {
-    T value;
-    Box(T v) { value = v; }
-    auto operator=(T v) { value = v; return this; }
-}
-
-auto x = shared_ptr<Box<int>>(5);
-auto y = x;
-y = 10;           // Box<int>::operator=(int)
-print(x.value);   // 10 (shared mutation)
-```
-
-**Requirements**:
-- Serialization support (serialize as wrapped value)
-- All comparison operators delegating to T
-- `weak_ptr<Box<T>>` works naturally
-
-## Serialization System
-
-### Pointer Deduplication
-- Track `shared_ptr` instances across serialization
-- Handle circular references
-- Maintain object identity through save/load
-
-### Binary Format
-- Compact binary serialization option
-- Versioning for schema evolution
-- Zero-copy deserialization where possible
-
-## Hot Reload Extensions
-
-### Function State Preservation
-- Maintain local variables during reload
-- Preserve call stack
-- Update function bodies in-place
-
-## VM Backend
-
-### Exception Handling
-**Current**: try/catch/throw works in interpreter only
-**Needed**: VM opcodes and compilation support
-
-### Reference Semantics
-**Design**: See VM_REFERENCE_SEMANTICS_DESIGN.md
-- MAKE_REFERENCE, LOAD_REFERENCE, STORE_REFERENCE opcodes
-- Lvalue/rvalue context detection in compiler
+- **Const declarations** — `const int x = 5;` (today `const` parses only on range-`for`
+  bindings).
+- **Union types** — `int | null`, `string | int`.
+- **Type narrowing** — `if (x is int) { ... }`.
+- **Script-side generics** — `function<T> identity(T x) -> T`.
+- **`array<auto>` deduced-type push-lock** — homogeneity is validated at declaration, but the
+  deduced element type isn't enforced on later `push`/insert.
+- **Map key homogeneity** — `auto m = {{"a", 1}, {2, 3}};` (mixed key types) is currently
+  allowed; decision needed.
+- **Smart-pointer type-parameter validation** — `weak_ptr<Creature> ref = OtherClass();` isn't
+  checked at runtime.
 
 ## Tooling
 
-### Language Server Protocol (LSP)
-- Autocomplete
-- Go to definition
-- Error diagnostics
+The static checker now provides the substrate (`engine::check()`, `check_report`,
+per-diagnostic locations — `engine.hpp`):
 
-### Syntax Highlighting
-- VS Code extension
-- Sublime Text package
+- Language Server Protocol (autocomplete, go-to-definition, diagnostics)
+- Syntax highlighting (VS Code, Sublime)
+- Debugger (breakpoints, stepping, variable inspection)
 
-### Debugger
-- Breakpoints
-- Step through
-- Variable inspection
-
-## Test Coverage Gaps
-
-### Container Operations After Declaration
-```javascript
-// Test: push to array<auto> after type deduction
-array<auto> nums = [1, 2];
-nums.push(3);      // Should work
-nums.push("x");    // Should error
-```
-
-### Map Key Type Validation
-```javascript
-// Test: mixed key types in auto map
-auto m = {{"a", 1}, {2, 3}};  // Document expected behavior
-```
-
-### Smart Pointer Assignment Validation
-```javascript
-// Test: wrong type to typed weak_ptr
-weak_ptr<A> ref;
-ref = B();  // Document expected behavior
-```
-
-### Nested Container Modification
-```javascript
-// Test: modifying nested containers preserves type constraints
-auto grid = [[1, 2], [3, 4]];
-grid[0].push("x");  // Should error if homogeneity tracked
-```
-
-## Documentation Needs
+## Documentation needs
 
 - [ ] API reference for stdlib functions
 - [ ] C++ integration cookbook with common patterns
-- [ ] Migration guide from ChaiScript
-- [ ] Performance tuning guide
-
-## Priority Order
-
-1. **Type System Correctness**
-   - Map key validation
-   - Smart pointer type params
-   - array<auto> deduced type tracking
-
-2. **Serialization** (enables save games)
-   - Pointer deduplication
-   - Binary format
-
-3. **VM Completion** (enables performance)
-   - Exception handling
-   - Reference semantics
-
-4. **Tooling** (enables adoption)
-   - LSP
-   - Syntax highlighting
+- [ ] Reference-model doc (write AFTER cells lands)
+- [ ] Performance tuning guide (seed from `thin_value_rebaseline.md` §6)

@@ -2000,6 +2000,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         return self; // Return the reset shared_ptr
     }},
 
+        // RULED (2026-07, open question #9, option C): use_count() reports the OUTER
+        // strong_ptr<object_holder> count — the layer script alias copies bump and the
+        // layer script weak_ptr expiry follows — so `shared_ptr<T> a = T()` reports 1
+        // and `var b = a;` makes it 2. The builtin's own call path holds transient
+        // receiver copies (bound-method capture + this local), so the raw count is
+        // aliases + K with K constant per backend (interp binds one fewer stack copy
+        // than the vm); the offset below is pinned by the alias-ladder parity tests.
+        // Today's inner std::shared_ptr count (C++-side shares) moved to cpp_ref_count().
         {symbolizer->intern("use_count"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "use_count() takes no arguments");
@@ -2008,13 +2016,33 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (self.is_object()) {
             auto obj_holder = self.get_object_holder();
             if (obj_holder && obj_holder->data) {
-                // Get the use count of the underlying shared_ptr
-                long count = obj_holder->data.use_count();
+                const long transient_k =
+                    (ctx.engine_ref && ctx.engine_ref->get_backend_type() == backend_type::vm) ? 3 : 2;
+                long count = static_cast<long>(obj_holder.use_count()) - transient_k;
+                if (count < 1) count = 1;   // the receiver itself always counts
                 return ctx.make_value(static_cast<script_int>(count));
             }
         }
 
         // Not a valid shared_ptr
+        return ctx.make_value(static_cast<script_int>(0));
+    }},
+
+        // Preserves the pre-ruling use_count() number: how many C++-side owners share
+        // the object (as<std::shared_ptr<T>>() / get_class_instance() extractions)
+        {symbolizer->intern("cpp_ref_count"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "cpp_ref_count() takes no arguments");
+        }
+
+        if (self.is_object()) {
+            auto obj_holder = self.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                long count = obj_holder->data.use_count();
+                return ctx.make_value(static_cast<script_int>(count));
+            }
+        }
+
         return ctx.make_value(static_cast<script_int>(0));
     }},
 
@@ -2026,9 +2054,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (self.is_object()) {
             auto obj_holder = self.get_object_holder();
             if (obj_holder && obj_holder->data) {
-                // Check if use count is 1
-                bool is_unique = (obj_holder->data.use_count() == 1);
-                return ctx.make_value(is_unique);
+                // unique = exactly one script handle (mirrors the ruled use_count layer)
+                const long transient_k =
+                    (ctx.engine_ref && ctx.engine_ref->get_backend_type() == backend_type::vm) ? 3 : 2;
+                long count = static_cast<long>(obj_holder.use_count()) - transient_k;
+                return ctx.make_value(count <= 1);
             }
         }
 

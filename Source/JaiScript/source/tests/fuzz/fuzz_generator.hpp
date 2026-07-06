@@ -333,9 +333,13 @@ namespace jai::fuzz {
 				}
 				case 5: { // container predicates
 					if (const var_info* a = random_var(vt::arr)) {
-						switch (rng_.below(3)) {
+						switch (rng_.below(4)) {
 							case 0: return a->name + ".empty()";
 							case 1: return "(" + a->name + ".contains(" + int_literal() + "))";
+							case 2:
+								// bare element read as truthiness (element reads reach
+								// conditions as reference wrappers - is_truthy must deref)
+								return "(" + a->name + ".size() > 0 && " + a->name + "[0])";
 							default: return "(" + a->name + ".has(" + int_literal() + "))";
 						}
 					}

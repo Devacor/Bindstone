@@ -9,6 +9,365 @@
 
 namespace jai {
 
+namespace {
+
+    // ---- Escape-mark pass (cell reference model) ----------------------------------
+    // A variable "ref-escapes" when it may be bound by reference at runtime: it appears
+    // as a bare-identifier call argument (callee ref-ness is unknowable statically), as
+    // the identifier source of a reference declaration (auto& x = y), or as an explicit
+    // by-reference lambda capture. Marked declarations box their storage into a cell
+    // (reference_holder cell mode), so reference binding is a handle share and an escaped
+    // reference keeps its target alive. Conservative by design: function-level granularity
+    // (all same-named decls in a function mark together) and unresolved symbols bubble
+    // outward through enclosing functions to the program scope; symbols unresolved even
+    // there (cross-execute globals, C++ defines) are handled at bind time instead. Class
+    // FIELDS are never registered: field refs use the instance-pinned identity mode.
+    struct ref_escape_marker {
+        struct scope {
+            std::unordered_multimap<uint64_t, variable_decl*> vars;
+            std::unordered_multimap<uint64_t, parameter*> params;
+            std::unordered_multimap<uint64_t, range_for_stmt*> range_vars;
+            std::unordered_multimap<uint64_t, std::pair<destructuring_decl*, size_t>> destructures;
+        };
+        std::vector<scope> scopes;
+        string_symbolizer* symbolizer = nullptr;
+
+        void escape(uint64_t symbol) {
+            if (symbol == UINT64_MAX) {
+                return;
+            }
+            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+                bool found = false;
+                auto vr = it->vars.equal_range(symbol);
+                for (auto v = vr.first; v != vr.second; ++v) { v->second->ref_escaping = true; found = true; }
+                auto pr = it->params.equal_range(symbol);
+                for (auto p = pr.first; p != pr.second; ++p) { p->second->ref_escaping = true; found = true; }
+                auto rr = it->range_vars.equal_range(symbol);
+                for (auto r = rr.first; r != rr.second; ++r) { r->second->var_ref_escaping = true; found = true; }
+                auto dr = it->destructures.equal_range(symbol);
+                for (auto d = dr.first; d != dr.second; ++d) {
+                    destructuring_decl* decl = d->second.first;
+                    if (decl->ref_escaping.size() < decl->names.size()) {
+                        decl->ref_escaping.resize(decl->names.size(), false);
+                    }
+                    decl->ref_escaping[d->second.second] = true;
+                    found = true;
+                }
+                if (found) {
+                    return;
+                }
+            }
+        }
+
+        void escape_arg(const expression* arg) {
+            if (arg && arg->get_type() == node_type::identifier_expr) {
+                escape(static_cast<const identifier_expr*>(arg)->symbol_id);
+            }
+        }
+
+        // True when the innermost scope that declares `symbol` declares it as a
+        // reference (ref param / auto& decl / auto& loop var). Unresolved symbols
+        // answer false (value-decl semantics is the safe default for stores).
+        bool names_reference_decl(uint64_t symbol) const {
+            if (symbol == UINT64_MAX) {
+                return false;
+            }
+            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+                bool found = false;
+                bool is_ref = false;
+                auto vr = it->vars.equal_range(symbol);
+                for (auto v = vr.first; v != vr.second; ++v) {
+                    found = true;
+                    if (v->second->type && v->second->type->base_type == script_value_type::jai_reference_type) {
+                        is_ref = true;
+                    }
+                }
+                auto pr = it->params.equal_range(symbol);
+                for (auto p = pr.first; p != pr.second; ++p) {
+                    found = true;
+                    if (p->second->is_reference) {
+                        is_ref = true;
+                    }
+                }
+                auto rr = it->range_vars.equal_range(symbol);
+                for (auto r = rr.first; r != rr.second; ++r) {
+                    found = true;
+                    if (r->second->is_reference) {
+                        is_ref = true;
+                    }
+                }
+                auto dr = it->destructures.equal_range(symbol);
+                if (dr.first != dr.second) {
+                    found = true;   // destructured names are always value decls
+                }
+                if (found) {
+                    return is_ref;
+                }
+            }
+            return false;
+        }
+
+        void walk_args(const std::vector<expression_ptr>& args) {
+            for (const auto& a : args) {
+                escape_arg(a.get());
+                walk_expr(a.get());
+            }
+        }
+
+        void walk_function(std::vector<parameter>& params, statement* body,
+                           const std::vector<constructor_initializer>* inits = nullptr) {
+            scopes.emplace_back();
+            for (auto& p : params) {
+                if (p.symbol_id == UINT64_MAX && symbolizer) {
+                    p.symbol_id = symbolizer->intern(p.name);
+                }
+                scopes.back().params.emplace(p.symbol_id, &p);
+                if (p.default_value) {
+                    walk_expr(p.default_value.get());
+                }
+            }
+            if (inits) {
+                for (const auto& ci : *inits) {
+                    walk_args(ci.arguments);
+                }
+            }
+            walk_stmt(body);
+            scopes.pop_back();
+        }
+
+        void walk_expr(expression* e) {
+            if (!e) {
+                return;
+            }
+            switch (e->get_type()) {
+                case node_type::identifier_expr: {
+                    auto* id = static_cast<identifier_expr*>(e);
+                    id->names_value_decl = !names_reference_decl(id->symbol_id);
+                    break;
+                }
+                case node_type::binary_expr: {
+                    auto* b = static_cast<binary_expr*>(e);
+                    walk_expr(b->left.get());
+                    walk_expr(b->right.get());
+                    break;
+                }
+                case node_type::unary_expr:
+                    walk_expr(static_cast<unary_expr*>(e)->operand.get());
+                    break;
+                case node_type::assignment_expr: {
+                    auto* a = static_cast<assignment_expr*>(e);
+                    walk_expr(a->target.get());
+                    walk_expr(a->value.get());
+                    break;
+                }
+                case node_type::call_expr: {
+                    auto* c = static_cast<call_expr*>(e);
+                    walk_expr(c->callee.get());
+                    walk_args(c->arguments);
+                    break;
+                }
+                case node_type::member_expr:
+                    walk_expr(static_cast<member_expr*>(e)->object.get());
+                    break;
+                case node_type::lambda_expr: {
+                    auto* l = static_cast<lambda_expr*>(e);
+                    // Explicit by-ref captures escape the captured variable
+                    for (const auto& cap : l->captures) {
+                        if (cap.by_reference) {
+                            if (cap.symbol_id == UINT64_MAX && symbolizer) {
+                                cap.symbol_id = symbolizer->intern(std::string(cap.name));
+                            }
+                            escape(cap.symbol_id);
+                        }
+                    }
+                    walk_function(l->parameters, l->body.get());
+                    break;
+                }
+                case node_type::new_expr:
+                    walk_args(static_cast<new_expr*>(e)->arguments);
+                    break;
+                case node_type::ternary_expr: {
+                    auto* t = static_cast<ternary_expr*>(e);
+                    walk_expr(t->condition.get());
+                    walk_expr(t->then_expression.get());
+                    walk_expr(t->else_expression.get());
+                    break;
+                }
+                case node_type::array_literal_expr:
+                    for (const auto& el : static_cast<array_literal_expr*>(e)->elements) {
+                        walk_expr(el.get());
+                    }
+                    break;
+                case node_type::map_literal_expr:
+                    for (const auto& [k, v] : static_cast<map_literal_expr*>(e)->entries) {
+                        walk_expr(k.get());
+                        walk_expr(v.get());
+                    }
+                    break;
+                case node_type::throw_expr:
+                    walk_expr(static_cast<throw_expr*>(e)->value.get());
+                    break;
+                case node_type::yield_expr:
+                    walk_expr(static_cast<yield_expr*>(e)->value.get());
+                    break;
+                default:
+                    break;   // literal/identifier/this/super: leaves
+            }
+        }
+
+        void walk_stmt(statement* s) {
+            if (!s) {
+                return;
+            }
+            switch (s->get_type()) {
+                case node_type::expression_stmt:
+                    walk_expr(static_cast<expression_stmt*>(s)->expression.get());
+                    break;
+                case node_type::block_stmt:
+                    for (const auto& d : static_cast<block_stmt*>(s)->declarations) {
+                        walk_stmt(d.get());
+                    }
+                    break;
+                case node_type::if_stmt: {
+                    auto* i = static_cast<if_stmt*>(s);
+                    walk_expr(i->condition.get());
+                    walk_stmt(i->then_statement.get());
+                    walk_stmt(i->else_statement.get());
+                    break;
+                }
+                case node_type::while_stmt: {
+                    auto* w = static_cast<while_stmt*>(s);
+                    walk_expr(w->condition.get());
+                    walk_stmt(w->body.get());
+                    break;
+                }
+                case node_type::for_stmt: {
+                    auto* f = static_cast<for_stmt*>(s);
+                    walk_stmt(f->initializer.get());
+                    walk_expr(f->condition.get());
+                    walk_expr(f->update.get());
+                    walk_stmt(f->body.get());
+                    break;
+                }
+                case node_type::range_for_stmt: {
+                    auto* r = static_cast<range_for_stmt*>(s);
+                    if (!scopes.empty() && r->variable_name_id != UINT64_MAX) {
+                        scopes.back().range_vars.emplace(r->variable_name_id, r);
+                    }
+                    walk_expr(r->container.get());
+                    walk_stmt(r->body.get());
+                    break;
+                }
+                case node_type::return_stmt:
+                    walk_expr(static_cast<return_stmt*>(s)->value.get());
+                    break;
+                case node_type::try_stmt: {
+                    auto* t = static_cast<try_stmt*>(s);
+                    walk_stmt(t->try_block.get());
+                    walk_stmt(t->catch_block.get());
+                    break;
+                }
+                case node_type::switch_stmt: {
+                    auto* sw = static_cast<switch_stmt*>(s);
+                    walk_expr(sw->condition.get());
+                    for (const auto& c : sw->cases) {
+                        walk_stmt(c.get());
+                    }
+                    walk_stmt(sw->default_case.get());
+                    break;
+                }
+                case node_type::case_stmt: {
+                    auto* c = static_cast<case_stmt*>(s);
+                    walk_expr(c->value.get());
+                    for (const auto& b : c->body) {
+                        walk_stmt(b.get());
+                    }
+                    break;
+                }
+                case node_type::default_stmt:
+                    for (const auto& b : static_cast<default_stmt*>(s)->body) {
+                        walk_stmt(b.get());
+                    }
+                    break;
+                case node_type::statement_decl:
+                    walk_stmt(static_cast<statement_decl*>(s)->statement.get());
+                    break;
+                case node_type::variable_decl: {
+                    auto* d = static_cast<variable_decl*>(s);
+                    // Ref decl: the identifier source escapes (auto& x = y shares y's cell)
+                    if (d->type && d->type->base_type == script_value_type::jai_reference_type &&
+                        d->initializer && d->initializer->get_type() == node_type::identifier_expr) {
+                        escape(static_cast<identifier_expr*>(d->initializer.get())->symbol_id);
+                    }
+                    walk_expr(d->initializer.get());
+                    if (!scopes.empty() && d->name_id != UINT64_MAX) {
+                        scopes.back().vars.emplace(d->name_id, d);
+                    }
+                    break;
+                }
+                case node_type::function_decl: {
+                    auto* fd = static_cast<function_decl*>(s);
+                    walk_function(fd->parameters, fd->body.get(), &fd->initializers);
+                    break;
+                }
+                case node_type::class_decl: {
+                    auto* cd = static_cast<class_decl*>(s);
+                    for (const auto& m : cd->members) {
+                        if (!m.declaration) {
+                            continue;
+                        }
+                        if (m.declaration->get_type() == node_type::function_decl) {
+                            walk_stmt(m.declaration.get());
+                        } else if (m.declaration->get_type() == node_type::variable_decl) {
+                            // Fields never become cells (identity-mode refs); only their
+                            // initializer expressions can produce escapes
+                            walk_expr(static_cast<variable_decl*>(m.declaration.get())->initializer.get());
+                        }
+                    }
+                    break;
+                }
+                case node_type::namespace_decl:
+                    for (const auto& d : static_cast<namespace_decl*>(s)->declarations) {
+                        walk_stmt(d.get());
+                    }
+                    break;
+                case node_type::expression_decl:
+                    walk_expr(static_cast<expression_decl*>(s)->expression.get());
+                    break;
+                case node_type::destructuring_decl: {
+                    auto* d = static_cast<destructuring_decl*>(s);
+                    walk_expr(d->initializer.get());
+                    if (!scopes.empty()) {
+                        for (size_t i = 0; i < d->names.size(); ++i) {
+                            if (d->names[i].second != UINT64_MAX) {
+                                scopes.back().destructures.emplace(d->names[i].second, std::make_pair(d, i));
+                            }
+                        }
+                    }
+                    break;
+                }
+                case node_type::include_decl:
+                    walk_expr(static_cast<include_decl*>(s)->path_expr.get());
+                    break;
+                case node_type::import_decl:
+                    walk_expr(static_cast<import_decl*>(s)->path_expr.get());
+                    break;
+                default:
+                    break;   // break/continue/fallthrough/enum: leaves
+            }
+        }
+
+        void run(const std::vector<declaration_ptr>& program) {
+            scopes.emplace_back();   // program scope: top-level decls = globals
+            for (const auto& d : program) {
+                walk_stmt(d.get());
+            }
+            scopes.pop_back();
+        }
+    };
+
+} // namespace
+
 // One true constructor with dependency injection
 parser::parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, engine* eng, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename)
     : tokens_(tokens), filename_(filename), current_(0), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
@@ -60,6 +419,14 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
             "Parse error: {0}",
             error_id
         );
+    }
+
+    // Escape-mark pass: flag declarations whose storage must be boxed into a cell
+    // (see ref_escape_marker above; consumed by both backends at decl/bind time)
+    {
+        ref_escape_marker marker;
+        marker.symbolizer = symbolizer_;
+        marker.run(declarations);
     }
 
     // Mark the last expression declaration as an implicit return

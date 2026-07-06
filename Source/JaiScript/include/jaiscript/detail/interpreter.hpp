@@ -965,6 +965,11 @@ namespace jai {
                     if (value.is_string()) return !value.unchecked_as_string().empty();
                     if (value.is_char()) return true;
                     return false;                 // opaque bound: preserves the old index-0 falsy observable
+                case script_value::TYPEID_REFERENCE:
+                    // References are transparent to truthiness like every other consumer
+                    // (element reads reach conditions as reference wrappers; `if (a[0])`
+                    // on a false element was always-truthy before this case existed)
+                    return is_truthy(value.deref());
                 default: return true;                         // functions, other complex types
             }
         }

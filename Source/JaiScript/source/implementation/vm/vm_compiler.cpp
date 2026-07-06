@@ -997,6 +997,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 		if (assign->op.type == token_type::equal) {
 			uint32_t flags = store_flag_no_result;
 			if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
+			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
 			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 		} else {
 			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
@@ -1205,6 +1206,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 		compile_expression(expr->value);
 		if (!compound) {
 			uint32_t flags = is_lvalue_shaped(expr->value.get()) ? store_flag_rhs_lvalue : 0;
+			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
 			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 		} else {
 			uint32_t kind;

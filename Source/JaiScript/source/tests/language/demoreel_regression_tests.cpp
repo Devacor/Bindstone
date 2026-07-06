@@ -411,6 +411,87 @@ public:
 				check_eq((int64_t)42, r2.value().as_int(), backend_tag(use_vm) + "later host callable returns real value");
 			}
 		});
+
+		// Finding 10 (demoreel README) + roguelike fog-of-war: element reads reach
+		// consumers as reference wrappers (rhs-lvalue read shape). The interpreter's
+		// typed identifier-assign rejected `int x; x = a[0]`, and BOTH backends'
+		// is_truthy answered always-true for `if (a[0])` on a false element.
+		test("element_read_assigns_into_typed_local", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = demoreel_engine(use_vm);
+				auto r = e->execute(R"(
+					var a = [7];
+					int x = 0;
+					x = a[0];
+					int y = a[0];
+					x * 10 + y;
+				)");
+				check_eq((int64_t)77, r.as_int(), backend_tag(use_vm) + "assignment and decl from element read agree");
+			}
+		});
+
+		test("typed_local_stores_from_ref_shaped_reads", [this]() {
+			// Same disease, other spellings: compound assign from an element read,
+			// simple/compound assign from a member read, and assign from a ref-decl'd
+			// value - the typed-slot enforcement must see the VALUE, not the wrapper.
+			for (bool use_vm : {false, true}) {
+				auto e = demoreel_engine(use_vm);
+				auto r = e->execute(R"(
+					class Holder { int f = 5; }
+					var a = [7, 2];
+					var h = Holder();
+					auto src = 9;
+					auto& rs = src;
+					int x = 1;
+					x += a[0];        // compound from element read
+					x = h.f;          // simple from member read
+					x += h.f;         // compound from member read
+					int z = 0;
+					z = rs;           // simple from ref-decl'd value
+					z += a[1];        // compound from element read again
+					to_string(x) + "|" + to_string(z);
+				)");
+				check_eq(std::string("10|11"), r.as<std::string>(), backend_tag(use_vm) + "typed-local stores from ref-shaped reads");
+			}
+		});
+
+		test("element_read_as_condition_derefs", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = demoreel_engine(use_vm);
+				auto r = e->execute(R"(
+					var flags = [false, true];
+					var ints = [0, 3];
+					var nulls = [null];
+					var out = "";
+					if (flags[0]) { out += "A"; } else { out += "a"; }
+					if (flags[1]) { out += "B"; } else { out += "b"; }
+					if (ints[0]) { out += "C"; } else { out += "c"; }
+					if (ints[1]) { out += "D"; } else { out += "d"; }
+					if (nulls[0]) { out += "E"; } else { out += "e"; }
+					out;
+				)");
+				check_eq(std::string("aBcDe"), r.as<std::string>(), backend_tag(use_vm) + "if on element reads");
+			}
+		});
+
+		test("element_read_condition_not_ternary_logical_while", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = demoreel_engine(use_vm);
+				auto r = e->execute(R"(
+					var flags = [false, true];
+					var out = "";
+					if (!flags[0]) { out += "n"; }
+					out += flags[0] ? "T" : "f";
+					if (flags[0] && flags[1]) { out += "X"; } else { out += "x"; }
+					if (flags[0] || flags[1]) { out += "O"; } else { out += "o"; }
+					var live = [true];
+					int spins = 0;
+					while (live[0]) { spins += 1; if (spins == 3) { live[0] = false; } }
+					out + to_string(spins);
+				)");
+				check_eq(std::string("nfxO3"), r.as<std::string>(), backend_tag(use_vm) + "!/ternary/&&/||/while on element reads");
+			}
+		});
 	}
 };
 

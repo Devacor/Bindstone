@@ -57,6 +57,8 @@ namespace jai::fuzz {
 		std::vector<std::string> statics;                 // int statics, accessed Class::name
 		bool has_op_plus = false;
 		bool has_op_lt = false;
+		std::string coroutine_method;                     // own or inherited (empty = none)
+		std::string typed_int_field;                      // declared-int field (typed writes convert)
 	};
 
 	class generator {
@@ -505,6 +507,8 @@ namespace jai::fuzz {
 			if (base >= 0) { // inherit flattened field/method view
 				ci.fields = classes_[base].fields;
 				ci.methods = classes_[base].methods;
+				ci.coroutine_method = classes_[base].coroutine_method;
+				ci.typed_int_field = classes_[base].typed_int_field;
 			}
 
 			int n_fields = static_cast<int>(rng_.range(1, 3));
@@ -516,6 +520,7 @@ namespace jai::fuzz {
 						lines_.push_back("int " + fname + " = " + std::to_string(rng_.range(0, 20)) + ";");
 						ci.fields.push_back({fname, vt::i});
 						if (first_int_field.empty()) first_int_field = fname;
+						if (ci.typed_int_field.empty()) ci.typed_int_field = fname;
 						break;
 					case 1:
 						lines_.push_back("string " + fname + " = " + string_literal() + ";");
@@ -535,6 +540,7 @@ namespace jai::fuzz {
 				first_int_field = fresh("m");
 				lines_.push_back("int " + first_int_field + " = 1;");
 				ci.fields.push_back({first_int_field, vt::i});
+				if (ci.typed_int_field.empty()) ci.typed_int_field = first_int_field;
 			}
 
 			if (rng_.chance(35)) {
@@ -594,6 +600,20 @@ namespace jai::fuzz {
 				std::string d = fresh("desc");
 				lines_.push_back("string " + d + "() { return \"<\" + to_string(" + first_int_field + ") + \">\"; }");
 				ci.methods.push_back({d, vt::s, 0});
+			}
+
+			// Coroutine method: yields this-fields across suspensions, sometimes with a
+			// float final return (typed conversion) or a field mutation mid-flight
+			if (rng_.chance(30)) {
+				std::string cm = fresh("cog");
+				ci.coroutine_method = cm;
+				lines_.push_back("coroutine int " + cm + "() {");
+				lines_.push_back("yield " + first_int_field + ";");
+				if (rng_.chance(50)) lines_.push_back(first_int_field + " = " + first_int_field + " + 1;");
+				lines_.push_back("yield " + first_int_field + " + " + std::to_string(rng_.range(1, 5)) + ";");
+				if (rng_.chance(30)) lines_.push_back("return " + float_literal() + ";");
+				else lines_.push_back("return " + first_int_field + ";");
+				lines_.push_back("}");
 			}
 
 			// Operator methods (throwing variants exercise the operator-throw surface)
@@ -1189,6 +1209,40 @@ namespace jai::fuzz {
 			const var_info* o = random_var(vt::obj);
 			if (!o) { emit_decl(); return; }
 			const class_info& ci = classes_[o->class_idx];
+			switch (rng_.below(6)) {
+				case 4: { // coroutine method drive (handle pins the instance)
+					if (ci.coroutine_method.empty()) { break; }
+					if (rng_.chance(40)) {
+						std::string yv = fresh("y");
+						lines_.push_back("for (auto " + yv + " : " + o->name + "." + ci.coroutine_method + "()) {");
+						lines_.push_back("print(" + yv + ");");
+						lines_.push_back("}");
+					} else {
+						std::string h = fresh("h");
+						lines_.push_back("auto " + h + " = " + o->name + "." + ci.coroutine_method + "();");
+						int resumes = static_cast<int>(rng_.range(1, 3));
+						for (int i = 0; i < resumes; ++i) {
+							std::string r = fresh("r");
+							lines_.push_back("auto " + r + " = " + h + ".resume();");
+							lines_.push_back("print(" + r + ");");
+						}
+						lines_.push_back("print(" + h + ".done());");
+						declare(h, vt::any);
+					}
+					return;
+				}
+				case 5: { // typed-field converting writes (int field: float assigns/compounds truncate)
+					if (ci.typed_int_field.empty()) { break; }
+					switch (rng_.below(3)) {
+						case 0: lines_.push_back(o->name + "." + ci.typed_int_field + " = " + float_literal() + ";"); break;
+						case 1: lines_.push_back(o->name + "." + ci.typed_int_field + " += " + float_literal() + ";"); break;
+						default: lines_.push_back(o->name + "." + ci.typed_int_field + " %= " + std::to_string(rng_.range(2, 7)) + ";"); break;
+					}
+					lines_.push_back("print(" + o->name + "." + ci.typed_int_field + ");");
+					return;
+				}
+				default: break;
+			}
 			switch (rng_.below(4)) {
 				case 0: { // method call
 					for (const auto& m : ci.methods) {

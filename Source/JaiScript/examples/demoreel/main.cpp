@@ -32,7 +32,7 @@ struct host_options {
 	int64_t seed = 20260705;
 	std::string backend = "vm";          // initially active backend
 	bool smoke = false;
-	int64_t frames = 1300;               // smoke frame budget (covers all 10 scene entries)
+	int64_t frames = 1700;               // smoke frame budget (covers all 13 scene entries)
 	bool precompiled = false;            // jaibite save/load boot path
 	std::string jaib_path = "demoreel.jaib";
 	int64_t capture = -1;                // scene index to text-capture (README material)
@@ -54,7 +54,8 @@ struct host_options {
 const char* kSceneFiles[] = {
 	"util.jai", "reel.jai", "plasma.jai", "starfield.jai", "donut.jai",
 	"julia.jai", "pipes.jai", "fire.jai", "sand.jai", "boids.jai",
-	"kinstein.jai", "finale.jai", "main.jai",
+	"kinstein.jai", "voxelspace.jai", "marcher.jai", "cloth.jai",
+	"finale.jai", "main.jai",
 };
 
 double now_seconds() {

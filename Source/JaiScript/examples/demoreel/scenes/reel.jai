@@ -35,7 +35,7 @@ class Reel {
 	bool hud = true;
 	bool paused = false;
 
-	int nscenes = 10;
+	int nscenes = 13;
 	var durs = [];
 	var cur = null;
 	var nxt = null;
@@ -73,6 +73,9 @@ class Reel {
 		durs.push(14.0);   // powder
 		durs.push(12.0);   // boids
 		durs.push(14.0);   // kinstein 3d
+		durs.push(15.0);   // canyonrun
+		durs.push(16.0);   // spongeworks
+		durs.push(16.5);   // bannerfall
 		durs.push(13.0);   // fire
 		durs.push(17.0);   // finale
 		start_scene(0, 0.0);
@@ -87,7 +90,10 @@ class Reel {
 		if (idx == 5) { return SandBox(); }
 		if (idx == 6) { return Boids(); }
 		if (idx == 7) { return Kinstein(); }
-		if (idx == 8) { return Fire(); }
+		if (idx == 8) { return CanyonRun(); }
+		if (idx == 9) { return SpongeWorks(); }
+		if (idx == 10) { return BannerFall(); }
+		if (idx == 11) { return Fire(); }
 		return Finale();
 	}
 

@@ -89,6 +89,46 @@ seed 20260705, fixed dt 1/30, whole reel incl. transitions (min of 3 runs of
 - `--reload-test`: hot reload of all scenes into both engines + TAB-style state
   sync, green.
 
+## Console performance (the write is half the frame)
+
+The smoke numbers above are script-only: a live frame also has to get through the
+console, and legacy conhost parses VT escapes ~16x slower than Windows Terminal
+(measured: the identical ~47 KB plasma stream costs **1.2 ms** to write in Windows
+Terminal, **~19 ms** in conhost). The HUD is honest about this now: its headline
+frame cost is `sim + draw` (script update + frame string, plus the console write),
+split out so you can see which side you're bound on. `--bench N --scene I` runs N
+real frames and reports the same split headlessly (`--bench-out FILE` to save it).
+
+What the host does about it (all post-processing in `main.cpp` — scenes and the
+`--smoke` frame stream are untouched, so parity hashes don't move):
+
+- **Escape trimming.** Scripts already emit a color escape only when the palette
+  index changes; the host additionally drops any SGR group that wouldn't change
+  terminal state, and (default on conhost) rewrites 24-bit colors to the xterm-256
+  cube — shorter escapes and coarser quanta = longer runs. `--truecolor` keeps
+  24-bit with per-channel merge tolerance (`--tol N`, default 8); `--no-filter`
+  is the byte-exact legacy stream.
+- **Terminal detection.** `WT_SESSION` distinguishes Windows Terminal from legacy
+  conhost. Conhost defaults to 256-color mode and shows a one-line tip on the
+  title card ("Windows Terminal renders this reel much faster"); everything else
+  defaults to truecolor + tolerance merging.
+- **One buffered write per frame**, via `WriteConsoleA` on a real console.
+- **`--diff`** row-diff redraw: only rows that changed since the last frame are
+  rewritten (cursor-move + row). Not the default — plasma/fire change every cell
+  every frame and defeat it — but starfield's write drops to ~1 ms.
+
+Measured on conhost (Release, 120 real frames per scene, ~110x29 window):
+
+| scene | bytes/frame raw -> written | write ms raw -> filtered | fps |
+| ----- | -------------------------- | ------------------------ | --- |
+| plasma | 29.6 KB -> 15.2 KB (2.6x) | 19.1 -> 14.1 | 23.8 -> 25.0 |
+| fire | 34.2 KB -> 9.7 KB (3.6x) | 23.4 -> 8.2 | 18.7 -> 27.8 |
+| finale | 29.9 KB -> 10.9 KB (3.0x) | 19.4 -> 9.7 | 13.4 -> 14.9 (sim-bound) |
+| starfield (`--diff`) | 5.3 KB -> 2.4 KB | 1.0 | 82 uncapped |
+
+And if it still *feels* like one frame per second: check you're not running the
+Debug build (~0.7 s of sim per frame — see above).
+
 ## Live coding
 
 1. Run `jai_demoreel`.

@@ -10,8 +10,8 @@ function demo_boot(int w, int h, int seed, string backend, bool smoke, bool hud_
 	reel = Reel(w, h, seed, backend, smoke, hud_on);
 }
 
-function demo_frame(float t, float dt, string key, float fps, float ms_self, float ms_other) -> string {
-	return reel.frame(t, dt, key, fps, ms_self, ms_other);
+function demo_frame(float t, float dt, string key, float fps, float ms_sim, float ms_draw, float ms_other) -> string {
+	return reel.frame(t, dt, key, fps, ms_sim, ms_draw, ms_other);
 }
 
 function demo_scene_index() -> int { return reel.cur_idx; }

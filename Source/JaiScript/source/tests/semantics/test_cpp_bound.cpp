@@ -341,11 +341,13 @@ public:
                 check_eq((int64_t)1, eng->execute("var r3 = 1; if (bfz) { r3 = 2; } r3").as_int(), tag + "0.0 bound float falsy in if");
                 check_true(eng->execute("!bfz").as_bool(), tag + "!zero-bound-float");
                 check_eq((int64_t)2, eng->execute("var r4 = 1; if (bfn) { r4 = 2; } r4").as_int(), tag + "nonzero bound float truthy in if");
-                check_eq((int64_t)1, eng->execute("var r5 = 1; if (bop) { r5 = 2; } r5").as_int(), tag + "opaque bound falsy in if");
-                check_true(eng->execute("!bop").as_bool(), tag + "!opaque-bound");
+                // RULED (2026-07, §13): opaque bound objects are TRUTHY while the host
+                // pointer is live (they ARE objects to script). Was falsy pre-ruling.
+                check_eq((int64_t)2, eng->execute("var r5 = 1; if (bop) { r5 = 2; } r5").as_int(), tag + "opaque bound truthy in if");
+                check_false(eng->execute("!bop").as_bool(), tag + "!opaque-bound");
                 check_eq((int64_t)3, eng->execute("var steps = 0; while (bn) { steps = steps + 1; bn = bn - 1; } steps").as_int(), tag + "while on bound int");
                 check_eq((int64_t)0, bn, tag + "loop decrement wrote through");
-                check_eq((int64_t)1, eng->execute("var r7 = 1; while (bop) { r7 = 2; break; } r7").as_int(), tag + "while on opaque bound never enters");
+                check_eq((int64_t)2, eng->execute("var r7 = 1; while (bop) { r7 = 2; break; } r7").as_int(), tag + "while on opaque bound enters (truthy, §13)");
             };
             runMatrix(false);
             runMatrix(true);
@@ -692,13 +694,23 @@ public:
             probe.v = 5;
             auto val = eng->make_value(&probe);
             check_true(val.is_cpp_bound(), "make_value(T*) on unregistered type is bound");
-            check_true(val.is_null(), "opaque bound reads as null (pinned as-is)");
+            // RULED (2026-07, §13): opaque bound objects are NON-null while the pointer
+            // is live (was is_null()==true pre-ruling); a null host pointer stays null.
+            check_false(val.is_null(), "opaque bound is non-null (ruled)");
             auto& extracted = val.template as<t1_opaque_probe&>();
             extracted.v = 42;
             check_eq(42, probe.v, "as<T&> extraction aliases the live object");
             check(val.template get_cpp_bound_as<t1_opaque_probe>() == &probe, "get_cpp_bound_as returns the live pointer");
             eng->add_global("bop13", val);
-            check_true(eng->execute("bop13 == null").as_bool(), "opaque bound null-comparison (pinned as-is)");
+            check_false(eng->execute("bop13 == null").as_bool(), "opaque bound != null (ruled)");
+            check_true(eng->execute("bop13 == bop13").as_bool(), "opaque bound self-identity");
+            jai::stdlib::register_all(*eng);
+            check_false(eng->execute("is_registered_type(bop13)").as_bool(),
+                        "is_registered_type false for opaque host tokens");
+            check_true(eng->execute("class Marker {} is_registered_type(Marker())").as_bool(),
+                       "is_registered_type true for script objects");
+            check_true(eng->execute("is_registered_type(42)").as_bool(),
+                       "is_registered_type true for ordinary values");
         });
     }
 };

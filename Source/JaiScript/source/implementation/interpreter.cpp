@@ -3616,6 +3616,14 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     }
     script_value operand = pop_value();
 
+    // `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
+    // full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,
+    // 2026-07). Identical result for bound primitives. Byte-parallel with exec_unary.
+    if (expr->op.type == token_type::bang) {
+        push_value(make_value(!is_truthy(operand)));
+        return {};
+    }
+
     size_t oi = operand.raw_storage_index();
     // S8: bound operand decodes in place to a detached temp (byte-parallel with vm_backend::exec_unary)
     if (oi == script_value::TYPEID_CPP_BOUND) [[unlikely]] {

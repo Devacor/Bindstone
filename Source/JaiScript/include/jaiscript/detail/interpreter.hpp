@@ -961,7 +961,8 @@ namespace jai {
                     if (value.is_float()) return value.unchecked_as_float() != 0.0;
                     if (value.is_string()) return !value.unchecked_as_string().empty();
                     if (value.is_char()) return true;
-                    return false;                 // opaque bound: preserves the old index-0 falsy observable
+                    // Opaque bound: truthy while the host pointer is live (§13, 2026-07)
+                    return value.get_cpp_bound_ptr() != nullptr;
                 case script_value::TYPEID_REFERENCE:
                     // References are transparent to truthiness like every other consumer
                     // (element reads reach conditions as reference wrappers; `if (a[0])`

@@ -388,7 +388,7 @@ var KEY_OF_DIR = {
 };
 
 function dir_key(int dx, int dy) -> string {
-	return KEY_OF_DIR[to_string(dx) + "," + to_string(dy)];
+	return KEY_OF_DIR[`${dx},${dy}`];
 }
 
 function pilot_has_upgrade() -> bool {

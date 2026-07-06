@@ -48,12 +48,12 @@ function make_equipment(int floor) -> var {
 		item.bonus["hp"] = item.bonus_of("hp") + 5;
 	} else if (affix_count > 0) {
 		var prefix = PREFIXES[RNG.next(PREFIXES.size())];
-		item.name = prefix["name"] + " " + item.name;
+		item.name = `${prefix["name"]} ${item.name}`;
 		item.atk = item.atk + prefix["atk"];
 		item.def = item.def + prefix["def"];
 		if (affix_count > 1) {
 			var suffix = SUFFIXES[RNG.next(SUFFIXES.size())];
-			item.name = item.name + " " + suffix["name"];
+			item.name = `${item.name} ${suffix["name"]}`;
 			// hoisted: passing a container-element read to a script-class METHOD's
 			// typed param throws "No matching overload found" (both backends, 2026-07)
 			var bonus_key = suffix["bonus"];
@@ -110,7 +110,7 @@ function make_floor_item(int floor) -> var {
 function item_label(var item) -> string {
 	if (item.kind == "potion") {
 		if (G.known_potions.has(item.effect)) { return POTIONS[item.effect]["name"]; }
-		return "a " + G.potion_looks[item.effect] + " potion";
+		return `a ${G.potion_looks[item.effect]} potion`;
 	}
 	if (item.kind == "scroll") {
 		if (G.known_scrolls.has(item.effect)) { return SCROLLS[item.effect]["name"]; }
@@ -129,12 +129,7 @@ function item_stats_label(var item) -> string {
 		else { parts.push(`+${kv.second} ${kv.first}`); }
 	}
 	if (parts.size() == 0) { return ""; }
-	var out = " (";
-	for (int i = 0; i < parts.size(); ++i) {
-		if (i > 0) { out = out + ", "; }
-		out = out + parts[i];
-	}
-	return out + ")";
+	return ` (${parts.join(", ")})`;
 }
 
 // ----------------------------------------------------------- inventory -----

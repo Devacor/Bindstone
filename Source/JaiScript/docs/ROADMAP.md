@@ -24,7 +24,7 @@ sections; the old (2025) pillar ordering is dead.
 1. **CELLS reference-model refactor** — IN FLIGHT (uncommitted on VM-perf): unify the four-mode
    `reference_holder` around cell storage. After it lands: write the replacement
    reference-model doc and re-verify `invariants.md` §3.
-2. **`parallel_for` / `pmap`** — designed and ruled (prove-it-or-stay-serial (A), 2026-07-06);
+2. **`parallel_for` / `parallel_transform`** — designed and ruled (prove-it-or-stay-serial (A), 2026-07-06);
    see `parallel_design.md` + `parallel_prove_or_serial.md`. Step 1 (thread pool,
    `detail/thread_pool.hpp`) has landed.
 3. **Flat-stack VM** — move the VM off environment-backed frames toward a flat value stack for

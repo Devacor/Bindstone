@@ -35,18 +35,20 @@ inline std::shared_ptr<function_decl> pick_best_overload(
 
         for (size_t i = 0; i < args.size(); ++i) {
             const auto& param = overload_ast->parameters[i];
+            // Lvalue call args (arr[i], obj.field) arrive as references: match their targets
+            const script_value& arg = args[i].deref();
             // var keyword creates type_info with type_name="any" and base_type=jai_any_type
             bool has_explicit_type = param.type &&
                                     !param.type->type_name.empty() &&
                                     param.type->type_name != "any" &&
                                     param.type->base_type != script_value_type::jai_any_type;
             if (has_explicit_type) {
-                auto arg_type = args[i].type();
+                auto arg_type = arg.type();
 
                 if (arg_type == script_value_type::jai_object_type ||
                     arg_type == script_value_type::jai_shared_ptr_type) {
                     // For objects and shared_ptr, check class name with inheritance support
-                    auto instance = const_cast<script_value&>(args[i]).get_class_instance();
+                    auto instance = const_cast<script_value&>(arg).get_class_instance();
                     if (instance) {
                         auto arg_class_def = instance->get_class_definition();
                         if (arg_class_def) {

@@ -43,7 +43,8 @@ static int compute_param_match_cost(
     int totalCost = 0;
     for (size_t i = 0; i < paramTypes.size(); ++i) {
         const auto& paramInfo = paramTypes[i];
-        const script_value& arg = args[first_arg + i];
+        // Lvalue call args (arr[i], obj.field) arrive as references: match their targets
+        const script_value& arg = args[first_arg + i].deref();
         script_value_type argType = arg.type();
 
         // A wildcard (script_value) parameter accepts any argument at a small fixed cost — low

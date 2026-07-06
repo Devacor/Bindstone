@@ -1,90 +1,63 @@
-# Local Variables Behavior Clarification
+# Per-Execution Local Variables (`instance_variables`)
 
-## Root Level Script Behavior - NO CHANGE
+The engine can overlay a set of caller-supplied variables onto a single execution:
 
-**Current behavior (preserved):**
 ```cpp
-engine.execute("var x = 10;");  // Creates global variable x
-engine.execute("print(x);");     // Prints 10 - x persists!
+// types.hpp
+using instance_variables = std::unordered_map<std::string, script_value>;
+
+// engine.hpp
+script_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
+script_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
 ```
 
-**With local variables:**
+## Semantics: a temporary overlay scope
+
+When `instanceVars` is non-empty, `engine::execute_parsed` pushes one scope on the backend,
+defines each entry in it, runs the script, and pops the scope. That gives:
+
+```
+[overlay scope]   <- the instance_variables, per-execution, discarded afterwards
+       ↓
+[global scope]    <- persistent, shared across executes
+```
+
+- **Overlay reads work.** The script sees the supplied variables by name.
+- **Shadowing works.** An overlay variable shadows a same-name global for that execution only.
+- **Globals stay writable.** Assigning to an existing global mutates it as usual.
+- **Top-level declarations do NOT persist.** With locals provided, a root-level `var x = 10;`
+  lands in the overlay scope and evaporates when it pops — there is no copy-back to globals.
+  (Without locals, no overlay exists and top-level declarations become globals as usual.)
+
 ```cpp
-// Local variables are ADDITIONAL, not replacing globals
-LocalVariables locals = {{"y", Value(20)}};
-engine.execute("var x = 10; print(y);", locals);  
-// - Creates global x (persists)
-// - Uses local y (doesn't persist)
+auto eng = jai::engine::make();
+eng->execute("var counter = 0;");                       // global (no overlay)
 
-engine.execute("print(x);");  // Still prints 10 - x is global
-engine.execute("print(y);");  // ERROR - y was local to previous execution
+jai::instance_variables locals{{"increment", eng->make_value(5)}};
+eng->execute("counter = counter + increment;", locals); // reads overlay, writes global
+eng->execute("var temp = 1;", locals);                  // temp dies with the overlay
+
+eng->execute("print(counter);");     // 5
+eng->execute("print(increment);");   // ERROR — overlay is gone
+eng->execute("print(temp);");        // ERROR — declared into the overlay, not globals
 ```
 
-## How It Works
+## Not dynamic scoping
 
-The local variables create an **additional scope layer**:
+Functions resolve names through their **captured closure chain**, not the caller's scopes. A
+function defined in an earlier execute does NOT see a later caller's `instance_variables` —
+its free names resolve against the environment it closed over. Only code parsed in the same
+execute (which closes over the overlay scope) can see the overlay.
 
-```
-[Local Variables Scope]  <- Temporary, per-execution
-         ↓
-[Global Variables Scope] <- Persistent, shared
-```
+## The real consumer: signal receivers
 
-When a script runs:
-1. Local variables (if provided) are visible
-2. Global variables are still visible
-3. New variables declared at root level still become globals
-4. Local variables shadow globals with same name (only during that execution)
+Script signal receivers are invoked with their parameters delivered as `instance_variables`
+(`detail::build_script_locals` in `signals/signal_impl.hpp` builds the map from the C++
+arguments and the receiver's parameter names). This is the pattern the feature exists for:
+passing per-invocation parameters without polluting the global namespace.
 
-## Examples
+## Known gap
 
-### Example 1: No locals = current behavior
-```cpp
-engine.execute("var counter = 0;");
-engine.execute("counter = counter + 1;");
-engine.execute("print(counter);");  // Prints 1
-```
-
-### Example 2: With locals - globals still work
-```cpp
-engine.execute("var counter = 0;");  // Global
-
-LocalVariables locals = {{"increment", Value(5)}};
-engine.execute("counter = counter + increment;", locals);  
-// Uses local 'increment', modifies global 'counter'
-
-engine.execute("print(counter);");  // Prints 5
-engine.execute("print(increment);");  // ERROR - increment was local
-```
-
-### Example 3: Shadowing
-```cpp
-engine.execute("var x = 'global';");
-
-LocalVariables locals = {{"x", Value("local")}};
-engine.execute("print(x);", locals);  // Prints "local" (shadowed)
-
-engine.execute("print(x);");  // Prints "global" (no shadowing)
-```
-
-### Example 4: Functions see both
-```cpp
-engine.execute(R"(
-    function greet(name) -> auto {
-        return prefix + " " + name;  // 'prefix' from locals
-    }
-)");
-
-LocalVariables locals = {{"prefix", Value("Hello")}};
-auto result = engine.execute("greet('World')", locals);  // "Hello World"
-
-// Without locals, function would error (no prefix defined)
-```
-
-## Summary
-
-- **No breaking changes** to existing scripts
-- Root level declarations still create/modify globals
-- Local variables are just an **optional overlay** for that execution
-- Scripts can use both locals and globals together
-- Perfect for passing parameters without polluting global namespace
+No Foundry test currently exercises `instance_variables` directly — the only coverage is
+indirect, through the signal tests. Treat behavioral changes here as untested until that gap
+is closed.

@@ -204,6 +204,7 @@ public:
 
     check_report run() {
         collect_top_level();
+        warn_duplicate_top_level_functions();
         scopes_.emplace_back();
         for (const auto& d : decls_) {
             walk_decl(d.get());
@@ -356,6 +357,28 @@ private:
         collect_scope_decls(decls_);
         for (const auto& d : decls_) {
             collect_names(d.get());
+        }
+    }
+
+    // Duplicate same-name TOP-LEVEL function definitions inside ONE textual parse
+    // unit: the later definition silently replaces the earlier at execution (top
+    // level does not overload), so surface it — warning severity always (Dev
+    // ruling 2026-07). Include/import composition stays silent by construction:
+    // included files parse and check as their own units at execution time, and
+    // this scan never crosses into namespace/class members (those overload
+    // legitimately with their own runtime collision rules).
+    void warn_duplicate_top_level_functions() {
+        std::unordered_map<std::string_view, const function_decl*> first_seen;
+        for (const auto& d : decls_) {
+            if (!d || d->get_type() != node_type::function_decl) { continue; }
+            auto* fn = static_cast<const function_decl*>(d.get());
+            auto [it, inserted] = first_seen.emplace(fn->name, fn);
+            if (!inserted) {
+                diag(diag_level::warning, fn->location,
+                     "duplicate definition of function '" + std::string(fn->name) +
+                     "' replaces the earlier one (top-level functions do not overload)",
+                     it->second->location.line, it->second->location.column);
+            }
         }
     }
 

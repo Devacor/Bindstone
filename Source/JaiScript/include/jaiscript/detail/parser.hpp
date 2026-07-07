@@ -119,7 +119,7 @@ namespace jai {
         checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default>> parse_capture_list();
 
         // Helper for parsing function bodies
-        checked_result<declaration_ptr> parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type);
+        checked_result<declaration_ptr> parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type, bool allow_ctor_initializers = false);
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);

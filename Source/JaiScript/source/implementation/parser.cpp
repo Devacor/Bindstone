@@ -1745,7 +1745,15 @@ checked_result<declaration_ptr> parser::declaration() {
 
     // Check specifically for function keyword to handle function declarations
     if (check(token_type::function_keyword)) {
-        // This is definitely a function declaration
+        // `function name = expr;` / `function name;` declares a function-typed VARIABLE
+        // (parse_type maps `function` to auto, matching function-typed parameters and the
+        // namespace path); `function name(` stays a function declaration.
+        if (current_ + 2 < tokens_.size() &&
+            tokens_[current_ + 1].type == token_type::identifier &&
+            (tokens_[current_ + 2].type == token_type::equal ||
+             tokens_[current_ + 2].type == token_type::semicolon)) {
+            return variable_declaration();
+        }
         JAISCRIPT_TRY_ASSIGN(auto result, function_declaration());
         // After parsing a function, consume optional semicolon but don't require it
         match(token_type::semicolon);
@@ -1860,9 +1868,15 @@ checked_result<declaration_ptr> parser::declaration() {
             }
             current_ = savedPos;
         } else if (check(token_type::identifier)) {
-            // Pattern: identifier identifier - this is likely a declaration
-            // Examples: Point p, MyClass obj, etc.
+            // Pattern: identifier identifier - a declaration. A '(' after the second
+            // identifier makes it a class-typed free function (C++ return-type-first,
+            // same as the namespace path); otherwise a variable: Point p; / Point mk() {...}
+            advance(); // consume second identifier
+            const bool is_function = check(token_type::left_paren);
             current_ = savedPos;
+            if (is_function) {
+                return function_declaration();
+            }
             return variable_declaration();
         } else {
             // Not a simple declaration pattern, restore and parse as expression
@@ -1978,10 +1992,11 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
                     is_reference = match(token_type::ampersand);
                     JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected parameter name"));
                     name = name_tok.lexeme;
-                } else if (check(token_type::comma) || check(token_type::right_paren)) {
+                } else if (check(token_type::comma) || check(token_type::right_paren) || check(token_type::equal)) {
                     // No identifier after type - treat the type as the parameter name with auto type
-                    // This handles shorthand like: void foo(x) where x is untyped
-                    // The type parsed is actually just a simple identifier, so use it as the name
+                    // This handles shorthand like: void foo(x) where x is untyped, including
+                    // untyped defaults foo(x = 3) (the '=' is consumed by the shared default
+                    // parse below)
                     if (type && type->base_type == script_value_type::jai_object_type && !type->type_name.empty()) {
                         name = type->type_name;
                         type = nullptr; // Auto type
@@ -2504,7 +2519,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                 // This is a constructor - use class name's pre-interned symbol
                 advance(); // consume class name
                 auto [ctor_name_id, ctor_name_view] = symbolizer_->intern_with_view(className.lexeme);
-                auto body_result = parse_function_body(ctor_name_view, ctor_name_id, nullptr);
+                auto body_result = parse_function_body(ctor_name_view, ctor_name_id, nullptr, /*allow_ctor_initializers=*/true);
                 if (!body_result) {
                     synchronize();
                     continue;
@@ -2585,7 +2600,8 @@ checked_result<declaration_ptr> parser::class_declaration() {
 
                         if (match(token_type::arrow)) {
                             if (check(token_type::left_brace)) {
-                                func->return_type = nullptr;
+                                // -> { adds no information: keep the leading type
+                                func->return_type = type;
                             } else {
                                 auto return_type_result = parse_type();
                                 if (!return_type_result) {
@@ -2593,6 +2609,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
                                     continue;
                                 }
                                 func->return_type = std::move(return_type_result.value());
+                                if (type && func->return_type && func->return_type->id != type->id) {
+                                    report_error("Conflicting return types '" + type->type_name + "' and '" +
+                                                 func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
+                                    synchronize();
+                                    continue;
+                                }
                             }
                         } else {
                             func->return_type = type;
@@ -2608,68 +2630,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
                             }
                         }
 
-                        if (match(token_type::colon)) {
-                            bool init_error = false;
-                            do {
-                                if (match(token_type::super_keyword)) {
-                                    auto super_paren_result = consume(token_type::left_paren, "Expected '(' after 'super'");
-                                    if (!super_paren_result) {
-                                        init_error = true;
-                                        break;
-                                    }
-                                    std::vector<expression_ptr> args;
-                                    if (!check(token_type::right_paren)) {
-                                        do {
-                                            auto arg_result = expression();
-                                            if (!arg_result) {
-                                                init_error = true;
-                                                break;
-                                            }
-                                            args.push_back(std::move(arg_result.value()));
-                                        } while (match(token_type::comma));
-                                    }
-                                    if (init_error) break;
-                                    auto super_close_result = consume(token_type::right_paren, "Expected ')' after super arguments");
-                                    if (!super_close_result) {
-                                        init_error = true;
-                                        break;
-                                    }
-                                    func->initializers.emplace_back("super", std::move(args));
-                                } else if (match(token_type::this_keyword)) {
-                                    auto this_paren_result = consume(token_type::left_paren, "Expected '(' after 'this'");
-                                    if (!this_paren_result) {
-                                        init_error = true;
-                                        break;
-                                    }
-                                    std::vector<expression_ptr> args;
-                                    if (!check(token_type::right_paren)) {
-                                        do {
-                                            auto arg_result = expression();
-                                            if (!arg_result) {
-                                                init_error = true;
-                                                break;
-                                            }
-                                            args.push_back(std::move(arg_result.value()));
-                                        } while (match(token_type::comma));
-                                    }
-                                    if (init_error) break;
-                                    auto this_close_result = consume(token_type::right_paren, "Expected ')' after this arguments");
-                                    if (!this_close_result) {
-                                        init_error = true;
-                                        break;
-                                    }
-                                    func->initializers.emplace_back("this", std::move(args));
-                                } else {
-                                    report_error("Expected 'super' or 'this' in constructor initializer list", peek());
-                                    init_error = true;
-                                    break;
-                                }
-                            } while (match(token_type::comma));
-
-                            if (init_error) {
-                                synchronize();
-                                continue;
-                            }
+                        if (check(token_type::colon)) {
+                            // Initializer lists are constructor-only (Dev ruling 2026-07); on methods
+                            // they were silently parsed and ignored - a trap
+                            report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
+                            synchronize();
+                            continue;
                         }
 
                         if (!match(token_type::left_brace)) {
@@ -2743,6 +2709,34 @@ checked_result<declaration_ptr> parser::class_declaration() {
             member = std::move(body_result.value());
             // TODO: Mark destructor as virtual if class has any virtual methods
             // Currently no virtual destructor support
+        } else if (check(token_type::function_keyword) &&
+                   current_ + 2 < tokens_.size() &&
+                   tokens_[current_ + 1].type == token_type::identifier &&
+                   tokens_[current_ + 1].lexeme != "operator" &&
+                   (tokens_[current_ + 2].type == token_type::equal ||
+                    tokens_[current_ + 2].type == token_type::semicolon)) {
+            // `function name = expr;` / `function name;` is a function-typed FIELD
+            // (auto semantics, same as top level); fall through to the regular member
+            // branch whose parse_type maps `function` to auto. `function operator=` is
+            // excluded - that stays an operator method.
+            advance(); // consume 'function'
+            token name = advance();
+            expression_ptr init = nullptr;
+            if (match(token_type::equal)) {
+                auto init_result = expression();
+                if (!init_result) {
+                    synchronize();
+                    continue;
+                }
+                init = std::move(init_result.value());
+            }
+            auto semicolon_result = consume(token_type::semicolon, "Expected ';' after field declaration");
+            if (!semicolon_result) {
+                synchronize();
+                continue;
+            }
+            auto var_decl = std::make_shared<variable_decl>(name.location, nullptr, name.lexeme, get_symbol_id(name), init);
+            member = var_decl;
         } else if (match(token_type::function_keyword)) {
             // Method declaration with 'function' keyword: function name(...) or function operator=(...)
             bool is_static = false;
@@ -2857,7 +2851,8 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     // Handle trailing return type
                     if (match(token_type::arrow)) {
                         if (check(token_type::left_brace)) {
-                            func->return_type = nullptr; // auto return
+                            // -> { adds no information: keep the leading type
+                            func->return_type = type;
                         } else {
                             auto return_type_result = parse_type();
                             if (!return_type_result) {
@@ -2865,6 +2860,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
                                 continue;
                             }
                             func->return_type = std::move(return_type_result.value());
+                            if (type && func->return_type && func->return_type->id != type->id) {
+                                report_error("Conflicting return types '" + type->type_name + "' and '" +
+                                             func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
+                                synchronize();
+                                continue;
+                            }
                         }
                     } else {
                         func->return_type = type; // Use declared type
@@ -2883,68 +2884,12 @@ checked_result<declaration_ptr> parser::class_declaration() {
                     }
 
                     // Parse constructor initialization list if present
-                    if (match(token_type::colon)) {
-                        bool init_error = false;
-                        do {
-                            if (match(token_type::super_keyword)) {
-                                auto super_paren_result = consume(token_type::left_paren, "Expected '(' after 'super'");
-                                if (!super_paren_result) {
-                                    init_error = true;
-                                    break;
-                                }
-                                std::vector<expression_ptr> args;
-                                if (!check(token_type::right_paren)) {
-                                    do {
-                                        auto arg_result = expression();
-                                        if (!arg_result) {
-                                            init_error = true;
-                                            break;
-                                        }
-                                        args.push_back(std::move(arg_result.value()));
-                                    } while (match(token_type::comma));
-                                }
-                                if (init_error) break;
-                                auto super_close_result = consume(token_type::right_paren, "Expected ')' after super arguments");
-                                if (!super_close_result) {
-                                    init_error = true;
-                                    break;
-                                }
-                                func->initializers.emplace_back("super", std::move(args));
-                            } else if (match(token_type::this_keyword)) {
-                                auto this_paren_result = consume(token_type::left_paren, "Expected '(' after 'this'");
-                                if (!this_paren_result) {
-                                    init_error = true;
-                                    break;
-                                }
-                                std::vector<expression_ptr> args;
-                                if (!check(token_type::right_paren)) {
-                                    do {
-                                        auto arg_result = expression();
-                                        if (!arg_result) {
-                                            init_error = true;
-                                            break;
-                                        }
-                                        args.push_back(std::move(arg_result.value()));
-                                    } while (match(token_type::comma));
-                                }
-                                if (init_error) break;
-                                auto this_close_result = consume(token_type::right_paren, "Expected ')' after this arguments");
-                                if (!this_close_result) {
-                                    init_error = true;
-                                    break;
-                                }
-                                func->initializers.emplace_back("this", std::move(args));
-                            } else {
-                                report_error("Expected 'super' or 'this' in constructor initializer list", peek());
-                                init_error = true;
-                                break;
-                            }
-                        } while (match(token_type::comma));
-
-                        if (init_error) {
-                            synchronize();
-                            continue;
-                        }
+                    if (check(token_type::colon)) {
+                        // Initializer lists are constructor-only (Dev ruling 2026-07); on methods
+                        // they were silently parsed and ignored - a trap
+                        report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
+                        synchronize();
+                        continue;
                     }
 
                     // Now parse the body
@@ -3173,6 +3118,12 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                             continue;
                         }
                         func->return_type = std::move(return_type_result.value());
+                        if (type && func->return_type && func->return_type->id != type->id) {
+                            report_error("Conflicting return types '" + type->type_name + "' and '" +
+                                         func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
+                            synchronize();
+                            continue;
+                        }
                     }
                 }
 
@@ -3357,7 +3308,7 @@ checked_result<declaration_ptr> parser::function_declaration() {
     return parse_function_body(name_view, name_id, return_type);
 }
 
-checked_result<declaration_ptr> parser::parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type) {
+checked_result<declaration_ptr> parser::parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type, bool allow_ctor_initializers) {
     auto func = std::make_shared<function_decl>(previous().location, name, name_id);
 
     JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after function name"));
@@ -3368,10 +3319,17 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     if (match(token_type::arrow)) {
         // Check if return type is specified or if we go directly to {
         if (check(token_type::left_brace)) {
-            // -> { means auto return type
-            func->return_type = nullptr; // nullptr means auto
+            // -> { adds no information: keep the leading type when one was given
+            func->return_type = return_type;
         } else {
             JAISCRIPT_TRY_ASSIGN(func->return_type, parse_type());
+            // A leading return type and a contradictory trailing one is an error
+            // (Dev ruling 2026-07); a matching pair is redundant-legal.
+            if (return_type && func->return_type && func->return_type->id != return_type->id) {
+                report_error("Conflicting return types '" + return_type->type_name + "' and '" +
+                             func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
+                return make_error_code(parse_error_code::unexpected_token);
+            }
         }
     } else {
         // No arrow - if we have a return type from before 'function', use it
@@ -3380,6 +3338,12 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     }
 
     // Parse constructor initialization list (: super(args), : this(args))
+    if (check(token_type::colon) && !allow_ctor_initializers) {
+        // Initializer lists are constructor-only; on free functions, destructors, and
+        // function-keyword methods they were silently ignored — a trap (Dev ruling 2026-07)
+        report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
     if (match(token_type::colon)) {
         do {
             // Parse initializer target (super or this)

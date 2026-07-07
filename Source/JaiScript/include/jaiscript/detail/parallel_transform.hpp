@@ -5,10 +5,12 @@
 
 // parallel_transform v0 (docs/parallel_design.md, docs/parallel_prove_or_serial.md §5).
 // Contract A: a body either satisfies the parallel contract or ERRORS — never silent-serial.
-// Everything here constructs at the parallel_transform call and tears down at the join;
-// outside an active region the engine carries exactly one extra null-pointer test on the
-// (cold, allocation-path) engine::execution_limits() accessor — the ruled
-// zero-concurrency-cost-outside-parallel invariant.
+// Everything here constructs lazily inside the first parallel_transform call; worker
+// contexts persist in an engine-owned slot pool and are RESET per call (Dev-greenlit
+// reuse — rebuild only on a provisioning-fingerprint change). Outside an active region
+// the engine carries exactly one extra null-pointer test on the (cold, allocation-path)
+// engine::execution_limits() accessor — the ruled zero-concurrency-cost-outside-parallel
+// invariant; sequential paths never touch any of this.
 
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/value.hpp>
@@ -67,6 +69,10 @@ namespace jai::detail {
         std::vector<type_info*> referenced_types;
     };
 
+    // A reusable worker execution context (definition private to parallel_transform.cpp:
+    // backend instance, root env, epoch sink, limits, provisioned callables).
+    struct parallel_worker_slot;
+
     // Engine-owned parallel machinery. Lazily created at the first parallel_transform /
     // thread_count touch; the pool's parked workers impose no cost on any sequential
     // script path (no engine lock exists outside an active region).
@@ -78,6 +84,17 @@ namespace jai::detail {
         std::unordered_map<const void*, parallel_admission> admission_cache;
         std::string error_text;                            // owns the message a re-raise views
         std::vector<size_t> last_chunk_bounds;             // instrumentation (tests/bench)
+
+        // Worker-context reuse (Dev-greenlit): slots built inside the first region
+        // persist and are RESET per call (limits re-slice, budget re-arm, residual-state
+        // clear, host-copy refresh) instead of rebuilt; a slot rebuilds only when its
+        // provisioning fingerprint (backend type + admission-graph bodies) changes.
+        // Sequential paths never see any of this - the state itself is created lazily
+        // inside the first region.
+        std::vector<std::unique_ptr<parallel_worker_slot>> worker_slots;
+
+        parallel_engine_state();
+        ~parallel_engine_state();   // out of line: worker_slot is incomplete here
     };
 
     // The builtin bodies (registered by the engine constructor).

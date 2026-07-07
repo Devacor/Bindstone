@@ -329,12 +329,16 @@ script_value script_value::make_field_reference(const std::shared_ptr<class_inst
 }
 
 script_value script_value::make_function(const script_function& func, engine* eng) {
+    return make_function(script_function(func), eng);
+}
+
+script_value script_value::make_function(script_function&& func, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create function with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_function(eng->get_type_info_void(), {}); // TODO: Proper type info
-    v.storage_ = make_strong<script_function>(func);
+    v.storage_ = make_strong<script_function>(std::move(func));
     return v;
 }
 

@@ -6,7 +6,10 @@
 //   The walk also snapshots the transitive call graph (script functions + whitelisted
 //   host functions) and every parse-time type the bodies reference.
 //
-//   BARRIER (single-threaded): per-worker execution contexts are built — own backend
+//   BARRIER (single-threaded): per-worker execution contexts are acquired — REUSED from
+//   the engine's slot pool when the provisioning fingerprint still matches (reset:
+//   limits re-slice, budget re-arm, residual-state clear, host-copy refresh), rebuilt
+//   otherwise. A fresh build gives each worker its own backend
 //   instance (engine's configured type), root environment with parent = nullptr (the
 //   hard partition: a lookup that would escape fails as undefined, it cannot race),
 //   private env-epoch sink, own execution_limits, per-worker copies of every callable
@@ -38,6 +41,42 @@
 #include <unordered_set>
 
 namespace jai::detail {
+
+	// Per-call worker failure record (first error in the slot's chunk)
+	struct parallel_worker_error {
+		size_t iteration = 0;
+		std::error_code code{};
+		std::string message;
+		bool terminal = false;
+	};
+
+	// One reusable worker execution context. Built inside a region, RESET per call
+	// afterwards; rebuilt only when the fingerprint stops matching. Owned by
+	// parallel_engine_state::worker_slots (engine lifetime).
+	struct parallel_worker_slot {
+		std::unique_ptr<string_symbolizer> env_epoch_sink;
+		std::shared_ptr<environment> root_env;
+		execution_limits limits;
+		std::unique_ptr<execution_backend> backend;
+		vm::vm_backend* vm = nullptr;                     // set when the engine backend is the vm
+		interpreter_backend* interp = nullptr;            // set otherwise
+		script_callable fn_payload;
+		std::vector<script_value> input;
+		size_t begin = 0;
+		size_t end = 0;
+		std::optional<parallel_worker_error> error;
+
+		// Provisioning fingerprint: reuse is valid only while these match the current
+		// call. Script bodies are identity-compared (hot reload swaps bodies -> rebuild);
+		// host copies are refreshed on every reuse instead of fingerprinted.
+		bool fingerprint_use_vm = false;
+		const void* fingerprint_fn_body = nullptr;
+		std::vector<std::pair<uint64_t, const void*>> fingerprint_script_bodies;
+		std::vector<std::pair<uint64_t, std::string>> host_functions;   // refreshed each reuse
+	};
+
+	parallel_engine_state::parallel_engine_state() = default;
+	parallel_engine_state::~parallel_engine_state() = default;
 
 namespace {
 
@@ -126,10 +165,10 @@ namespace {
 				return fail(call_node, "fn has no body known at admission time");
 			}
 			if (require_unary_value_param) {
-				if (fn->parameters.size() != 1) {
+				if (fn->parameters().size() != 1) {
 					return fail(fn->body.get(), "fn must take exactly one parameter");
 				}
-				if (fn->parameters[0].is_reference) {
+				if (fn->parameters()[0].is_reference) {
 					return fail(fn->body.get(), "fn may not take its element by reference (elements are detached copies)");
 				}
 			}
@@ -150,7 +189,7 @@ namespace {
 			saved.swap(scopes);
 			scopes.emplace_back();
 			bool ok = true;
-			for (const auto& p : fn->parameters) {
+			for (const auto& p : fn->parameters()) {
 				if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }   // warm (idempotent lazy fill)
 				declare(p.symbol_id);
 				collect_type(p.type);
@@ -464,25 +503,6 @@ namespace {
 
 	// ============================== WORKERS ==============================
 
-	struct worker_error_record {
-		size_t iteration = 0;
-		std::error_code code{};
-		std::string message;
-		bool terminal = false;
-	};
-
-	struct worker_context {
-		std::unique_ptr<string_symbolizer> env_epoch_sink;
-		std::shared_ptr<environment> root_env;
-		execution_limits limits;
-		std::unique_ptr<execution_backend> backend;
-		vm::vm_backend* vm = nullptr;
-		script_callable fn_payload;
-		std::vector<script_value> input;
-		size_t begin = 0;
-		size_t end = 0;
-		std::optional<worker_error_record> error;
-	};
 
 	// Worker-side value-semantic check for fn results (read-only const walk - no handle
 	// copies, so it never touches a refcount)
@@ -522,21 +542,66 @@ namespace {
 		}
 	}
 
-	std::unique_ptr<worker_context> provision_worker(engine& eng, const parallel_admission& adm,
+	// Re-slice the worker's memory allowance from the CURRENT outer accounting
+	void slice_worker_limits(engine& eng, parallel_worker_slot& slot) {
+		const auto& outer = eng.execution_limits();
+		slot.limits.terminal_error = false;
+		slot.limits.memory_used = 0;
+		slot.limits.memory_raises = 0;
+		slot.limits.memory_cap = outer.memory_cap;
+		slot.limits.memory_cap_symbol_id = outer.memory_cap_symbol_id;
+		slot.limits.memory_limit = outer.memory_limit;
+		if (outer.memory_limit != SIZE_MAX) {
+			const size_t already = std::min(outer.memory_used, outer.memory_limit);
+			slot.limits.memory_limit = outer.memory_limit - already;
+		}
+	}
+
+	// True when a persisted slot was provisioned for exactly this call shape: same
+	// backend type, same fn body, same transitive script bodies under the same names.
+	// (Host copies are refreshed on reuse rather than fingerprinted; the admission graph
+	// itself was already verified fresh against the live global environment.)
+	bool slot_matches(const parallel_worker_slot& slot, const parallel_admission& adm,
+	                  const script_defined_function& fn, bool use_vm) {
+		if (slot.fingerprint_use_vm != use_vm) { return false; }
+		if (slot.fingerprint_fn_body != static_cast<const void*>(fn.body.get())) { return false; }
+		if (slot.fingerprint_script_bodies.size() != adm.script_functions.size()) { return false; }
+		for (size_t i = 0; i < adm.script_functions.size(); ++i) {
+			if (slot.fingerprint_script_bodies[i].first != adm.script_functions[i].first ||
+			    slot.fingerprint_script_bodies[i].second != static_cast<const void*>(adm.script_functions[i].second->body.get())) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// Reuse a persisted slot: re-slice limits, re-arm the budget clock, clear residual
+	// execution state (a prior call may have ended mid-chunk on an error), refresh the
+	// host-function copies (registration may have changed - reconstruction is cheaper
+	// than detecting it). Provisioned script-function copies stay - that is the point.
+	void reset_worker_slot(engine& eng, parallel_worker_slot& slot, std::chrono::nanoseconds budget) {
+		slice_worker_limits(eng, slot);
+		if (slot.vm) {
+			slot.vm->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
+		} else {
+			slot.interp->get_interpreter()->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(),
+			                                                          &slot.limits, budget);
+		}
+		for (const auto& [name_id, name] : slot.host_functions) {
+			slot.root_env->define(name_id, eng.make_parallel_host_function_copy(name));
+		}
+		slot.error.reset();
+		slot.input.clear();
+	}
+
+	std::unique_ptr<parallel_worker_slot> provision_worker(engine& eng, const parallel_admission& adm,
 	                                                 std::chrono::nanoseconds budget,
 	                                                 bool use_vm) {
-		auto ctx = std::make_unique<worker_context>();
+		auto ctx = std::make_unique<parallel_worker_slot>();
 		ctx->env_epoch_sink = std::make_unique<string_symbolizer>();
 		ctx->root_env = std::make_shared<environment>(ctx->env_epoch_sink.get());
 
-		const auto& outer = eng.execution_limits();
-		ctx->limits.memory_cap = outer.memory_cap;
-		ctx->limits.memory_cap_symbol_id = outer.memory_cap_symbol_id;
-		ctx->limits.memory_limit = outer.memory_limit;
-		if (outer.memory_limit != SIZE_MAX) {
-			const size_t already = std::min(outer.memory_used, outer.memory_limit);
-			ctx->limits.memory_limit = outer.memory_limit - already;
-		}
+		slice_worker_limits(eng, *ctx);
 
 		if (use_vm) {
 			auto backend = std::make_unique<vm::vm_backend>(eng.get_symbolizer(), ctx->root_env);
@@ -549,8 +614,20 @@ namespace {
 			backend->set_engine_reference(&eng);
 			backend->get_interpreter()->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(),
 			                                                      &ctx->limits, budget);
+			ctx->interp = backend.get();
 			ctx->backend = std::move(backend);
 		}
+
+		// Provisioning fingerprint for reuse decisions on later calls
+		ctx->fingerprint_use_vm = use_vm;
+		ctx->fingerprint_script_bodies.reserve(adm.script_functions.size());
+		for (const auto& [name_id, source_fn] : adm.script_functions) {
+			ctx->fingerprint_script_bodies.emplace_back(name_id, static_cast<const void*>(source_fn->body.get()));
+		}
+		if (!adm.script_functions.empty()) {
+			ctx->fingerprint_fn_body = static_cast<const void*>(adm.script_functions.front().second->body.get());
+		}
+		ctx->host_functions = adm.host_functions;
 
 		// Per-worker copies of every callable the body needs: fresh script_defined_function
 		// objects (own parameters vector, own backend_body_cache, closure_env = the worker
@@ -559,8 +636,10 @@ namespace {
 		execution_backend* backend_ptr = ctx->backend.get();
 		bool first_entry = true;
 		for (const auto& [name_id, source_fn] : adm.script_functions) {
+			// Deep parameter copy ON PURPOSE: parameter's mutable symbol_id/slot_index
+			// lazy fills stay worker-private (the shared-storage mints are main-thread)
 			auto copy = std::make_shared<script_defined_function>(
-				source_fn->name, source_fn->parameters, source_fn->return_type,
+				source_fn->name, std::vector<parameter>(source_fn->parameters()), source_fn->return_type,
 				source_fn->body, ctx->root_env, source_fn->local_count);
 			if (ctx->vm) { ctx->vm->precompile_parallel_function(*copy); }
 			script_callable payload;
@@ -583,7 +662,7 @@ namespace {
 		return ctx;
 	}
 
-	void run_worker(worker_context& ctx, std::vector<script_value>& out, engine& eng) {
+	void run_worker(parallel_worker_slot& ctx, std::vector<script_value>& out, engine& eng) {
 		std::vector<script_value> call_args;
 		call_args.emplace_back(std::monostate{}, &eng);
 		size_t i = ctx.begin;
@@ -595,20 +674,20 @@ namespace {
 					// Uncaught script throw: surfaces as backend unwinding state, not a
 					// checked_result failure. The thrown value flattens to its message
 					// text across the join (v0).
-					ctx.error = worker_error_record{ i,
+					ctx.error = parallel_worker_error{ i,
 						make_error_code(runtime_error_code::evaluation_failed),
 						ctx.backend->get_current_exception().what(),
 						ctx.limits.terminal_error };
 					return;
 				}
 				if (!r) {
-					ctx.error = worker_error_record{ i, r.error(),
+					ctx.error = parallel_worker_error{ i, r.error(),
 						format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
 					return;
 				}
 				const char* what = nullptr;
 				if (!result_value_semantic(r.value(), &what)) {
-					ctx.error = worker_error_record{ i,
+					ctx.error = parallel_worker_error{ i,
 						make_error_code(runtime_error_code::unsupported_operation),
 						std::string("parallel_transform: fn returned a non-value-semantic result (") + what +
 							") for element " + std::to_string(i),
@@ -618,7 +697,7 @@ namespace {
 				out[i] = std::move(r).value();
 			}
 		} catch (const std::exception& e) {
-			ctx.error = worker_error_record{ i, make_error_code(runtime_error_code::cpp_exception),
+			ctx.error = parallel_worker_error{ i, make_error_code(runtime_error_code::cpp_exception),
 				e.what(), ctx.limits.terminal_error };
 		}
 	}
@@ -728,7 +807,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		if (!weight_adm->admitted) {
 			return raise(weight_adm->code, weight_adm->message);
 		}
-		if (weight_payload->fn->parameters.size() != 1 || weight_payload->fn->parameters[0].is_reference) {
+		if (weight_payload->fn->parameters().size() != 1 || weight_payload->fn->parameters()[0].is_reference) {
 			return usage("parallel_transform: weight_fn must take exactly one parameter by value");
 		}
 	}
@@ -786,22 +865,32 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	}
 	const bool use_vm = engine_backend == backend_type::vm;
 
+	// Acquire the first worker_count persistent slots: RESET matching ones (limits
+	// re-slice + budget re-arm + residual-state clear + host refresh), rebuild the rest.
 	std::vector<type_info*> value_types;
-	std::vector<std::unique_ptr<worker_context>> contexts;
+	if (state.worker_slots.size() < worker_count) {
+		state.worker_slots.resize(worker_count);
+	}
+	std::vector<parallel_worker_slot*> contexts;
 	contexts.reserve(worker_count);
 	for (size_t k = 0; k < worker_count; ++k) {
-		auto ctx = provision_worker(eng, *adm, budget, use_vm);
-		ctx->begin = bounds[k];
-		ctx->end = bounds[k + 1];
-		ctx->input.reserve(ctx->end - ctx->begin);
-		for (size_t i = ctx->begin; i < ctx->end; ++i) {
+		auto& slot = state.worker_slots[k];
+		if (slot && slot_matches(*slot, *adm, *fn_payload->fn, use_vm)) {
+			reset_worker_slot(eng, *slot, budget);
+		} else {
+			slot = provision_worker(eng, *adm, budget, use_vm);
+		}
+		slot->begin = bounds[k];
+		slot->end = bounds[k + 1];
+		slot->input.reserve(slot->end - slot->begin);
+		for (size_t i = slot->begin; i < slot->end; ++i) {
 			try {
-				ctx->input.push_back(source[i].parallel_detached_copy(&value_types));
+				slot->input.push_back(source[i].parallel_detached_copy(&value_types));
 			} catch (const std::exception& e) {
 				return usage("parallel_transform: element " + std::to_string(i) + ": " + e.what());
 			}
 		}
-		contexts.push_back(std::move(ctx));
+		contexts.push_back(slot.get());
 	}
 	prewarm_region_types(eng, [&] {
 		std::vector<type_info*> seed = adm->referenced_types;
@@ -828,7 +917,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	eng.get_symbolizer()->set_frozen(true);
 	state.active_region = &table;
 	for (size_t k = 1; k < worker_count; ++k) {
-		worker_context* ctx = contexts[k].get();
+		parallel_worker_slot* ctx = contexts[k];
 		std::vector<script_value>* out_ptr = &out;
 		engine* eng_ptr = &eng;
 		state.pool->submit_to(k - 1, [ctx, out_ptr, eng_ptr] { run_worker(*ctx, *out_ptr, *eng_ptr); });
@@ -849,7 +938,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	if (rolled_up) {
 		eng.execution_limits().memory_charge_deferred(rolled_up);
 	}
-	const worker_error_record* winner = nullptr;
+	const parallel_worker_error* winner = nullptr;
 	for (const auto& ctx : contexts) {
 		if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {
 			winner = &*ctx->error;

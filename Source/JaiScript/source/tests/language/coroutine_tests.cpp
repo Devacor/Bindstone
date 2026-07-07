@@ -708,6 +708,122 @@ public:
         // Method coroutines MATCH that precedent: a class hot reload while a method
         // coroutine is suspended leaves the suspended handle on the OLD body, resuming
         // against the SAME (migrated) instance; fresh calls use the NEW body.
+        // HANDLE REFERENCE SEMANTICS (Dev ruling, 2026-07): a handle IS a reference to a
+        // running computation, so copies SHARE the live coroutine (clone() shallow-shares
+        // the holder - value.cpp jai_object_type case). Field stores, aliases, by-value
+        // params, and container elements all see the same resume/done state.
+
+        test("handle_stored_in_field_resumes", [this, check_both]() {
+            check_both(R"(
+                coroutine function co() { yield 1; yield 2; }
+                class B { var h = null; }
+                var b = B();
+                b.h = co();
+                to_string(b.h.resume()) + "|" + to_string(b.h.resume()) + "|" + to_string(b.h.done())
+            )", "1|2|false", "handle lives in a field; resume/done through the field");
+        });
+
+        test("handle_copies_share_the_coroutine", [this, check_both]() {
+            check_both(R"(
+                coroutine function co() { yield 1; yield 2; yield 3; return 0; }
+                var h = co();
+                var h2 = h;
+                var a = h.resume(); var b = h2.resume(); var c = h.resume(); h2.resume();
+                to_string(a) + to_string(b) + to_string(c) + "|" +
+                    to_string(h.done()) + "|" + to_string(h2.done())
+            )", "123|true|true", "aliases interleave one coroutine; done() agrees");
+        });
+
+        test("handle_in_array_and_map", [this, check_both]() {
+            check_both(R"(
+                coroutine function co() { yield 7; yield 8; }
+                var a = [co()];
+                var m = {"k": a[0]};
+                to_string(a[0].resume()) + "|" + to_string(m["k"].resume())
+            )", "7|8", "array element and map entry share the stored handle");
+        });
+
+        test("handle_passed_by_value_resumes_shared", [this, check_both]() {
+            check_both(R"(
+                coroutine function co() { yield 42; return 0; }
+                function drive(var h) -> int { return h.resume(); }
+                var h = co();
+                var a = drive(h);
+                h.resume();
+                to_string(a) + "|" + to_string(h.done())
+            )", "42|true", "by-value param resumes the caller's coroutine");
+        });
+
+        test("instance_copy_shares_field_held_handle", [this, check_both]() {
+            // Object copies stay value-semantic (deep) - but the handle FIELD shares the
+            // one coroutine, exactly like a shared_ptr field would share its pointee.
+            check_both(R"(
+                coroutine function co() { yield 10; yield 20; yield 30; }
+                class Holder { var h = null; int n = 0; }
+                var a = Holder();
+                a.h = co();
+                var b = a;
+                b.n = 99;
+                to_string(a.h.resume()) + to_string(b.h.resume()) + to_string(a.h.resume()) +
+                    "|" + to_string(a.n) + to_string(b.n)
+            )", "102030|099", "copied instance shares the coroutine, not the ints");
+        });
+
+        test("self_receiver_field_handle_boss_pattern", [this, check_both]() {
+            // The crawler boss shape: a Game method coroutine whose handle lives in a
+            // Game field (receiver pin + field-held handle = deliberate strong cycle;
+            // broken by re-assignment/null like any shared structure).
+            check_both(R"(
+                class Game {
+                    var boss_co = null;
+                    int phase = 0;
+                    coroutine void brain() { phase = 1; yield; phase = 2; yield; phase = 3; }
+                    function tick() -> void {
+                        if (boss_co == null || boss_co.done()) { boss_co = brain(); }
+                        boss_co.resume();
+                    }
+                }
+                var g = Game();
+                g.tick(); g.tick(); g.tick();
+                to_string(g.phase)
+            )", "3", "own-method handle stored in own field drives across ticks");
+        });
+
+        test("field_held_handle_survives_field_changing_reload", [this, check_both]() {
+            check_both(R"(
+                class W { var co = null; int v = 1; coroutine int gen() { yield v; yield v + 1; return 0; } }
+                var w = W();
+                w.v = 40;
+                w.co = w.gen();
+                var a = w.co.resume();
+                class W { var co = null; int v = 1; string extra = "e"; coroutine int gen() { yield 8; return 0; } }
+                var b = w.co.resume();
+                var h2 = w.gen();
+                to_string(a) + "|" + to_string(b) + "|" + w.extra + "|" + to_string(h2.resume())
+            )", "40|41|e|8", "in-place migration keeps the field-held handle on the old body");
+        });
+
+        test("engine_teardown_with_field_held_suspended_handle", [this]() {
+            // Debug's 0xDD sweep catches any teardown ordering bug: the engine dies while
+            // a SUSPENDED handle sits in a field of its own receiver (the strong cycle).
+            for (bool use_vm : {false, true}) {
+                {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->execution_budget(0);
+                    auto r = e->execute(R"(
+                        class Game { var co = null; coroutine int brain() { yield 1; yield 2; yield 3; } }
+                        var g = Game();
+                        g.co = g.brain();
+                        g.co.resume()
+                    )");
+                    check_eq(static_cast<script_int>(1), r.as<script_int>());
+                }   // engine + suspended fiber/continuation + cycle all die here
+                auto fresh = jai::engine::make();
+                check_eq(static_cast<script_int>(4), fresh->execute("2 + 2").as<script_int>());
+            }
+        });
+
         test("method_coroutine_hot_reload_matches_free_precedent", [this]() {
             auto engine = make_engine();
             engine->execute(R"(

@@ -114,13 +114,8 @@ namespace jai::detail {
 				cur = field_value;
 				continue;
 			}
-			if (!holder->target) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Null reference");
-			}
-			if (holder->sourceEnv.expired()) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
-			}
-			cur = holder->target;
+			// unreachable: every factory sets a mode
+			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Null reference");
 		}
 		return script_value(*cur);
 	}
@@ -138,7 +133,6 @@ namespace jai::detail {
 	// assign-through constraint.
 	inline checked_result<script_value> resolve_ref_lvalue(const expression* arg, call_frame* caller_locals,
 	                                                       environment* caller_env,
-	                                                       const std::shared_ptr<environment>& caller_env_shared,
 	                                                       engine* eng, string_symbolizer* symbolizer) {
 		// Collect steps outermost-first; applied base-first (reverse)
 		const expression* inline_steps[8];
@@ -295,7 +289,7 @@ namespace jai::detail {
 					}
 					auto array_type_info = cur.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
-					return script_value::make_element_reference(storage, static_cast<size_t>(index), caller_env_shared, eng, element_type);
+					return script_value::make_element_reference(storage, static_cast<size_t>(index), eng, element_type);
 				}
 				auto derefed = ref_checked_deref((*storage)[static_cast<size_t>(index)]);
 				if (!derefed) { return derefed; }

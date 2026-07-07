@@ -68,9 +68,6 @@ namespace {
         if (!refHolder) {
             return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
         }
-        if (!refHolder->has_cell && !refHolder->has_map_key && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
-        }
         return script_value(source);
     }
 
@@ -3480,7 +3477,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 auto array_type_info = left.get_type_info();
                 type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
                 script_value ref_value = script_value::make_element_reference(
-                    left.get_array_storage(), static_cast<size_t>(index), environment_, engine_, element_type);
+                    left.get_array_storage(), static_cast<size_t>(index), engine_, element_type);
                 push_value(ref_value);
             } else {
                 // True temporary (e.g., function return), read-only access
@@ -5314,14 +5311,10 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 
                 // Check if we got a reference
                 if (target_ref.is_reference()) {
-                    // Get the actual target through the reference
+                    // Mode-based re-resolution (never a cached address): realloc/erase
+                    // between mint and write can't corrupt the heap
                     auto refHolder = target_ref.get_reference_holder();
-                    script_value* target_ptr = refHolder->target;
-                    if (!target_ptr && refHolder->has_map_key) {
-                        // Map-entry mode carries no raw target: re-resolve via find(key)
-                        auto map_it = refHolder->container_map->find(*refHolder->cell());
-                        if (map_it != refHolder->container_map->end()) { target_ptr = &map_it->second; }
-                    }
+                    script_value* target_ptr = refHolder->resolve_target();
                     if (!target_ptr) {
                         return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
                     }
@@ -8797,7 +8790,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                             element_constraint = et;
                         }
                     }
-                    *loop_var_ptr = script_value::make_element_reference(array_storage, i, environment_, engine_, element_constraint);
+                    *loop_var_ptr = script_value::make_element_reference(array_storage, i, engine_, element_constraint);
                 } else {
                     // Make a copy of the element - assign directly to pointer
                     *loop_var_ptr = (*array_storage)[i].clone();
@@ -11022,7 +11015,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     // an owner-pinned reference (Tier 1)
     if (argExpr && detail::is_ref_bindable_lvalue(argExpr)) {
         auto resolved = detail::resolve_ref_lvalue(argExpr, caller_locals,
-                                                   caller_env.get(), caller_env, engine_, string_symbolizer_);
+                                                   caller_env.get(), engine_, string_symbolizer_);
         if (!resolved) {
             return resolved.error_value();
         }
@@ -11600,17 +11593,9 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
     }
 
     // Dereference if the argument is a reference to get the actual value type
+    // (deref() follows chains to a non-reference or throws - no residual-ref case)
     const script_value& derefed_arg = arg.deref();
-    // Get source type - prefer storage_type for accuracy
     auto source_type = derefed_arg.storage_type();
-    // If still showing as reference after deref, get the actual target and check its type
-    if (source_type == script_value_type::jai_reference_type) {
-        // The deref'd value is still showing as reference - manually get the target
-        auto ref_holder = derefed_arg.get_reference_holder();
-        if (ref_holder && ref_holder->target) {
-            source_type = ref_holder->target->storage_type();
-        }
-    }
     auto target_base_type = target_type->base_type;
 
     // Any type accepts anything - no conversion needed

@@ -222,9 +222,6 @@ namespace {
 		if (!refHolder) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 		}
-		if (!refHolder->has_cell && !refHolder->has_map_key && !refHolder->container && !refHolder->owner_instance && refHolder->sourceEnv.expired()) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target environment has been destroyed");
-		}
 		return script_value(source);
 	}
 
@@ -2496,14 +2493,9 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 		return arg;
 	}
 
+	// deref() follows chains to a non-reference or throws - no residual-ref case
 	const script_value& derefed_arg = arg.deref();
 	auto source_type = derefed_arg.storage_type();
-	if (source_type == script_value_type::jai_reference_type) {
-		auto ref_holder = derefed_arg.get_reference_holder();
-		if (ref_holder && ref_holder->target) {
-			source_type = ref_holder->target->storage_type();
-		}
-	}
 	auto target_base_type = target_type->base_type;
 
 	if (target_base_type == script_value_type::jai_any_type) return arg;
@@ -4201,7 +4193,7 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 			auto array_type_info = left.get_type_info();
 			type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 			script_value ref_value = script_value::make_element_reference(
-				left.get_array_storage(), static_cast<size_t>(index), environment_, engine_, element_type);
+				left.get_array_storage(), static_cast<size_t>(index), engine_, element_type);
 			stack_.push_back(std::move(ref_value));
 		} else {
 			stack_.push_back(array[index]);
@@ -4322,13 +4314,10 @@ checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instructio
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
 	}
 
+	// Mode-based re-resolution (never a cached address): realloc/erase between mint
+	// and write can't corrupt the heap
 	auto refHolder = target_ref.get_reference_holder();
-	script_value* target_ptr = refHolder->target;
-	if (!target_ptr && refHolder->has_map_key) {
-		// Map-entry mode carries no raw target: re-resolve via find(key)
-		auto map_it = refHolder->container_map->find(*refHolder->cell());
-		if (map_it != refHolder->container_map->end()) { target_ptr = &map_it->second; }
-	}
+	script_value* target_ptr = refHolder->resolve_target();
 	if (!target_ptr) {
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 	}
@@ -4429,13 +4418,10 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 	if (!currentValue.is_reference()) {
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
 	}
+	// Mode-based re-resolution (never a cached address): realloc/erase between mint
+	// and write can't corrupt the heap
 	auto refHolder = currentValue.get_reference_holder();
-	script_value* target_ptr = refHolder->target;
-	if (!target_ptr && refHolder->has_map_key) {
-		// Map-entry mode carries no raw target: re-resolve via find(key)
-		auto map_it = refHolder->container_map->find(*refHolder->cell());
-		if (map_it != refHolder->container_map->end()) { target_ptr = &map_it->second; }
-	}
+	script_value* target_ptr = refHolder->resolve_target();
 	if (!target_ptr) {
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 	}
@@ -7497,7 +7483,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 					element_constraint = et;
 				}
 			}
-			element = script_value::make_element_reference(array_storage, state.index, environment_, engine_, element_constraint);
+			element = script_value::make_element_reference(array_storage, state.index, engine_, element_constraint);
 		} else {
 			element = (*array_storage)[state.index].clone();
 		}
@@ -8717,7 +8703,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				if (lvalue_node != k_invalid_u32 && caller_code) {
 					auto resolved = detail::resolve_ref_lvalue(
 						static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
-						caller_locals, caller_env.get(), caller_env, engine_, symbolizer_);
+						caller_locals, caller_env.get(), engine_, symbolizer_);
 					if (!resolved) {
 						return resolved.error_value();
 					}

@@ -55,6 +55,23 @@ script_value::reference_holder::~reference_holder() {
     }
 }
 
+script_value* script_value::reference_holder::resolve_target() {
+    if (has_cell) {
+        return cell();
+    }
+    if (has_map_key) {
+        auto it = container_map->find(*cell());
+        return it != container_map->end() ? &it->second : nullptr;
+    }
+    if (container) {
+        return container_index < container->size() ? &(*container)[container_index] : nullptr;
+    }
+    if (owner_instance) {
+        return owner_instance->find_field_value(field_id);
+    }
+    return nullptr;   // unreachable: every factory sets a mode
+}
+
 script_value script_value::make_cell_reference(script_value&& boxed, engine* eng) {
     static_assert(sizeof(script_value) == reference_holder::cell_storage_size &&
                   alignof(script_value) <= 8, "cell inline storage must fit a script_value");
@@ -89,23 +106,6 @@ script_value script_value::make_map_entry_reference(const strong_ptr<std::map<sc
     ref->has_map_key = true;
     ref->container_map = map_storage;
     ref->container_element_type = value_type;
-    v.storage_ = ref;
-    return v;
-}
-
-script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env) {
-    if (!target) {
-        throw runtime_error("Cannot create reference to null");
-    }
-    auto eng = target->get_engine();
-    if (!eng) {
-        throw runtime_error("Cannot create reference: target has no valid engine reference");
-    }
-    script_value v(std::monostate{}, eng);  // Use engine reference from target
-    v.type_info_ = eng->get_type_info_reference(target->get_type_info());
-    auto ref = make_strong<reference_holder>();
-    ref->target = target;
-    ref->sourceEnv = env;  // Store weak reference to environment
     v.storage_ = ref;
     return v;
 }
@@ -259,31 +259,8 @@ checked_result<script_value> script_value::make_weak_ptr(const script_value& val
     return checked_result<script_value>(v);
 }
 
-script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env, engine* eng) {
-    script_value v = make_reference(target, env);
-    v.engine_ = eng;
-    return v;
-}
-
-script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env, engine* eng, type_info_ptr container_element_type) {
-    if (!target) {
-        throw runtime_error("Cannot create reference to null");
-    }
-    if (!eng) {
-        throw runtime_error("Cannot create reference: null engine pointer");
-    }
-    script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(target->get_type_info());
-    auto ref = make_strong<reference_holder>();
-    ref->target = target;
-    ref->sourceEnv = env;
-    ref->container_element_type = container_element_type;  // Store the container's element type constraint
-    v.storage_ = ref;
-    return v;
-}
-
 script_value script_value::make_element_reference(const strong_ptr<std::vector<script_value>>& container, size_t index,
-                                                  const std::shared_ptr<environment>& env, engine* eng, type_info_ptr element_type) {
+                                                  engine* eng, type_info_ptr element_type) {
     if (!container || index >= container->size()) {
         throw runtime_error("Cannot create reference to out-of-range array element");
     }
@@ -293,15 +270,9 @@ script_value script_value::make_element_reference(const strong_ptr<std::vector<s
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_reference((*container)[index].get_type_info());
     auto ref = make_strong<reference_holder>();
-    ref->sourceEnv = env;
     ref->container_element_type = element_type;
     ref->container = container;          // owns the vector (keeps it alive) + enables re-resolve
     ref->container_index = index;
-    // target is the element address AT CREATION time — valid for callers that resolve
-    // and use the reference immediately (the assignment paths). deref()/assign_through()
-    // ignore it in favor of container+index, which is recomputed each time and bounds-
-    // checked, so a reference STORED across a reallocation (the #41 case) stays safe.
-    ref->target = &(*container)[index];
     v.storage_ = ref;
     return v;
 }
@@ -674,7 +645,7 @@ const script_value& script_value::deref() const {
     if (current_type() == script_value_type::jai_reference_type) {
         // Bind a reference to the held strong_ptr (do NOT copy it): copying bumps and
         // then drops the (non-atomic) refcount on every deref, which is pure overhead
-        // on this hot path. We only read target/sourceEnv here.
+        // on this hot path.
         const auto& refHolder = std::get<strong_ptr<reference_holder>>(storage_);
         if (!refHolder) {
             throw runtime_error("Null reference");
@@ -701,22 +672,15 @@ const script_value& script_value::deref() const {
             return (*refHolder->container)[refHolder->container_index].deref();
         }
         if (refHolder->owner_instance) {
-            // Field reference: re-resolve by id (no lazy default insert, no sourceEnv
-            // check - the pinned instance IS the lifetime)
+            // Field reference: re-resolve by id (no lazy default insert - the pinned
+            // instance IS the lifetime)
             const script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
             if (!field_value) {
                 throw runtime_error("Reference to a removed field");
             }
             return field_value->deref();
         }
-        if (!refHolder->target) {
-            throw runtime_error("Null reference");
-        }
-        if (refHolder->sourceEnv.expired()) {
-            throw runtime_error("Reference target environment has been destroyed");
-        }
-        // Recursively deref to handle chained references
-        return refHolder->target->deref();
+        throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
     // For C++ references, we don't deref here - they need special handling
     // The interpreter will handle them specially
@@ -754,14 +718,7 @@ script_value& script_value::deref() {
             }
             return field_value->deref();
         }
-        if (!refHolder->target) {
-            throw runtime_error("Null reference");
-        }
-        if (refHolder->sourceEnv.expired()) {
-            throw runtime_error("Reference target environment has been destroyed");
-        }
-        // Recursively deref to handle chained references
-        return refHolder->target->deref();
+        throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
     return *this;
 }
@@ -801,13 +758,7 @@ void script_value::assign_through(const script_value& value) {
             *field_value = value;
             return;
         }
-        if (!refHolder->target) {
-            throw runtime_error("Null reference in assign_through");
-        }
-        if (refHolder->sourceEnv.expired()) {
-            throw runtime_error("Reference target environment has been destroyed");
-        }
-        *refHolder->target = value;
+        throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode
     } else if (is_cpp_bound()) {
         void* boundPtr = bound_target_ptr();
         const uint8_t sizeAndSign = bound_size_and_sign();
@@ -889,13 +840,7 @@ void script_value::assign_through(script_value&& value) {
             *field_value = std::move(value);
             return;
         }
-        if (!refHolder->target) {
-            throw runtime_error("Null reference in assign_through");
-        }
-        if (refHolder->sourceEnv.expired()) {
-            throw runtime_error("Reference target environment has been destroyed");
-        }
-        *refHolder->target = std::move(value);
+        throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode
     } else if (is_cpp_bound()) {
         // can't move into a C++ variable — fall back to copy
         assign_through(value);

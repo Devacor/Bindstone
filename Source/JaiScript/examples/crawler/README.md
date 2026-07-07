@@ -199,7 +199,7 @@ position, inventory and effects exactly.
 
 ```
 main.cpp            thin host: console, keys, Rng, file IO, flags (adapted from roguelike)
-scripts/state.jai   persistent globals (G, RNG, BOSS_CO, PILOT_CO)   [copied verbatim]
+scripts/state.jai   persistent globals (G, RNG, PILOT_CO)            [boss handle moved into G]
 scripts/util.jai    colors, hashing, direction tables                [copied verbatim]
 scripts/data.jai    species/classes/bestiary/items/affixes/flavor    [copied verbatim]
 scripts/entities.jai Entity/Monster/Player/Item + timed effects      [copied verbatim]
@@ -231,8 +231,13 @@ and coroutine methods landed (3766da09). Both got used naturally:
   `monsters[bi]` to `var&` helpers like `attack()` and `step_toward()`, which
   resolves through the new lvalue-reference argument path and mutates the real
   monster. The roguelike's free-function + global-chain version is strictly
-  clumsier. (Handles still refuse to live in fields/containers, so `BOSS_CO`
-  keeps its named global slot — fair trade.)
+  clumsier.
+- **FIXED (2026-07): the handle-in-a-field gripe.** This README used to say
+  "handles still refuse to live in fields/containers, so `BOSS_CO` keeps its
+  named global slot". Handles are reference-semantic on copy now — copies share
+  the one live coroutine — so the boss handle moved into a `Game` field where it
+  always belonged (`G.boss_co`, see game.jai/ai.jai) and the `BOSS_CO` global is
+  gone. Field stores, container elements, and by-value params all just work.
 - **Found one live regression** (reported; worked around at one site in
   `ui.jai`): a **bare container-element read used directly as a condition is
   always truthy** on BOTH backends — `if (arr[i])` and `if (!arr[i])` see the

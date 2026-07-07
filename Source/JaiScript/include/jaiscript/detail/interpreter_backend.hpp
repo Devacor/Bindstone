@@ -70,7 +70,19 @@ public:
     void set_engine_reference(engine* engine_ref) override {
         interpreter_->set_engine_reference(engine_ref);
     }
-    
+
+    void set_debug_controller(debug::controller* controller) override {
+        interpreter_->set_debug_controller(controller);
+    }
+
+    std::shared_ptr<environment> get_current_environment() const override {
+        return interpreter_->get_current_environment();
+    }
+
+    std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const override {
+        return interpreter_->get_current_frame_locals();
+    }
+
     // Exception handling
     bool is_unwinding() const override {
         return interpreter_->is_unwinding();

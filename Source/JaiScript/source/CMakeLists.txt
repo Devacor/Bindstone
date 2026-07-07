@@ -5,6 +5,8 @@ set(JAISCRIPT_SOURCES
     implementation/class_registry.cpp
     implementation/conversion_registry.cpp
     implementation/coroutine.cpp
+    implementation/debug/connector.cpp
+    implementation/debug/controller.cpp
     implementation/engine.cpp
     implementation/environment.cpp
     implementation/interpreter.cpp
@@ -40,6 +42,14 @@ target_compile_features(jaiscript PUBLIC cxx_std_20)
 target_compile_definitions(jaiscript PRIVATE
     JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES
 )
+
+# Optional DAP-over-TCP debugger transport (jai::debug::debug_connector). On for desktop
+# dev/editor builds; turn OFF for shipping/mobile so no socket code is compiled in. The
+# connector's TU is empty when this is off (constructing one is then a link error by design).
+option(JAISCRIPT_ENABLE_DEBUGGER "Compile the DAP debug_connector (raw-socket VS Code attach)" ON)
+if(JAISCRIPT_ENABLE_DEBUGGER)
+    target_compile_definitions(jaiscript PUBLIC JAISCRIPT_ENABLE_DEBUGGER)
+endif()
 
 # Platform-specific settings
 if(MSVC)

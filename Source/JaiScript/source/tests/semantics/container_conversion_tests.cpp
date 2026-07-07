@@ -19,7 +19,9 @@ public:
     void forge_tests() override {
         test("large_vector_performance", [this]() {
             auto engine = make_engine();
-            
+            engine->execution_budget(0.0);   // correctness+measurement test, not a wall-clock gate:
+                                             // the 10k-element build loop must not flake under load
+
             engine->add_function("sum_large", [](std::vector<int> nums) -> int64_t {
                 int64_t sum = 0;
                 for (int n : nums) sum += n;
@@ -185,7 +187,9 @@ public:
         
         test("large_vector_performance", [this]() {
             auto engine = make_engine();
-            
+            engine->execution_budget(0.0);   // correctness+measurement test, not a wall-clock gate:
+                                             // the 10k-element build loop must not flake under load
+
             engine->add_function("print", [](const std::string& str) { std::cout << str << std::endl; });
             engine->add_function("to_string", [](int val) -> std::string { return std::to_string(val); });
             

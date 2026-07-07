@@ -1,5 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <filesystem>
+#include <fstream>
 
 using namespace jai::foundry;
 
@@ -240,6 +242,34 @@ public:
             auto trace = engine->last_stack_trace();
             check_false(trace.empty());
             check_eq(std::string("<script>"), trace.back().function);
+        });
+
+        test("execute_file_stamps_stack_frame_file", [this]() {
+            // execute_file must attribute the script to its path: every AST node's
+            // location carries the file, observable via the captured stack trace.
+            auto write_tmp = [](const std::string& name, const std::string& body) {
+                std::filesystem::path p = std::filesystem::temp_directory_path() / name;
+                std::ofstream(p) << body;
+                return p.string();
+            };
+            auto engine = make_engine();
+
+            std::string fileA = write_tmp("jaidbg_creature.jai", "throw \"x\";");
+            try { engine->execute_file(fileA); } catch (...) {}
+            auto trace = engine->last_stack_trace();
+            check_false(trace.empty());
+            check_eq(fileA, trace.back().file);
+
+            // Identical content under a DIFFERENT path must not alias the cached AST:
+            // the parse cache keys on (sourcePath, content), not content alone.
+            std::string fileB = write_tmp("jaidbg_missile.jai", "throw \"x\";");
+            try { engine->execute_file(fileB); } catch (...) {}
+            auto trace2 = engine->last_stack_trace();
+            check_false(trace2.empty());
+            check_eq(fileB, trace2.back().file);
+
+            std::filesystem::remove(fileA);
+            std::filesystem::remove(fileB);
         });
 
         test("format_stack_trace_lists_frames", [this]() {

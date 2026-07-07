@@ -6,6 +6,7 @@
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
+#include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
 #include <sstream>
 #include <cmath>
@@ -10216,9 +10217,9 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
     buffer << file.rdbuf();
     std::string content = buffer.str();
 
-    // Execute the included file
-    // Note: include always parses and executes the file
-    auto result = engine_ptr->execute(content);
+    // Execute the included file. Pass the resolved path so every node in the included
+    // unit is stamped with its real filename (stack traces / breakpoints name the file).
+    auto result = engine_ptr->execute_source(content, jai::instance_variables{}, resolved_path);
 
     // Push the result onto the value stack
     push_value(result);
@@ -11010,6 +11011,93 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
 
 // Function call implementation - returns checked_result for consistent error handling
 // Uses stack-based call frames for fast parameter access instead of hash map environments
+// Debugger: collect (slot, name) for every local a function body declares. Mirrors the shape
+// of collect_outer_slots_stmt; stops at nested function/lambda/class bodies (separate frames)
+// and expression statements (no locals). Runs only when a debugger asks for locals at a stop.
+static void collect_frame_slot_names(const statement* s,
+                                     std::vector<std::pair<size_t, std::string_view>>& out) {
+    if (!s) return;
+    switch (s->get_type()) {
+    case node_type::variable_decl: {
+        auto* vd = static_cast<const variable_decl*>(s);
+        if (vd->slot_index != SIZE_MAX) out.emplace_back(vd->slot_index, vd->name);
+        break;
+    }
+    case node_type::statement_decl:
+        collect_frame_slot_names(static_cast<const statement_decl*>(s)->statement.get(), out);
+        break;
+    case node_type::block_stmt:
+        for (const auto& d : static_cast<const block_stmt*>(s)->declarations)
+            collect_frame_slot_names(d.get(), out);
+        break;
+    case node_type::if_stmt: {
+        auto* is = static_cast<const if_stmt*>(s);
+        collect_frame_slot_names(is->then_statement.get(), out);
+        if (is->else_statement) collect_frame_slot_names(is->else_statement.get(), out);
+        break;
+    }
+    case node_type::while_stmt:
+        collect_frame_slot_names(static_cast<const while_stmt*>(s)->body.get(), out);
+        break;
+    case node_type::for_stmt: {
+        auto* fs = static_cast<const for_stmt*>(s);
+        if (fs->initializer) collect_frame_slot_names(fs->initializer.get(), out);
+        collect_frame_slot_names(fs->body.get(), out);
+        break;
+    }
+    case node_type::range_for_stmt: {
+        auto* rf = static_cast<const range_for_stmt*>(s);
+        if (rf->variable_slot_index != SIZE_MAX)
+            out.emplace_back(rf->variable_slot_index, rf->variable_name);
+        collect_frame_slot_names(rf->body.get(), out);
+        break;
+    }
+    case node_type::switch_stmt: {
+        auto* sw = static_cast<const switch_stmt*>(s);
+        for (const auto& c : sw->cases)
+            for (const auto& st : c->body) collect_frame_slot_names(st.get(), out);
+        if (sw->default_case)
+            for (const auto& st : sw->default_case->body) collect_frame_slot_names(st.get(), out);
+        break;
+    }
+    case node_type::try_stmt: {
+        auto* tr = static_cast<const try_stmt*>(s);
+        if (tr->try_block) collect_frame_slot_names(tr->try_block.get(), out);
+        if (tr->catch_block) collect_frame_slot_names(tr->catch_block.get(), out);
+        break;
+    }
+    default: break;   // expressions, nested functions/lambdas/classes: not this frame's locals
+    }
+}
+
+std::vector<std::pair<std::string, script_value>> interpreter::get_current_frame_locals() const {
+    std::vector<std::pair<std::string, script_value>> out;
+    if (call_stack_.empty()) return out;                 // global scope: caller falls back to env
+    const call_frame& frame = call_stack_.back();
+    const auto* fn = static_cast<const script_defined_function*>(frame.debug_function);
+    if (!fn) return out;
+
+    // slot -> name for this frame: parameters, then every declaration reachable in the body.
+    std::vector<std::pair<size_t, std::string_view>> slot_names;
+    for (const auto& p : fn->parameters)
+        if (p.slot_index != SIZE_MAX) slot_names.emplace_back(p.slot_index, p.name);
+    collect_frame_slot_names(fn->body.get(), slot_names);
+
+    // Emit in slot order; only slots that are live (assigned/reached) in this frame show up,
+    // so an unentered branch's not-yet-declared locals are naturally excluded.
+    std::sort(slot_names.begin(), slot_names.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    size_t last = SIZE_MAX;
+    for (const auto& [slot, name] : slot_names) {
+        if (slot == last) continue;                      // dedupe (slots are unique anyway)
+        last = slot;
+        const script_value* v = frame.get_local(slot);
+        if (!v) continue;                                // reserved capacity only: not live yet
+        out.emplace_back(std::string(name), *v);
+    }
+    return out;
+}
+
 checked_result<script_value> interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args) {
     // Check recursion depth limit FIRST
     if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
@@ -11079,6 +11167,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     call_stack_.emplace_back();
     const size_t frame_index = call_stack_.size() - 1;
     call_stack_[frame_index].function_name = function.name;
+    call_stack_[frame_index].debug_function = &function;   // for naming slot locals at a breakpoint
 
     // Pre-allocate locals for all slots (params + local variables)
     // Slot indices are assigned by the parser at parse time
@@ -12093,6 +12182,8 @@ std::string interpreter::format_stack_trace() const {
 checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
     if (!call_stack_.empty()) call_stack_.back().current_node = stmt;
     else top_level_node_ = stmt;
+    if (auto* dbg = debugger_.load(std::memory_order_relaxed); dbg && dbg->enabled())
+        dbg->on_statement(stmt, static_cast<int>(call_stack_.size()));
     switch (stmt->get_type()) {
         case node_type::expression_stmt:
             return visit_expression_stmt(static_cast<expression_stmt*>(stmt));
@@ -12131,6 +12222,8 @@ checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
 checked_result<void> interpreter::dispatch_decl(declaration* decl) {
     if (!call_stack_.empty()) call_stack_.back().current_node = decl;
     else top_level_node_ = decl;
+    if (auto* dbg = debugger_.load(std::memory_order_relaxed); dbg && dbg->enabled())
+        dbg->on_statement(decl, static_cast<int>(call_stack_.size()));
     switch (decl->get_type()) {
         case node_type::variable_decl:
             return visit_variable_decl(static_cast<variable_decl*>(decl));

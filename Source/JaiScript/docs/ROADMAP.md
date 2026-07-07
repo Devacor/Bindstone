@@ -56,7 +56,8 @@ per-diagnostic locations — `engine.hpp`):
 
 - Language Server Protocol (autocomplete, go-to-definition, diagnostics)
 - Syntax highlighting (VS Code, Sublime)
-- Debugger (breakpoints, stepping, variable inspection)
+- Debugger (breakpoints, stepping, variable inspection) — designed in `DEBUGGER_DESIGN.md`
+  (DAP over raw sockets, `engine::debugger()` + `debug_connector`, interpreter backend first)
 
 ## Documentation needs
 

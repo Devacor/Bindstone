@@ -9,8 +9,12 @@
 
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#ifdef JAISCRIPT_ENABLE_DEBUGGER
+#include <jaiscript/debug/connector.hpp>
+#endif
 
 #include <chrono>
+#include <iostream>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -47,6 +51,9 @@ struct host_options {
 	int64_t filter_mode = -1;            // -1 auto, 0 off, 1 truecolor+tolerance, 2 xterm-256
 	int64_t tol = 8;                     // per-channel merge tolerance for mode 1
 	bool diff = false;                   // row-diff redraw (skip unchanged rows)
+	bool debug = false;                  // single-interpreter debug session (VS Code attach)
+	bool debug_wait = false;             // also hold boot until a debugger attaches (--debug-wait)
+	int64_t debug_port = 52472;           // port VS Code attaches to
 };
 
 // Load order matters only in that base classes execute before derived ones.
@@ -638,6 +645,93 @@ int run_reload_test(const std::string& source, const std::string& dir, const hos
 	return 0;
 }
 
+#ifdef JAISCRIPT_ENABLE_DEBUGGER
+// One interpreter engine (the statement hook is interpreter-only), scenes loaded per-file via
+// execute_file so each node carries its real .jai path and VS Code breakpoints bind — the
+// normal boot concatenates every scene into one jaibite unit stamped "<script>", which no
+// file breakpoint can match. Single-engine, so TAB backend-swap is disabled here.
+int run_debug(const std::string& dir, const host_options& opt) {
+	namespace fs = std::filesystem;
+	backend_slot slot;
+	slot.name = "interpreter";
+	slot.eng = make_reel_engine("interpreter");
+	// The connector listens for the whole engine lifetime — attach from VS Code any time and
+	// breakpoints bind on the next frame. --debug-wait additionally holds boot until Enter.
+	jai::debug::listen(*slot.eng, static_cast<int>(opt.debug_port));
+	std::fprintf(stderr, "[jai debug] listening on 127.0.0.1:%d - attach from VS Code any time.\n",
+		static_cast<int>(opt.debug_port));
+	if (opt.debug_wait) {
+		std::fprintf(stderr, "[jai debug] --debug-wait: open a scenes/*.jai, set breakpoints, then press Enter.\n> ");
+		std::fflush(stderr);
+		std::string line; std::getline(std::cin, line);
+	}
+	std::fflush(stderr);
+
+	// execute_file each scene in load order (canonical path == what the connector normalizes
+	// VS Code's breakpoint paths to). main.jai is last and owns the persistent globals.
+	for (const char* f : kSceneFiles) {
+		slot.eng->execute_file(fs::canonical(fs::path(dir) / f).string());
+	}
+
+	console_host console;
+	console.init();
+	console.mode = (opt.filter_mode >= 0) ? static_cast<int>(opt.filter_mode) : 1;
+	console.tol = static_cast<int>(opt.tol);
+	console.diff = opt.diff;
+	int w = 100, h = 40;
+	console.size(w, h);
+	if (opt.width > 0) { w = static_cast<int>(opt.width); }
+	if (opt.height > 0) { h = static_cast<int>(opt.height); }
+	boot_reel(slot, w, h, opt, true);
+	if (opt.scene >= 0) {
+		auto* e = slot.eng.get();
+		call_script(slot, "demo_jump", { jai::script_value(opt.scene, e), jai::script_value(5.0, e) });
+	}
+
+	double t_prev = now_seconds();
+	double fps_ema = opt.target_fps;
+	try {
+		for (;;) {
+			double frame_start = now_seconds();
+			double dt = frame_start - t_prev;
+			t_prev = frame_start;
+			if (dt > 0.1) { dt = 0.1; }
+			if (dt > 0.0001) { fps_ema = fps_ema * 0.92 + (1.0 / dt) * 0.08; }
+
+			std::string key = console.poll_key();
+			if (key == "q" || key == "esc") { break; }
+			if (key == "tab") { key = ""; }   // no backend swap: this session is interpreter-only
+			else if (key == "r") {
+				for (const char* f : kSceneFiles) {
+					if (std::string(f) == "main.jai") { continue; }
+					slot.eng->execute_file(fs::canonical(fs::path(dir) / f).string());
+				}
+				call_script(slot, "demo_reload", {});
+				key = "";
+			}
+
+			std::string frame = run_frame(slot, frame_start, dt, key,
+				fps_ema, console.last_draw_ms, 0.0);
+			console.draw(frame);
+
+			double budget = 1.0 / opt.target_fps;
+			double used = now_seconds() - frame_start;
+			if (used < budget) {
+#ifdef _WIN32
+				Sleep(static_cast<DWORD>((budget - used) * 1000.0));
+#endif
+			}
+		}
+	} catch (const std::exception& ex) {
+		console.shutdown();
+		std::fprintf(stderr, "jai_demoreel: script error: %s\n", ex.what());
+		return 1;
+	}
+	console.shutdown();
+	return 0;
+}
+#endif
+
 void print_usage() {
 	std::puts(
 		"jai_demoreel - a demoscene tech reel written in JaiScript\n"
@@ -660,6 +754,9 @@ void print_usage() {
 		"  --no-filter      byte-exact legacy output (no escape trimming)\n"
 		"  --tol N          per-channel merge tolerance for --truecolor (default 8)\n"
 		"  --diff           row-diff redraw: skip rows unchanged since last frame\n"
+		"  --debug          single-interpreter session, listening for a VS Code attach the whole run\n"
+		"  --debug-wait     like --debug, but also hold boot until you attach + press Enter\n"
+		"  --debug-port N   port for --debug (default 52472)\n"
 		"\nkeys: TAB backend swap | r hot reload | h HUD | f freeze | n/p/space scene skip |\n"
 		"      1-9,0 jump to scene | q/ESC quit");
 }
@@ -697,6 +794,9 @@ int main(int argc, char** argv) {
 		else if (a == "--no-filter") { opt.filter_mode = 0; }
 		else if (a == "--tol") { opt.tol = std::stoll(next_arg("--tol")); }
 		else if (a == "--diff") { opt.diff = true; }
+		else if (a == "--debug") { opt.debug = true; }
+		else if (a == "--debug-wait") { opt.debug = true; opt.debug_wait = true; }
+		else if (a == "--debug-port") { opt.debug_port = std::stoll(next_arg("--debug-port")); }
 		else if (a == "--dev") { /* hot reload is always on; accepted for muscle memory */ }
 		else if (a == "--help" || a == "-h") { print_usage(); return 0; }
 		else { std::fprintf(stderr, "unknown flag: %s\n", a.c_str()); print_usage(); return 2; }
@@ -723,6 +823,9 @@ int main(int argc, char** argv) {
 		if (opt.smoke) { return run_smoke(source, opt); }
 		if (opt.capture >= 0) { return run_capture(source, opt); }
 		if (opt.reload_test) { return run_reload_test(source, dir, opt); }
+#ifdef JAISCRIPT_ENABLE_DEBUGGER
+		if (opt.debug) { return run_debug(dir, opt); }
+#endif
 	} catch (const std::exception& ex) {
 		std::fprintf(stderr, "jai_demoreel: script error: %s\n", ex.what());
 		return 1;

@@ -6,6 +6,7 @@
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
+#include <jaiscript/debug/controller.hpp>         // engine::debugger()
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -380,6 +381,11 @@ struct engine::implementation {
     bool tearing_down = false;  // engine dtor: backend() must not reconstruct for late thunks
     bool custom_numeric_ops_flag_ = false; // sticky signal from add_function; applied at wiring
 
+    // Step-debugger controller, lazily created on first engine::debugger() call.
+    std::unique_ptr<debug::controller> debugger_;
+    // Optional debug transport (e.g. a DAP socket server). Stopped before teardown.
+    std::shared_ptr<debug::transport> debug_transport_;
+
     // Script namespace registry (engine-owned so namespaces survive across backends)
     std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>> script_namespaces_;
 
@@ -430,8 +436,15 @@ struct engine::implementation {
         return entry.check_result;
     }
 
-    std::shared_ptr<script_cache_entry> find_cached_script(const std::string& source) {
-        auto it = script_cache.find(source);
+    // Key on (sourcePath, content) so identical text under different paths does not
+    // alias one AST. Length-prefixing the path pins the boundary, so no (path, content)
+    // pair can collide with another via string concatenation.
+    static std::string script_cache_key(const std::string& sourcePath, const std::string& source) {
+        return std::to_string(sourcePath.size()) + ":" + sourcePath + source;
+    }
+
+    std::shared_ptr<script_cache_entry> find_cached_script(const std::string& sourcePath, const std::string& source) {
+        auto it = script_cache.find(script_cache_key(sourcePath, source));
         if (it == script_cache.end()) {
             return nullptr;
         }
@@ -443,7 +456,7 @@ struct engine::implementation {
         return it->second;
     }
 
-    std::shared_ptr<script_cache_entry> store_cached_script(const std::string& source, std::vector<declaration_ptr> decls) {
+    std::shared_ptr<script_cache_entry> store_cached_script(const std::string& sourcePath, const std::string& source, std::vector<declaration_ptr> decls) {
         if (script_cache.size() >= script_cache_max) {
             auto victim = script_cache.begin();
             for (auto it = script_cache.begin(); it != script_cache.end(); ++it) {
@@ -457,7 +470,7 @@ struct engine::implementation {
         entry->declarations = std::move(decls);
         entry->epoch = script_cache_epoch;
         entry->last_used = ++script_cache_clock;
-        script_cache.emplace(source, entry);
+        script_cache.emplace(script_cache_key(sourcePath, source), entry);
         return entry;
     }
 
@@ -569,6 +582,12 @@ engine::engine() : impl(std::make_unique<implementation>()) {}
 // and fail soft instead of re-entering a half-destroyed backend.
 engine::~engine() {
     if (impl) {
+        // Tear the transport down first (join its thread, detach the controller) so no
+        // parked script thread stays blocked in the hook once anything it touches dies.
+        if (impl->debug_transport_) {
+            impl->debug_transport_->stop();
+            impl->debug_transport_.reset();
+        }
         impl->tearing_down = true;
         impl->backend.reset();
     }
@@ -880,6 +899,10 @@ script_value engine::execute(const std::string& scriptContent) {
 }
 
 script_value engine::execute(const std::string& scriptContent, const instance_variables& instanceVars) {
+    return execute_source(scriptContent, instanceVars, "<script>");
+}
+
+script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath) {
     impl->has_executed_ = true;
     try {
         // Prepare backend for new execution
@@ -887,9 +910,11 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
 
         // Identical source re-executes through its cached parse (and, on the vm,
         // its cached compiled chunk) — same semantics as re-executing a jaibite.
-        auto cached = impl->find_cached_script(scriptContent);
+        // Keyed on (sourcePath, content): the same text under two paths gets two
+        // ASTs, each stamped with its own filename (breakpoints/traces stay distinct).
+        auto cached = impl->find_cached_script(sourcePath, scriptContent);
         if (!cached) {
-            lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
+            lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes, sourcePath);
             auto tokens = lexer.tokenize();
             parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
             auto parse_result = parser.parse();
@@ -900,7 +925,7 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
             if (!parse_result) {
                 throw parse_error(format_error(parse_result));
             }
-            cached = impl->store_cached_script(scriptContent, std::move(parse_result.value()));
+            cached = impl->store_cached_script(sourcePath, scriptContent, std::move(parse_result.value()));
         }
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
@@ -1091,7 +1116,7 @@ const check_report& engine::last_check_diagnostics() const {
 }
 
 check_report engine::check(const std::string& scriptContent) {
-    auto cached = impl->find_cached_script(scriptContent);
+    auto cached = impl->find_cached_script("<script>", scriptContent);
     if (!cached) {
         lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
         auto tokens = lexer.tokenize();
@@ -1100,7 +1125,7 @@ check_report engine::check(const std::string& scriptContent) {
         if (!parse_result) {
             throw parse_error(format_error(parse_result));
         }
-        cached = impl->store_cached_script(scriptContent, std::move(parse_result.value()));
+        cached = impl->store_cached_script("<script>", scriptContent, std::move(parse_result.value()));
     }
     return impl->checked_report(*this, *cached);
 }
@@ -1168,7 +1193,7 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
     
     std::stringstream buffer;
     buffer << file.rdbuf();
-    return execute(buffer.str(), instanceVars);
+    return execute_source(buffer.str(), instanceVars, scriptPath);
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
@@ -1845,6 +1870,23 @@ double engine::execution_budget() const {
     return impl->execution_budget_seconds_;
 }
 
+debug::controller& engine::debugger() {
+    if (!impl->debugger_) {
+        impl->debugger_ = std::make_unique<debug::controller>(this);
+        // Wire the active backend's statement hook. backend() constructs it lazily; the
+        // vm backend's set_debug_controller is a no-op until phase 5.
+        backend()->set_debug_controller(impl->debugger_.get());
+    }
+    return *impl->debugger_;
+}
+
+void engine::set_debug_connector(std::shared_ptr<debug::transport> connector) {
+    if (impl->debug_transport_ == connector) return;
+    if (impl->debug_transport_) impl->debug_transport_->stop();
+    impl->debug_transport_ = std::move(connector);
+    if (impl->debug_transport_) impl->debug_transport_->start(this);
+}
+
 void engine::memory_cap(size_t bytes) {
     impl->limits_.memory_cap = bytes;
     impl->limits_.memory_limit = bytes ? bytes : SIZE_MAX;
@@ -2099,9 +2141,10 @@ script_value engine::execute_import(const std::string& resolved_path) {
         std::stringstream buffer;
         buffer << file.rdbuf();
         std::string content = buffer.str();
-        
-        auto result = execute(content);
-        
+
+        // Attribute the imported unit to its resolved path (stack traces / debugger).
+        auto result = execute_source(content, instance_variables{}, resolved_path);
+
         // Update import cache
         implementation::import_record record;
         record.resolved_path = resolved_path;

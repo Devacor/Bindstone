@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debugging — JaiScript Embedding</title>
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<nav class="site-nav"><a href="../guide/index.html">Guide</a><a href="../embedding/index.html" class="active">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a><a href="../open-questions.html">Open Questions</a></nav>
+<div class="header-tools">
+<div class="search"><input id="search-box" type="search" placeholder="search docs&hellip;" autocomplete="off" aria-label="Search docs"><div id="search-results" hidden></div></div>
+<button id="theme-toggle" title="toggle light/dark" aria-label="toggle theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar"><div class="sidebar-title">Embedding</div><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li class="current"><a href="../embedding/12-debugging.html">Debugging</a></li></ol></aside>
+<main class="content">
+<article class="chapter"><h1 id="debugging-jaiscript">Debugging JaiScript<a class="hlink" href="#debugging-jaiscript" aria-label="link">&#8203;</a></h1>
+<p>JaiScript ships a <strong>step-debugger core</strong> — set breakpoints, pause a running script, inspect and edit variables, step, and resume — plus a <strong>VS&nbsp;Code extension</strong> for syntax highlighting. This page shows what works today and how to drive it by hand.</p>
+<div class="callout"><p><strong>Status (phase 3.2 — VS&nbsp;Code attach works).</strong> Three pieces work right now on the <strong>interpreter backend</strong>: (1) editor <strong>syntax highlighting</strong>; (2) the <strong>debugger core</strong> driven from C++; and (3) the <strong>DAP <code>debug_connector</code></strong> — a dependency-free TCP server that lets <strong>VS&nbsp;Code attach</strong> and stop on breakpoints you click in the gutter, step (over/into/out), see the stop location, and read in-scope variables. Still to come: a multi-frame call stack, live variable <em>editing</em> / <code>evaluate</code>, conditional breakpoints, and the VM backend hook. The full design is in <code>docs/DEBUGGER_DESIGN.md</code>.</p></div>
+<h2 id="syntax-highlighting-vs-code">Syntax highlighting (VS&nbsp;Code)<a class="hlink" href="#syntax-highlighting-vs-code" aria-label="link">&#8203;</a></h2>
+<p>The extension lives in <code>Source/JaiScript/tools/vscode-jaiscript/</code>. It highlights <code>.script</code>, <code>.jai</code>, and <code>.jaibite</code> files — the full keyword set, the <code>int</code>/<code>auto</code>/<code>var</code> type ladder, <code>function</code>/<code>lambda</code>/<code>class</code>, backtick template strings with <code>${expr}</code> interpolation, all operators (including <code>&lt;=&gt;</code> and <code>?.</code>), numeric literals, and the stdlib builtins. The grammar is generated straight from the real lexer&#x27;s keyword table, so it stays truthful (e.g. <code>int64</code> is <em>not</em> a keyword and is deliberately not highlighted as one).</p>
+<p>Load it the quickest way — open the extension folder in VS&nbsp;Code and press <kbd>F5</kbd> to launch an Extension Development Host, then open any <code>.script</code> file:</p>
+<div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">code Source/JaiScript/tools/vscode-jaiscript
+# in the new window: press F5  ->  &quot;Extension Development Host&quot; opens
+# open any Assets/**/main.script  ->  it is highlighted</code></pre></div>
+<p>To install it persistently instead, package it to a <code>.vsix</code> and install that:</p>
+<div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">cd Source/JaiScript/tools/vscode-jaiscript
+npm install
+npx vsce package                       # produces jaiscript-*.vsix
+code --install-extension jaiscript-*.vsix</code></pre></div>
+<p>Syntax highlighting is entirely standalone — it needs no engine build and no running app. (The extension also declares a <code>jaiscript</code> <em>attach</em> debug type for later; it is inert until the <code>debug_connector</code> lands.)</p>
+<h2 id="attach-from-vs-code">Attach from VS&nbsp;Code<a class="hlink" href="#attach-from-vs-code" aria-label="link">&#8203;</a></h2>
+<p>The <code>jai::debug_connector</code> is a self-contained DAP server: it speaks the Debug Adapter Protocol directly on a raw OS socket (WinSock / BSD sockets — no asio, no Node adapter, no external tool), runs on its own thread, and drives the engine&#x27;s <code>debugger()</code>. VS&nbsp;Code&#x27;s built-in DAP client connects straight to the port. One line of host code turns it on:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/debug/connector.hpp&gt;
+
+// One connector per engine (typical). The engine keeps it alive and stops it — joining
+// its thread and detaching the controller — before teardown, so a paused script can
+// never wedge the host. The jai::debug::listen() convenience builds the connector, attaches
+// it, and returns it (the whole host-side wiring in one line):
+auto conn = jai::debug::listen(*eng);                 // default port jai::debug::default_port (52472)
+// auto conn = jai::debug::listen(*eng, 40000);       // custom port
+// eng-&gt;set_debug_connector(nullptr);                 // detach + release
+//
+// listen() is exactly this, if you want to hold the pieces yourself:
+// eng-&gt;set_debug_connector(std::make_shared&lt;jai::debug::debug_connector&gt;(52472));</code></pre></div>
+<p>It is compiled only when the <code>JAISCRIPT_ENABLE_DEBUGGER</code> CMake option is on (the default for desktop dev/editor builds; turn it <em>off</em> for shipping / mobile and no socket code is built at all). Then, in VS&nbsp;Code, add an <strong>attach</strong> configuration and press <kbd>F5</kbd> while the host is running:</p>
+<div class="codeblock cb-plain"><span class="cb-label">.vscode/launch.json</span><pre><code class="lang-plain">{
+  "version": "0.2.0",
+  "configurations": [
+    { "type": "jaiscript", "request": "attach", "name": "Attach to JaiScript",
+      "host": "127.0.0.1", "port": 52472 }
+  ]
+}</code></pre></div>
+<p>Set breakpoints in the gutter of your <code>.jai</code>/<code>.script</code> file, attach, and the running engine stops there — you get the stop location highlighted, step over/into/out, continue, pause, and the <strong>Variables</strong> pane showing in-scope locals (read-only for now).</p>
+<div class="callout"><p><strong>Breakpoints bind by file path.</strong> A node only carries a real path if the engine parsed it with one — so run gameplay scripts through <strong><code>execute_file(path, vars)</code></strong> or <strong><code>import</code></strong> (both stamp every node with the file&#x27;s <code>std::filesystem::canonical()</code> path), not the bare <code>execute(source)</code> (which stamps <code>&quot;&lt;script&gt;&quot;</code>). The connector <strong>normalizes the path VS&nbsp;Code sends to the same canonical form</strong> before matching, so a breakpoint binds regardless of drive-letter case or forward/backslashes — the two spellings don&#x27;t have to be byte-identical. A <code>.jaibite</code> unit debugs against its original <code>.jai</code> source unchanged — it round-trips the source path per node. See <a href="04-jaibite.html">jaibite</a> and the filename-plumbing note in the design doc.</p></div>
+<h2 id="try-it-the-example-hosts">Try it: the example hosts<a class="hlink" href="#try-it-the-example-hosts" aria-label="link">&#8203;</a></h2>
+<p>All three bundled demos (<code>examples/roguelike</code>, <code>examples/crawler</code>, <code>examples/demoreel</code>) accept <strong><code>--debug</code></strong>: it forces the interpreter backend (the one with the hook) and stands up the connector via <code>jai::debug::listen()</code>. The connector is <strong>tied to the engine&#x27;s lifetime — it listens for the whole run</strong>, so you can attach (and detach and re-attach) at <em>any</em> time; breakpoints you set bind on the next statement. Open <code>Source/JaiScript</code> in VS&nbsp;Code (the workspace ships a <code>.vscode/launch.json</code> with the <em>Attach to JaiScript</em> config on port&nbsp;52472), then:</p>
+<div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">jai_rogue.exe --debug            # boots immediately; listening on 127.0.0.1:52472 the whole run
+# in VS Code, whenever you like: F5 (Attach to JaiScript) -&gt; set breakpoints in scripts/*.jai
+jai_rogue.exe --debug-wait       # same, but HOLD boot until you attach + press Enter
+                                 #   (use this to catch boot-time code: dungeon gen, class init)
+jai_rogue.exe --debug-port 40000 # attach on a different port</code></pre></div>
+<p>The roguelike and crawler load their scripts with <code>import</code>, so every <code>scripts/*.jai</code> node already carries a canonical path. The demoreel normally concatenates every scene into one precompiled <code>.jaibite</code> unit (stamped <code>&quot;&lt;script&gt;&quot;</code> — nothing to bind); under <code>--debug</code> it instead loads each scene through <code>execute_file</code> on a single interpreter engine, so <code>scenes/*.jai</code> breakpoints bind (TAB backend-swap is disabled in that mode, since the VM has no hook yet).</p>
+<p>Under the hood this is the same wire protocol proven by the <code>Debugger Connector</code> foundry suite (<code>source/tests/debug/debugger_connector_tests.cpp</code>), which drives a real loopback socket through the whole loop — handshake &rarr; <code>setBreakpoints</code> &rarr; run &rarr; <code>stopped</code> &rarr; <code>stackTrace</code> &rarr; <code>scopes</code> &rarr; <code>variables</code> &rarr; <code>stepIn</code>/<code>next</code> &rarr; <code>continue</code> — with no editor in the loop.</p>
+<h2 id="the-debugger-core-c-api">The debugger core (C++ API)<a class="hlink" href="#the-debugger-core-c-api" aria-label="link">&#8203;</a></h2>
+<p>Every engine owns a lazily-created <code>jai::debug::controller</code>, reached with <code>engine-&gt;debugger()</code> (<code>include/jaiscript/debug/controller.hpp</code>). It is transport-agnostic: the same object a future DAP socket will drive, you can drive directly today.</p>
+<p>The essential contract: <strong>a script runs on one thread and blocks at a breakpoint; a <em>different</em> thread drives it and inspects state.</strong> The controller&#x27;s <em>control-side</em> calls (breakpoints, resume, step) are safe from any thread; <em>inspection</em> (reading/editing variables) must run on the parked script thread, which you arrange by handing the controller a closure via <code>post_command()</code>.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
+#include &lt;jaiscript/debug/controller.hpp&gt;
+#include &lt;thread&gt;
+
+auto eng = jai::engine::make();          // interpreter backend (the one with the hook today)
+auto&amp; dbg = eng-&gt;debugger();
+
+// 1. React to stops. Fires ON the script thread the instant it parks.
+dbg.set_on_stopped([&amp;](const jai::debug::stop_info&amp; si) {
+    // si.reason is &quot;breakpoint&quot; | &quot;step&quot; | &quot;pause&quot;;  si.file / si.line / si.depth
+    // Signal your driver thread here (a condition_variable, a queue, ...).
+});
+
+// 2. Set breakpoints and arm the session. A script run via execute(src) is attributed
+//    to &quot;&lt;script&gt;&quot;; one run via execute_file(path) is attributed to that path — so key
+//    breakpoints on whichever file name the script carries.
+dbg.set_breakpoints(&quot;&lt;script&gt;&quot;, {3});
+dbg.set_enabled(true);                   // also suspends the wall-clock budget while attached
+
+// 3. Run the script on its own thread — it will block at line 3.
+std::thread script([&amp;] {
+    eng-&gt;execute(&quot;var x = 1;\n&quot;         // line 1
+                 &quot;var y = 2;\n&quot;         // line 2
+                 &quot;var z = x + y;\n&quot;);   // line 3  &lt;- stops BEFORE this runs
+});</code></pre></div>
+<p>When it stops, inspect and steer it from your driver thread. Reads run on the parked thread via <code>post_command</code>; stepping and resuming are direct calls:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// ...after your on_stopped fired and you know it is paused (dbg.is_paused() == true):
+
+// Inspect: the closure runs on the parked script thread, against live state.
+dbg.post_command([&amp;] {
+    jai::script_value x = dbg.get_variable(&quot;x&quot;);   // 1  (line 1 ran; line 3 hasn&#x27;t)
+    // dbg.set_variable(&quot;x&quot;, eng-&gt;make_value(41)); // edit it live if you like
+});
+
+// Step / continue (all safe from the driver thread):
+dbg.step_into();   // stop at the next statement, any depth
+dbg.step_over();   // next statement at this depth or shallower
+dbg.step_out();    // next statement shallower than this one
+dbg.resume();      // continue until the next breakpoint / completion
+
+script.join();</code></pre></div>
+<p>The full, runnable version — breakpoint &rarr; read a variable &rarr; step &rarr; resume, plus a disconnect-safety case — is the <code>Debugger</code> suite in <code>source/tests/debug/debugger_tests.cpp</code>. Run it with <code>jaiscript_tests.exe &quot;Debugger&quot;</code>.</p>
+<h2 id="how-it-works">How it works<a class="hlink" href="#how-it-works" aria-label="link">&#8203;</a></h2>
+<ul><li><strong>The hook.</strong> The interpreter calls the controller once per statement (at <code>dispatch_stmt</code>/<code>dispatch_decl</code>). When no session is attached it is a single relaxed pointer load — the detached hot path stays free.</li><li><strong>Park &amp; pump.</strong> On a stop the script thread blocks in the hook on one mutex + one condition variable (predicate-guarded, so a resume racing the stop is never lost). While parked it drains posted closures — that is how the other thread inspects live <code>environment</code> state without ever touching engine data itself.</li><li><strong>Stepping</strong> is computed from call-stack depth: <em>into</em> = next statement any depth; <em>over</em> = depth &le; the stop; <em>out</em> = depth &lt; the stop.</li><li><strong>Budget.</strong> Arming a session suspends the wall-clock execution budget so a script paused at a breakpoint is never killed by the 1&nbsp;s cap; disabling restores it.</li><li><strong>detach()</strong> force-resumes a parked thread and disarms — the safety valve for a client disconnect or app shutdown, so a paused script can never wedge the host.</li></ul>
+<p>Today this is wired on the <strong>interpreter</strong> backend only; drive debugged scripts with <code>jai::engine::make()</code> (the default) or set <code>MV_SCRIPT_INTERPRETER=1</code> in Bindstone. The VM carries a no-op stub of the same hook so wiring is identical when its statement-boundary hook lands.</p>
+<h2 id="whats-next">What&#x27;s next<a class="hlink" href="#whats-next" aria-label="link">&#8203;</a></h2>
+<ul><li><strong>Multi-frame call stack</strong> — the connector reports the top frame today; walking the interpreter&#x27;s <code>call_stack_</code> gives the full stack in the editor&#x27;s Call Stack pane.</li><li><strong>Live variable editing + <code>evaluate</code></strong> — <code>setVariable</code> routed through the <code>int</code>/<code>auto</code> type ladder, and REPL/watch expression evaluation on the parked frame (watch/hover read-only by convention).</li><li><strong>Conditional breakpoints + logpoints.</strong></li><li><strong>VM backend hook</strong> — statement-boundary stops in the bytecode VM (the backend Bindstone ships), naming a stopped frame&#x27;s locals lazily via the interner&#x27;s reverse lookup.</li></ul>
+<p>The concurrency &amp; lifecycle contract these build on — and the reasons each corner matters — is documented in full in <code>docs/DEBUGGER_DESIGN.md</code>.</p><nav class="prevnext"><a class="prev" href="../embedding/11-performance.html"><span>&larr; previous</span>Performance Notes</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-07</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

@@ -273,6 +273,12 @@ namespace jai {
         std::string_view function_name;
         const ast_node* current_node = nullptr;
 
+        // Debug-only: the detail::script_defined_function this frame is executing, used to
+        // name the slot-based locals below when a debugger stops here. Typed as void* to
+        // avoid a header ordering dependency; the interpreter casts it back. Null for frames
+        // not pushed by call_function. One pointer store per call — no measurable cost.
+        const void* debug_function = nullptr;
+
         /// O(1) access by slot index - much faster than hash map or linear search
         std::vector<script_value> locals;
 

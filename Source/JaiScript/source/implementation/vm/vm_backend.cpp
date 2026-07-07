@@ -7570,8 +7570,9 @@ checked_result<void> vm_backend::exec_include(frame& f, const vm_instruction& in
 
 	// Re-entrant into this backend's execute(); prepare_for_execution preserves any
 	// running-coroutine state. An error in the included file surfaces as unwinding.
+	// Pass the resolved path so included nodes carry their real filename.
 	try {
-		script_value result = engine_->execute(content);
+		script_value result = engine_->execute_source(content, jai::instance_variables{}, resolved_path);
 		stack_.push_back(std::move(result));
 	} catch (const script_exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);

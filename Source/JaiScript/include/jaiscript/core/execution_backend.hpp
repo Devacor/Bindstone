@@ -16,6 +16,7 @@ namespace jai {
 class string_symbolizer;
 class class_definition;
 class coroutine_handle;
+namespace debug { class controller; }
 
 // Backend-neutral payload describing a script-defined callable. Stored thunks capture
 // (engine*, payload) and resolve the live backend at call time via
@@ -68,7 +69,21 @@ struct script_method_dispatch {
 class execution_backend {
 public:
     virtual ~execution_backend() = default;
-    
+
+    // Debugger hook: engine::debugger() wires the controller here. Default no-op, so the
+    // vm backend inherits it unchanged until phase 5 adds its statement-boundary hook.
+    virtual void set_debug_controller(debug::controller*) {}
+
+    // Innermost active environment during execution — the debugger enumerates in-scope
+    // locals from it while parked. Default null (vm until phase 5); the interpreter
+    // returns its live scope.
+    virtual std::shared_ptr<environment> get_current_environment() const { return nullptr; }
+
+    // Named slot-based locals of the current (innermost) call frame — params + reached body
+    // locals, which the environment's flat map does not hold. The debugger prefers this for
+    // the Locals view. Default empty (vm until phase 5; interpreter reconstructs from the frame).
+    virtual std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const { return {}; }
+
     // Core execution
     virtual script_value execute(const std::vector<declaration_ptr>& declarations) = 0;
 

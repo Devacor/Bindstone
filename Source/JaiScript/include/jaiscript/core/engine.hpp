@@ -34,6 +34,8 @@ namespace jai {
     class class_registry;
     class execution_backend;
     class string_symbolizer;
+    namespace vm { class vm_backend; }
+    namespace debug { class controller; class transport; }
     struct script_namespace_data;
 
     namespace detail {
@@ -103,7 +105,11 @@ namespace jai {
         // Primary API - execute methods
         virtual script_value execute(const std::string& scriptContent);
         script_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
-        
+
+        // execute_file attributes the script to `scriptPath`: the path is stamped onto
+        // every AST node (file:line:col), so stack traces, error messages, and the
+        // debugger name the originating file. Prefer this over execute() for files —
+        // the source path is carried for free, no debugging-only parameter to pass.
         script_value execute_file(const std::string& scriptPath);
         script_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
 
@@ -202,6 +208,18 @@ namespace jai {
         // call entry, so straight-line C++ bindings are never interrupted mid-call.
         void execution_budget(double seconds);
         double execution_budget() const;
+
+        // The step-debugger controller for this engine (lazily created, engine-owned).
+        // First call wires the active backend's statement hook. Arm a session with
+        // debugger().set_enabled(true). See jaiscript/debug/controller.hpp.
+        debug::controller& debugger();
+
+        // Attach an optional debug transport (typically jai::debug::debug_connector, which
+        // speaks DAP over a TCP socket so VS Code can attach). The engine keeps it alive and
+        // stops it — joining its thread and detaching the controller — before teardown, so a
+        // paused script can never wedge the host. Passing nullptr stops and releases any
+        // current one. One connector per engine is the norm; see docs/DEBUGGER_DESIGN.md.
+        void set_debug_connector(std::shared_ptr<debug::transport> connector);
 
         // Approximate script memory cap in bytes for one top-level execute()/resume()
         // call. Accounting is a HIGH-WATER MARK charged at the heavy-value chokepoints
@@ -735,6 +753,14 @@ namespace jai {
                                     std::shared_ptr<void>& compiled_slot,
                                     const instance_variables* instanceVars);
 
+        // The one lex+parse+run entry: stamps `sourcePath` onto every AST node and keys
+        // the parse cache on (sourcePath, content). Not public — attributing raw content
+        // to a path is debugger plumbing, a sharp edge for callers. Reached via execute()
+        // ("<script>"), execute_file() (the file path), and include/import (resolved path).
+        script_value execute_source(const std::string& scriptContent,
+                                    const instance_variables& instanceVars,
+                                    const std::string& sourcePath);
+
         // Lazily constructs + wires the selected backend on first use, so creating an
         // engine (or switching backend type) costs nothing until a script actually runs.
         execution_backend* backend() const;
@@ -756,6 +782,8 @@ namespace jai {
         template<typename T> friend struct detail::value_converter;
         // Allow interpreter to access implementation for include/import
         friend class interpreter;
+        // Allow the vm backend the same access (include/import call execute_source)
+        friend class vm::vm_backend;
         
         // Helper to wrap functions with type conversion
         template<typename ReturnType>

@@ -50,6 +50,11 @@ namespace jai::vm {
         }
         void set_engine_reference(engine* engine_ref) override;
 
+        // Phase-5 stub: the vm will hook statement boundaries in run_dispatch (watch for
+        // chunk::stmt_nodes[ip] changing). Stored now so engine::debugger() wires both
+        // backends identically; currently a no-op — the interpreter carries phase 3.
+        void set_debug_controller(debug::controller* controller) override { debug_controller_ = controller; }
+
         bool is_unwinding() const override { return is_unwinding_; }
         const script_exception& get_current_exception() const override { return current_exception_.value(); }
 
@@ -146,6 +151,7 @@ namespace jai::vm {
         string_symbolizer* env_symbolizer_ = nullptr;
         std::shared_ptr<environment> environment_;
         engine* engine_ = nullptr;
+        debug::controller* debug_controller_ = nullptr;   // phase-5 stub: stored, not yet consulted
         environment* cached_global_env_ = nullptr;   // env_lookup_cached gate (never dereferenced)
 
         vm_compiler compiler_;

@@ -62,6 +62,7 @@
 #include <system_error>
 #include <optional>
 #include <chrono>
+#include <atomic>
 
 namespace jai {
 
@@ -69,6 +70,7 @@ namespace jai {
     class script_class_definition;
     class class_definition;
     class class_instance;
+    namespace debug { class controller; }
 
     // Forward declare interpreter for scoped_method_environment
     class interpreter;
@@ -212,6 +214,12 @@ namespace jai {
             if (cached_zero_int_.has_value()) cached_type_info_int_ = cached_zero_int_->get_type_info();
             if (cached_zero_float_.has_value()) cached_type_info_float_ = cached_zero_float_->get_type_info();
             if (cached_true_.has_value()) cached_type_info_bool_ = cached_true_->get_type_info();
+        }
+
+        // Wire (or clear) the step-debugger. Null when no session is attached — the
+        // statement hook is then a single relaxed pointer load per statement.
+        void set_debug_controller(debug::controller* c) {
+            debugger_.store(c, std::memory_order_release);
         }
 
         // Get engine pointer (for internal use in lambdas)
@@ -402,6 +410,10 @@ namespace jai {
         
         // Accessors for script class support
         std::shared_ptr<environment> get_current_environment() const { return environment_; }
+
+        // Debugger: named slot-locals (params + reached body decls) of the current call frame,
+        // reconstructed from the frame's function AST. Empty at global scope / for foreign frames.
+        std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const;
 
         // Get the global (root) environment from the engine directly
         // Previously walked up the parent chain, but that can diverge when closures/methods
@@ -749,6 +761,11 @@ namespace jai {
         // Engine pointer for script_value creation (raw pointer - no atomic ops on copy)
         // Interpreter lifetime is managed by engine, so engine will always outlive interpreter
         engine* engine_ = nullptr;
+
+        // Step-debugger controller (engine-owned). Null unless a session is attached;
+        // read once per statement in dispatch_stmt/dispatch_decl. Atomic because the
+        // transport thread may attach/detach while this thread is running.
+        std::atomic<debug::controller*> debugger_{nullptr};
 
         // Cached common values to avoid repeated allocations (initialized in set_engine_reference)
         std::optional<script_value> cached_null_;

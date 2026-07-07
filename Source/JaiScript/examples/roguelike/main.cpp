@@ -5,6 +5,9 @@
 
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#ifdef JAISCRIPT_ENABLE_DEBUGGER
+#include <jaiscript/debug/connector.hpp>
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -36,6 +39,9 @@ struct host_options {
 	std::string scripted_input;  // keys fed to read_key(); empty = interactive
 	std::string scripts_dir;
 	std::string save_path = "jai_rogue_save.json";
+	bool debug = false;          // stand up the DAP debug_connector (forces the interpreter)
+	bool debug_wait = false;     // also hold boot until a debugger attaches (--debug-wait)
+	int64_t debug_port = 52472;   // port VS Code attaches to
 };
 
 // --time latency probe: read_key return -> frame_mark (turn logic) ->
@@ -265,6 +271,24 @@ std::string locate_scripts_dir(const std::string& override_dir, const char* argv
 	return "scripts";
 }
 
+#ifdef JAISCRIPT_ENABLE_DEBUGGER
+// Attach a DAP connector for the whole engine lifetime — it listens until the engine is torn
+// down, so you can attach from VS Code at ANY time; breakpoints you set bind on the next
+// statement. Pass wait_to_boot (--debug-wait) to also hold boot until you press Enter, which
+// lets breakpoints in boot-time script (dungeon gen, class init) catch the very first run.
+void start_debugger(jai::engine& eng, int port, bool wait_to_boot) {
+	jai::debug::listen(eng, port);
+	std::fprintf(stderr, "[jai debug] listening on 127.0.0.1:%d - attach from VS Code any time.\n", port);
+	if (wait_to_boot) {
+		std::fprintf(stderr, "[jai debug] --debug-wait: attach + set breakpoints, then press Enter to boot.\n> ");
+		std::fflush(stderr);
+		std::string line;
+		std::getline(std::cin, line);
+	}
+	std::fflush(stderr);
+}
+#endif
+
 void print_usage() {
 	std::puts(
 		"jai_rogue - an ASCII roguelike written in JaiScript\n"
@@ -279,7 +303,10 @@ void print_usage() {
 		"  --god           god mode (no damage, monstrous stats)\n"
 		"  --load          continue from the save file\n"
 		"  --save PATH     save file path (default jai_rogue_save.json)\n"
-		"  --scripts DIR   override the scripts directory\n");
+		"  --scripts DIR   override the scripts directory\n"
+		"  --debug         listen for a VS Code debugger for the whole run (forces interpreter)\n"
+		"  --debug-wait    like --debug, but also hold boot until you attach + press Enter\n"
+		"  --debug-port N  port for --debug (default 52472)\n");
 }
 
 } // namespace
@@ -307,6 +334,9 @@ int main(int argc, char** argv) {
 		else if (a == "--load") { opt.load = true; }
 		else if (a == "--save") { opt.save_path = next_arg("--save"); }
 		else if (a == "--scripts") { opt.scripts_dir = next_arg("--scripts"); }
+		else if (a == "--debug") { opt.debug = true; }
+		else if (a == "--debug-wait") { opt.debug = true; opt.debug_wait = true; }
+		else if (a == "--debug-port") { opt.debug_port = std::stoll(next_arg("--debug-port")); }
 		else if (a == "--help" || a == "-h") { print_usage(); return 0; }
 		else { std::fprintf(stderr, "unknown flag: %s\n", a.c_str()); print_usage(); return 2; }
 	}
@@ -318,10 +348,17 @@ int main(int argc, char** argv) {
 		console.input_was_scripted = true;
 		for (char c : opt.scripted_input) { console.scripted.emplace_back(1, c); }
 	}
-	console.init();
+	// Only --debug-wait holds the alt-screen back (its attach prompt prints to the normal
+	// terminal). Plain --debug boots immediately with the connector listening in the
+	// background, so init the console now.
+	if (!(opt.debug && opt.debug_wait)) { console.init(); }
 
 	auto eng = jai::engine::make();
-	if (opt.backend == "vm") { eng->set_backend(jai::backend_type::vm); }
+	if (opt.debug) {
+		opt.backend = "interpreter";   // the statement hook is interpreter-only (see DEBUGGER_DESIGN.md)
+		eng->set_backend(jai::backend_type::interpreter);
+	}
+	else if (opt.backend == "vm") { eng->set_backend(jai::backend_type::vm); }
 	else if (opt.backend == "interpreter" || opt.backend == "interp") {
 		eng->set_backend(jai::backend_type::interpreter);
 	} else {
@@ -391,6 +428,15 @@ int main(int argc, char** argv) {
 	eng->add_global("HOST_SCRIPTED", eng->make_value(console.input_was_scripted));
 	eng->add_global("SAVE_PATH", eng->make_value(opt.save_path));
 	eng->add_global("HOST_BACKEND", eng->make_value(opt.backend));
+
+	if (opt.debug) {
+#ifdef JAISCRIPT_ENABLE_DEBUGGER
+		start_debugger(*eng, static_cast<int>(opt.debug_port), opt.debug_wait);
+#else
+		std::fprintf(stderr, "--debug needs a build with -DJAISCRIPT_ENABLE_DEBUGGER=ON\n");
+#endif
+		if (opt.debug_wait) { console.init(); }
+	}
 
 	int exit_code = 0;
 	try {

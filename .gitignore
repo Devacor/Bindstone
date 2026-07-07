@@ -76,3 +76,6 @@ Tools/LocalServer/postgresql-binaries.zip
 Source/JaiScript/squirrel/
 Source/JaiScript/sol2/
 Source/JaiScript/lua/
+
+# JaiScript sibling parse caches (auto-written next to .jai script files)
+*.jaibite

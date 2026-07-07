@@ -130,37 +130,48 @@ accessLabel = ("public" | "private" | "protected") ":"
 
 constructorDeclaration = IDENTIFIER "(" parameterList? ")" (":" ctorInitializer ("," ctorInitializer)*)? blockStatement
 
-// Initializer lists accept ONLY super(...) / this(...) delegation.
+// Initializer lists accept ONLY super(...) / this(...) delegation, and ONLY on
+// constructors — on free functions, methods, or destructors they are a parse error.
 // Field initializers like `: name(n)` do NOT parse — initialize fields in the body.
 ctorInitializer = "super" "(" argumentList? ")"
                 | "this" "(" argumentList? ")"
 
 destructorDeclaration = "~" IDENTIFIER "(" ")" blockStatement
 
-methodDeclaration = "coroutine"? "static"? "override"? type IDENTIFIER "(" parameterList? ")" ("->" type)? "override"? blockStatement
+methodDeclaration = "coroutine"? "static"? "override"? type (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? "override"? blockStatement
                   | "coroutine"? "function" ("static" | "override")* (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
 
 operatorName = "operator" ("=" | "+" | "-" | "*" | "/" | "[]" | "<" | ">" | "<=" | ">=" | "==" | "!=")
 
 fieldDeclaration = "static"? type IDENTIFIER ("=" expression)? ";"
 
-// Function declarations
+// Function declarations. `type` is ANY type — builtin, container, or a user class
+// name (`Point mk() {...}` works at top level, in namespaces, and in classes).
+// A leading return type AND a trailing `->` type may both be given only if they
+// MATCH (redundant-legal); a contradictory pair is a parse error. `-> {` (arrow
+// straight into the body) means auto return — or keeps the leading type if one
+// was given.
 functionDeclaration = "coroutine"? ( "function" IDENTIFIER "(" parameterList? ")" ("->" type)? blockStatement
-                                   | type "&"? IDENTIFIER "(" parameterList? ")" blockStatement
-                                   | "auto" IDENTIFIER "(" parameterList? ")" "->" type blockStatement )
+                                   | type "&"? IDENTIFIER "(" parameterList? ")" ("->" type)? blockStatement )
 
 parameterList = parameter ("," parameter)*
 
 // Four accepted parameter shapes; a default value may follow any of them.
 // Once a parameter has a default, all later parameters must too.
+// NOTE: defaults are honored by free functions, lambdas, and static methods;
+// instance methods, constructors, and namespace overloads currently resolve on
+// exact arity and ignore them (pending).
 parameter = type "&"? IDENTIFIER ("=" expression)?     // classic:  int x, Creature& c
-          | type ":" IDENTIFIER ("=" expression)?      // shorthand: int: x
-          | ":" IDENTIFIER ("=" expression)?           // auto shorthand: :x
-          | IDENTIFIER ("=" expression)?               // untyped -> auto: foo(x)
+          | IDENTIFIER ("=" expression)?               // untyped -> auto: foo(x), foo(x = 3)
+          | type ":" IDENTIFIER ("=" expression)?      // typed shorthand: int: n (no '&' form)
+          | ":" IDENTIFIER ("=" expression)?           // auto shorthand: :x (like `auto x`)
 
-// Variable declarations (reference declarations alias the initializer's storage)
+// Variable declarations (reference declarations alias the initializer's storage).
+// `function name = expr;` / `function name;` declares a function-typed variable
+// (auto semantics); also legal as a class field and in namespaces.
 variableDeclaration = type "&"? IDENTIFIER ("=" expression)? ";"
                     | type IDENTIFIER "{" argumentList? "}" ";"      // brace construction
+                    | "function" IDENTIFIER ("=" expression)? ";"    // function-typed variable
 
 destructuringDeclaration = ("auto" | "var") "[" IDENTIFIER ("," IDENTIFIER)* "]" "=" expression ";"
 
@@ -405,34 +416,80 @@ auto v = Vec(1.0, 2.0) + Vec{3.0, 4.0};        // Type(args) and Type{args} both
 print(Vec::count());
 ```
 
-Limitation (pending): an operator method cannot declare a **named class type** as its return
-type (`Vec operator+(...)` is a parse error) — use the `function operator+(...)` form, which
-infers the return type.
+Typed operator methods accept named-class, container, and shared_ptr return types
+(`Vec operator+(Vec other) { ... }` parses and chains), in both the typed-first and the
+`function operator+(...)` spellings.
 
-### Functions, Defaults, References
+### Functions — the definitive form catalog
+
+Free functions (top level and namespaces; class methods accept the same spellings):
+
 ```cpp
-function greet(name, string greeting = "Hello") {   // untyped param -> auto; defaults allowed
+function f(a, b) { return a + b; }          // function keyword, inferred return
+function f(a) -> int { return a; }          // function keyword, trailing return
+function f(a) -> { return a; }              // -> { means auto return
+int f(int a) { return a + 1; }              // C++ return-type-first (any builtin type)
+void f() {}                                 //   incl. void,
+array<int> f() { return [1]; }              //   containers,
+shared_ptr<P> f() { return new P(); }       //   shared_ptr,
+Point mk() { return Point(); }              //   and user class types
+auto f(a) { return a; }                     // auto: inferred return
+auto f(a) -> int { return a; }              // auto + trailing return
+var f(a) { return a; }                      // var: dynamic (any-typed) return
+int f() -> int { return 4; }                // leading + matching trailing: redundant, legal
+                                            // (a CONTRADICTORY pair is a parse error:
+                                            //  int f() -> string  ==> "Conflicting return types")
+int f() -> { return 4; }                    // leading + bare arrow: keeps the leading type
+coroutine function f() { yield 1; }         // coroutine variants of every form above
+coroutine int f() { yield 1; }              //   (top level and class methods; NOT
+                                            //    yet inside namespaces)
+```
+
+Function-typed variables and fields hold any callable (auto semantics):
+
+```cpp
+function f = [](x) { return x * 2; };       // top level, function bodies, namespaces
+function g;                                 // starts null; assign later: g = f;
+class K { function cb = [](){ return 1; }; }   // fields too
+```
+
+Parameters and defaults:
+
+```cpp
+function greet(name, string greeting = "Hello") {   // untyped param -> auto
     print("{} {}", greeting, name);
 }
+function f(x = 3) { return x; }             // untyped params take defaults too
+// Defaults are honored by free functions, lambdas, and static methods; instance
+// methods, constructors, and namespace overloads currently need exact arity (pending).
 
-int square(int: n) { return n * n; }                // type: name shorthand
-auto id = [](:x) -> { return x; };                  // :name shorthand (auto), auto return
+int square(int: n) { return n * n; }        // type: name — alternative typed spelling
+auto id = [](:x) -> { return x; };          // :x — auto-like parameter (same as `auto x`)
 
 void heal(Creature& c, int amount) { c.health += amount; }
 heal(party[0], 25);            // lvalue arguments bind by reference: arr[i], obj.field, locals
-
-int& pick(array<int>& a, int i) { return a[i]; }    // reference returns
-auto& slot = pick(nums, 2);                          // reference locals alias storage
-slot = 99;                                           // writes through to nums[2]
 ```
+
+Known limitation (pending): reference RETURN types parse (`int& pick(...)`) but currently
+error at runtime ("expected int& but got int") — reference returns do not survive the
+typed-return conversion since the reference-cells rework.
+
+Redefinition: at top level a same-name function definition replaces the previous one
+(last wins); with static checking enabled (`warn`/`strict`) a duplicate definition inside
+one textual parse unit reports a checker WARNING (never an error — strict mode still
+executes). Composition through `include`/`import` stays silent: included files parse and
+check as their own units. In namespaces, same name + same arity requires `override`
+(placed AFTER the parameter list: `int f() override { ... }`); different arities coexist
+as overloads. Class methods and constructors overload by arity.
 
 ### Coroutines
 ```cpp
-coroutine function counter(int limit) {
-    for (int i = 0; i < limit; i++) {
+coroutine function counter(int limit) {      // typed-first spellings work too:
+    for (int i = 0; i < limit; i++) {         //   coroutine int counter(...) { ... }
         yield i;                       // yield is an expression; bare `yield` also legal
     }
 }
+// Coroutines are NOT yet supported inside namespace bodies (parse error).
 
 for (auto n : counter(3)) { print(n); }   // range-for drives the coroutine
 
@@ -450,9 +507,9 @@ namespace game::combat {                  // nested a::b::c namespaces
 }
 print(game::combat::base_damage());
 
-// Replacing an existing namespace function REQUIRES override:
+// Replacing an existing namespace function REQUIRES override (after the params):
 namespace game::combat {
-    override int base_damage() { return 12; }
+    int base_damage() override { return 12; }
 }
 
 enum Color { red, green, blue }
@@ -467,6 +524,14 @@ import "creature.jai";   // module style: cached per path — declarations (clas
                           // namespaces) load ONCE; never produces a value
 import(pathExpression);   // computed paths work for both; so does `#include <lib.jai>`
 ```
+
+Every file-based load (include in all forms, import, `engine::execute_file`) transparently
+maintains a sibling parse cache: `foo.jai` keeps a `foo.jaibite` (its pre-parsed AST) next to
+it. A sibling that is strictly newer by mtime with a matching registration fingerprint loads
+instead of parsing; anything else (edited source, equal mtimes, corrupt data, different host
+registrations) reparses and rewrites it — so an edited `.jai` always wins and hot reload is
+unaffected. Cache writes are silent best-effort (read-only script dirs are fine, the write is
+just skipped); disable per engine with `engine->jaibite_cache(false)`.
 
 ### Destructuring
 ```cpp
@@ -490,6 +555,11 @@ auto f = [=]() { return counter + multiplier; };       // everything by value
 auto g = [&]() { counter += multiplier; };             // everything by reference
 auto h = [&, multiplier]() { counter += multiplier; }; // by-ref default, one by-value exception
 auto m = [this]() { return health; };                  // inside a method
+
+// AUTO-CAPTURE: an empty [] still sees outer locals it references — they are
+// snapshot BY VALUE at creation time (use [&] / [&name] for write-through).
+int base = 10;
+auto n = []() { return base + 1; };                    // 11
 ```
 
 ### Variable Types: auto vs var
@@ -623,7 +693,9 @@ string healthLevel = health > 75 ? "healthy" :
 7. **Ternary Operator**: Right-associative conditional expression.
 8. **Virtual by Default**: All methods are virtual; `override` on class methods is optional
    documentation. Replacing a same-name/same-arity **namespace function**, however, REQUIRES
-   `override` (silent replacement is an error without it).
+   `override` placed after the parameter list (`int f() override {}`); silent replacement is
+   an error without it. Top-level free functions are NOT override-gated: a same-name
+   definition silently replaces the previous one.
 9. **`new` is shared_ptr sugar**: `new T(args)` (or `new T{args}`) is exactly
    `shared_ptr<T>(args)` — it constructs a `T` and tags the result with reference
    semantics, so copies share instead of clone. A `var`/`auto` declaration keeps the

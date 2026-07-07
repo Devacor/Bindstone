@@ -399,7 +399,7 @@ public:
 
         // FIXED by inclusion (2026-07, open question #10): zero-arg and variadic host
         // functions register as plain globals (never enter overloadedFunctions) and were
-        // invisible to registration_fingerprint(), so a .jaib saved against them loaded
+        // invisible to registration_fingerprint(), so a .jaibite saved against them loaded
         // with registration_mismatch()==false and died at execute. They now fold into
         // the fingerprint with an arity-class marker.
         test("registration_fingerprint_sees_zero_arg_and_variadic", [this]() {

@@ -34,7 +34,7 @@ struct host_options {
 	bool smoke = false;
 	int64_t frames = 1700;               // smoke frame budget (covers all 13 scene entries)
 	bool precompiled = false;            // jaibite save/load boot path
-	std::string jaib_path = "demoreel.jaib";
+	std::string jaibite_path = "demoreel.jaibite";
 	int64_t capture = -1;                // scene index to text-capture (README material)
 	bool reload_test = false;            // headless hot-reload + backend-swap exercise
 	int64_t width = 0;                   // 0 = autodetect
@@ -418,8 +418,8 @@ struct backend_slot {
 	std::shared_ptr<jai::engine> eng;
 	std::string name;                 // "vm" | "interpreter"
 	double last_ms = 0.0;             // last measured demo_frame cost
-	double boot_ms = 0.0;             // parse (or .jaib load) time
-	std::string boot_kind;            // "parsed" | "loaded .jaib"
+	double boot_ms = 0.0;             // parse (or .jaibite load) time
+	std::string boot_kind;            // "parsed" | "loaded .jaibite"
 };
 
 std::shared_ptr<jai::engine> make_reel_engine(const std::string& backend) {
@@ -453,18 +453,18 @@ std::shared_ptr<jai::engine> make_reel_engine(const std::string& backend) {
 }
 
 // Parse-once boot: the concatenated scene source goes through engine->jaibite()
-// (or a saved .jaib in --precompiled mode), then executes to define everything.
+// (or a saved .jaibite in --precompiled mode), then executes to define everything.
 void boot_scripts(backend_slot& slot, const std::string& source, const host_options& opt) {
 	namespace fs = std::filesystem;
 	double t0 = now_seconds();
 	jai::jaibite bite;
-	if (opt.precompiled && fs::exists(opt.jaib_path)) {
-		bite = slot.eng->jaibite_load(opt.jaib_path);
-		slot.boot_kind = "loaded .jaib";
+	if (opt.precompiled && fs::exists(opt.jaibite_path)) {
+		bite = slot.eng->jaibite_load(opt.jaibite_path);
+		slot.boot_kind = "loaded .jaibite";
 	} else {
 		bite = slot.eng->jaibite(source);
 		slot.boot_kind = "parsed";
-		if (opt.precompiled) { bite.save(opt.jaib_path); }
+		if (opt.precompiled) { bite.save(opt.jaibite_path); }
 	}
 	slot.boot_ms = (now_seconds() - t0) * 1000.0;
 	if (std::getenv("JAI_DEMOREEL_NO_JAIBITE")) { slot.eng->execute(source); return; }
@@ -558,7 +558,7 @@ int run_smoke(const std::string& source, const host_options& opt) {
 		hashes[b] = hash;
 		double cells_per_sec = (static_cast<double>(w) * h * opt.frames) / (total_ms / 1000.0);
 		std::printf("%-12s | %7.1f ms %-4s | %10.1f | %9.3f | %12.0f | %016llx\n",
-			slot.name.c_str(), slot.boot_ms, slot.boot_kind == "parsed" ? "prse" : "jaib",
+			slot.name.c_str(), slot.boot_ms, slot.boot_kind == "parsed" ? "prse" : "bite",
 			total_ms, per_frame[b], cells_per_sec,
 			static_cast<unsigned long long>(hash));
 	}
@@ -649,8 +649,8 @@ void print_usage() {
 		"  --frames N       smoke frame budget (default 1300)\n"
 		"  --capture I      print scene I as a plain-text frame and exit\n"
 		"  --reload-test    headless hot-reload + backend-swap self-test\n"
-		"  --precompiled    boot from demoreel.jaib (saved on first run)\n"
-		"  --jaib PATH      .jaib path for --precompiled\n"
+		"  --precompiled    boot from demoreel.jaibite (saved on first run)\n"
+		"  --jaibite PATH   .jaibite path for --precompiled\n"
 		"  --scenes DIR     override the scenes directory\n"
 		"  --bench N        run N frames of the real loop, report sim/write split, exit\n"
 		"  --scene I        jump to scene I after boot (bench targeting)\n"
@@ -684,7 +684,7 @@ int main(int argc, char** argv) {
 		else if (a == "--capture") { opt.capture = std::stoll(next_arg("--capture")); }
 		else if (a == "--reload-test") { opt.reload_test = true; }
 		else if (a == "--precompiled") { opt.precompiled = true; }
-		else if (a == "--jaib") { opt.jaib_path = next_arg("--jaib"); }
+		else if (a == "--jaibite") { opt.jaibite_path = next_arg("--jaibite"); }
 		else if (a == "--scenes") { opt.scenes_dir = next_arg("--scenes"); }
 		else if (a == "--fps") { opt.target_fps = std::stod(next_arg("--fps")); }
 		else if (a == "--w") { opt.width = std::stoll(next_arg("--w")); }

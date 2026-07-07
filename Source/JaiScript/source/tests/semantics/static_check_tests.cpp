@@ -532,6 +532,118 @@ public:
             check_eq((size_t)0, error_count(e->check("string s = 1 + \"b\";")));
         });
 
+        // ------------------------------------------------------------ shadowing warnings
+        // Always WARNING severity (shadowing is legal; strict must not throw on it).
+
+        test("shadow_local_over_field", [this]() {
+            auto e = make_engine();
+            auto r = e->check("class Creature {\n  int hp = 10;\n  function hit() -> void { var hp = 3; }\n}");
+            check_eq((size_t)0, error_count(r));
+            check_eq((size_t)1, warning_count(r));
+            check_true(r.diagnostics[0].message.find(
+                "local 'hp' shadows field 'hp' of class 'Creature' (field declared at 2:") != std::string::npos);
+        });
+
+        test("shadow_param_over_field_but_not_ctor_params", [this]() {
+            auto e = make_engine();
+            auto r = e->check("class C {\n  int hp = 1;\n  function heal(int hp) -> void { this.hp += hp; }\n}");
+            check_eq((size_t)1, warning_count(r));
+            check_true(r.diagnostics[0].message.find("parameter 'hp' shadows field 'hp'") != std::string::npos);
+            // C(int hp) { this.hp = hp; } is the established idiom - silent
+            check_eq((size_t)0, e->check(
+                "class C {\n  int hp = 1;\n  C(int hp) { this.hp = hp; }\n}").diagnostics.size());
+        });
+
+        test("shadow_rangefor_and_catch_over_field", [this]() {
+            auto e = make_engine();
+            auto r = e->check(
+                "class C {\n  var items = [1];\n  function each() -> void {\n"
+                "    for (var items : [2]) { var y = items; }\n"
+                "    try { throw \"e\"; } catch (items) { }\n  }\n}");
+            check_eq((size_t)2, warning_count(r));
+            check_true(r.diagnostics[0].message.find("range-for variable 'items' shadows field") != std::string::npos);
+            check_true(r.diagnostics[1].message.find("catch variable 'items' shadows field") != std::string::npos);
+        });
+
+        test("shadow_inherited_and_static_fields", [this]() {
+            auto e = make_engine();
+            auto r = e->check(
+                "class Base { int bv = 5; }\n"
+                "class D : Base { function m() -> void { var bv = 1; } }");
+            check_eq((size_t)1, warning_count(r));
+            check_true(r.diagnostics[0].message.find("shadows field 'bv' of class 'Base'") != std::string::npos);
+            auto r2 = e->check(
+                "class S {\n  static int count = 0;\n  function m() -> void { var count = 1; }\n}");
+            check_eq((size_t)1, warning_count(r2));
+            check_true(r2.diagnostics[0].message.find("shadows static field 'count'") != std::string::npos);
+        });
+
+        test("shadow_outer_local", [this]() {
+            auto e = make_engine();
+            auto r = e->check(
+                "function f() -> void {\n  var x = 1;\n  if (x > 0) { var x = 2; }\n}");
+            check_eq((size_t)1, warning_count(r));
+            check_true(r.diagnostics[0].message.find(
+                "local 'x' shadows a declaration in an enclosing scope (declared at 2:") != std::string::npos);
+        });
+
+        test("shadow_global_only_when_used_earlier", [this]() {
+            auto e = make_engine();
+            // read the global, then declare a local with the same spelling: warn
+            auto r = e->check(
+                "var total = 0;\nfunction f() -> void {\n  total += 1;\n  var total = 5;\n}");
+            check_eq((size_t)1, warning_count(r));
+            check_true(r.diagnostics[0].message.find(
+                "local 'total' shadows global 'total' used earlier in this function") != std::string::npos);
+            // plain local-over-global with no earlier use: silent (too common to flag)
+            check_eq((size_t)0, e->check(
+                "var total = 0;\nfunction f() -> void { var total = 5; }").diagnostics.size());
+        });
+
+        test("shadow_warnings_never_gate_strict", [this]() {
+            auto e = make_engine();
+            e->static_checking(check_mode::strict);
+            // strict throws on errors only; a shadow warning still executes
+            check_eq((int64_t)3, e->execute(
+                "class K { int hp = 10; function m() -> int { var hp = 3; return hp; } }\n"
+                "K().m()").as_int());
+            check_eq((size_t)1, e->last_check_diagnostics().diagnostics.size());
+            e->static_checking(check_mode::off);
+        });
+
+        test("shadow_lambda_field_visibility", [this]() {
+            auto e = make_engine();
+            // [=] lambdas cannot reach fields (audited): a same-named lambda local is
+            // NOT a field shadow. [this] lambdas can: warn.
+            check_eq((size_t)0, e->check(
+                "class C {\n  int v = 1;\n  function m() -> void { var f = [=]() { var v = 2; return v; }; }\n}").diagnostics.size());
+            auto r = e->check(
+                "class C {\n  int v = 1;\n  function m() -> void { var f = [this]() { var v = 2; return v; }; }\n}");
+            check_eq((size_t)1, warning_count(r));
+        });
+
+        // ------------------------------------------------------- field/global ambiguity
+        // Runtime bare-name resolution reaches GLOBALS before this-fields (audited,
+        // docs/site/guide/07-classes.html): a name that is both is flow-order-ambiguous
+        // to the static walk, so member hits on it degrade to unknown. Pinned here
+        // because the old field-first inference produced a strict-mode false positive.
+
+        test("field_global_ambiguity_is_lenient", [this]() {
+            auto e = make_engine();
+            // global declared AFTER the class: runtime reads the (int) global - the old
+            // checker trusted the string field and errored on a program that runs clean
+            check_eq((size_t)0, error_count(e->check(
+                "class C { string count = \"s\"; function probe() -> void { int x = count; } }\n"
+                "var count = 5;\nC().probe();")));
+            // writes through the same ambiguity: lenient too
+            check_eq((size_t)0, error_count(e->check(
+                "class C { string count = \"s\"; function poke() -> void { count = 7; } }\n"
+                "var count = 5;\nC().poke();")));
+            // unambiguous field names keep their precise checking
+            check_eq((size_t)1, error_count(e->check(
+                "class C { string only_field = \"s\"; function probe() -> void { int x = only_field; } }")));
+        });
+
         // ------------------------------------------------------------ fuzz corpus FP gate
 
         test("fuzz_corpus_false_positive_gate", [this]() {

@@ -16,6 +16,7 @@
 #include <jaiscript/detail/environment.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -252,6 +253,11 @@ private:
     // AND the engine surface — typos, not ordering.
     std::unordered_set<std::string_view> all_names_;
     std::unordered_set<std::string> extra_globals_;
+    // Top-level (and namespace-flattened) variable names. Runtime resolution reads the
+    // scope chain THROUGH the globals before falling back to this-fields, so a name that
+    // is both a global and a field is flow-order-ambiguous to a static walk: member hits
+    // on these names degrade to unknown instead of trusting the field's declared type.
+    std::unordered_set<std::string_view> global_var_names_;
 
     struct var_entry {
         ctype type;
@@ -267,6 +273,13 @@ private:
         bool is_coroutine = false;
         std::string_view name;
         size_t line = 0, column = 0;
+        // Bare names in this body can reach the enclosing class's fields (method/ctor,
+        // or [this]-capturing lambda). Plain [=]/[&] lambdas cannot - no field-shadow
+        // warnings inside them.
+        bool sees_fields = false;
+        // Names this body resolved through the global tier so far (shadow shape D:
+        // "declaration shadows a global used earlier in the same scope chain").
+        std::unordered_set<std::string_view> globals_used;
     };
     std::vector<fn_ctx> fn_stack_;
     sclass* class_ctx_ = nullptr;
@@ -330,6 +343,14 @@ private:
                     functions_[static_cast<const function_decl*>(d.get())->name]
                         .push_back(static_cast<const function_decl*>(d.get()));
                     break;
+                case node_type::variable_decl:
+                    global_var_names_.insert(static_cast<const variable_decl*>(d.get())->name);
+                    break;
+                case node_type::destructuring_decl:
+                    for (const auto& [name, _] : static_cast<const destructuring_decl*>(d.get())->names) {
+                        global_var_names_.insert(name);
+                    }
+                    break;
                 case node_type::class_decl:
                     collect_class(static_cast<const class_decl*>(d.get()));
                     break;
@@ -384,14 +405,101 @@ private:
 
     // -------------------------------------------------------------- name resolution
 
-    var_entry* find_local(std::string_view name) {
-        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-            auto found = it->find(name);
-            if (found != it->end()) {
+    var_entry* find_local(std::string_view name, size_t* scope_index = nullptr) {
+        for (size_t i = scopes_.size(); i-- > 0;) {
+            auto found = scopes_[i].find(name);
+            if (found != scopes_[i].end()) {
+                if (scope_index) { *scope_index = i; }
                 return &found->second;
             }
         }
         return nullptr;
+    }
+
+    // The name resolves through the global tier at runtime (scope chain reaches the
+    // globals BEFORE the this-field/static fallbacks - see the audited resolution
+    // order in docs/site/guide/07-classes.html). Used both to degrade ambiguous
+    // member hits to unknown and for the shadowing warnings.
+    bool global_tier_name(std::string_view name) {
+        if (global_var_names_.count(name) || functions_.count(name)) { return true; }
+        std::string n(name);
+        return extra_globals_.count(n) || eng_.has_variable(n) || eng_.has_function(n);
+    }
+
+    void note_global_use(std::string_view name) {
+        if (!fn_stack_.empty()) {
+            fn_stack_.back().globals_used.insert(name);
+        }
+    }
+
+    // ---------------------------------------------------- shadowing warnings
+    // Always warning severity - shadowing is legal; the checker just points at it.
+
+    struct field_shadow_hit {
+        std::string_view cls;
+        const variable_decl* decl = nullptr;
+        bool is_static = false;
+    };
+
+    // In-script hierarchy only: engine-registered ancestors are unknowable -> silent.
+    std::optional<field_shadow_hit> find_shadowed_field(std::string_view cls, std::string_view name, int depth = 0) {
+        if (depth > 32) { return std::nullopt; }
+        auto it = classes_.find(cls);
+        if (it == classes_.end()) { return std::nullopt; }
+        if (auto f = it->second.fields.find(name); f != it->second.fields.end()) {
+            return field_shadow_hit{cls, f->second, false};
+        }
+        if (auto f = it->second.static_fields.find(name); f != it->second.static_fields.end()) {
+            return field_shadow_hit{cls, f->second, true};
+        }
+        for (auto base : it->second.decl->base_classes) {
+            if (auto hit = find_shadowed_field(base, name, depth + 1)) { return hit; }
+        }
+        return std::nullopt;
+    }
+
+    void warn_shadow(std::string_view kind, std::string_view name, const source_location& loc,
+                     bool allow_field_shape = true) {
+        if (fn_stack_.empty()) { return; }   // top-level decls ARE the globals
+        // The dangerous shape: shadows a field of the enclosing class (only where the
+        // body can actually reach fields - methods/ctors and [this] lambdas)
+        if (allow_field_shape && class_ctx_ && fn_stack_.back().sees_fields) {
+            if (auto hit = find_shadowed_field(class_ctx_name_, name)) {
+                std::string msg = std::string(kind) + " '" + std::string(name) + "' shadows " +
+                    (hit->is_static ? "static field '" : "field '") + std::string(name) +
+                    "' of class '" + std::string(hit->cls) + "'";
+                if (hit->decl && hit->decl->location.line != 0) {
+                    msg += " (field declared at " + std::to_string(hit->decl->location.line) + ":" +
+                           std::to_string(hit->decl->location.column) + ")";
+                }
+                diag(diag_level::warning, loc, std::move(msg));
+                return;
+            }
+        }
+        // Shadows an outer local/param (any enclosing non-global scope)
+        for (size_t i = scopes_.size() - 1; i-- > 1;) {
+            auto found = scopes_[i].find(name);
+            if (found != scopes_[i].end()) {
+                std::string msg = std::string(kind) + " '" + std::string(name) +
+                    "' shadows a declaration in an enclosing scope";
+                if (found->second.line != 0) {
+                    msg += " (declared at " + std::to_string(found->second.line) + ":" +
+                           std::to_string(found->second.column) + ")";
+                }
+                diag(diag_level::warning, loc, std::move(msg));
+                return;
+            }
+        }
+        // Shadows a global this body already READ through the global tier: from here on
+        // the same spelling silently means the local (declaration-point scoping).
+        bool used_earlier = false;
+        for (const auto& f : fn_stack_) {
+            if (f.globals_used.count(name)) { used_earlier = true; break; }
+        }
+        if (used_earlier && (global_tier_name(name) || scopes_[0].count(name))) {
+            diag(diag_level::warning, loc, std::string(kind) + " '" + std::string(name) +
+                 "' shadows global '" + std::string(name) + "' used earlier in this function");
+        }
     }
 
     bool engine_knows_name(const std::string& name) {
@@ -873,28 +981,34 @@ private:
     }
 
     ctype infer_identifier(identifier_expr* id) {
-        if (var_entry* local = find_local(id->name)) {
+        size_t scope_index = 0;
+        if (var_entry* local = find_local(id->name, &scope_index)) {
+            if (scope_index == 0) { note_global_use(id->name); }   // top-level var read
             return local->dynamic ? ctype{} : local->type;
         }
         if (class_ctx_) {
             member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
             if (hit.found) {
+                // Runtime resolution reaches GLOBALS before this-fields; a name that is
+                // both is flow-order-ambiguous to a static walk (a global declared later
+                // in the source steals the read at call time) - stay unknown.
+                if (global_tier_name(id->name)) { return {}; }
                 if (hit.methods) { return ctype::make(ctype::function_k); }
                 if (hit.field && hit.field->type) { return ctype_from_type_info(hit.field->type.get()); }
                 return {};
             }
         }
-        if (functions_.count(id->name)) { return ctype::make(ctype::function_k); }
+        if (functions_.count(id->name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
         if (classes_.count(id->name)) { return ctype{ctype::class_ref_k, id->name}; }
         if (enums_.count(id->name)) { return ctype{ctype::enum_ref_k, id->name}; }
         if (namespaces_.count(id->name)) { return {}; }
         std::string name(id->name);
-        if (extra_globals_.count(name)) { return {}; }
+        if (extra_globals_.count(name)) { note_global_use(id->name); return {}; }
         if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
             return ctype{ctype::class_ref_k, id->name};
         }
-        if (eng_.has_function(name)) { return ctype::make(ctype::function_k); }
-        if (eng_.has_variable(name)) { return engine_global_type(name); }
+        if (eng_.has_function(name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
+        if (eng_.has_variable(name)) { note_global_use(id->name); return engine_global_type(name); }
         if (engine_knows_name(name)) { return {}; }
         if (all_names_.count(id->name)) { return {}; }
         undeclared(id->location, id->name);
@@ -952,15 +1066,23 @@ private:
         expression* callee = c->callee.get();
         if (callee->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(callee);
-            if (find_local(id->name)) { return {}; }   // callable local: signature unknown
+            size_t scope_index = 0;
+            if (find_local(id->name, &scope_index)) {
+                if (scope_index == 0) { note_global_use(id->name); }
+                return {};   // callable local: signature unknown
+            }
             if (class_ctx_) {
                 member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
                 if (hit.found) {
+                    // Bare calls prefer the GLOBAL function when one exists (audited
+                    // resolution order); flow order decides which one runs - lenient.
+                    if (global_tier_name(id->name)) { return {}; }
                     if (hit.methods) { return check_script_overloads(id->name, *hit.methods, args, c->location).result; }
                     return {};
                 }
             }
             if (auto it = functions_.find(id->name); it != functions_.end()) {
+                note_global_use(id->name);
                 return check_script_overloads(id->name, it->second, args, c->location).result;
             }
             if (auto it = classes_.find(id->name); it != classes_.end()) {
@@ -969,15 +1091,17 @@ private:
             }
             if (enums_.count(id->name)) { return {}; }
             std::string name(id->name);
-            if (extra_globals_.count(name)) { return {}; }
+            if (extra_globals_.count(name)) { note_global_use(id->name); return {}; }
             if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
                 return ctype::object(id->name);   // registered class ctor: args lenient
             }
             if (eng_.has_function(name)) {
+                note_global_use(id->name);
                 check_host_call(name, args, c->location);
                 return {};
             }
-            if (eng_.has_variable(name) || engine_knows_name(name)) { return {}; }
+            if (eng_.has_variable(name)) { note_global_use(id->name); return {}; }
+            if (engine_knows_name(name)) { return {}; }
             if (all_names_.count(id->name)) { return {}; }
             undeclared(id->location, id->name);
             return {};
@@ -1025,7 +1149,9 @@ private:
         expression* target = a->target.get();
         if (target->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(target);
-            if (var_entry* local = find_local(id->name)) {
+            size_t scope_index = 0;
+            if (var_entry* local = find_local(id->name, &scope_index)) {
+                if (scope_index == 0) { note_global_use(id->name); }   // top-level var write
                 if (local->dynamic) { return rhs; }
                 check_store(rhs, compound, base_op, local->type, local->display,
                             "'" + std::string(id->name) + "'", a->location, local->line, local->column);
@@ -1034,6 +1160,9 @@ private:
             if (class_ctx_) {
                 member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
                 if (hit.found) {
+                    // Writes resolve through the global tier before fields too (audited
+                    // order) - a name that is both is flow-order-ambiguous: stay lenient.
+                    if (global_tier_name(id->name)) { return rhs; }
                     if (hit.field && hit.field->type) {
                         ctype ft = ctype_from_type_info(hit.field->type.get());
                         if (!ft.is_unknown()) {
@@ -1047,11 +1176,13 @@ private:
                 }
             }
             std::string name(id->name);
+            if (extra_globals_.count(name)) { note_global_use(id->name); return rhs; }
             if (functions_.count(id->name) || classes_.count(id->name) || enums_.count(id->name) ||
-                namespaces_.count(id->name) || extra_globals_.count(name)) {
+                namespaces_.count(id->name)) {
                 return rhs;
             }
             if (eng_.has_variable(name)) {
+                note_global_use(id->name);
                 ctype gt = engine_global_type(name);
                 if (!gt.is_unknown()) {
                     check_store(rhs, compound, base_op, gt, ctype_name(gt),
@@ -1146,6 +1277,7 @@ private:
                 entry.display = f->element_type ? f->element_type->canonical_name() : "auto";
                 entry.line = f->location.line;
                 entry.column = f->location.column;
+                warn_shadow("range-for variable", f->variable_name, f->location);
                 scopes_.back().emplace(f->variable_name, std::move(entry));
                 walk_stmt(f->body.get());
                 scopes_.pop_back();
@@ -1161,6 +1293,7 @@ private:
                 if (!t->catch_var.empty()) {
                     var_entry entry;
                     entry.dynamic = true;
+                    warn_shadow("catch variable", t->catch_var, t->location);
                     scopes_.back().emplace(std::string_view(t->catch_var), std::move(entry));
                 }
                 walk_stmt(t->catch_block.get());
@@ -1268,6 +1401,7 @@ private:
                 for (const auto& [name, _] : dd->names) {
                     var_entry entry;
                     entry.dynamic = true;
+                    warn_shadow("local", name, dd->location);
                     scopes_.back().emplace(name, std::move(entry));
                 }
                 break;
@@ -1322,17 +1456,23 @@ private:
             // checker can't see branch order, so it stays dynamic (documented leniency)
             entry.dynamic = true;
         }
+        warn_shadow("local", decl->name, decl->location);
         scopes_.back().emplace(decl->name, std::move(entry));
     }
 
     void walk_function(const function_decl* fn) {
         scopes_.emplace_back();
-        define_params(fn->parameters);
+        fn_ctx ctx{fn->return_type.get(), fn->is_coroutine, fn->name,
+                   fn->location.line, fn->location.column};
+        ctx.sees_fields = class_ctx_ != nullptr;
+        // Constructor params shadowing the field they initialize (C(int hp) { this.hp = hp; })
+        // is the established idiom - no field-shadow warnings on ctor params.
+        bool is_ctor = class_ctx_ && fn->name == class_ctx_name_;
+        fn_stack_.push_back(std::move(ctx));
+        define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor);
         for (const auto& init : fn->initializers) {
             for (const auto& arg : init.arguments) { infer(arg.get()); }
         }
-        fn_stack_.push_back({fn->return_type.get(), fn->is_coroutine, fn->name,
-                             fn->location.line, fn->location.column});
         if (fn->body) {
             for (auto& d : fn->body->declarations) { walk_decl(d.get()); }
         }
@@ -1341,7 +1481,8 @@ private:
         scopes_.pop_back();
     }
 
-    void define_params(const std::vector<parameter>& params) {
+    void define_params(const std::vector<parameter>& params, const source_location& fn_loc,
+                       bool warn_field_shadows = true) {
         for (const auto& p : params) {
             ctype pt = ctype_from_type_info(p.type.get());
             if (p.default_value) {
@@ -1352,11 +1493,14 @@ private:
                          (p.type ? p.type->canonical_name() : "auto") + "' has type '" + ctype_name(dv) + "'");
                 }
             }
+            warn_shadow("parameter", p.name, fn_loc, warn_field_shadows);
             var_entry entry;
             entry.type = pt;
             entry.dynamic = pt.is_unknown() || p.is_reference;
             entry.declared = p.type.get();
             entry.display = p.type ? p.type->canonical_name() : "auto";
+            entry.line = fn_loc.line;
+            entry.column = fn_loc.column;
             scopes_.back().emplace(std::string_view(p.name), std::move(entry));
         }
     }
@@ -1404,9 +1548,14 @@ private:
             undeclared(l->location, cap.name);
         }
         scopes_.emplace_back();
-        define_params(l->parameters);
-        fn_stack_.push_back({l->return_type.get(), /*is_coroutine=*/false, "lambda",
-                             l->location.line, l->location.column});
+        fn_ctx ctx{l->return_type.get(), /*is_coroutine=*/false, "lambda",
+                   l->location.line, l->location.column};
+        // Only a [this] capture reaches fields from a lambda body (bare [=]/[&] do not)
+        for (const auto& cap : l->captures) {
+            if (cap.name == "this") { ctx.sees_fields = class_ctx_ != nullptr; break; }
+        }
+        fn_stack_.push_back(std::move(ctx));
+        define_params(l->parameters, l->location);
         walk_stmt(l->body.get());
         fn_stack_.pop_back();
         scopes_.pop_back();

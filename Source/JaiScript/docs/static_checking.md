@@ -118,3 +118,26 @@ source, cached beside the parse; re-run only when the registration surface epoch
 (`add_function`/`add_global`/`add_class`/`register_template_type`). Executes with host
 instance variables check fresh per call (the name set is per-call). Walk cost is
 parse-order (same tree, no allocation-heavy state).
+
+## Shadowing warnings (2026-07)
+
+Warning severity ALWAYS (never gates strict — shadowing is legal). Shapes:
+
+- local / parameter / range-for variable / catch variable shadows a FIELD (or static
+  field) of the enclosing class, including inherited in-script bases:
+  `local 'hp' shadows field 'hp' of class 'Creature' (field declared at 4:2)`.
+  Constructor params named after the field they initialize are the established idiom
+  and stay silent; `[=]`/`[&]` lambda bodies can't reach fields, so only `[this]`
+  lambdas participate.
+- local shadows an outer local/param: `local 'x' shadows a declaration in an
+  enclosing scope (declared at 2:5)`.
+- declaration shadows a global the same function already READ through the global
+  tier: `local 'total' shadows global 'total' used earlier in this function`.
+  (Plain local-over-global with no earlier use is silent — too common to flag.)
+
+Related inference fix shipped with this: runtime bare-name resolution reaches GLOBALS
+before this-fields (see the classes guide chapter, "Name resolution in methods"), so a
+name that is both a global and a field is flow-order-ambiguous to the static walk —
+member hits on such names degrade to unknown instead of trusting the field's declared
+type (the old field-first inference produced a strict-mode false positive, pinned in
+`field_global_ambiguity_is_lenient`).

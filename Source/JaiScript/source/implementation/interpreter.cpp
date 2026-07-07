@@ -6403,9 +6403,20 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
                     }
 
-                    // Find matching overload by arity in namespace
-                    for (const auto& func_decl : overloads) {
-                        if (func_decl->parameters.size() == args.size()) {
+                    // Find matching overload by arity in namespace (trailing defaults
+                    // open the window; the candidate using fewest defaults wins)
+                    std::shared_ptr<function_decl> ns_pick;
+                    size_t ns_defaults = SIZE_MAX;
+                    for (const auto& fd : overloads) {
+                        if (arity_accepts(fd->parameters, args.size()) &&
+                            fd->parameters.size() - args.size() < ns_defaults) {
+                            ns_pick = fd;
+                            ns_defaults = fd->parameters.size() - args.size();
+                        }
+                    }
+                    {
+                        const auto& func_decl = ns_pick;
+                        if (func_decl) {
                             // Create an environment with namespace variables accessible
                             auto ns_env = std::make_shared<environment>(mint_env, eng->get_symbolizer());
 
@@ -9014,6 +9025,44 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
 checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
     if (stmt->value) {
+        if (stmt->binds_reference) {
+            // Ref-return producer: bind the operand as a reference instead of
+            // evaluating a copy. KEEP semantics parallel with the vm's
+            // exec_ref_return_bind/exec_ref_return_lvalue.
+            if (stmt->value->get_type() == node_type::identifier_expr) {
+                auto* ident = static_cast<identifier_expr*>(stmt->value.get());
+                if (ident->symbol_id == UINT64_MAX) {
+                    ident->symbol_id = string_symbolizer_->intern(ident->name);
+                }
+                script_value* storage = nullptr;
+                if (ident->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                    storage = call_stack_.back().get_local(ident->slot_index);
+                }
+                if (!storage) {
+                    storage = environment_->get_value_ptr(ident->symbol_id);
+                }
+                if (!storage) {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                        "Cannot take reference of undefined variable", ident->symbol_id);
+                }
+                returnValue_ = share_boxed_env_storage(*storage, engine_);
+                hasReturnValue_ = true;
+                return {};
+            }
+            if (detail::is_ref_bindable_lvalue(stmt->value.get())) {
+                auto resolved = detail::resolve_ref_lvalue(stmt->value.get(),
+                    call_stack_.empty() ? nullptr : &call_stack_.back(),
+                    environment_.get(), engine_, string_symbolizer_);
+                if (!resolved) {
+                    return resolved.error_value();
+                }
+                returnValue_ = std::move(resolved.value());
+                hasReturnValue_ = true;
+                return {};
+            }
+            // Fall through: calls that already yield a reference pass; anything else
+            // rejects at the call_function epilogue's ref-return branch
+        }
         // Evaluate the return expression
         JAISCRIPT_TRY(dispatch_expr(stmt->value.get()));
         returnValue_ = std::move(pop_value());
@@ -10429,20 +10478,23 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // Get all constructor ASTs
     const auto& ctor_asts = class_def->get_constructor_asts();
 
-    // Find constructor with matching parameter count AND types
+    // Find constructor with matching parameter count AND types (trailing defaults open
+    // the arity window; within a tier the ctor using FEWER defaults wins)
     // Priority: 1) exact type match, 2) numeric conversion match, 3) untyped fallback
     std::shared_ptr<function_decl> exact_match_ctor;
     std::shared_ptr<function_decl> convertible_match_ctor;
     std::shared_ptr<function_decl> arity_match_ctor;  // Fallback for untyped params
+    size_t exact_defaults = SIZE_MAX, convertible_defaults = SIZE_MAX, arity_defaults = SIZE_MAX;
 
     for (const auto& ctor_ast : ctor_asts) {
-        if (ctor_ast->parameters.size() != args.size()) {
+        if (!arity_accepts(ctor_ast->parameters, args.size())) {
             continue;
         }
+        const size_t defaults_used = ctor_ast->parameters.size() - args.size();
 
-        // Remember first arity match as fallback
-        if (!arity_match_ctor) {
+        if (defaults_used < arity_defaults) {
             arity_match_ctor = ctor_ast;
+            arity_defaults = defaults_used;
         }
 
         // Check if all parameter types match exactly
@@ -10484,11 +10536,13 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
             // If param has no type, it accepts anything
         }
 
-        if (exact_match && !exact_match_ctor) {
+        if (exact_match && defaults_used < exact_defaults) {
             exact_match_ctor = ctor_ast;
+            exact_defaults = defaults_used;
         }
-        if (convertible_match && !convertible_match_ctor) {
+        if (convertible_match && defaults_used < convertible_defaults) {
             convertible_match_ctor = ctor_ast;
+            convertible_defaults = defaults_used;
         }
     }
 
@@ -10523,12 +10577,14 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
 
     // Bind constructor parameters so they're available in initializer expressions
     // NOTE: Do NOT clone here - these params are just for field initializer evaluation
-    // The actual parameter binding with proper value/reference semantics happens in call_function
-    if (matching_ctor->parameters.size() != args.size()) {
+    // The actual parameter binding with proper value/reference semantics happens in
+    // call_function (which also evaluates trailing defaults for omitted args; omitted
+    // params are simply absent here, like C++ field-inits that can't see ctor params)
+    if (!arity_accepts(matching_ctor->parameters, args.size())) {
         return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
             "Constructor parameter count mismatch");
     }
-    for (size_t i = 0; i < matching_ctor->parameters.size(); ++i) {
+    for (size_t i = 0; i < matching_ctor->parameters.size() && i < args.size(); ++i) {
         init_env->define(matching_ctor->parameters[i].name, args[i]);
     }
 
@@ -10573,13 +10629,15 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                     // Check if parent is a script class
                     auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent_class);
                     if (parent_script_class) {
-                        // Find matching parent constructor
+                        // Find matching parent constructor (fewest defaults used wins)
                         const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
                         std::shared_ptr<function_decl> parent_ctor;
+                        size_t parent_defaults = SIZE_MAX;
                         for (const auto& ctor_ast : parent_ctor_asts) {
-                            if (ctor_ast->parameters.size() == init_args.size()) {
+                            if (arity_accepts(ctor_ast->parameters, init_args.size()) &&
+                                ctor_ast->parameters.size() - init_args.size() < parent_defaults) {
                                 parent_ctor = ctor_ast;
-                                break;
+                                parent_defaults = ctor_ast->parameters.size() - init_args.size();
                             }
                         }
 
@@ -10639,12 +10697,15 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                             auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor);
                                             if (ancestor_script) {
                                                 // Ancestor is a script class - find matching constructor and add to chain
+                                                // (fewest defaults used wins)
                                                 const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
                                                 std::shared_ptr<function_decl> ancestor_ctor;
+                                                size_t ancestor_defaults = SIZE_MAX;
                                                 for (const auto& ac : ancestor_ctors) {
-                                                    if (ac->parameters.size() == ancestor_args.size()) {
+                                                    if (arity_accepts(ac->parameters, ancestor_args.size()) &&
+                                                        ac->parameters.size() - ancestor_args.size() < ancestor_defaults) {
                                                         ancestor_ctor = ac;
-                                                        break;
+                                                        ancestor_defaults = ac->parameters.size() - ancestor_args.size();
                                                     }
                                                 }
                                                 if (ancestor_ctor) {
@@ -10800,13 +10861,15 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
             // Restore environment
             environment_ = old_env;
             
-            // Find matching constructor in same class
+            // Find matching constructor in same class (fewest defaults used wins)
             const auto& ctor_asts = class_def->get_constructor_asts();
             std::shared_ptr<function_decl> target_ctor;
+            size_t target_defaults = SIZE_MAX;
             for (const auto& ctor_ast : ctor_asts) {
-                if (ctor_ast->parameters.size() == init_args.size() && ctor_ast != matching_ctor) {
+                if (ctor_ast != matching_ctor && arity_accepts(ctor_ast->parameters, init_args.size()) &&
+                    ctor_ast->parameters.size() - init_args.size() < target_defaults) {
                     target_ctor = ctor_ast;
-                    break;
+                    target_defaults = ctor_ast->parameters.size() - init_args.size();
                 }
             }
             
@@ -11440,31 +11503,43 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // return conversion on it would replace the in-flight exception (VM parity: unwinding
     // frames complete with their implicit result, conversion skipped)
     if (hasReturnValue_ && !is_unwinding_) {
-        // IMPORTANT: Dereference any references before cleanup destroys the call frame.
-        // References to call frame locals (e.g., map[key] on a parameter) would become
-        // dangling after the call frame is popped.
-        if (returnValue_.value().is_reference()) {
-            // Copy the target - can't move since target might be in outer scope
-            result = returnValue_.value().deref();
-        } else {
-            // Not a reference - safe to move directly
-            result = std::move(returnValue_.value());
-        }
-
-        // Apply return type conversion if needed
-        // Skip conversion for void, auto, or any type (implicit return type accepts any value)
-        if (function.return_type && !function.return_type->type_name.empty() &&
-            function.return_type->type_name != "void" &&
-            function.return_type->type_name != "auto" &&
-            function.return_type->base_type != script_value_type::jai_any_type) {
-            // cleanup before propagating: leaking hasReturnValue_/frame/env here poisons the
-            // rest of the run once the caller catches (vm pop_script_frame_core ordering)
-            auto convert_result = try_convert_for_parameter(result, function.return_type);
-            if (!convert_result) {
+        if (function.return_type && function.return_type->base_type == script_value_type::jai_reference_type) {
+            // Reference return (int& f()): the HANDLE passes through - the holder's
+            // owner pin is the lifetime, so escaping the frame is legal. KEEP BYTE-
+            // PARALLEL with the vm's convert_return_value ref branch.
+            auto passed = detail::ref_return_pass_through(std::move(returnValue_.value()),
+                                                          function.return_type, string_symbolizer_);
+            if (!passed) {
                 cleanup();
-                return convert_result.error_value();
+                return passed.error_value();
             }
-            result = std::move(convert_result.value());
+            result = std::move(passed.value());
+        } else {
+            // Value returns flatten BEFORE cleanup destroys the call frame: a plain
+            // function's result is a copy, never an alias.
+            if (returnValue_.value().is_reference()) {
+                // Copy the target - can't move since target might be in outer scope
+                result = returnValue_.value().deref();
+            } else {
+                // Not a reference - safe to move directly
+                result = std::move(returnValue_.value());
+            }
+
+            // Apply return type conversion if needed
+            // Skip conversion for void, auto, or any type (implicit return type accepts any value)
+            if (function.return_type && !function.return_type->type_name.empty() &&
+                function.return_type->type_name != "void" &&
+                function.return_type->type_name != "auto" &&
+                function.return_type->base_type != script_value_type::jai_any_type) {
+                // cleanup before propagating: leaking hasReturnValue_/frame/env here poisons the
+                // rest of the run once the caller catches (vm pop_script_frame_core ordering)
+                auto convert_result = try_convert_for_parameter(result, function.return_type);
+                if (!convert_result) {
+                    cleanup();
+                    return convert_result.error_value();
+                }
+                result = std::move(convert_result.value());
+            }
         }
     } else {
         // Check if this is a constructor (method with no explicit return)

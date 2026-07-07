@@ -11,21 +11,42 @@
 
 namespace jai {
 
+// Trailing-default arity window (the parser enforces defaults are trailing): a callable
+// with N params of which K have defaults accepts N-K..N arguments. The binding layer on
+// BOTH backends already evaluates missing defaults; these gates decide VIABILITY only -
+// used uniformly by method/ctor/delegation/namespace resolution so every callable kind
+// honors defaults the way free functions always have.
+inline size_t required_parameter_count(const std::vector<parameter>& params) {
+    size_t required = 0;
+    for (const auto& p : params) {
+        if (!p.default_value) { ++required; } else { break; }
+    }
+    return required;
+}
+
+inline bool arity_accepts(const std::vector<parameter>& params, size_t argc) {
+    return argc >= required_parameter_count(params) && argc <= params.size();
+}
+
 // Shared script-overload scorer used by instance-method and static-method dispatch.
 // Priority: 1) all typed + exact match, 2) all typed + conversions (fewest first)
 //           3) var/any parameters (fallback)
+// Same-score tie: the candidate using FEWER defaults wins (an exact-arity overload
+// beats one that must fill trailing defaults), then fewest conversions.
 // Returns nullptr when no overload is viable for these arguments.
 inline std::shared_ptr<function_decl> pick_best_overload(
     const std::vector<std::shared_ptr<function_decl>>& overloads,
     const std::vector<script_value>& args) {
     std::shared_ptr<function_decl> best_ast;
     int best_score = INT_MAX;  // Lower is better: 0=exact, 1-N=conversions, 1000=has_var
+    size_t best_defaults_used = SIZE_MAX;
     size_t best_conversion_count = SIZE_MAX;
 
     for (const auto& overload_ast : overloads) {
-        if (overload_ast->parameters.size() != args.size()) {
+        if (!arity_accepts(overload_ast->parameters, args.size())) {
             continue;
         }
+        const size_t defaults_used = overload_ast->parameters.size() - args.size();
 
         bool all_typed = true;       // All parameters have explicit types
         bool all_exact = true;       // All typed parameters match exactly
@@ -114,9 +135,18 @@ inline std::shared_ptr<function_decl> pick_best_overload(
             continue;
         }
 
-        if (score < best_score || (score == best_score && conversion_count < best_conversion_count)) {
+        bool better;
+        if (score != best_score) {
+            better = score < best_score;
+        } else if (defaults_used != best_defaults_used) {
+            better = defaults_used < best_defaults_used;
+        } else {
+            better = conversion_count < best_conversion_count;
+        }
+        if (better) {
             best_ast = overload_ast;
             best_score = score;
+            best_defaults_used = defaults_used;
             best_conversion_count = conversion_count;
         }
     }
@@ -155,7 +185,7 @@ inline checked_result<std::shared_ptr<function_decl>> class_definition::resolve_
     if (overloads.size() > 1) {
         size_t arity_match_count = 0;
         for (const auto& o : overloads) {
-            if (o->parameters.size() == args.size()) {
+            if (arity_accepts(o->parameters, args.size())) {
                 ++arity_match_count;
             }
         }

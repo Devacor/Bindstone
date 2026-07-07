@@ -5559,8 +5559,19 @@ checked_result<void> vm_backend::static_member_value(member_expr* expr, script_v
 					return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
 				}
 
-				for (const auto& func_decl : overloads) {
-					if (func_decl->parameters.size() == args.size()) {
+				// Trailing defaults open the window; the candidate using fewest defaults wins
+				std::shared_ptr<function_decl> ns_pick;
+				size_t ns_defaults = SIZE_MAX;
+				for (const auto& fd : overloads) {
+					if (arity_accepts(fd->parameters, args.size()) &&
+					    fd->parameters.size() - args.size() < ns_defaults) {
+						ns_pick = fd;
+						ns_defaults = fd->parameters.size() - args.size();
+					}
+				}
+				{
+					const auto& func_decl = ns_pick;
+					if (func_decl) {
 						auto ns_env = std::make_shared<environment>(mint_env, eng->get_symbolizer());
 
 						auto& namespaces = eng->script_namespaces();
@@ -6845,17 +6856,21 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
                                                             const std::vector<script_value>& args) {
 	const auto& ctor_asts = class_def->get_constructor_asts();
 
+	// Trailing defaults open the arity window; within a tier the ctor using FEWER defaults wins
 	std::shared_ptr<function_decl> exact_match_ctor;
 	std::shared_ptr<function_decl> convertible_match_ctor;
 	std::shared_ptr<function_decl> arity_match_ctor;
+	size_t exact_defaults = SIZE_MAX, convertible_defaults = SIZE_MAX, arity_defaults = SIZE_MAX;
 
 	for (const auto& ctor_ast : ctor_asts) {
-		if (ctor_ast->parameters.size() != args.size()) {
+		if (!arity_accepts(ctor_ast->parameters, args.size())) {
 			continue;
 		}
+		const size_t defaults_used = ctor_ast->parameters.size() - args.size();
 
-		if (!arity_match_ctor) {
+		if (defaults_used < arity_defaults) {
 			arity_match_ctor = ctor_ast;
+			arity_defaults = defaults_used;
 		}
 
 		bool exact_match = true;
@@ -6891,11 +6906,13 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 			}
 		}
 
-		if (exact_match && !exact_match_ctor) {
+		if (exact_match && defaults_used < exact_defaults) {
 			exact_match_ctor = ctor_ast;
+			exact_defaults = defaults_used;
 		}
-		if (convertible_match && !convertible_match_ctor) {
+		if (convertible_match && defaults_used < convertible_defaults) {
 			convertible_match_ctor = ctor_ast;
+			convertible_defaults = defaults_used;
 		}
 	}
 
@@ -6920,11 +6937,13 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	init_env->define("this", this_value);
 	init_env->set_access_context(class_def.get());   // field initializers are class-body code
 
-	if (matching_ctor->parameters.size() != args.size()) {
+	// (binding evaluates trailing defaults for omitted args; omitted params are simply
+	// absent here, like C++ field-inits that can't see ctor params)
+	if (!arity_accepts(matching_ctor->parameters, args.size())) {
 		return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
 			"Constructor parameter count mismatch");
 	}
-	for (size_t i = 0; i < matching_ctor->parameters.size(); ++i) {
+	for (size_t i = 0; i < matching_ctor->parameters.size() && i < args.size(); ++i) {
 		init_env->define(std::string(matching_ctor->parameters[i].name), args[i]);
 	}
 
@@ -6952,12 +6971,15 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 				if (parent_class) {
 					auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent_class);
 					if (parent_script_class) {
+						// fewest defaults used wins
 						const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
 						std::shared_ptr<function_decl> parent_ctor;
+						size_t parent_defaults = SIZE_MAX;
 						for (const auto& ctor_ast : parent_ctor_asts) {
-							if (ctor_ast->parameters.size() == init_args.size()) {
+							if (arity_accepts(ctor_ast->parameters, init_args.size()) &&
+							    ctor_ast->parameters.size() - init_args.size() < parent_defaults) {
 								parent_ctor = ctor_ast;
-								break;
+								parent_defaults = ctor_ast->parameters.size() - init_args.size();
 							}
 						}
 
@@ -6998,12 +7020,15 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 
 											auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor);
 											if (ancestor_script) {
+												// fewest defaults used wins
 												const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
 												std::shared_ptr<function_decl> ancestor_ctor;
+												size_t ancestor_defaults = SIZE_MAX;
 												for (const auto& ac : ancestor_ctors) {
-													if (ac->parameters.size() == ancestor_args.size()) {
+													if (arity_accepts(ac->parameters, ancestor_args.size()) &&
+													    ac->parameters.size() - ancestor_args.size() < ancestor_defaults) {
 														ancestor_ctor = ac;
-														break;
+														ancestor_defaults = ac->parameters.size() - ancestor_args.size();
 													}
 												}
 												if (ancestor_ctor) {
@@ -7121,12 +7146,15 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 				init_args.push_back(std::move(result.value()));
 			}
 
+			// fewest defaults used wins
 			const auto& all_ctor_asts = class_def->get_constructor_asts();
 			std::shared_ptr<function_decl> target_ctor;
+			size_t target_defaults = SIZE_MAX;
 			for (const auto& ctor_ast : all_ctor_asts) {
-				if (ctor_ast->parameters.size() == init_args.size() && ctor_ast != matching_ctor) {
+				if (ctor_ast != matching_ctor && arity_accepts(ctor_ast->parameters, init_args.size()) &&
+				    ctor_ast->parameters.size() - init_args.size() < target_defaults) {
 					target_ctor = ctor_ast;
-					break;
+					target_defaults = ctor_ast->parameters.size() - init_args.size();
 				}
 			}
 
@@ -7623,6 +7651,37 @@ checked_result<void> vm_backend::exec_import(frame& f, const vm_instruction& ins
 	return {};
 }
 
+// Ref-return producers (return_stmt::binds_reference): the return expression binds
+// as a reference instead of evaluating to a copy; convert_return_value passes the
+// handle through. KEEP semantics parallel with the interpreter's visit_return_stmt.
+checked_result<void> vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) {
+	const uint64_t symbol_id = f.code->symbols[ins.b];
+	script_value* storage = nullptr;
+	if (ins.a != k_invalid_u32 && f.locals) {
+		storage = f.locals->get_local(ins.a);
+	}
+	if (!storage && environment_) {
+		storage = environment_->get_value_ptr(symbol_id);
+	}
+	if (!storage) {
+		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+			"Cannot take reference of undefined variable", symbol_id);
+	}
+	stack_.push_back(share_env_ref(*storage));
+	return {};
+}
+
+checked_result<void> vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins) {
+	auto resolved = detail::resolve_ref_lvalue(
+		static_cast<const expression*>(f.code->nodes[ins.a].get()),
+		f.locals, environment_.get(), engine_, symbolizer_);
+	if (!resolved) {
+		return resolved.error_value();
+	}
+	stack_.push_back(std::move(resolved.value()));
+	return {};
+}
+
 // ============================================================
 // Dispatch loop
 // ============================================================
@@ -7652,6 +7711,8 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 		case opcode::op_iter_pop: return exec_iter_pop(f, ins);
 		case opcode::op_include: return exec_include(f, ins);
 		case opcode::op_import: return exec_import(f, ins);
+		case opcode::op_ref_return_bind: return exec_ref_return_bind(f, ins);
+		case opcode::op_ref_return_lvalue: return exec_ref_return_lvalue(f, ins);
 		default: return {};
 	}
 }
@@ -7846,6 +7907,8 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			case opcode::op_iter_pop:
 			case opcode::op_include:
 			case opcode::op_import:
+			case opcode::op_ref_return_bind:
+			case opcode::op_ref_return_lvalue:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or
@@ -8581,8 +8644,14 @@ script_value vm_backend::implicit_this_result(call_frame& locals) {
 }
 
 checked_result<script_value> vm_backend::convert_return_value(script_value result, const type_info_ptr& return_type) {
+	if (return_type && return_type->base_type == script_value_type::jai_reference_type) {
+		// Reference return (int& f()): the HANDLE passes through - the holder's
+		// owner pin is the lifetime, so escaping the frame is legal. KEEP BYTE-
+		// PARALLEL with the interpreter's call_function epilogue ref branch.
+		return detail::ref_return_pass_through(std::move(result), return_type, symbolizer_);
+	}
 	if (result.is_reference()) {
-		// References into this call frame would dangle once the frame dies
+		// Value returns flatten: a plain function's result is a copy, never an alias
 		result = result.deref();
 	}
 	// base_type first: the common any/auto return rejects on one enum compare

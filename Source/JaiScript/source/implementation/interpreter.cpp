@@ -2557,7 +2557,19 @@ std::shared_ptr<environment> interpreter::get_global_environment() const {
     return global_env ? global_env : environment_;
 }
 
+// Debug sync point: execute entry + every 1024 budget ticks, always on the script
+// thread. Mirrors the transport-writable controller state into the plain per-statement
+// gate (debug_hook_) and the controller's hot cache; a session that just ended gets a
+// fresh budget deadline (the armed one is long past after any pause).
+void interpreter::sync_debug_hook() {
+    auto* dbg = debugger_.load(std::memory_order_acquire);
+    debug::controller* next = (dbg && dbg->sync_hot_state()) ? dbg : nullptr;
+    if (debug_hook_ && !next) { arm_execution_deadline(); }
+    debug_hook_ = next;
+}
+
 void interpreter::prepare_for_execution() {
+    sync_debug_hook();
     arm_execution_deadline();
 
     // Share the engine's limit state: reentrant executes see the outer run's terminal
@@ -12190,8 +12202,10 @@ std::string interpreter::format_stack_trace() const {
 checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
     if (!call_stack_.empty()) call_stack_.back().current_node = stmt;
     else top_level_node_ = stmt;
-    if (auto* dbg = debugger_.load(std::memory_order_relaxed); dbg && dbg->enabled())
-        dbg->on_statement(stmt, static_cast<int>(call_stack_.size()));
+    if (debug_hook_) [[unlikely]] {
+        if (debug_hook_->wants_statement(static_cast<uint32_t>(stmt->location.line)))
+            debug_hook_->on_statement(stmt, static_cast<int>(call_stack_.size()));
+    }
     switch (stmt->get_type()) {
         case node_type::expression_stmt:
             return visit_expression_stmt(static_cast<expression_stmt*>(stmt));
@@ -12230,8 +12244,10 @@ checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
 checked_result<void> interpreter::dispatch_decl(declaration* decl) {
     if (!call_stack_.empty()) call_stack_.back().current_node = decl;
     else top_level_node_ = decl;
-    if (auto* dbg = debugger_.load(std::memory_order_relaxed); dbg && dbg->enabled())
-        dbg->on_statement(decl, static_cast<int>(call_stack_.size()));
+    if (debug_hook_) [[unlikely]] {
+        if (debug_hook_->wants_statement(static_cast<uint32_t>(decl->location.line)))
+            debug_hook_->on_statement(decl, static_cast<int>(call_stack_.size()));
+    }
     switch (decl->get_type()) {
         case node_type::variable_decl:
             return visit_variable_decl(static_cast<variable_decl*>(decl));

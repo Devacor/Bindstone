@@ -20,6 +20,12 @@ class debugger_tests : public suite {
 public:
     debugger_tests() : suite("Debugger") {}
 
+    // Benchmark engines (one per cost-model configuration), built lazily inside the
+    // benchmark lambdas so setup cost stays out of the measured loop.
+    std::shared_ptr<jai::engine> bench_eng_;
+
+    void pre_test() override { bench_eng_.reset(); }
+
     void forge_tests() override {
         test("breakpoint_inspect_step_resume", [this]() {
             auto eng = jai::engine::make();
@@ -112,6 +118,58 @@ public:
             dbg.detach();                 // no resume() — detach must unblock it
             script.join();
             check_true(done.load());
+        });
+
+        // ---- cost-model benchmarks (verbose runs only; non-asserting) ----
+        // The same script as Performance Benchmarks' "Hot Loop (1000 iterations)", run
+        // under each debugger configuration from docs/DEBUGGER_DESIGN.md "Debugger
+        // performance". The loop-body statement sits on line 4 of the source.
+        static constexpr const char* hot_loop_src = R"(
+                auto sum = 0;
+                for (auto i = 0; i < 1000; i += 1) {
+                    sum += i * 2;
+                }
+            )";
+
+        benchmark("Hot Loop: no debugger constructed", [this]() {
+            if (!bench_eng_) bench_eng_ = jai::engine::make();
+            bench_eng_->execute(hot_loop_src);
+        });
+
+        benchmark("Hot Loop: controller constructed, no session", [this]() {
+            if (!bench_eng_) {
+                bench_eng_ = jai::engine::make();
+                bench_eng_->debugger();   // = connector listening, no client attached
+            }
+            bench_eng_->execute(hot_loop_src);
+        });
+
+        benchmark("Hot Loop: session enabled, no breakpoints", [this]() {
+            if (!bench_eng_) {
+                bench_eng_ = jai::engine::make();
+                bench_eng_->debugger().set_enabled(true);
+            }
+            bench_eng_->execute(hot_loop_src);
+        });
+
+        benchmark("Hot Loop: session enabled, bp in cold file", [this]() {
+            if (!bench_eng_) {
+                bench_eng_ = jai::engine::make();
+                auto& dbg = bench_eng_->debugger();
+                dbg.set_breakpoints("cold.jai", {50});   // no line in the script matches
+                dbg.set_enabled(true);
+            }
+            bench_eng_->execute(hot_loop_src);
+        });
+
+        benchmark("Hot Loop: session enabled, bp line collides", [this]() {
+            if (!bench_eng_) {
+                bench_eng_ = jai::engine::make();
+                auto& dbg = bench_eng_->debugger();
+                dbg.set_breakpoints("cold.jai", {4});    // same line as the hot statement
+                dbg.set_enabled(true);
+            }
+            bench_eng_->execute(hot_loop_src);
         });
     }
 };

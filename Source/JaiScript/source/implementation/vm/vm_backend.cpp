@@ -8,6 +8,7 @@
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/debug/controller.hpp>   // step-debugger statement hook (phase 5)
 #include <cassert>
 #include <cmath>
 #include <fstream>
@@ -459,12 +460,116 @@ void vm_backend::arm_execution_deadline() {
 }
 
 bool vm_backend::execution_budget_exhausted() {
-	if (!budget_active_ || ++budget_tick_ < 1024) { return false; }
+	if (++budget_tick_ < 1024) [[likely]] { return false; }
 	budget_tick_ = 0;
+	// Off-cycle debug sync (twin of the interpreter's): the only mid-run point where this
+	// thread notices attach/detach/breakpoint edits — one relaxed load when no debugger
+	// was ever constructed. Ticks count even for budget-0 hosts so long scripts still sync.
+	if (debug_controller_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] {
+		sync_debug_hook();
+	}
+	// An armed debug session suspends the wall-clock deadline (a parked script must not
+	// be killed by the act of debugging); sync_debug_hook re-arms fresh on session end.
+	if (!budget_active_ || debug_hook_) { return false; }
 	if (std::chrono::steady_clock::now() < execution_deadline_) { return false; }
 	// Budget overruns are TERMINAL: no script catch may swallow a timeout
 	limits_->terminal_error = true;
 	return true;
+}
+
+void vm_backend::sync_debug_hook() {
+	auto* dbg = debug_controller_.load(std::memory_order_acquire);
+	debug::controller* next = (dbg && dbg->sync_hot_state()) ? dbg : nullptr;
+	if (debug_hook_ && !next) { arm_execution_deadline(); }
+	debug_hook_ = next;
+}
+
+// Statement boundary: the stamped node changed, we entered a different chunk, or a
+// backward jump re-entered the same statement (ip <= the ip the hook last fired at in
+// this frame — loop iterations re-fire, straight-line ops inside one statement don't).
+void vm_backend::debug_statement_boundary(frame& f) {
+	const ast_node* sn = f.ip < f.code->stmt_nodes.size() ? f.code->stmt_nodes[f.ip] : nullptr;
+	if (!sn) { return; }
+	if (sn == f.debug_stmt && f.ip > f.debug_stmt_ip) { return; }
+	f.debug_stmt = sn;
+	f.debug_stmt_ip = f.ip;
+	if (debug_hook_->wants_statement(static_cast<uint32_t>(sn->location.line))) {
+		debug_paused_frame_ = &f;
+		debug_hook_->on_statement(sn,
+			static_cast<int>(call_records_top_ + static_cast<size_t>(current_call_depth_)));
+		debug_paused_frame_ = nullptr;
+	}
+}
+
+std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_locals() const {
+	std::vector<std::pair<std::string, script_value>> out;
+	const frame* f = debug_paused_frame_;
+	if (!f && call_records_top_ > 0) { f = &call_records_[call_records_top_ - 1]->f; }
+	if (!f || !f->locals || f->top_level || !f->code) { return out; }   // global scope: env fallback
+
+	// slot -> name from the chunk's operands: decls carry their variable_decl node
+	// (exact name + slot); load/store/incdec name any slot the body touches (parameters
+	// included — a parameter the body never reads is invisible here, documented).
+	std::vector<std::pair<size_t, std::string_view>> slot_names;
+	for (const auto& ins : f->code->code) {
+		switch (ins.op) {
+		case opcode::op_decl_var:
+		case opcode::op_decl_ref_ident:
+		case opcode::op_decl_ref_value: {
+			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[ins.a].get());
+			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
+			break;
+		}
+		case opcode::op_load:
+			if (ins.a != k_invalid_u32 && ins.b < f->code->symbols.size()) {
+				slot_names.emplace_back(ins.a, symbolizer_->get_string(f->code->symbols[ins.b]));
+			}
+			break;
+		case opcode::op_store:
+		case opcode::op_compound_store:
+		case opcode::op_incdec:
+			if (ins.b != k_invalid_u32 && ins.a < f->code->symbols.size()) {
+				slot_names.emplace_back(ins.b, symbolizer_->get_string(f->code->symbols[ins.a]));
+			}
+			break;
+		default: break;
+		}
+	}
+	// Fused superinstructions carry identifier operands in side tables, not op_loads —
+	// a parameter referenced only inside `a + b` is named here.
+	auto note_operand = [&](const fused_operand& o) {
+		if (o.slot != k_invalid_u32 && o.symbol != k_invalid_u32 && o.symbol < f->code->symbols.size()) {
+			slot_names.emplace_back(o.slot, symbolizer_->get_string(f->code->symbols[o.symbol]));
+		}
+	};
+	for (const auto& p : f->code->fused_binary_protos) { note_operand(p.left); note_operand(p.right); }
+	for (const auto& p : f->code->counted_for_protos) { note_operand(p.var); note_operand(p.end); note_operand(p.step); }
+	for (const auto& p : f->code->compound_fused_protos) {
+		if (p.slot != k_invalid_u32 && p.symbol < f->code->symbols.size()) {
+			slot_names.emplace_back(p.slot, symbolizer_->get_string(f->code->symbols[p.symbol]));
+		}
+	}
+	for (const auto& p : f->code->iter_protos) {
+		if (p.slot != SIZE_MAX && p.var_symbol != UINT64_MAX) {
+			slot_names.emplace_back(p.slot, symbolizer_->get_string(p.var_symbol));
+		}
+	}
+	for (const auto& p : f->code->destructure_protos) {
+		for (const auto& [sym_id, slot] : p.names) {
+			if (slot != SIZE_MAX) { slot_names.emplace_back(slot, symbolizer_->get_string(sym_id)); }
+		}
+	}
+	std::sort(slot_names.begin(), slot_names.end(),
+	          [](const auto& a, const auto& b) { return a.first < b.first; });
+	size_t last = SIZE_MAX;
+	for (const auto& [slot, name] : slot_names) {
+		if (slot == last) { continue; }
+		last = slot;
+		const script_value* v = f->locals->get_local(slot);
+		if (!v) { continue; }                            // reserved capacity only: not live yet
+		out.emplace_back(std::string(name), *v);
+	}
+	return out;
 }
 
 bool vm_backend::execution_limit_exhausted() {
@@ -486,6 +591,7 @@ void vm_backend::set_execution_budget(std::chrono::nanoseconds budget) {
 }
 
 void vm_backend::prepare_for_execution() {
+	sync_debug_hook();   // execute-entry debug sync (attach/detach/breakpoint edits)
 	arm_execution_deadline();
 
 	// Share the engine's limit state: reentrant executes see the outer run's terminal
@@ -7783,6 +7889,7 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			VM_TRY_OP_SHARED(fall_off_script_frame(fp));
 			continue;
 		}
+		if (debug_hook_) [[unlikely]] { debug_statement_boundary(f); }
 		const vm_instruction& ins = code[f.ip];
 		switch (ins.op) {
 			case opcode::op_halt:

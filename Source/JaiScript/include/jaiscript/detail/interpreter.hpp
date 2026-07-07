@@ -872,8 +872,8 @@ namespace jai {
             budget_tick_ = 0;
             // Off-cycle debug sync: the ONLY mid-run point where this thread notices a
             // debugger attach/detach or breakpoint edit (one relaxed load when no
-            // debugger was ever constructed). Interpreter-only until vm phase 5 — the
-            // vm twin keeps the plain budget shape.
+            // debugger was ever constructed). The vm twin carries the same shape
+            // (vm_backend::execution_budget_exhausted) — keep them parallel.
             if (debugger_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] {
                 sync_debug_hook();
             }

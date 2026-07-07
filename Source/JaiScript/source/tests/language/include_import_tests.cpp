@@ -462,6 +462,257 @@ public:
             }
             cleanup_temp_file(counter_file);
         });
+
+        // === jaibite disk cache (Dev ruling 2026-07): every file-based load maintains a
+        // sibling <stem>.jaibite — strictly-newer mtime + matching registration
+        // fingerprint loads instead of parsing; anything else reparses and rewrites.
+        // Deterministic mtime orderings via the std::filesystem::last_write_time SETTER.
+
+        auto sibling_of = [](const std::string& src) {
+            return std::filesystem::path(src).replace_extension(".jaibite").string();
+        };
+        auto starts_with_jbit = [](const std::string& path) {
+            std::ifstream f(path, std::ios::binary);
+            char magic[4] = {};
+            f.read(magic, 4);
+            return f.gcount() == 4 && magic[0] == 'J' && magic[1] == 'B' && magic[2] == 'I' && magic[3] == 'T';
+        };
+        auto force_older_than = [](const std::string& target, const std::string& reference) {
+            auto ref = std::filesystem::last_write_time(reference);
+            std::filesystem::last_write_time(target, ref - std::chrono::hours(1));
+        };
+
+        test("jaibite_cache_creates_sibling_on_file_loads", [&]() {
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_make.jai", "auto cache_make_v = 11;");
+                std::filesystem::remove(sibling_of(src));
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->execute("include \"cache_make.jai\"");
+                check(std::filesystem::exists(sibling_of(src)), "include writes the sibling");
+                check(starts_with_jbit(sibling_of(src)), "sibling is a jaibite (JBIT magic)");
+
+                std::filesystem::remove(sibling_of(src));
+                eng->execute_file(src);
+                check(std::filesystem::exists(sibling_of(src)), "execute_file writes the sibling");
+
+                std::filesystem::remove(sibling_of(src));
+                eng->execute("import \"cache_make.jai\"");
+                check(std::filesystem::exists(sibling_of(src)), "import writes the sibling");
+
+                cleanup_temp_file(src);
+                std::filesystem::remove(sibling_of(src));
+            }
+        });
+
+        test("jaibite_cache_fresh_sibling_skips_parse", [&]() {
+            // Proof the parse is skipped: a fresh (strictly newer, fingerprint-matching)
+            // sibling loads fine even when the .jai itself no longer parses.
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_skip.jai", "42;");
+                std::filesystem::remove(sibling_of(src));
+                {
+                    auto writer = engine::make();
+                    if (use_vm) { writer->set_backend(jai::backend_type::vm); }
+                    writer->add_include_path(std::filesystem::temp_directory_path().string());
+                    check_eq((int64_t)42, writer->execute("var r = include \"cache_skip.jai\"; r;").as_int());
+                }
+                {
+                    std::ofstream f(src, std::ios::trunc);
+                    f << "%%% not a script %%%";
+                }
+                force_older_than(src, sibling_of(src));
+                auto reader = engine::make();
+                if (use_vm) { reader->set_backend(jai::backend_type::vm); }
+                reader->add_include_path(std::filesystem::temp_directory_path().string());
+                check_eq((int64_t)42, reader->execute("var r = include \"cache_skip.jai\"; r;").as_int(),
+                         use_vm ? "vm: cache hit skipped the parse" : "interp: cache hit skipped the parse");
+                cleanup_temp_file(src);
+                std::filesystem::remove(sibling_of(src));
+            }
+        });
+
+        test("jaibite_cache_loaded_ast_keeps_file_attribution", [&]() {
+            // Composition pin with the debugger's path stamping: an AST loaded from the
+            // sibling (parse provably skipped — the source is unparseable) still carries
+            // the .jai filename in its source_locations, so stack traces name the file.
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_attr.jai", "throw \"attr\";");
+                std::filesystem::remove(sibling_of(src));
+                {
+                    auto writer = engine::make();
+                    if (use_vm) { writer->set_backend(jai::backend_type::vm); }
+                    try { writer->execute_file(src); } catch (...) {}
+                }
+                {
+                    std::ofstream f(src, std::ios::trunc);
+                    f << "%%%";
+                }
+                force_older_than(src, sibling_of(src));
+                auto reader = engine::make();
+                if (use_vm) { reader->set_backend(jai::backend_type::vm); }
+                try { reader->execute_file(src); } catch (...) {}
+                auto trace = reader->last_stack_trace();
+                check(!trace.empty(), "trace captured from cache-loaded AST");
+                check_eq(src, trace.back().file,
+                         use_vm ? "vm: cache-loaded AST names the .jai" : "interp: cache-loaded AST names the .jai");
+                cleanup_temp_file(src);
+                std::filesystem::remove(sibling_of(src));
+            }
+        });
+
+        test("jaibite_cache_edit_goes_stale_equal_mtime_included", [&]() {
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_edit.jai", "1;");
+                std::filesystem::remove(sibling_of(src));
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                check_eq((int64_t)1, eng->execute("var a = include \"cache_edit.jai\"; a;").as_int());
+                // edit lands on the very next include, same engine run; equal mtimes
+                // must read as stale (pin: strictly-newer freshness rule)
+                {
+                    std::ofstream f(src, std::ios::trunc);
+                    f << "2;";
+                }
+                std::filesystem::last_write_time(src, std::filesystem::last_write_time(sibling_of(src)));
+                check_eq((int64_t)2, eng->execute("var b = include \"cache_edit.jai\"; b;").as_int(),
+                         "equal mtimes = stale -> reparse");
+                cleanup_temp_file(src);
+                std::filesystem::remove(sibling_of(src));
+            }
+        });
+
+        test("jaibite_cache_corrupt_sibling_falls_back_and_rewrites", [&]() {
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_corrupt.jai", "7;");
+                {
+                    std::ofstream f(sibling_of(src), std::ios::binary | std::ios::trunc);
+                    f << "JBITgarbage-not-a-real-bite";
+                }
+                force_older_than(src, sibling_of(src));   // corrupt sibling looks "fresh"
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                check_eq((int64_t)7, eng->execute("var c = include \"cache_corrupt.jai\"; c;").as_int(),
+                         "corrupt sibling -> silent reparse");
+                check(starts_with_jbit(sibling_of(src)), "sibling rewritten valid");
+                // the rewritten sibling really loads: clobber the source again
+                {
+                    std::ofstream f(src, std::ios::trunc);
+                    f << "%%%";
+                }
+                force_older_than(src, sibling_of(src));
+                auto eng2 = engine::make();
+                if (use_vm) { eng2->set_backend(jai::backend_type::vm); }
+                eng2->add_include_path(std::filesystem::temp_directory_path().string());
+                check_eq((int64_t)7, eng2->execute("var d = include \"cache_corrupt.jai\"; d;").as_int());
+                cleanup_temp_file(src);
+                std::filesystem::remove(sibling_of(src));
+            }
+        });
+
+        test("jaibite_cache_fingerprint_mismatch_reparses", [&]() {
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_fp.jai", "100;");
+                std::filesystem::remove(sibling_of(src));
+                {   // engine A stamps its (extra-function) fingerprint into the sibling
+                    auto a = engine::make();
+                    if (use_vm) { a->set_backend(jai::backend_type::vm); }
+                    a->add_function("fp_extra", [](script_int v) -> script_int { return v; });
+                    a->add_include_path(std::filesystem::temp_directory_path().string());
+                    check_eq((int64_t)100, a->execute("var r = include \"cache_fp.jai\"; r;").as_int());
+                }
+                // source now says 200, forced older than the sibling (mtime says "fresh")
+                {
+                    std::ofstream f(src, std::ios::trunc);
+                    f << "200;";
+                }
+                force_older_than(src, sibling_of(src));
+                {   // engine B: different registration surface -> stale -> parses the source
+                    auto b = engine::make();
+                    if (use_vm) { b->set_backend(jai::backend_type::vm); }
+                    b->add_include_path(std::filesystem::temp_directory_path().string());
+                    check_eq((int64_t)200, b->execute("var r = include \"cache_fp.jai\"; r;").as_int(),
+                             "fingerprint mismatch -> reparse");
+                }
+                // B's reparse rewrote the sibling under B's (bare) surface; an engine
+                // with the same bare surface now loads it (fingerprint matches)
+                force_older_than(src, sibling_of(src));
+                {
+                    auto c = engine::make();
+                    if (use_vm) { c->set_backend(jai::backend_type::vm); }
+                    c->add_include_path(std::filesystem::temp_directory_path().string());
+                    check_eq((int64_t)200, c->execute("var r = include \"cache_fp.jai\"; r;").as_int(),
+                             "matching fingerprint -> sibling loads");
+                }
+                cleanup_temp_file(src);
+                std::filesystem::remove(sibling_of(src));
+            }
+        });
+
+        test("jaibite_cache_disable_switch", [&]() {
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_off.jai", "5;");
+                std::filesystem::remove(sibling_of(src));
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                check(eng->jaibite_cache(), "cache defaults ON");
+                eng->jaibite_cache(false);
+                check(!eng->jaibite_cache(), "setter/getter");
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                check_eq((int64_t)5, eng->execute("var r = include \"cache_off.jai\"; r;").as_int());
+                check(!std::filesystem::exists(sibling_of(src)), "disabled -> no sibling written");
+                cleanup_temp_file(src);
+            }
+        });
+
+        test("jaibite_cache_write_failure_is_silent_and_counted", [&]() {
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_ro.jai", "9;");
+                std::filesystem::remove(sibling_of(src));
+                std::filesystem::create_directory(sibling_of(src));   // sibling path unwritable
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                check_eq((int64_t)9, eng->execute("var r = include \"cache_ro.jai\"; r;").as_int(),
+                         "unwritable sibling never surfaces as an error");
+                check(eng->jaibite_cache_write_failures() >= 1, "failure counted for diagnostics");
+                std::filesystem::remove(sibling_of(src));
+                cleanup_temp_file(src);
+            }
+        });
+
+        test("import_mtime_gate_sits_above_disk_cache", [&]() {
+            // import's once-per-change gate decides IF the file runs at all; the disk
+            // cache only decides parse-vs-load when it does (pin: hot-reload semantics).
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_imp.jai", "cache_imp_bump();");
+                std::filesystem::remove(sibling_of(src));
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                int bumps = 0;
+                eng->add_function("cache_imp_bump", [&bumps]() { bumps++; });
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                eng->set_import_behavior(engine::import_behavior::file_timestamp);
+                eng->execute("import \"cache_imp.jai\"");
+                eng->execute("import \"cache_imp.jai\"");
+                check_eq(1, bumps, "unchanged file: import runs once");
+                {
+                    std::ofstream f(src, std::ios::trunc);
+                    f << "cache_imp_bump(); cache_imp_bump();";
+                }
+                auto bumped = std::filesystem::last_write_time(sibling_of(src)) + std::chrono::seconds(2);
+                std::filesystem::last_write_time(src, bumped);   // deterministic "edited later"
+                eng->execute("import \"cache_imp.jai\"");
+                check_eq(3, bumps, "mtime change: import re-runs the edited body");
+                eng->execute("import \"cache_imp.jai\"");
+                check_eq(3, bumps, "no further change: gated again");
+                cleanup_temp_file(src);
+                std::filesystem::remove(sibling_of(src));
+            }
+        });
     }
 };
 

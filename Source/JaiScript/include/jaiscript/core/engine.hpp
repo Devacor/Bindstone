@@ -113,6 +113,27 @@ namespace jai {
         script_value execute_file(const std::string& scriptPath);
         script_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
 
+        // Automatic jaibite disk cache (default ON). Every FILE-based load — execute_file,
+        // script include (all forms), script import — transparently maintains a sibling
+        // cache next to the source (foo.jai -> foo.jaibite): a sibling that is strictly
+        // newer by mtime (equal = stale) with a matching registration fingerprint loads
+        // instead of parsing; otherwise the source parses and the sibling is rewritten.
+        // Cache writes are best-effort and SILENT on failure (read-only asset dirs,
+        // shipped games) — jaibite_cache_write_failures() counts them for diagnostics.
+        // String executes never touch disk. Backend-agnostic: the sibling holds the parsed
+        // AST (filename stamps included, so traces still name the .jai); the vm compiles
+        // its chunk lazily and reuses it in-memory as usual.
+        void jaibite_cache(bool enabled);
+        bool jaibite_cache() const;
+        size_t jaibite_cache_write_failures() const;
+
+        // Execute already-read script file contents with jaibite disk-cache maintenance
+        // keyed beside resolvedPath — for hosts that read files through their own VFS but
+        // still want the sibling cache (engine-side file loads use it internally).
+        // Identical to execute(content) + path attribution when the cache is disabled or
+        // the path is a .jaibite itself.
+        script_value execute_file_source(const std::string& resolvedPath, const std::string& content);
+
         // Pre-parsed script handle: parse once here, then run it repeatedly via
         // bite.execute() or engine->execute(bite) without re-lexing/parsing (the vm
         // backend also caches its compiled bytecode inside the bite). Engine-bound —

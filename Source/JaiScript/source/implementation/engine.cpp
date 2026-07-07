@@ -482,6 +482,92 @@ struct engine::implementation {
         return entry;
     }
 
+    // Jaibite disk cache (engine.hpp doc): sibling <stem>.jaibite maintained beside every
+    // file-based load. std::filesystem only; every touch is best-effort via error_code.
+    bool jaibite_cache_enabled = true;
+    size_t jaibite_cache_write_failures_ = 0;
+
+    // Empty result = caching inactive for this source (a .jaibite loaded as source
+    // must never overwrite itself).
+    static std::filesystem::path jaibite_sibling_path(const std::string& sourcePath) {
+        std::filesystem::path src(sourcePath);
+        if (src.extension() == k_jaibite_extension) {
+            return {};
+        }
+        return src.replace_extension(k_jaibite_extension);
+    }
+
+    // Strictly newer wins; equal mtimes are treated as stale (safer under coarse
+    // filesystem timestamp granularity) — Dev: "newer than the .jai = fresh".
+    static bool jaibite_sibling_fresh(const std::filesystem::path& sibling, const std::string& sourcePath) {
+        std::error_code cacheEc, sourceEc;
+        auto cacheTime = std::filesystem::last_write_time(sibling, cacheEc);
+        auto sourceTime = std::filesystem::last_write_time(sourcePath, sourceEc);
+        return !cacheEc && !sourceEc && cacheTime > sourceTime;
+    }
+
+    // Load a fresh sibling into the normal parse-entry pipeline. nullptr = fall back to
+    // parsing (corrupt/truncated/unreadable data, version or registration-fingerprint
+    // mismatch) — never throws, the source is still in hand. The deserialized AST carries
+    // its saved filename stamps (serializer round-trips source_location.filename), so
+    // stack traces and the debugger still name the .jai.
+    std::shared_ptr<script_cache_entry> try_load_jaibite_entry(engine& self, const std::filesystem::path& sibling,
+                                                               const std::string& sourcePath, const std::string& source) {
+        try {
+            std::ifstream file(sibling, std::ios::binary);
+            if (!file.is_open()) {
+                return nullptr;
+            }
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            uint64_t savedFingerprint = 0;
+            uint32_t flags = 0;
+            auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags);
+            if (savedFingerprint != self.registration_fingerprint()) {
+                return nullptr;   // registration surface moved: stale, reparse + rewrite
+            }
+            auto entry = store_cached_script(sourcePath, source, std::move(declarations));
+            if (flags & detail::k_jaibite_flag_checked_clean) {
+                // Trusted stamp (fingerprint matched): skip the re-check exactly like a
+                // loaded bite does — check_result stays default (no diagnostics).
+                entry->checked = true;
+                entry->checked_epoch = check_surface_epoch_;
+            }
+            return entry;
+        } catch (...) {
+            return nullptr;
+        }
+    }
+
+    // Best-effort sibling write: failures are SILENT (cache is an optimization, never an
+    // error — read-only asset dirs, shipped games) and counted for diagnostics. A partial
+    // write is removed so a fresh-looking corrupt sibling can't linger; even if the
+    // remove also fails, the loader's corrupt fallback covers it.
+    void write_jaibite_sibling(engine& self, const std::filesystem::path& sibling, const script_cache_entry& entry) noexcept {
+        try {
+            uint32_t flags = 0;
+            if (static_check_mode_ != check_mode::off && entry.checked &&
+                entry.checked_epoch == check_surface_epoch_ && !entry.check_result.has_errors()) {
+                flags |= detail::k_jaibite_flag_checked_clean;
+            }
+            auto bytes = detail::serialize_jaibite(entry.declarations, string_symbolizer_,
+                                                   self.registration_fingerprint(), flags);
+            std::ofstream file(sibling, std::ios::binary | std::ios::trunc);
+            if (!file.is_open()) {
+                ++jaibite_cache_write_failures_;
+                return;
+            }
+            file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            file.close();
+            if (!file) {
+                ++jaibite_cache_write_failures_;
+                std::error_code removeEc;
+                std::filesystem::remove(sibling, removeEc);
+            }
+        } catch (...) {
+            ++jaibite_cache_write_failures_;
+        }
+    }
+
     implementation();
     ~implementation();
     
@@ -910,17 +996,40 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
     return execute_source(scriptContent, instanceVars, "<script>");
 }
 
+script_value engine::execute_file_source(const std::string& resolvedPath, const std::string& content) {
+    return execute_source(content, instance_variables{}, resolvedPath);
+}
+
 script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath) {
     impl->has_executed_ = true;
     try {
         // Prepare backend for new execution
         backend()->prepare_for_execution();
 
+        // Jaibite disk cache scope for this call — real file paths only ("<script>" is
+        // the raw-content sentinel; string executes never touch disk). engine.hpp doc.
+        std::filesystem::path sibling;
+        bool siblingFresh = false;
+        if (impl->jaibite_cache_enabled && sourcePath != "<script>") {
+            sibling = implementation::jaibite_sibling_path(sourcePath);
+            siblingFresh = !sibling.empty() && implementation::jaibite_sibling_fresh(sibling, sourcePath);
+        }
+
         // Identical source re-executes through its cached parse (and, on the vm,
         // its cached compiled chunk) — same semantics as re-executing a jaibite.
         // Keyed on (sourcePath, content): the same text under two paths gets two
         // ASTs, each stamped with its own filename (breakpoints/traces stay distinct).
         auto cached = impl->find_cached_script(sourcePath, scriptContent);
+        if (!cached && siblingFresh) {
+            // Fresh sibling: skip the parse entirely. Corrupt data or a fingerprint
+            // mismatch falls back to the parse below (and the sibling is rewritten).
+            // Feeds the SAME parse-entry pipeline, so the static-check hook and the
+            // vm's lazy chunk compile are untouched.
+            cached = impl->try_load_jaibite_entry(*this, sibling, sourcePath, scriptContent);
+            if (!cached) {
+                siblingFresh = false;
+            }
+        }
         if (!cached) {
             lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes, sourcePath);
             auto tokens = lexer.tokenize();
@@ -952,6 +1061,13 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
             if (impl->static_check_mode_ == check_mode::strict && impl->last_check_.has_errors()) {
                 throw static_check_error("static check failed:\n" + impl->last_check_.format(scriptContent));
             }
+        }
+
+        // Rewrite a missing/stale/rejected sibling AFTER the check hook so a clean check
+        // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
+        // invalidate a good parse.
+        if (!sibling.empty() && !siblingFresh) {
+            impl->write_jaibite_sibling(*this, sibling, *cached);
         }
 
         return execute_parsed(cached->declarations, cached->compiled, instanceVars.empty() ? nullptr : &instanceVars);
@@ -1170,11 +1286,11 @@ uint64_t engine::registration_fingerprint() const {
     }
     // Plain-global function registrations (zero-arg add_function, add_variadic_function,
     // single untyped bindings) never enter overloadedFunctions, so they were invisible
-    // here — a .jaib saved against them loaded with registration_mismatch()==false and
+    // here — a .jaibite saved against them loaded with registration_mismatch()==false and
     // died at execute (open question #10, FIXED by inclusion 2026-07). Folded in AFTER
     // the sorted overload surface with an arity-class marker, so engines registering
     // none of these hash exactly as before; engines that do get a CHANGED fingerprint
-    // (old .jaibs then report the advisory mismatch — correct, loads never hard-fail).
+    // (old .jaibites then report the advisory mismatch — correct, loads never hard-fail).
     std::vector<std::pair<std::string_view, char>> plain;
     plain.reserve(impl->functionArities.size());
     for (const auto& [name, arity] : impl->functionArities) {
@@ -1202,6 +1318,18 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
     std::stringstream buffer;
     buffer << file.rdbuf();
     return execute_source(buffer.str(), instanceVars, scriptPath);
+}
+
+void engine::jaibite_cache(bool enabled) {
+    impl->jaibite_cache_enabled = enabled;
+}
+
+bool engine::jaibite_cache() const {
+    return impl->jaibite_cache_enabled;
+}
+
+size_t engine::jaibite_cache_write_failures() const {
+    return impl->jaibite_cache_write_failures_;
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {

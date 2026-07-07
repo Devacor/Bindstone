@@ -481,9 +481,29 @@ void heal(Creature& c, int amount) { c.health += amount; }
 heal(party[0], 25);            // lvalue arguments bind by reference: arr[i], obj.field, locals
 ```
 
-Known limitation (pending): reference RETURN types parse (`int& pick(...)`) but currently
-error at runtime ("expected int& but got int") — reference returns do not survive the
-typed-return conversion since the reference-cells rework.
+Reference returns (shipped with the reference-cells rework):
+
+```cpp
+int& pick(array<int>& a, int i) { return a[i]; }   // leading form: free functions
+Box& get() { return b; }                            // class-typed leading form works too
+class Orc {
+    int hp = 10;
+    function heal() -> int& { return this.hp; }     // methods/lambdas: trailing -> T& form
+}
+
+auto& slot = pick(nums, 2);    // reference locals alias the returned reference
+slot = 99;                     // writes through to nums[2]
+int& leak() { int v = 7; return v; }   // returning a LOCAL is legal: the local boxes
+auto& r = leak(); r = r + 1;           // into a cell the returned handle keeps alive
+```
+
+Rules: the returned operand must be an lvalue (a variable, `arr[i]`, `obj.field`, a
+chain, or a call that itself returns a reference) — returning a temporary raises
+"Function with reference return type must return an lvalue reference". The referent's
+type must match the declared referent exactly (no int/float conversion applies through
+a reference). Coroutines cannot return references (parse error). At top level
+`ClassName& name(` reads as a function declaration, like `ClassName name(` — spell a
+bitwise-and of a class value as `(ClassName) & name()`.
 
 Redefinition: at top level a same-name function definition replaces the previous one
 (last wins); with static checking enabled (`warn`/`strict`) a duplicate definition inside

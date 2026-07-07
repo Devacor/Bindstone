@@ -108,7 +108,8 @@ char/bool/array/map/object/function/reference/shared_ptr/weak_ptr). Heavy types 
 non-atomic `strong_ptr` for O(1) copies. C++-bound values use `cpp_bound_ptr_` +
 `cpp_bound_type_size_` (low 7 bits = byte size, bit `0x80` = unsigned) — decode via
 `unchecked_as_int()/unchecked_as_float()`, NOT raw casts. References hold a `reference_holder`
-(`target` ptr + weak `sourceEnv`); `deref()` resolves them. `clone()` = deep copy, copy = shallow.
+(four owner-pinned modes: cell / container+index / instance+field_id / map+key — see
+`docs/reference_model.md`); `deref()` resolves them. `clone()` = deep copy, copy = shallow.
 Every `script_value` needs an engine ref: `script_value(value, eng)` or
 `script_value(std::monostate{}, eng)` for null.
 

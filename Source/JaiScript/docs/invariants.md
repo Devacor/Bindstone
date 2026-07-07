@@ -41,23 +41,32 @@ The 2026-07 failure mode: method frames compiled/reserved with local_count 0, so
 memory (demoreel finding 2 — silent wrong loop counts, Release; delayed detonation shapes).
 Never add a frame-creation path that skips the full-slot reserve.
 
-## 3. Reference cells (the anchor rule's replacement, 2026-07)
+## 3. Reference cells (mode 1 is DELETED, 2026-07 stage C)
 
-The old rule ("ref-anchor environments are never pooled/reused") is RETIRED along with
-the metadata/anchor machinery. References now come in four holder modes
-(`reference_holder`, value.hpp): CELL (the holder OWNS the value in inline storage —
-Lua upvalue), vector element (container+index re-resolve), instance field (owner+id
-re-resolve), and map entry (pinned map + key re-resolve). Rules:
+The old ref-anchor rule is dead machinery: `reference_holder` no longer has a raw
+`target` pointer or a `weak_ptr<environment> sourceEnv` — a reference NEVER holds a
+raw address + lifetime guess. Exactly four owner-pinned holder modes exist
+(`reference_holder`, value.hpp; long-form: docs/reference_model.md): CELL (the holder
+OWNS the value in inline storage — Lua upvalue), vector element (container+index
+re-resolve), instance field (owner+id re-resolve), and map entry (pinned map + key
+re-resolve). Rules:
 
 - Cells are minted ONLY by `make_cell_reference` (make_strong single allocation,
   memory_cap-charged); the boxed value is never itself a reference. Escape-marked
-  declarations (`parser.cpp` ref_escape_marker) box at decl/bind; unmarked variables
-  bind by boxing ON DEMAND at the first ref bind (`bind_reference_to_storage`), which
-  must demote active counted-for fast states (they cache raw payload pointers).
-- Escape is LEGAL: a reference returned, stored, captured, or held across yields keeps
-  its target alive through the holder. Never reintroduce a raw-pointer + weak-env
-  reference to frame slots or env storage (`sourceEnv` survives only in the residual
-  mode-1 sites and dies with them).
+  declarations (`parser.cpp` ref_escape_marker) box at decl/bind; unmarked storage
+  boxes ON DEMAND at the first ref bind through the ONE box-in-place + share kernel
+  pair (`vm_backend::share_env_ref` / interpreter `share_boxed_env_storage`; ref-param
+  binds ride it via `bind_reference_to_storage`). The vm kernel must demote active
+  counted-for fast states (they cache raw payload pointers).
+- Escape is LEGAL: a reference returned (incl. typed ref returns `int& f()`), stored,
+  captured, or held across yields/executes keeps its target alive through the holder.
+  Never reintroduce a raw-pointer + weak-env reference to frame slots or env storage;
+  "Reference target environment has been destroyed" must never come back as an error.
+- Every write path resolves by MODE, never by cached address: deref()/assign_through()
+  re-resolve per touch; the immediate-use assignment twins go through
+  `reference_holder::resolve_target()` (value.cpp). A new consumer must do one or the
+  other — a stored `script_value*` into a container/frame is the bug class this
+  section exists to prevent.
 - Reference binding is STATELESS: the call site travels as an argument
   (vm `bind_parameters(site, caller_locals, caller_code)`; interpreter
   `call_site_context`). Opaque `std::function` boundaries hand it over via a single
@@ -67,6 +76,9 @@ re-resolve), and map entry (pinned map + key re-resolve). Rules:
 - Direct assignment to an escape-boxed variable writes the cell WITH the variable's
   typed-store enforcement (`names_value_decl` / `store_flag_ref_alias` pick the
   semantics); writes through ref aliases keep the unconstrained store-through rules.
+- Ref returns pass the HANDLE out through the ONE epilogue kernel
+  (`detail::ref_return_pass_through`); value returns still flatten (deref) at the
+  epilogue. Both backends must keep using the shared kernel.
 
 ## 4. S8 bound-operand prologue (TYPEID_CPP_BOUND = 14)
 

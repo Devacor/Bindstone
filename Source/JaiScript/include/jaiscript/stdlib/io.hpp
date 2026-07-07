@@ -321,6 +321,7 @@ namespace stdlib {
                 case script_value_type::jai_map_type: return "map";
                 case script_value_type::jai_function_type: return "function";
                 case script_value_type::jai_object_type: return "object";
+                case script_value_type::jai_shared_ptr_type: return "object";
                 case script_value_type::jai_reference_type: return "reference";
                 case script_value_type::jai_weak_ptr_type: return "weak_ptr";
                 default: return "unknown";

@@ -123,6 +123,10 @@ namespace jai {
 
         // Helper for parsing function bodies
         checked_result<declaration_ptr> parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type, bool allow_ctor_initializers = false);
+
+        // Consumes an optional '&' after a return type and wraps it as a reference
+        // return (int& f() / -> int& / auto&). No-op when the next token isn't '&'.
+        type_info_ptr wrap_reference_return_type(type_info_ptr return_type);
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);

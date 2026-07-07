@@ -474,7 +474,22 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 	case node_type::return_stmt: {
 		auto* rs = static_cast<return_stmt*>(stmt.get());
 		if (rs->value) {
-			compile_expression(rs->value);
+			if (rs->binds_reference && rs->value->get_type() == node_type::identifier_expr) {
+				// Ref-return producer: bind the named storage as a reference (share the
+				// cell, boxing on demand) instead of loading a copy
+				auto* ident = static_cast<identifier_expr*>(rs->value.get());
+				if (ident->symbol_id == UINT64_MAX) {
+					ident->symbol_id = symbolizer_->intern(ident->name);
+				}
+				emit(opcode::op_ref_return_bind, identifier_slot_operand(ident), add_symbol(ident->symbol_id));
+			} else if (rs->binds_reference && detail::is_ref_bindable_lvalue(rs->value.get())) {
+				// Field/subscript/chain operand: owner-pinned reference via the shared kernel
+				emit(opcode::op_ref_return_lvalue, add_node(rs->value));
+			} else {
+				// Calls that already yield a reference pass through; anything else
+				// rejects at convert_return_value's ref-return epilogue
+				compile_expression(rs->value);
+			}
 		} else {
 			emit(opcode::op_null);
 		}

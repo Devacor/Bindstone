@@ -556,6 +556,33 @@ namespace jai::detail {
 		        constraint->base_type == script_value_type::jai_shared_ptr_type);
 	}
 
+	// Typed reference-return epilogue (int& f() / -> auto&): the result passes through
+	// as the reference HANDLE - the cell/element/field/map-entry pin is the lifetime,
+	// so a returned reference outliving its frame is legal. Non-reference results
+	// reject (a reference cannot bind a temporary). A declared referent type must match
+	// the referent's current base type (no conversion can apply through a reference;
+	// null referents pass - typed object refs stay nullable like typed fields do).
+	inline checked_result<script_value> ref_return_pass_through(script_value&& result, type_info_ptr return_type,
+	                                                            string_symbolizer* symbolizer) {
+		if (!result.is_reference()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),
+				"Function with reference return type must return an lvalue reference");
+		}
+		type_info_ptr referent = return_type->type_params.empty() ? nullptr : return_type->type_params[0];
+		if (referent && referent->base_type != script_value_type::jai_any_type &&
+		    referent->base_type != script_value_type::jai_null_type &&
+		    referent->type_name != "auto") {
+			const script_value& actual = result.deref();
+			if (!actual.is_null() && actual.type() != referent->base_type) {
+				uint64_t got = symbolizer->intern(ref_value_type_name(actual));
+				uint64_t want = symbolizer->intern(return_type->type_name);
+				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
+					"Cannot return reference to '{0}' from a function returning '{1}'", got, want);
+			}
+		}
+		return std::move(result);
+	}
+
 	// Identifier-assignment through a reference local: unconstrained refs keep today's
 	// exact clone-through-deref line; constrained element/field refs enforce like the
 	// subscript-assign paths do.

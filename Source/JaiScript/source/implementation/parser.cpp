@@ -114,9 +114,15 @@ namespace {
             }
         }
 
+        // Innermost function's ref-return-ness: return statements inside a reference-
+        // returning function bind their operand as a reference (return_stmt stamping)
+        std::vector<char> ref_return_stack;
+
         void walk_function(std::vector<parameter>& params, statement* body,
-                           const std::vector<constructor_initializer>* inits = nullptr) {
+                           const std::vector<constructor_initializer>* inits = nullptr,
+                           bool returns_reference = false) {
             scopes.emplace_back();
+            ref_return_stack.push_back(returns_reference ? 1 : 0);
             for (auto& p : params) {
                 if (p.symbol_id == UINT64_MAX && symbolizer) {
                     p.symbol_id = symbolizer->intern(p.name);
@@ -132,6 +138,7 @@ namespace {
                 }
             }
             walk_stmt(body);
+            ref_return_stack.pop_back();
             scopes.pop_back();
         }
 
@@ -180,7 +187,8 @@ namespace {
                             escape(cap.symbol_id);
                         }
                     }
-                    walk_function(l->parameters, l->body.get());
+                    walk_function(l->parameters, l->body.get(), nullptr,
+                                  l->return_type && l->return_type->base_type == script_value_type::jai_reference_type);
                     break;
                 }
                 case node_type::new_expr:
@@ -261,9 +269,17 @@ namespace {
                     walk_stmt(r->body.get());
                     break;
                 }
-                case node_type::return_stmt:
-                    walk_expr(static_cast<return_stmt*>(s)->value.get());
+                case node_type::return_stmt: {
+                    auto* r = static_cast<return_stmt*>(s);
+                    if (!ref_return_stack.empty() && ref_return_stack.back()) {
+                        // Ref-return producer: the operand binds as a reference; a
+                        // bare-identifier operand escapes (its decl boxes from the start)
+                        r->binds_reference = true;
+                        escape_arg(r->value.get());
+                    }
+                    walk_expr(r->value.get());
                     break;
+                }
                 case node_type::try_stmt: {
                     auto* t = static_cast<try_stmt*>(s);
                     walk_stmt(t->try_block.get());
@@ -310,7 +326,9 @@ namespace {
                 }
                 case node_type::function_decl: {
                     auto* fd = static_cast<function_decl*>(s);
-                    walk_function(fd->parameters, fd->body.get(), &fd->initializers);
+                    walk_function(fd->parameters, fd->body.get(), &fd->initializers,
+                                  fd->return_type && fd->return_type->base_type == script_value_type::jai_reference_type &&
+                                  !fd->is_coroutine);
                     break;
                 }
                 case node_type::class_decl: {
@@ -1747,6 +1765,12 @@ checked_result<declaration_ptr> parser::declaration() {
         in_coroutine_ = was_in_coroutine;
         auto* func = static_cast<function_decl*>(result.get());
         func->is_coroutine = true;
+        // A suspended fiber's return channel is a value channel: ref returns are
+        // function-only (the epilogue would flatten anyway - make it explicit)
+        if (func->return_type && func->return_type->base_type == script_value_type::jai_reference_type) {
+            report_error("Coroutines cannot return references", previous());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         match(token_type::semicolon);
         return result;
     }
@@ -1888,6 +1912,14 @@ checked_result<declaration_ptr> parser::declaration() {
                 return function_declaration();
             }
             return variable_declaration();
+        } else if (check(token_type::ampersand) &&
+                   current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::identifier &&
+                   current_ + 2 < tokens_.size() && tokens_[current_ + 2].type == token_type::left_paren) {
+            // Pattern: ClassName& name( - a class-typed reference-return free function
+            // (Box& get() { ... }). Declaration wins like the identifier-identifier
+            // form above; a bitwise-and expression spells it (Box) & get().
+            current_ = savedPos;
+            return function_declaration();
         } else {
             // Not a simple declaration pattern, restore and parse as expression
             current_ = savedPos;
@@ -2087,6 +2119,7 @@ checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_
             lambda->return_type = nullptr; // nullptr means auto
         } else {
             JAISCRIPT_TRY_ASSIGN(lambda->return_type, parse_type());
+            lambda->return_type = wrap_reference_return_type(lambda->return_type);
         }
     }
 
@@ -2632,7 +2665,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                                     synchronize();
                                     continue;
                                 }
-                                func->return_type = std::move(return_type_result.value());
+                                func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
                                 if (type && func->return_type && func->return_type->id != type->id) {
                                     report_error("Conflicting return types '" + type->type_name + "' and '" +
                                                  func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
@@ -2883,7 +2916,7 @@ checked_result<declaration_ptr> parser::class_declaration() {
                                 synchronize();
                                 continue;
                             }
-                            func->return_type = std::move(return_type_result.value());
+                            func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
                             if (type && func->return_type && func->return_type->id != type->id) {
                                 report_error("Conflicting return types '" + type->type_name + "' and '" +
                                              func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
@@ -3141,7 +3174,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                             synchronize();
                             continue;
                         }
-                        func->return_type = std::move(return_type_result.value());
+                        func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
                         if (type && func->return_type && func->return_type->id != type->id) {
                             report_error("Conflicting return types '" + type->type_name + "' and '" +
                                          func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
@@ -3314,18 +3347,20 @@ checked_result<declaration_ptr> parser::import_declaration() {
     return std::make_shared<import_decl>(previous().location, path);
 }
 
+type_info_ptr parser::wrap_reference_return_type(type_info_ptr return_type) {
+    if (!match(token_type::ampersand)) {
+        return return_type;
+    }
+    type_info refType(script_value_type::jai_reference_type);
+    refType.type_name = return_type ? (return_type->type_name + "&") : "auto&";
+    refType.type_params.push_back(return_type);
+    refType.id = symbolizer_->intern(refType.canonical_name());
+    return store_type_info(std::move(refType));
+}
+
 checked_result<declaration_ptr> parser::function_declaration() {
     JAISCRIPT_TRY_ASSIGN(type_info_ptr return_type, parse_type());
-
-    // Check for reference return type
-    if (match(token_type::ampersand)) {
-        // Create a reference type
-        type_info refType(script_value_type::jai_reference_type);
-        refType.type_name = return_type ? (return_type->type_name + "&") : "auto&";
-        refType.type_params.push_back(return_type);
-        refType.id = symbolizer_->intern(refType.canonical_name());
-        return_type = store_type_info(std::move(refType));
-    }
+    return_type = wrap_reference_return_type(return_type);
 
     JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected function name"));
     auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
@@ -3347,6 +3382,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
             func->return_type = return_type;
         } else {
             JAISCRIPT_TRY_ASSIGN(func->return_type, parse_type());
+            func->return_type = wrap_reference_return_type(func->return_type);
             // A leading return type and a contradictory trailing one is an error
             // (Dev ruling 2026-07); a matching pair is redundant-legal.
             if (return_type && func->return_type && func->return_type->id != return_type->id) {

@@ -175,8 +175,6 @@ namespace jai {
         script_value parallel_detached_copy(std::vector<type_info*>* collected_types = nullptr) const;
 
     public:
-        static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env);
-
         // Engine-aware factory methods (preferred - ALWAYS use these)
         static script_value make_array(type_info_ptr element_type, engine* eng);
         static script_value make_map(type_info_ptr keyType, type_info_ptr valueType, engine* eng);
@@ -186,14 +184,11 @@ namespace jai {
         // Internal factory method for raw C++ objects - always requires type_id to avoid re-interning
         static script_value make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng);
     public:
-        static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, engine* eng);
-        // Overload for container subscript references with element type constraint
-        static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, engine* eng, type_info_ptr container_element_type);
         // Reallocation-safe reference to a vector element (range-for auto&, arr[i] lvalue):
         // holds the owning container + index so deref/assign-through recompute the element
         // address each time and bounds-check it (see reference_holder::container).
         static script_value make_element_reference(const strong_ptr<std::vector<script_value>>& container, size_t index,
-                                                   const std::shared_ptr<environment>& env, engine* eng, type_info_ptr element_type);
+                                                   engine* eng, type_info_ptr element_type);
         // Instance-pinned reference to a class field: deref/assign-through re-resolve the
         // field node by id (never a cached address), so hot reload cannot dangle it.
         static script_value make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,
@@ -1619,21 +1614,23 @@ namespace jai {
             explicit shared_value_holder(std::shared_ptr<script_value> v) noexcept : inner(std::move(v)) {}
         };
 
-        // Reference wrapper for reference types
+        // Reference wrapper for reference types. Four owner-pinned modes, mutually
+        // exclusive - a reference NEVER holds a raw address + lifetime guess (the old
+        // mode 1, raw script_value* + weak env anchor, is deleted; escape is legal):
+        //
+        // CELL (Lua-upvalue box): the holder OWNS the referenced value in inline
+        // storage - one make_strong allocation is the whole box. Escape-marked
+        // variables store a cell reference from declaration; unmarked storage boxes on
+        // demand at the first ref bind. Binding/aliasing is a handle copy and an
+        // escaped reference keeps its target alive.
+        //
+        // MAP-ENTRY: container_map pins the owning map (strong) and the inline storage
+        // holds the KEY; deref/assign-through re-resolve via find(key) each time, so an
+        // erased entry errors cleanly and a reference into a temporary map keeps the
+        // map alive.
         struct reference_holder {
-            script_value* target = nullptr;  // Points to the referenced value (when container is null)
-            std::weak_ptr<environment> sourceEnv;  // environment that owns the target
             type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
 
-            // CELL mode (Lua-upvalue box): the holder OWNS the referenced value in inline
-            // storage - one make_strong allocation is the whole box. Escape-marked variables
-            // store a cell reference from declaration, so binding/aliasing is a handle copy
-            // and an escaped reference keeps its target alive instead of dangling/erroring.
-            //
-            // MAP-ENTRY mode: container_map pins the owning map (strong) and the inline
-            // storage holds the KEY; deref/assign-through re-resolve via find(key) each
-            // time, so an erased entry errors cleanly and a reference into a temporary
-            // map keeps the map alive. Modes are mutually exclusive.
             static constexpr size_t cell_storage_size = 32;   // == sizeof(script_value), gated in value.cpp
             alignas(8) unsigned char cell_storage[cell_storage_size];
             bool has_cell = false;      // inline storage holds the OWNED value
@@ -1647,23 +1644,30 @@ namespace jai {
             reference_holder& operator=(const reference_holder&) = delete;
             ~reference_holder();   // destroys the inline value/key (value.cpp: script_value complete there)
 
-            // For references into a std::vector element (range-for `auto&`, `arr[i]`
-            // lvalue): hold the OWNING container + index instead of a raw element
-            // pointer. A raw pointer into a vector dangles when the vector reallocates
-            // (e.g. a push inside the loop body) -> heap corruption on write-through.
-            // When `container` is set, deref()/assign_through() recompute the element
-            // address from container+index each time (surviving reallocation) and
-            // bounds-check the index (a shrink throws instead of reading freed memory).
-            // The strong_ptr also keeps the vector alive for the reference's lifetime.
+            // ELEMENT mode: for references into a std::vector element (range-for
+            // `auto&`, `arr[i]` lvalue): hold the OWNING container + index instead of a
+            // raw element pointer. A raw pointer into a vector dangles when the vector
+            // reallocates (e.g. a push inside the loop body) -> heap corruption on
+            // write-through. When `container` is set, deref()/assign_through()
+            // recompute the element address from container+index each time (surviving
+            // reallocation) and bounds-check the index (a shrink throws instead of
+            // reading freed memory). The strong_ptr also keeps the vector alive.
             strong_ptr<std::vector<script_value>> container;
             size_t container_index = SIZE_MAX;
 
-            // Field reference (ref-param bind of f(obj.field)): pins the owning instance
-            // and re-resolves the field node by id on every deref/assign-through, so it
+            // FIELD mode (ref bind of obj.field): pins the owning instance and
+            // re-resolves the field node by id on every deref/assign-through, so it
             // survives hot-reload field migration (a removed field errors instead of
-            // dangling). target stays null for the holder's whole lifetime.
+            // dangling).
             std::shared_ptr<class_instance> owner_instance;
             uint64_t field_id = UINT64_MAX;
+
+            // Mode-based write-target resolution for the immediate-use assignment
+            // paths: re-resolves every time (realloc/erase safe), single level - never
+            // follows a chained reference (matching the old raw-target twins). Returns
+            // null when the element/entry/field is gone. Defined in value.cpp
+            // (class_instance complete there).
+            script_value* resolve_target();
         };
         
         

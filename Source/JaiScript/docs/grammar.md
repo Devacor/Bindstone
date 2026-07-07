@@ -649,3 +649,13 @@ string healthLevel = health > 75 ? "healthy" :
     `{key, value}` entries or JSON-style `key: value` pairs.
 14. **Subscript Operations**: Full support for array/map subscripting with both read and write
     operations; `operator[]` is overloadable on script classes.
+15. **Parallel Builtins (v0, no new syntax)**: `parallel_transform(arr, fn)` and
+    `parallel_transform(arr, fn, weight_fn)` are ordinary builtin CALLS — the optional
+    weight hint is simply the third argument (the `parallel_for` keyword and its hint
+    syntax are future work; see docs/parallel_design.md). `fn` must be a script-defined
+    function of one value parameter whose body passes the parallel admission walk
+    (no reads/writes of enclosing state, no unwhitelisted host calls, no lambdas/
+    classes/yield); elements and results must be value-semantic (null/int/float/
+    string/char/bool + arrays/maps of the same). Violations raise
+    "parallel_transform: <reason> at line:col" — never silently serial.
+    `thread_count()` reports the worker count a region will use.

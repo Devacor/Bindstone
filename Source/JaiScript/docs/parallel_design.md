@@ -1,11 +1,14 @@
 # Parallel execution design (`parallel_for` on one engine, thread_storage pads)
 
-Status: DESIGN ONLY — nothing below is implemented unless it carries a source anchor.
-Names introduced here (`parallel_for`, `thread_storage`, `thread_count()`, the binding
-annotations) do not exist in the tree yet. Everything with a `file:line` anchor was verified
-against VM-perf as of this writing. Dev rulings 2026-07-06 are final where marked RULED.
-All four §11 questions are now RULED — the only remaining open sub-item is the Q1 weight-hint
-syntax spelling (final call at implementation).
+Status: DESIGN with the v0 slice SHIPPED — **`parallel_transform(arr, fn[, weight_fn])` and
+`thread_count()` are live** (the prove_or_serial §5 sequencing step; implementation:
+`detail/parallel_transform.hpp` + `source/implementation/parallel_transform.cpp`, tests in
+`source/tests/language/parallel_transform_tests.cpp`, scaling benches in
+`source/tests/performance/parallel_transform_bench.cpp`). The `parallel_for` keyword,
+`thread_storage` pads, and the binding annotations remain design-only. Dev rulings
+2026-07-06 are final where marked RULED. All four §11 questions are RULED — the only
+remaining open sub-item is the Q1 weight-hint syntax spelling for the future KEYWORD form;
+the shipped BUILTIN needs no new syntax (the hint is simply the third argument).
 
 ## 0. Ground truth: script values can never be shared live across threads
 
@@ -247,6 +250,10 @@ when the hint is supplied:
   discipline; it runs under the barrier's single-threaded safety anyway, but a mutating hint is
   still an error.
 
+SHIPPED NOTE (v0): the `parallel_transform` BUILTIN sidesteps the spelling question entirely —
+the optional weight hint IS just the third argument: `parallel_transform(arr, fn, weight_fn)`.
+The candidates below apply only to the future `parallel_for` KEYWORD form.
+
 Dev wants "a really *really* easy OPTIONAL syntax" for the hint. Candidate spellings for the
 implementation pass to choose from (**syntax final call at implementation**):
 
@@ -294,6 +301,12 @@ contract (§1) and the write check (§4c) are updated to match.
 ## 12. Sequencing sketch
 
 1. **`jai::thread_pool` lands** (DONE — `detail/thread_pool.hpp`, §7) with pinned-worker mode + foundry coverage.
+1.5. **`parallel_transform` v0 lands** (DONE — the prove_or_serial §5 "step 3.5" tier:
+   value-semantic elements, fail-closed admission walk, per-worker execution contexts
+   built at the call and torn down at the join, static chunks + optional weight hint,
+   iteration-order error selection, per-worker budget/cap rails, 1-vs-N determinism +
+   fuzz battery both backends). Deferred from v0 toward the steps below: pads, captured
+   reads (first-touch gate), own-element mutation, command buffer/annotations, objects.
 2. **`parallel_for` sequential-semantics first** (~1k lines): parse, both backends,
    `thread_storage` pads, the enclosing-write wall, binding annotations + command buffer,
    print buffering, `thread_count()` — running on ONE thread. Gate: full foundry green on both

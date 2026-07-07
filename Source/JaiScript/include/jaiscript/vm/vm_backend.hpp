@@ -86,6 +86,27 @@ namespace jai::vm {
             env_symbolizer_ = env_epoch_sink;
             limits_ = worker_limits;
             scope_env_pool_.clear();   // pooled envs minted earlier carry the shared sink
+            // Slot REUSE reset (worker contexts persist across regions): clear every
+            // piece of residual execution state from a prior region's chunk.
+            stack_.clear();
+            frames_.clear();
+            call_records_top_ = 0;
+            try_records_.clear();
+            iter_states_.clear();
+            cfor_states_.clear();
+            current_call_depth_ = 0;
+            is_unwinding_ = false;
+            current_exception_.reset();
+            active_exception_value_.reset();
+            trace_captured_ = false;
+            captured_trace_.clear();
+            return_value_.reset();
+            has_return_value_ = false;
+            implicit_result_.reset();
+            yielding_ = false;
+            switch_to_ = nullptr;
+            pending_site_ctx_ = {};
+            external_site_stack_.clear();
             execution_budget_ = budget;
             arm_execution_deadline();
         }
@@ -94,7 +115,7 @@ namespace jai::vm {
         // barrier (compilation interns; workers must only ever hit) and pin the chunk on
         // the copy's own backend_body_cache.
         void precompile_parallel_function(const script_defined_function& fn) {
-            fn.backend_body_cache = chunk_for_body(fn.name, fn.parameters, fn.body, fn.local_count);
+            fn.backend_body_cache = chunk_for_body(fn.name, fn.parameters(), fn.body, fn.local_count);
         }
 
     private:

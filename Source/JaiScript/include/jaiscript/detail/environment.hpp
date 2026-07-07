@@ -355,10 +355,16 @@ namespace jai {
         };
     }
 
-    // Script-defined function storage
+    // Script-defined function storage. Parameters live behind a shared immutable vector:
+    // every function value minted from the same AST node shares ONE storage (the vm's
+    // compile-time protos always did this implicitly; the interpreter's per-execution
+    // lambda/method/namespace mints used to deep-copy the vector each time). parameter's
+    // mutable symbol_id/slot_index caches are warmed single-threaded (parse or the
+    // parallel admission walk), so sharing is read-safe; parallel workers still take
+    // private copies (provision_worker) so their lazy fills never cross threads.
     struct script_defined_function {
         std::string_view name;  // Points to symbolizer storage (permanent)
-        std::vector<parameter> parameters;
+        std::shared_ptr<const std::vector<parameter>> shared_parameters;
         type_info_ptr return_type;
         std::shared_ptr<block_stmt> body;
         std::shared_ptr<environment> closure_env;  // capture environment for closures
@@ -372,11 +378,20 @@ namespace jai {
         // Precomputed so ref-free call sites can skip the per-call arg-metadata build
         bool has_reference_parameters = false;
 
+        const std::vector<parameter>& parameters() const noexcept { return *shared_parameters; }
+
         script_defined_function(std::string_view n, std::vector<parameter> params,
                             type_info_ptr retType, std::shared_ptr<block_stmt> b,
                             std::shared_ptr<environment> env = nullptr, size_t slots = 0)
-            : name(n), parameters(std::move(params)), return_type(retType), body(b), closure_env(env), local_count(slots) {
-            for (const auto& p : parameters) {
+            : script_defined_function(n, std::make_shared<const std::vector<parameter>>(std::move(params)),
+                                      retType, std::move(b), std::move(env), slots) {}
+
+        // Sharing constructor: node-cached parameter storage, zero per-mint copies
+        script_defined_function(std::string_view n, std::shared_ptr<const std::vector<parameter>> params,
+                            type_info_ptr retType, std::shared_ptr<block_stmt> b,
+                            std::shared_ptr<environment> env = nullptr, size_t slots = 0)
+            : name(n), shared_parameters(std::move(params)), return_type(retType), body(std::move(b)), closure_env(std::move(env)), local_count(slots) {
+            for (const auto& p : *shared_parameters) {
                 if (p.is_reference) { has_reference_parameters = true; break; }
             }
         }

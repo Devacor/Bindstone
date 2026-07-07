@@ -5,8 +5,10 @@ variable inspection"). This doc is the plan of record. **Landed:** phase 1 (exte
 grammar), phase 2 (source-filename plumbing), phase 3 (debug `controller` core + statement
 hook, and the DAP `debug_connector` — raw-socket attach: handshake, breakpoints, stopped
 events, stack location, scopes, read-only variables, continue/pause, step over/into/out),
-all on the interpreter backend. **Next:** multi-frame stack, `setVariable`/`evaluate`,
-conditional breakpoints (phase 4); VM backend hook (phase 5).
+phase 5 (VM backend hook — breakpoints/stepping/locals on BOTH backends, one shared
+controller; see phasing item 5 for the as-built shape and "Debugger performance" for the
+cost model + the parallel-region atomicity ruling). **Next:** multi-frame stack,
+`setVariable`/`evaluate`, conditional breakpoints (phase 4).
 
 **Landed since (tooling pass):** a `jai::debug::listen(engine&, port=default_port, host)`
 convenience (build connector + attach + return it in one line — `connector.hpp`); the default
@@ -314,11 +316,27 @@ debugger; ships first. A later LSP can layer semantic highlighting + diagnostics
 4. **Stepping + variable editing + conditional breakpoints.** step over/into/out (depth machine),
    budget re-arm on resume, reentrancy guard, `setVariable` with type-ladder enforcement, `evaluate`
    (repl mutates, watch/hover read-only-by-convention), conditional breakpoints + logpoints (Q5).
-5. **VM backend parity.** Statement-boundary detection in `run_dispatch`; name a stopped frame's
-   `call_frame::locals` **lazily** — gather the frame's `(slot, symbol id)` pairs from the chunk's
-   load/store operands on demand (the disassembler already does this, `disassembler.cpp`) and map
-   id→name via `string_symbolizer::get_string(id)`. No table baked into the chunk; release chunks
-   stay lean. MV ships the VM, so this is required for real gameplay debugging.
+5. **VM backend parity. ✅ Done (as built).** The vm mirrors the interpreter's plain-cache
+   architecture against the SAME engine-owned controller (bloom/snapshot/step state all live
+   controller-side — nothing duplicated): a cached `debug_hook_` gate tested once per dispatch
+   iteration (a predictable branch when no session — the vm hot-loop band holds, see the cost
+   table), statement boundaries from `chunk::stmt_nodes[ip]` via an out-of-line edge detector
+   (`debug_statement_boundary`: fires when the stamped node changes OR a backward jump
+   re-enters the same statement, so loop-body breakpoints re-fire per iteration; out of line so
+   `run_dispatch`'s Debug frame stays flat — invariants.md §5), sync points at
+   `prepare_for_execution` + the vm's 1024-tick budget twin + park exit, and the SAME park (the
+   script thread blocks in the hook inside `run_dispatch`; suspended fibers just stay suspended
+   — no fiber-level suspension machinery needed, and none was). A stopped frame's locals are
+   named **lazily** as planned: `get_current_frame_locals` scans the parked frame's chunk
+   (`debug_paused_frame_`, exact even for native-entry frames) for decl/load/store/incdec
+   operands PLUS the fused side tables (`fused_binary_protos`, `counted_for_protos`,
+   `compound_fused_protos`, `iter_protos`, `destructure_protos`) and maps symbol→name through
+   the interner. No name table baked into release chunks. Known deltas from the interpreter: a
+   breakpoint on a loop-HEADER line (`for`/`while` condition) re-fires per iteration on the vm
+   (the header ops re-execute; the interpreter dispatches the loop statement once), and a
+   parameter the body never references is invisible in the vm Locals view.
+   `engine::wire_backend` re-wires the controller across backend swaps, so
+   `debugger()`-before-`set_backend(vm)` works in either order.
 6. **Value history ("step back") + LSP.** Snapshot touched variables per stop for read-only
    backward inspection; optional LSP on `engine::check()`.
 
@@ -411,12 +429,55 @@ Flat within harness noise in every configuration except the deliberate worst cas
 breakpoint in *another file* whose line number collides with the hot statement's line, which
 pays one string compare per collision (bounded, and vanishingly rare in practice). The
 backends hold their pre-debugger bands with the debugger compiled in and enabled hooks fixed
-(vm: hot loop 44-55, fib(15) 666-742 vs the recorded 47-48/687-741; the vm has no statement
-hook until phase 5). Paused/stepping cost is not budgeted (human-paced), but a step-over
-across hot code re-checks breakpoints through the bloom, not the string table.
+(vm: hot loop 44-55, fib(15) 666-742 vs the recorded 47-48/687-741 — measured pre-phase-5;
+the vm's own hook cost model is below). Paused/stepping cost is not budgeted (human-paced),
+but a step-over across hot code re-checks breakpoints through the bloom, not the string table.
+
+### VM backend (phase 5) cost model
+
+Identical architecture, one adaptation: the vm has no per-statement chokepoint, so the gate is
+tested once per **dispatch iteration** (per op) — still one plain predictable branch when no
+session is enabled, and the boundary/edge work runs only while armed. Same 5 configurations,
+same script, vm backend (min-of-3, integer µs):
+
+| configuration                          | vm, with the hook |
+|----------------------------------------|-------------------|
+| no debugger constructed                | 46                |
+| controller constructed, no session     | 46                |
+| session enabled, no breakpoints        | 50                |
+| session enabled, bp in a cold file     | 52                |
+| session enabled, bp line collides      | 63                |
+
+The disabled/unattached rows sit exactly on the vm's pre-debugger 44-48 band (Dev's hard
+requirement). An armed session costs ~10% on the vm (the statement-boundary edge detection
+runs per dispatch iteration while armed — an out-of-line call per op; the interpreter's armed
+cost hides inside its statement dispatch). The bloom keeps breakpoint filtering line-cheap
+exactly as on the interpreter; the collision worst case is the same bounded string-compare.
+
+### Parallel regions are ATOMIC to the debugger (Dev ruling, both backends)
+
+- A breakpoint ON the `parallel_transform` call line breaks normally (before the call); a
+  step-over at the call line runs the entire region and lands after the join; **step-into is
+  the same as step-over** — there is no stepping into a region.
+- Breakpoints on lines INSIDE the parallel body **never fire while the body executes as part
+  of a region — including chunk 0 on the calling thread.** This is *structural*, not a
+  suppression flag: every region context (chunk 0 included) is a fresh worker-slot backend
+  (`provision_worker`) that `set_debug_controller` was never called on, its `debug_hook_`
+  gate stays null, and its budget-tick sync sees a null controller — workers never consult
+  the debugger at all. The live engine backend is parked inside the builtin for the region's
+  duration and executes no body statements. Pinned by the `Debugger` suite
+  (`parallel_region_atomic_to_debugger`, both backends).
+- Rationale (Dev delegation, finalized): pausing chunk 0 would leave N-1 workers running
+  against live budget clocks (debugging would *cause* terminal budget errors), fire for only
+  1/W of elements, and expose a half-filled output array + frozen region structures.
+- The same body function called OUTSIDE a region (a normal serial call) breaks normally.
+- **Sanctioned workflow for debugging a parallel body:** the body is by construction a pure
+  function of its element (admission-enforced), so debug it serially — call `fn(arr[i])`
+  directly (console/temporary code) or swap the region for a plain `for` loop; the purity
+  contract guarantees identical semantics.
 
 **Deliberately not done:** a literally-empty statement path when disabled would require dual
 dispatch of the whole interpreter (or a per-statement indirect call — worse); the single
-predictable plain-pointer branch measures below harness noise. VM stepping remains phase 5;
-`set_enabled` keeps breakpoints across detach (the connector clears sessions via
+predictable plain-pointer branch measures below harness noise (same for the vm's per-dispatch
+gate). `set_enabled` keeps breakpoints across detach (the connector clears sessions via
 `set_enabled(false)`).

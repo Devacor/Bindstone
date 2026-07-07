@@ -74,6 +74,19 @@ namespace {
         return script_value(source);
     }
 
+    // Box-in-place + share: non-ref storage moves into a cell and the storage becomes
+    // the handle (all read/store paths handle the boxed form); ref storage just shares
+    // its holder. The one way env-variable storage is ever bound by reference — decl
+    // refs, [&] captures, ref returns. KEEP BYTE-PARALLEL with vm_backend::share_env_ref
+    // (the vm twin also demotes active counted-for fast states).
+    script_value share_boxed_env_storage(script_value& storage, engine* eng) {
+        if (!storage.is_reference()) {
+            script_value inner = std::move(storage);
+            storage = script_value::make_cell_reference(std::move(inner), eng);
+        }
+        return script_value(storage);
+    }
+
     // A handle's backend_state is always interpreter-owned here: an engine's backend
     // is fixed before its first execute, so no other backend can have populated it.
     interpreter_coroutine_state& coroutine_state(coroutine_handle& handle) {
@@ -5631,9 +5644,9 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 }
                 define_variable(std::move(aliased.value()));
             } else {
-                // Regular reference - use current environment
-                script_value refValue = script_value::make_reference(targetPtr, environment_);
-                define_variable(std::move(refValue));
+                // Box the variable's storage into a cell and alias it (escape-legal:
+                // the ref keeps the cell alive after the env dies)
+                define_variable(share_boxed_env_storage(*targetPtr, engine_));
             }
         } else {
             // For other expressions, evaluate them and check if they return a reference
@@ -7406,8 +7419,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         if (capture_by_ref) {
                             script_value* targetPtr = environment_->get_value_ptr(var_id);
                             if (targetPtr) {
-                                script_value refValue = script_value::make_reference(targetPtr, environment_);
-                                captureEnv->define(var_id, std::move(refValue));
+                                // Cell share (escape-legal): the capture stays live after
+                                // the captured env dies
+                                captureEnv->define(var_id, share_boxed_env_storage(*targetPtr, engine_));
                             }
                         } else {
                             auto capture_result = environment_->get(var_id);
@@ -7470,8 +7484,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 } else if (capture.by_reference) {
                     script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
                     if (targetPtr) {
-                        script_value refValue = script_value::make_reference(targetPtr, environment_);
-                        captureEnv->define(capture.symbol_id, std::move(refValue));
+                        // Cell share (escape-legal): the capture stays live after the
+                        // captured env dies
+                        captureEnv->define(capture.symbol_id, share_boxed_env_storage(*targetPtr, engine_));
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
                             "Cannot capture variable '{0}' by reference", capture.symbol_id);
@@ -10957,23 +10972,15 @@ script_value interpreter::bind_parameter(
 // holder (cells alias), or boxes the value on demand (cell) when the variable predates
 // its escape mark. KEEP BYTE-PARALLEL with vm_backend::bind_reference_to_storage.
 checked_result<void> interpreter::bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot) {
-    if (storage.is_reference()) {
-        if (!storage.get_reference_holder()) {
-            return checked_result<void>(
-                make_error_code(runtime_error_code::invalid_reference),
-                "Reference target is null");
-        }
-        // Share the holder: zero alloc; cells alias the same box, element/field refs
-        // keep their container/instance re-resolution
-        call_stack_[frame_index].set_local(param_slot, script_value(storage));
-        return {};
+    if (storage.is_reference() && !storage.get_reference_holder()) {
+        return checked_result<void>(
+            make_error_code(runtime_error_code::invalid_reference),
+            "Reference target is null");
     }
-    // Box on demand: the variable predates its escape mark (cross-execute global, C++
-    // define, dynamic shape). Its storage becomes the cell - reads/stores already handle
-    // the boxed form (cold path: first ref bind only).
-    script_value inner = std::move(storage);
-    storage = script_value::make_cell_reference(std::move(inner), engine_);
-    call_stack_[frame_index].set_local(param_slot, script_value(storage));
+    // Share the holder (zero alloc; cells alias the same box, element/field refs keep
+    // their container/instance re-resolution), boxing on demand when the variable
+    // predates its escape mark (cross-execute global, C++ define, dynamic shape)
+    call_stack_[frame_index].set_local(param_slot, share_boxed_env_storage(storage, engine_));
     return {};
 }
 

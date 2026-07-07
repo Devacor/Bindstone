@@ -1210,6 +1210,70 @@ public:
 			}
 		});
 
+		// Stage C (cells): escape is LEGAL. Under mode 1 these shapes dangled or raised
+		// "Reference target environment has been destroyed"; the cell keeps the target
+		// alive for as long as any handle exists (docs/reference_model.md).
+		test("escape_capture_env_var_outlives_block_env", [this]() {
+			// [&] capture of a BLOCK-scoped env variable, invoked after the block env
+			// died: the capture shares the cell, so the closure keeps live state
+			const char* src = R"(
+				var f = null;
+				{
+					var v = 10;
+					f = [&]() { v = v + 1; return v; };
+				}
+				f() * 10 + f();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)122, e->execute(src).as_int());   // 11*10 + 12
+			}
+		});
+
+		test("escape_cell_alive_across_executes", [this]() {
+			// A cell escaped through a closure survives into LATER execute() calls
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)122, e->execute(
+					"var f = null; { var v = 10; f = [&]() { v = v + 1; return v; }; } f() * 10 + f();").as_int());
+				check_eq((int64_t)13, e->execute("f()").as_int());
+				e->execute("function unrelated() { return 0; }");
+				check_eq((int64_t)14, e->execute("f()").as_int());
+			}
+		});
+
+		test("escape_hot_reload_keeps_live_cell", [this]() {
+			// A top-level ref decl holds a cell minted by a function's local; the
+			// function is then REDEFINED (hot reload) - the old body's cell stays
+			// alive and writable through the held reference
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)5, e->execute(
+					"int& keep() { int v = 100; return v; } auto& r = keep(); r = 5; r;").as_int());
+				e->execute("function keep() { return 0; }");   // redefine while the cell escapes
+				check_eq((int64_t)6, e->execute("r = r + 1; r;").as_int());
+			}
+		});
+
+		test("escape_engine_teardown_with_live_cells", [this]() {
+			// Teardown order with escaped cells reachable from globals must be clean
+			// (Debug's 0xDD freed-memory fill catches a double-touch)
+			for (bool use_vm : {false, true}) {
+				{
+					auto e = jai::engine::make();
+					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					auto r = e->execute(
+						"var f = null; { var v = 1; f = [&]() { return v; }; } "
+						"int& mk() { int q = 2; return q; } auto& g = mk(); f() + g;");
+					check_eq((int64_t)3, r.as_int());
+				}   // engine destroyed with live cells held by its own globals
+				check_true(true, "teardown clean");
+			}
+		});
+
 		// Stage 2 (Tier 1): field/subscript/chain lvalue arguments bind to reference
 		// parameters through the shared resolver (detail/ref_lvalue.hpp). Field refs pin
 		// the instance, element refs pin the vector; typed fields/elements enforce their

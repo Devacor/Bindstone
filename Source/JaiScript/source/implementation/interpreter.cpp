@@ -12312,7 +12312,11 @@ checked_result<void> interpreter::dispatch_decl(declaration* decl) {
     if (!call_stack_.empty()) call_stack_.back().current_node = decl;
     else top_level_node_ = decl;
     if (debug_hook_) [[unlikely]] {
-        if (debug_hook_->wants_statement(static_cast<uint32_t>(decl->location.line)))
+        // statement_decl is a pass-through wrapper: the inner dispatch_stmt fires the
+        // hook — firing here too would stop twice on one statement (and a second park
+        // after the resume is a join hang for anyone driving the controller).
+        if (decl->get_type() != node_type::statement_decl &&
+            debug_hook_->wants_statement(static_cast<uint32_t>(decl->location.line)))
             debug_hook_->on_statement(decl, static_cast<int>(call_stack_.size()));
     }
     switch (decl->get_type()) {

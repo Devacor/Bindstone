@@ -97,7 +97,10 @@ auto loaded = other_engine->jaibite_load("level.jaibite");  // symbols relocate
 
 The engine also caches source strings transparently, so even naive `execute(str)` in a
 loop pays the parse once. Loading a `.jaibite` skips parsing entirely and re-interns symbols
-into the loading engine — save on one engine, load on another.
+into the loading engine — save on one engine, load on another. And file-based loads
+(include/import/`execute_file`) maintain a sibling `.jaibite` automatically: after the first
+run, unchanged scripts never parse again — even across processes (`engine->jaibite_cache(false)`
+to opt out).
 
 ## The receipts
 

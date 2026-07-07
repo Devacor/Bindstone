@@ -11087,7 +11087,7 @@ std::vector<std::pair<std::string, script_value>> interpreter::get_current_frame
 
     // slot -> name for this frame: parameters, then every declaration reachable in the body.
     std::vector<std::pair<size_t, std::string_view>> slot_names;
-    for (const auto& p : fn->parameters)
+    for (const auto& p : fn->parameters())
         if (p.slot_index != SIZE_MAX) slot_names.emplace_back(p.slot_index, p.name);
     collect_frame_slot_names(fn->body.get(), slot_names);
 

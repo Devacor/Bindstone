@@ -114,8 +114,11 @@ namespace jai {
 
         checked_result<std::vector<parameter>> parse_parameter_list();
 
-        // Lambda parsing
+        // Lambda parsing (anonymous `function (params) {...}` desugars to a no-capture
+        // lambda through the shared tail)
         checked_result<expression_ptr> lambda_expression();
+        checked_result<expression_ptr> anonymous_function_expression();
+        checked_result<expression_ptr> finish_lambda_after_captures(std::shared_ptr<lambda_expr> lambda);
         checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default>> parse_capture_list();
 
         // Helper for parsing function bodies

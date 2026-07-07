@@ -298,6 +298,7 @@ primaryExpression = literal
                   | includeExpression
                   | "(" expression ")"
                   | lambdaExpression
+                  | anonymousFunctionExpression
                   | arrayLiteral
                   | mapLiteral
 
@@ -316,6 +317,12 @@ literal = INTEGER_LITERAL
         | "null" | "nullptr"
 
 lambdaExpression = "[" captureList? "]" "(" parameterList? ")" ("->" type?)? blockStatement
+
+// Anonymous function expression — desugars to a NO-CAPTURE lambda ([]-equivalent
+// auto-capture: enclosing-function locals snapshot by value at creation, globals
+// resolve live). There is no coroutine form (coroutine lambdas do not exist), and
+// no named form (`function g(x) {...}` in expression position stays an error).
+anonymousFunctionExpression = "function" "(" parameterList? ")" ("->" type?)? blockStatement
 
 captureList = captureDefault ("," capture)*    // [=] / [&] with optional explicit exceptions
             | capture ("," capture)*           // explicit captures: [x, &y, this]
@@ -451,6 +458,10 @@ Function-typed variables and fields hold any callable (auto semantics):
 function f = [](x) { return x * 2; };       // top level, function bodies, namespaces
 function g;                                 // starts null; assign later: g = f;
 class K { function cb = [](){ return 1; }; }   // fields too
+
+var d = function(x) { return x * 2; };      // anonymous function EXPRESSION - a
+apply(function(v) { return v + 1; }, 41);   // no-capture lambda; legal anywhere an
+function(a, b) { return a * b; }(6, 7);     // expression is, incl. args and IIFE
 ```
 
 Parameters and defaults:

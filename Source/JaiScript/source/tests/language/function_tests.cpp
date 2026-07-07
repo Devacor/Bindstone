@@ -689,6 +689,103 @@ public:
             check_eq(size_t(1), duplicate_warnings(*engine));
         });
 
+        // ---- anonymous function expressions: `function (params) {...}` ----
+        // Pure desugar to a no-capture lambda ([]-equivalent auto-capture:
+        // enclosing-function locals snapshot by value at creation, globals live)
+
+        test("anonymous_function_assign_and_call", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(42), engine->execute(
+                "var f = function(x) { return x * 2; }; f(21);").as_int());
+            check_eq(int64_t(7), engine->execute(
+                "auto g = function(a, b) { return a + b; }; g(3, 4);").as_int());
+            check_eq(int64_t(9), engine->execute(
+                "function h = function() { return 9; }; h();").as_int());
+        });
+
+        test("anonymous_function_as_argument", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(42), engine->execute(
+                "function apply(g, v) { return g(v); }"
+                "apply(function(x) { return x + 1; }, 41);").as_int());
+        });
+
+        test("anonymous_function_immediately_invoked", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(42), engine->execute(
+                "function(x) { return x + 1; }(41);").as_int());
+        });
+
+        test("anonymous_function_trailing_return", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(5), engine->execute(
+                "var f = function(a) -> int { return a; }; f(5);").as_int());
+            check_eq(int64_t(6), engine->execute(
+                "var g = function(a) -> { return a; }; g(6);").as_int());
+            check_throws([&]() {
+                engine->execute("var h = function() -> int { return \"x\"; }; h();");
+            });
+        });
+
+        test("anonymous_function_capture_matches_empty_lambda", [this]() {
+            auto engine = make_engine();
+            // whatever [] auto-capture yields for enclosing locals, function() must match
+            auto r = engine->execute(R"(
+                function outer() {
+                    int a = 1;
+                    var f = function() { return a; };
+                    var g = [](){ return a; };
+                    a = 2;
+                    return f() * 10 + g();
+                }
+                outer();
+            )");
+            // 11 = both snapshot the enclosing local BY VALUE at creation ([] parity)
+            check_eq(int64_t(11), r.as_int());
+        });
+
+        test("anonymous_function_default_param", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(8), engine->execute(
+                "var f = function(x = 8) { return x; }; f();").as_int());
+        });
+
+        test("anonymous_function_returned_and_nested", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(5), engine->execute(
+                "var adder = function(x) { return function(y) { return x + y; }; };"
+                "adder(2)(3);").as_int());
+        });
+
+        test("anonymous_function_statement_position_discarded", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(1), engine->execute(
+                "function(x) { return x; }; 1;").as_int());
+        });
+
+        test("anonymous_function_named_form_still_error", [this]() {
+            auto engine = make_engine();
+            check_throws([&]() {
+                engine->execute("var f = function g(x) { return x; }; f(1);");
+            });
+        });
+
+        test("anonymous_function_coroutine_not_supported", [this]() {
+            auto engine = make_engine();
+            // no coroutine lambdas -> no coroutine anonymous functions (documented)
+            check_throws([&]() {
+                engine->execute("var f = coroutine function() { yield 1; }; 1;");
+            });
+        });
+
+        test("anonymous_function_declarations_unchanged", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(42), engine->execute(
+                "function f(x) { return x * 2; } f(21);").as_int());
+            check_eq(int64_t(3), engine->execute(
+                "function h = [](){ return 3; }; h();").as_int());
+        });
+
         test("destructuring_from_variable", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

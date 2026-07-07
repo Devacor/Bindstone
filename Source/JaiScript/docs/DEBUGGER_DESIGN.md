@@ -353,3 +353,70 @@ option), so mobile ships zero debug/socket code. Guard: a CMake option (e.g.
   thread-safety is **the host's responsibility** (their critical sections); JaiScript does not claim
   to support unsynchronized cross-thread debugging. The clean pattern for multi-threaded hosts is a
   **separate `debug_connector` (distinct port) per thread**.
+
+## Debugger performance (cost model — supersedes the "relaxed-atomic gate" hook description above)
+
+Dev's rulings (2026-07 perf pass): zero impact when not enabled is non-negotiable; enabled but
+not connected must also be free; the executing script must never consult a live/shared/locked
+structure on the hot path — connection detection **and** breakpoint synchronization happen
+off-cycle, at the same two points as the script-timeout clock. The implementation:
+
+- **The per-statement path reads plain script-thread memory only.** `dispatch_stmt`/
+  `dispatch_decl` test one cached plain pointer (`interpreter::debug_hook_`, null unless a
+  session is enabled). When it is non-null, `controller::wants_statement(line)` reads two more
+  plain members: a step/pause flag and an 8 KB **line bloom** (bit = breakpoint line mod 65536).
+  No atomics, no mutexes, no `shared_ptr` loads, no string hashing — those all happened per
+  statement in the first cut and were the observed enabled-mode slowness (see table).
+- **Debug sync points (the off-cycle pattern).** The script thread pulls transport-side state
+  (attach/detach, breakpoint edits, pause requests) into its cache only at: (a) **`execute()`
+  entry** (`prepare_for_execution` → `sync_debug_hook`), (b) **the every-1024-ticks budget
+  sample** (`execution_budget_exhausted` cold block — the same sampling the script-timeout
+  clock uses; the tick now counts even for budget-0 hosts so a long-running script still
+  syncs), and (c) **park exit** (resume/step/detach re-sync before the next statement runs, so
+  stepping is exact, never 1024-statements late). Cost of a steady-state sync: three relaxed
+  loads + a version compare; the breakpoint table/bloom rebuild runs only when
+  `setBreakpoints` actually changed something (`bp_version_`).
+- **Consequence (documented latency):** a breakpoint set or pause requested *mid-execution*
+  binds within ~1024 statements, or at the next `execute()` entry, whichever comes first.
+  Anything done while parked (the normal IDE flow) is exact and immediate.
+- **Transport side stays lock-based/atomic** — `set_breakpoints` publishes an immutable
+  snapshot + bumps `bp_version_` (release); the script thread re-caches on version mismatch
+  (acquire). The hand-off is the sync point; the hot path never touches the shared table.
+- **Budget interaction.** While the hook is armed the interpreter skips wall-clock deadline
+  checks (a script parked for minutes must not be killed by the act of debugging — and no
+  cross-thread engine-budget write happens on attach anymore); `sync_debug_hook` re-arms a
+  fresh deadline the moment the session ends. Memory-cap enforcement stays active throughout.
+- **Connection detection** was never per-statement: the connector runs its own poll loop on
+  its own thread (`accept` there), and DAP `attach` just flips `enabled_` — which the script
+  thread notices at the sync points above. Constructing a `debug_connector` opens no thread
+  until `engine::set_debug_connector` calls `start()`; no ambient threads exist when unused.
+- **Call frames** carry one unconditional pointer store (`call_frame::debug_function`, used to
+  name slot locals at a stop) — within the "one cached test per call-frame push" budget.
+- **`engine::execute` path:** the (sourcePath, content) parse-cache key is built in a reused
+  member buffer — no per-execute allocation for the key (debugger-era plumbing had introduced
+  one).
+
+Measured (Foundry `Debugger` suite benches, Release BENCHMARKS, i7-6920HQ, min-of-3, the
+"Hot Loop (1000 iterations)" script on the interpreter — integer µs, ±50% harness variance):
+
+| configuration                          | before (4e2540a4+merge) | after this pass |
+|----------------------------------------|-------------------------|-----------------|
+| no debugger constructed                | 152                     | 142             |
+| controller constructed, no session     | 146                     | 145             |
+| session enabled, no breakpoints        | 187                     | 144             |
+| session enabled, bp in a cold file     | 187                     | 142             |
+| session enabled, bp line collides      | 191                     | 160             |
+
+Flat within harness noise in every configuration except the deliberate worst case — a
+breakpoint in *another file* whose line number collides with the hot statement's line, which
+pays one string compare per collision (bounded, and vanishingly rare in practice). The
+backends hold their pre-debugger bands with the debugger compiled in and enabled hooks fixed
+(vm: hot loop 44-55, fib(15) 666-742 vs the recorded 47-48/687-741; the vm has no statement
+hook until phase 5). Paused/stepping cost is not budgeted (human-paced), but a step-over
+across hot code re-checks breakpoints through the bloom, not the string table.
+
+**Deliberately not done:** a literally-empty statement path when disabled would require dual
+dispatch of the whole interpreter (or a per-statement indirect call — worse); the single
+predictable plain-pointer branch measures below harness noise. VM stepping remains phase 5;
+`set_enabled` keeps breakpoints across detach (the connector clears sessions via
+`set_enabled(false)`).

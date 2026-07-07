@@ -300,7 +300,7 @@ inline bool class_definition::has_static_method_with_arity(uint64_t name_id, siz
     auto it = static_method_overloads_.find(name_id);
     if (it != static_method_overloads_.end()) {
         for (const auto& func_decl : it->second) {
-            if (func_decl->parameters.size() == arity) {
+            if (arity_accepts(func_decl->parameters, arity)) {   // trailing defaults widen
                 return true;
             }
         }

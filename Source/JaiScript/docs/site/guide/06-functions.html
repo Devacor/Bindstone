@@ -22,28 +22,90 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar"><div class="sidebar-title">Guide</div><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li class="current"><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li></ol></aside>
 <main class="content">
 <article class="chapter"><h1 id="functions-lambdas">Functions &amp; Lambdas<a class="hlink" href="#functions-lambdas" aria-label="link">&#8203;</a></h1>
-<h2 id="declaration-forms-typed-params-defaults">Declaration forms, typed params, defaults<a class="hlink" href="#declaration-forms-typed-params-defaults" aria-label="link">&#8203;</a></h2>
-<p>Three equivalent declaration styles: <code>function name(params) -&gt; type</code>, <code>auto name(params)</code> (inferred return), and typed C-style. Parameters may be typed (enforced + converted like any typed target) or bare (dynamic). Default arguments work, including several in a row:</p>
+<h2 id="declaration-forms">Declaration forms — the full catalog<a class="hlink" href="#declaration-forms" aria-label="link">&#8203;</a></h2>
+<p>Every C++ way of writing a function works, plus the <code>function</code> keyword. Return-type-first accepts <em>any</em> type — builtins, <code>void</code>, containers, <code>shared_ptr&lt;T&gt;</code>, and user classes (<code>Point mk() {&hellip;}</code> works at top level, in namespaces, and in classes). <code>auto</code> infers the return; <code>var</code> makes it dynamic (any type per call). A trailing <code>-&gt; type</code> is accepted on every form. Prefixing <code>coroutine</code> turns any of these spellings into a coroutine (see the Coroutines chapter):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function add(int a, int b) -&gt; int { return a + b; }
+int twice(int v) { return v * 2; }
 auto mul(a, b) { return a * b; }
-function greet(string name, string greeting = &quot;hello&quot;) -&gt; string {
+var pick(flag) { return flag ? 42 : &quot;none&quot;; }
+
+class Point {
+    float x = 0.0; float y = 0.0;
+    Point(float px, float py) { x = px; y = py; }
+}
+Point origin() { return Point(0.0, 0.0); }
+
+print(add(2, 3));
+print(twice(21));
+print(mul(4, 2.5));
+print(pick(true));
+print(pick(false));
+print(origin().x);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5
+42
+10.000000
+42
+none
+0.000000</code></pre></div>
+<p>*(pinned: language/function_tests.cpp — <code>class_typed_return_first_top_level_call</code>, <code>class_typed_return_first_assign_and_pass</code>, <code>return_type_redundant_match_ok</code>)*</p>
+<h2 id="return-type-rules">Return-type rules<a class="hlink" href="#return-type-rules" aria-label="link">&#8203;</a></h2>
+<p>A leading return type and a trailing <code>-&gt; type</code> may both be written only when they <strong>match</strong> (redundant but legal: <code>int f() -&gt; int</code>). A contradictory pair is a parse error. A bare arrow (<code>-&gt; {</code>) adds no information — it keeps the leading type if one was given, otherwise means auto:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int f() -&gt; string { return &quot;s&quot;; }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">!! error: Parse error: &lt;script&gt;:1:12: Conflicting return types 'int' and 'string' (leading and trailing '-&gt;' types must match)</code></pre></div>
+<p>Typed returns are enforced with the usual conversions (<code>int f()</code> returning <code>2.9</code> yields <code>2</code>; returning a string is a runtime type error). *(pinned: language/function_tests.cpp — <code>return_type_conflict_is_parse_error</code>, <code>arrow_auto_keeps_leading_type</code>)*</p>
+<h2 id="parameters-defaults">Parameters and defaults<a class="hlink" href="#parameters-defaults" aria-label="link">&#8203;</a></h2>
+<p>Four parameter spellings: classic <code>int x</code> / <code>Creature&amp; c</code> (typed, enforced + converted like any typed target), bare <code>x</code> (dynamic), the typed shorthand <code>int: n</code>, and the auto shorthand <code>:x</code> — an auto-like parameter, the same as writing <code>auto x</code>. Defaults may follow any of them (once a parameter has a default, all later ones need one too):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function greet(name, string greeting = &quot;hello&quot;) {
     return greeting + &quot; &quot; + name;
 }
-print(add(2, 3));
-print(mul(4, 2.5));
 print(greet(&quot;world&quot;));
 print(greet(&quot;world&quot;, &quot;salve&quot;));
-function clamp(int v, int lo = 0, int hi = 100) -&gt; int {
-    return v &lt; lo ? lo : (v &gt; hi ? hi : v);
-}
-print(&quot;clamp(150) = {}&quot;, clamp(150));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5
-10.000000
-hello world
+
+function pad(x = 3) { return x; }        // bare params take defaults too
+print(pad());
+print(pad(7));
+
+int square(int: n) { return n * n; }     // typed shorthand
+auto id = [](:x) -&gt; { return x; };       // :x — auto-like parameter
+print(square(6));
+print(id(&quot;passthrough&quot;));
+
+void heal(int&amp; hp, int amount) { hp += amount; }   // by-reference parameter
+int health = 50;
+heal(health, 25);
+print(health);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hello world
 salve world
-clamp(150) = 100</code></pre></div>
-<p>*(pinned: language/function_tests.cpp — <code>default_parameter_multiple</code>, <code>default_parameter_string</code>; typed params/returns: semantics/strong_types_tests.cpp <code>function_with_typed_params</code>, <code>function_param_type_conversion</code>, <code>function_returns_to_typed_var</code>)*</p>
-<p>By-reference parameters (<code>int&amp; x</code>, <code>auto&amp; x</code>) bind the caller&#x27;s variable — covered in depth in the Value Semantics chapter.</p>
+3
+7
+36
+passthrough
+75</code></pre></div>
+<p><strong>Where defaults apply:</strong> free functions, lambdas, and static methods honor them today; instance methods, constructors, and namespace overloads currently resolve on exact arity and ignore defaults (pending). By-reference parameters bind the caller&#x27;s variable — covered in depth in the Value Semantics chapter. *(pinned: language/function_tests.cpp — <code>untyped_param_default_free_function</code>, <code>untyped_param_default_lambda</code>, <code>untyped_param_default_ordering_still_enforced</code>)*</p>
+<h2 id="initializer-lists-are-constructor-only">Initializer lists are constructor-only<a class="hlink" href="#initializer-lists-are-constructor-only" aria-label="link">&#8203;</a></h2>
+<p><code>: super(&hellip;)</code> / <code>: this(&hellip;)</code> delegation belongs to constructors (see Classes). On a free function, method, or destructor it is a parse error rather than a silent no-op:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function setup() : super(1) { return 3; }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">!! error: Parse error: &lt;script&gt;:1:19: Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors</code></pre></div>
+<p>*(pinned: language/function_tests.cpp — <code>initializer_list_only_on_constructors</code>, <code>constructor_initializers_still_work</code>)*</p>
+<h2 id="function-typed-variables">Function-typed variables and fields<a class="hlink" href="#function-typed-variables" aria-label="link">&#8203;</a></h2>
+<p><code>function name = expr;</code> declares a variable that holds a callable (auto semantics — it locks to callable on first assignment); <code>function name;</code> starts null for later assignment. Both work at top level, inside function bodies, in namespaces, and as class fields:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function scale = [](int v) { return v * 10; };
+print(scale(4));
+
+function cb;
+cb = scale;
+print(cb(5));
+
+class Button {
+    function on_click = [](){ return &quot;unbound&quot;; };
+}
+auto b = Button();
+b.on_click = [](){ return &quot;clicked!&quot;; };
+print(b.on_click());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">40
+50
+clicked!</code></pre></div>
+<p>*(pinned: language/function_tests.cpp — <code>function_typed_variable_top_level</code>, <code>function_typed_variable_uninitialized_then_assigned</code>, <code>function_typed_field</code>, <code>function_operator_assign_still_a_method</code>)*</p>
 <h2 id="lambdas-and-captures">Lambdas and captures<a class="hlink" href="#lambdas-and-captures" aria-label="link">&#8203;</a></h2>
 <p>C++11-style lambdas with explicit captures: <code>[x]</code> copies, <code>[&amp;x]</code> references, <code>[=]</code> copies everything used, <code>[&amp;]</code> references everything used:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto add = [](int a, int b) -&gt; int { return a + b; };
@@ -68,7 +130,7 @@ print(&quot;a = {}, sum_all() = {} (captured before set_a)&quot;, a, sum_all());
 scale(4) = 40
 counter = 3
 a = 100, sum_all() = 5 (captured before set_a)</code></pre></div>
-<p><strong>Auto-capture:</strong> even with an empty capture list, a lambda can read enclosing variables — captures are automatic when omitted:</p>
+<p><strong>Auto-capture:</strong> even with an empty capture list, a lambda can read enclosing variables — they are snapshot <em>by value</em> at creation time (use <code>[&amp;]</code> / <code>[&amp;name]</code> for write-through):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto n = 5;
 auto f = []() { return n; };
 f();</code></pre></div>
@@ -91,6 +153,14 @@ print(&quot;ops map: {}&quot;, ops[&quot;square&quot;](7));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">18
 1 2 3
 ops map: 49</code></pre></div>
+<h2 id="redefinition-and-the-duplicate-warning">Redefinition and the duplicate warning<a class="hlink" href="#redefinition-and-the-duplicate-warning" aria-label="link">&#8203;</a></h2>
+<p>Top-level functions do <em>not</em> overload — a same-name definition replaces the earlier one (last wins). With static checking enabled (<code>engine.static_checking(check_mode::warn)</code> — see the Embedding docs), defining the same name twice <em>inside one textual parse unit</em> reports a warning (never an error; <code>strict</code> mode still executes):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function damage(a) { return a; }
+function damage(a, b) { return a + b; }
+print(damage(2, 3));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5
+warning script:2:10: duplicate definition of function 'damage' replaces the earlier one (top-level functions do not overload)</code></pre></div>
+<p>Composition through <code>include</code>/<code>import</code> stays <strong>silent</strong>: included files parse and check as their own units, so a library included from several places never triggers the warning — only a literal duplicate in one file does. Redefinition across separate <code>execute()</code> calls (the hot-reload shape) is silent too. Function overloading by arity <em>is</em> available inside namespaces (<code>utils::add(a,b)</code> vs <code>utils::add(a,b,c)</code> — see Kitchen Sink; same name + same arity there requires <code>override</code> after the parameter list) and for class constructors/methods (see Classes). *(pinned: language/function_tests.cpp — <code>duplicate_top_level_definition_warns</code>, <code>duplicate_warning_silent_for_include_composition</code>, <code>duplicate_warning_silent_across_executes</code>, <code>duplicate_warning_never_blocks_strict_mode</code>)*</p>
 <h2 id="recursion">Recursion<a class="hlink" href="#recursion" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int {
     if (n &lt; 2) { return n; }
@@ -108,8 +178,7 @@ out.join(&quot;, &quot;);</code></pre></div>
     for (auto&amp; a : args) total += a.as_int();
     return jai::script_value(total, &amp;engine);
 });
-// script: sum_all(1, 2, 3, 4)  -&gt;  10</code></pre></div>
-<p>Function overloading by arity <em>is</em> available inside namespaces (<code>utils::add(a,b)</code> vs <code>utils::add(a,b,c)</code> — see Kitchen Sink) and for class constructors/methods (see Classes). *(pinned: foundry/suite_namespaces.cpp <code>namespace_function_overload</code>; language/method_overload_tests.cpp)*</p><nav class="prevnext"><a class="prev" href="../guide/05-control-flow.html"><span>&larr; previous</span>Control Flow</a><a class="next" href="../guide/07-classes.html"><span>next &rarr;</span>Classes</a></nav></article>
+// script: sum_all(1, 2, 3, 4)  -&gt;  10</code></pre></div><nav class="prevnext"><a class="prev" href="../guide/05-control-flow.html"><span>&larr; previous</span>Control Flow</a><a class="next" href="../guide/07-classes.html"><span>next &rarr;</span>Classes</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">documentation generated from the test suite &mdash; every example executed on both backends &middot; 2026-07-06</footer>

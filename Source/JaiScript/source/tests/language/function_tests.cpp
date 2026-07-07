@@ -1,6 +1,8 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <filesystem>
+#include <fstream>
 
 using namespace jai::foundry;
 
@@ -398,6 +400,293 @@ public:
             check_eq(eng->get_variable("a").as<int64_t>(), int64_t(10));
             check_eq(eng->get_variable("b").as<int64_t>(), int64_t(20));
             check(eng->get_variable("c").is_null());
+        });
+
+
+        // ---- C++ return-type-first free functions with class types (top level) ----
+
+        test("class_typed_return_first_top_level_call", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                class Point { int x = 5; }
+                Point mk() { return Point(); }
+                mk().x;
+            )");
+            check_eq(int64_t(5), r.as_int());
+        });
+
+        test("class_typed_return_first_assign_and_pass", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                class Point { int x = 6; }
+                Point mk() { return Point{}; }
+                function call0(g) { return g(); }
+                var f = mk;
+                f().x + call0(mk).x;
+            )");
+            check_eq(int64_t(12), r.as_int());
+        });
+
+        test("class_typed_return_type_enforced", [this]() {
+            auto engine = make_engine();
+            check_throws([&]() {
+                engine->execute(R"(
+                    class P { int x = 1; }
+                    class Q { int y = 2; }
+                    P mk() { return Q(); }
+                    mk();
+                )");
+            });
+        });
+
+        test("class_typed_variable_decl_still_a_variable", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                class Point { int x = 8; }
+                Point p = Point();
+                p.x;
+            )");
+            check_eq(int64_t(8), r.as_int());
+        });
+
+        test("class_typed_return_first_redefinition_last_wins", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                class P { int x = 1; }
+                P mk() { return P(); }
+                P mk() { var p = P(); p.x = 2; return p; }
+                mk().x;
+            )");
+            check_eq(int64_t(2), r.as_int());
+        });
+
+        // ---- untyped parameter defaults ----
+
+        test("untyped_param_default_free_function", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(3), engine->execute("function f(x = 3) { return x; } f();").as_int());
+            check_eq(int64_t(10), engine->execute("function g(x = 3) { return x; } g(10);").as_int());
+        });
+
+        test("untyped_param_default_lambda", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute("auto f = [](x = 8) { return x; }; f() + f(1);");
+            check_eq(int64_t(9), r.as_int());
+        });
+
+        test("untyped_param_default_mixed", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute("function f(x, y = 4) { return x + y; } f(1) + f(1, 1);");
+            check_eq(int64_t(7), r.as_int());
+        });
+
+        test("untyped_param_default_ordering_still_enforced", [this]() {
+            auto engine = make_engine();
+            // parse error surfaces as a throw (probed both backends); engine stays usable
+            check_throws([&]() {
+                engine->execute("function f(x = 1, y) { return y; } f(2);");
+            });
+            check_eq(int64_t(4), engine->execute("2 + 2").as_int());
+        });
+
+        // ---- function-typed variables and fields ----
+
+        test("function_typed_variable_top_level", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                function f = [](x) { return x * 2; };
+                f(21);
+            )");
+            check_eq(int64_t(42), r.as_int());
+        });
+
+        test("function_typed_variable_uninitialized_then_assigned", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                function f;
+                f = [](){ return 7; };
+                f();
+            )");
+            check_eq(int64_t(7), r.as_int());
+        });
+
+        test("function_typed_variable_holds_named_function", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                function g() { return 3; }
+                function f = g;
+                f();
+            )");
+            check_eq(int64_t(3), r.as_int());
+        });
+
+        test("function_typed_variable_in_function_body", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                function outer() {
+                    function f = [](x) { return x + 1; };
+                    return f(41);
+                }
+                outer();
+            )");
+            check_eq(int64_t(42), r.as_int());
+        });
+
+        test("function_typed_field", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                class K { function cb = [](){ return 8; }; }
+                K().cb();
+            )");
+            check_eq(int64_t(8), r.as_int());
+        });
+
+        test("function_typed_field_null_then_assigned", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                class K { function cb; }
+                auto k = K();
+                k.cb = [](){ return 9; };
+                k.cb();
+            )");
+            check_eq(int64_t(9), r.as_int());
+        });
+
+        test("function_operator_assign_still_a_method", [this]() {
+            auto engine = make_engine();
+            auto r = engine->execute(R"(
+                class V { int x = 0; function operator=(o) { x = o.x + 100; return this; } }
+                var a = V();
+                var b = V();
+                b.x = 1;
+                a = b;
+                a.x;
+            )");
+            // pins today's behavior (probed both backends): plain variable assignment
+            // does NOT dispatch script operator=; a becomes a clone of b (x == 1).
+            // The point of this test: `function operator=` must keep parsing as a METHOD
+            // and never fall into the function-typed-field lookahead.
+            check_eq(int64_t(1), r.as_int());
+        });
+
+        test("function_keyword_declaration_unchanged", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(42), engine->execute("function g(x) { return x * 2; } g(21);").as_int());
+        });
+
+        // ---- return-type conflicts (Dev ruling 2026-07: contradictory leading +
+        // trailing types = parse error; a matching pair is redundant-legal) ----
+
+        test("return_type_conflict_is_parse_error", [this]() {
+            auto engine = make_engine();
+            check_throws([&]() { engine->execute("int f() -> string { return \"s\"; } f();"); });
+            check_throws([&]() { engine->execute("class K { int m() -> string { return \"s\"; } } K().m();"); });
+            check_throws([&]() { engine->execute("namespace n { int f() -> string { return \"s\"; } } n::f();"); });
+        });
+
+        test("return_type_redundant_match_ok", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(4), engine->execute("int f() -> int { return 4; } f();").as_int());
+            check_eq(int64_t(5), engine->execute("function g() -> int { return 5; } g();").as_int());
+            check_eq(int64_t(6), engine->execute("auto h() -> int { return 6; } h();").as_int());
+            check_eq(int64_t(7), engine->execute("class K { int m() -> int { return 7; } } K().m();").as_int());
+        });
+
+        test("arrow_auto_keeps_leading_type", [this]() {
+            auto engine = make_engine();
+            // -> { adds no information; the declared int still converts/enforces
+            check_eq(int64_t(2), engine->execute("int f() -> { return 2.9; } f();").as_int());
+            check_throws([&]() { engine->execute("int g() -> { return \"x\"; } g();"); });
+        });
+
+        // ---- initializer lists are constructor-only (Dev ruling 2026-07) ----
+
+        test("initializer_list_only_on_constructors", [this]() {
+            auto engine = make_engine();
+            check_throws([&]() { engine->execute("function f() : super(1) { return 3; } f();"); });
+            check_throws([&]() { engine->execute("int f() : this(1) { return 3; } f();"); });
+            check_throws([&]() { engine->execute("class K { function m() : super(1) { return 1; } } 1;"); });
+            check_throws([&]() { engine->execute("class A { int v = 0; } class B : A { int m() : super() { return 1; } } 1;"); });
+            check_throws([&]() { engine->execute("class K { ~K() : super() {} } 1;"); });
+        });
+
+        test("constructor_initializers_still_work", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(15), engine->execute(
+                "class K { int a = 0; K(int v) { a = v; } K() : this(15) {} } K().a;").as_int());
+            check_eq(int64_t(9), engine->execute(
+                "class A { int v = 0; A(int x) { v = x; } } class B : A { B() : super(9) {} } B().v;").as_int());
+        });
+
+        // ---- duplicate top-level definitions warn; include composition is silent
+        // (Dev ruling 2026-07: warn severity always, scoped to one textual parse unit) ----
+
+        auto duplicate_warnings = [](jai::engine& eng) {
+            size_t n = 0;
+            for (const auto& d : eng.last_check_diagnostics().diagnostics) {
+                if (d.severity == jai::check_diagnostic::level::warning &&
+                    d.message.find("duplicate definition") != std::string::npos) { n++; }
+            }
+            return n;
+        };
+
+        test("duplicate_top_level_definition_warns", [&, this]() {
+            auto engine = make_engine();
+            engine->static_checking(jai::check_mode::warn);
+            check_eq(int64_t(2), engine->execute(
+                "function f(a) { return 1; } function f(a, b) { return 2; } f(0, 0);").as_int());
+            check_eq(size_t(1), duplicate_warnings(*engine));
+        });
+
+        test("duplicate_warning_spans_definition_forms", [&, this]() {
+            auto engine = make_engine();
+            engine->static_checking(jai::check_mode::warn);
+            engine->execute("int f(int a) { return 1; } coroutine function f() { yield 1; } 1;");
+            check_eq(size_t(1), duplicate_warnings(*engine));
+        });
+
+        test("duplicate_warning_silent_for_legit_overloads", [&, this]() {
+            auto engine = make_engine();
+            engine->static_checking(jai::check_mode::warn);
+            engine->execute(
+                "namespace n { int f() { return 1; } int f(int a) { return 2; } }"
+                "class K { int m(a) { return 1; } int m(a, b) { return 2; } } n::f();");
+            check_eq(size_t(0), duplicate_warnings(*engine));
+        });
+
+        test("duplicate_warning_silent_across_executes", [&, this]() {
+            auto engine = make_engine();
+            engine->static_checking(jai::check_mode::warn);
+            engine->execute("function f(a) { return 1; } f(0);");
+            engine->execute("function f(a) { return 2; } f(0);");   // hot-reload shape
+            check_eq(size_t(0), duplicate_warnings(*engine));
+        });
+
+        test("duplicate_warning_silent_for_include_composition", [&, this]() {
+            namespace fs = std::filesystem;
+            auto dir = fs::temp_directory_path();
+            auto file = dir / "fn_dupwarn_lib.jai";
+            { std::ofstream out(file); out << "function f(a) { return 1; }\n"; }
+
+            auto engine = make_engine();
+            engine->add_include_path(dir.string());
+            engine->static_checking(jai::check_mode::warn);
+            // file defines f once; this unit includes it TWICE and defines its own f
+            // once - all composition, zero textual duplicates, zero warnings
+            auto r = engine->execute(
+                "include \"fn_dupwarn_lib.jai\"; include \"fn_dupwarn_lib.jai\";"
+                "function f(a, b) { return a + b; } f(1, 2);");
+            check_eq(int64_t(3), r.as_int());
+            check_eq(size_t(0), duplicate_warnings(*engine));
+            fs::remove(file);
+        });
+
+        test("duplicate_warning_never_blocks_strict_mode", [&, this]() {
+            auto engine = make_engine();
+            engine->static_checking(jai::check_mode::strict);
+            check_eq(int64_t(2), engine->execute(
+                "function f(a) { return 1; } function f(a) { return 2; } f(0);").as_int());
+            check_eq(size_t(1), duplicate_warnings(*engine));
         });
 
         test("destructuring_from_variable", [this]() {

@@ -9,6 +9,7 @@
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -50,10 +51,20 @@ namespace jai::vm {
         }
         void set_engine_reference(engine* engine_ref) override;
 
-        // Phase-5 stub: the vm will hook statement boundaries in run_dispatch (watch for
-        // chunk::stmt_nodes[ip] changing). Stored now so engine::debugger() wires both
-        // backends identically; currently a no-op — the interpreter carries phase 3.
-        void set_debug_controller(debug::controller* controller) override { debug_controller_ = controller; }
+        // Phase 5 (live): run_dispatch detects statement boundaries via chunk::stmt_nodes
+        // and drives the SAME controller as the interpreter. The per-op path tests one
+        // plain cached pointer (debug_hook_); transport state is pulled in only at the
+        // debug sync points (prepare_for_execution, the 1024-tick budget sample, park exit).
+        void set_debug_controller(debug::controller* controller) override {
+            debug_controller_.store(controller, std::memory_order_release);
+        }
+
+        // Innermost live environment (debugger locals fallback / globals scope).
+        std::shared_ptr<environment> get_current_environment() const override { return environment_; }
+
+        // Named slot locals of the parked frame, reconstructed lazily from the chunk's
+        // decl/load/store operands (no name table baked into release chunks — Q6 ruling).
+        std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const override;
 
         bool is_unwinding() const override { return is_unwinding_; }
         const script_exception& get_current_exception() const override { return current_exception_.value(); }
@@ -127,6 +138,11 @@ namespace jai::vm {
             std::shared_ptr<environment> entry_env;
             size_t stack_base = 0;
             bool top_level = false;
+            // Debug statement-boundary edge state (touched only while a session is armed).
+            // Stale values across record reuse are harmless: a fresh frame enters at ip 0,
+            // and ip <= debug_stmt_ip re-fires the boundary (also the loop back-edge case).
+            const ast_node* debug_stmt = nullptr;
+            size_t debug_stmt_ip = 0;
         };
 
         struct frame_guard;
@@ -172,7 +188,16 @@ namespace jai::vm {
         string_symbolizer* env_symbolizer_ = nullptr;
         std::shared_ptr<environment> environment_;
         engine* engine_ = nullptr;
-        debug::controller* debug_controller_ = nullptr;   // phase-5 stub: stored, not yet consulted
+        // Step-debugger controller (engine-owned, shared with the interpreter backend).
+        // Atomic: engine::debugger() may wire it from another thread mid-run; NOT read per
+        // op — sync_debug_hook mirrors it into the plain gate below at the sync points only.
+        std::atomic<debug::controller*> debug_controller_{nullptr};
+        // Script-thread cached statement-hook gate: non-null only while a session is
+        // enabled; run_dispatch tests this one plain pointer per dispatch iteration.
+        debug::controller* debug_hook_ = nullptr;
+        // The frame parked at the current stop (set around on_statement) — exact locals
+        // source for get_current_frame_locals while the script thread is parked.
+        frame* debug_paused_frame_ = nullptr;
         environment* cached_global_env_ = nullptr;   // env_lookup_cached gate (never dereferenced)
 
         vm_compiler compiler_;
@@ -296,6 +321,13 @@ namespace jai::vm {
         // high-water) and its cold raise twin. KEEP BYTE-PARALLEL with the interpreter.
         bool execution_limit_exhausted();
         error_propagator execution_limit_failure();
+        // Debug sync point (execute entry + every 1024 budget ticks + park exit via the
+        // controller): mirrors debug_controller_ into the plain per-op gate and hands a
+        // session-end a fresh budget deadline. Twin of interpreter::sync_debug_hook.
+        void sync_debug_hook();
+        // Statement-boundary edge detection + hook fire; out of line so run_dispatch's
+        // Debug frame stays flat (JAI_MAX_CALL_DEPTH path). Called only when armed.
+        void debug_statement_boundary(frame& f);
 
         std::shared_ptr<chunk> chunk_for_body(std::string_view name,
                                               const std::vector<parameter>& params,

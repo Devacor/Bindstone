@@ -1651,6 +1651,12 @@ void engine::wire_backend() {
         ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(impl->execution_budget_seconds_))
         : std::chrono::nanoseconds(0);
     impl->backend->set_execution_budget(budget);
+
+    // Re-wire the step-debugger across backend swaps/reconstruction: engine::debugger()
+    // may have been called before set_backend picked the final backend.
+    if (impl->debugger_) {
+        impl->backend->set_debug_controller(impl->debugger_.get());
+    }
 }
 
 void engine::set_backend(backend_type type) {

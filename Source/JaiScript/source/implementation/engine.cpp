@@ -438,9 +438,17 @@ struct engine::implementation {
 
     // Key on (sourcePath, content) so identical text under different paths does not
     // alias one AST. Length-prefixing the path pins the boundary, so no (path, content)
-    // pair can collide with another via string concatenation.
-    static std::string script_cache_key(const std::string& sourcePath, const std::string& source) {
-        return std::to_string(sourcePath.size()) + ":" + sourcePath + source;
+    // pair can collide with another via string concatenation. The buffer is a reused
+    // member: a cache-hit execute() does no key allocation (engine::execute hot path).
+    std::string script_cache_key_buf_;
+    const std::string& script_cache_key(const std::string& sourcePath, const std::string& source) {
+        auto& key = script_cache_key_buf_;
+        key.clear();
+        key += std::to_string(sourcePath.size());
+        key += ':';
+        key += sourcePath;
+        key += source;
+        return key;
     }
 
     std::shared_ptr<script_cache_entry> find_cached_script(const std::string& sourcePath, const std::string& source) {

@@ -209,6 +209,9 @@ namespace jai {
         static script_value make_map_entry_reference(const strong_ptr<std::map<script_value, script_value>>& map_storage,
                                                      const script_value& key, engine* eng, type_info_ptr value_type);
         static script_value make_function(const script_function& func, engine* eng);
+        // Rvalue mint: moves the std::function into its strong_ptr box (every backend
+        // mint passes a temporary - the copy was pure churn)
+        static script_value make_function(script_function&& func, engine* eng);
 
         // Mints an unregistered object holder wrapping a coroutine_handle; bypasses the
         // class-registry check the other make_object factories enforce (handles have no class).

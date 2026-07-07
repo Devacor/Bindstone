@@ -20,6 +20,7 @@ namespace jai {
     class expression;
     class statement;
     class declaration;
+    struct script_defined_function;   // environment.hpp; node mint caches hold it opaquely
     
     using ast_node_ptr = std::shared_ptr<ast_node>;
     using expression_ptr = std::shared_ptr<expression>;
@@ -314,8 +315,26 @@ namespace jai {
         mutable std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
         mutable bool outer_slot_plan_built = false;
 
+        // Shared immutable parameter storage, minted once per node (see function_decl):
+        // every closure created from this lambda shares it instead of deep-copying.
+        // Capture-free lambdas (closure_env = nullptr) additionally reuse the ONE
+        // script_defined_function across creations.
+        mutable std::shared_ptr<const std::vector<parameter>> shared_params_cache;
+        mutable std::shared_ptr<script_defined_function> mint_cache;
+
         lambda_expr(const source_location& loc) : expression(loc, node_type::lambda_expr), local_count(0) {}
     };
+
+    // Node-cached shared parameter storage (function_decl / lambda_expr): built on the
+    // first mint, shared by every later function value from the same node. Lazy fill is
+    // single-threaded by construction (parallel bodies reject nested declarations).
+    template<typename NodeT>
+    inline const std::shared_ptr<const std::vector<parameter>>& shared_parameters_for(const NodeT* node) {
+        if (!node->shared_params_cache) {
+            node->shared_params_cache = std::make_shared<const std::vector<parameter>>(node->parameters);
+        }
+        return node->shared_params_cache;
+    }
 
     // New expression
     class new_expr : public expression {
@@ -586,6 +605,18 @@ namespace jai {
         // plan and never reads these.
         mutable std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
         mutable bool outer_slot_plan_built = false;
+
+        // Shared immutable parameter storage, minted once per node: every function value
+        // created from this declaration shares it instead of deep-copying the vector
+        // (built lazily on the first mint - single-threaded; parallel bodies reject
+        // nested declarations). Coroutine declarations additionally cache their owning
+        // function_decl copy (the factory needs shared ownership of an AST the visitor
+        // only sees by raw pointer).
+        mutable std::shared_ptr<const std::vector<parameter>> shared_params_cache;
+        mutable std::shared_ptr<function_decl> coroutine_mint_cache;
+        // Non-coroutine declarations always mint with closure_env = nullptr, so the ONE
+        // script_defined_function can be reused for every execution of this node
+        mutable std::shared_ptr<script_defined_function> mint_cache;
 
         function_decl(const source_location& loc, std::string_view n, uint64_t id = UINT64_MAX)
             : declaration(loc, node_type::function_decl), name(n), name_id(id), is_override(false), is_static(false), is_coroutine(false), local_count(0) {}

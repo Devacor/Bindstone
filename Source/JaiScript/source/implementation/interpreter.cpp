@@ -6405,7 +6405,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                             payload.kind = script_callable::kind_type::function;
                             payload.fn = std::make_shared<script_defined_function>(
                                 func_decl->name,
-                                func_decl->parameters,
+                                shared_parameters_for(func_decl.get()),
                                 func_decl->return_type,
                                 func_decl->body,
                                 ns_env  // Environment with namespace variables
@@ -7552,37 +7552,37 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         
     }
     
-    // Convert the lambda body to a block_stmt if it's not already
-    std::shared_ptr<block_stmt> lambdaBody;
-    if (auto blockStmt = std::dynamic_pointer_cast<block_stmt>(expr->body)) {
-        lambdaBody = blockStmt;
-    } else {
-        // Wrap single statement in a block
-        std::vector<declaration_ptr> stmts;
-        if (auto stmt = std::dynamic_pointer_cast<statement>(expr->body)) {
-            auto stmtDecl = std::make_shared<statement_decl>(expr->location, stmt);
-            stmts.push_back(stmtDecl);
-        }
-        lambdaBody = std::make_shared<block_stmt>(expr->location, std::move(stmts));
-    }
-    
     // Note: Parameter symbol IDs are pre-interned by the parser (parse_parameter_list())
 
-    // Create the script function
-    // Use final_closure_env which is either the capture environment or current environment
-    // This ensures lambdas can access variables from their creation context
-    // IMPORTANT: If needs_capture_env is false, we pass nullptr as closure_env
-    // This makes the lambda behave exactly like a regular function
-    
-    
-    auto lambdaFunc = std::make_shared<script_defined_function>(
-        "<lambda>",  // Anonymous function name
-        expr->parameters,
-        expr->return_type,
-        lambdaBody,
-        needs_capture_env ? final_closure_env : nullptr  // Only use closure env if we have captures
-    );
-    
+    // Create the script function. Capture-free lambdas mint ONCE per node (closure_env
+    // is nullptr, so every creation is identical - body wrap, parameter storage and the
+    // function object all reuse); capturing lambdas share the node's parameter storage
+    // but carry their per-creation capture environment.
+    std::shared_ptr<script_defined_function> lambdaFunc = needs_capture_env ? nullptr : expr->mint_cache;
+    if (!lambdaFunc) {
+        // Convert the lambda body to a block_stmt if it's not already
+        std::shared_ptr<block_stmt> lambdaBody;
+        if (auto blockStmt = std::dynamic_pointer_cast<block_stmt>(expr->body)) {
+            lambdaBody = blockStmt;
+        } else {
+            // Wrap single statement in a block
+            std::vector<declaration_ptr> stmts;
+            if (auto stmt = std::dynamic_pointer_cast<statement>(expr->body)) {
+                auto stmtDecl = std::make_shared<statement_decl>(expr->location, stmt);
+                stmts.push_back(stmtDecl);
+            }
+            lambdaBody = std::make_shared<block_stmt>(expr->location, std::move(stmts));
+        }
+        lambdaFunc = std::make_shared<script_defined_function>(
+            "<lambda>",  // Anonymous function name
+            shared_parameters_for(expr),
+            expr->return_type,
+            lambdaBody,
+            needs_capture_env ? final_closure_env : nullptr  // Only use closure env if we have captures
+        );
+        if (!needs_capture_env) { expr->mint_cache = lambdaFunc; }
+    }
+
     // Create a script_function wrapper resolving the live backend at call time.
     // Named thunk (not an anonymous lambda) so callers can recover the payload via
     // std::function::target<script_callable_thunk>() - vm parity (exec_closure).
@@ -9285,14 +9285,18 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     // (see parse_function_body() and parse_parameter_list())
 
     if (decl->is_coroutine) {
-        // Coroutine function - calling it returns a coroutine_handle instead of executing
-        // Create a shared copy of the function declaration for the coroutine handle
-        auto func_decl_ptr = std::make_shared<function_decl>(decl->location, decl->name, decl->name_id);
-        func_decl_ptr->parameters = decl->parameters;
-        func_decl_ptr->return_type = decl->return_type;
-        func_decl_ptr->body = decl->body;
-        func_decl_ptr->is_coroutine = true;
-        func_decl_ptr->local_count = decl->local_count;
+        // Coroutine function - calling it returns a coroutine_handle instead of executing.
+        // The shared function_decl copy the handle pins is identical on every execution
+        // of this declaration - mint it once per node.
+        auto& func_decl_ptr = decl->coroutine_mint_cache;
+        if (!func_decl_ptr) {
+            func_decl_ptr = std::make_shared<function_decl>(decl->location, decl->name, decl->name_id);
+            func_decl_ptr->parameters = decl->parameters;
+            func_decl_ptr->return_type = decl->return_type;
+            func_decl_ptr->body = decl->body;
+            func_decl_ptr->is_coroutine = true;
+            func_decl_ptr->local_count = decl->local_count;
+        }
 
         auto closure_env = environment_;
 
@@ -9370,16 +9374,19 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         return {};
     }
 
-    // Don't capture any environment in the closure - just use nullptr
-    // The environment stack will handle variable lookup naturally
-    auto scriptFunc = std::make_shared<script_defined_function>(
-        decl->name,
-        decl->parameters,
-        decl->return_type,
-        decl->body,
-        nullptr,  // No closure needed - environment stack handles everything
-        decl->local_count  // Slot count for stack allocation
-    );
+    // Don't capture any environment in the closure - just use nullptr (which also makes
+    // the mint node-cacheable: every execution of this declaration is identical)
+    auto& scriptFunc = decl->mint_cache;
+    if (!scriptFunc) {
+        scriptFunc = std::make_shared<script_defined_function>(
+            decl->name,
+            shared_parameters_for(decl),
+            decl->return_type,
+            decl->body,
+            nullptr,  // No closure needed - environment stack handles everything
+            decl->local_count  // Slot count for stack allocation
+        );
+    }
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.
@@ -10299,10 +10306,11 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
         return make_coroutine_object(engine_, coroutine_handle_type_id_, handle);
     }
 
-    // Create a script_defined_function with the method environment
+    // Create a script_defined_function with the method environment (parameter storage
+    // shared from the node - no per-call vector copy)
     script_defined_function script_func(
         ast->name,
-        ast->parameters,
+        shared_parameters_for(ast.get()),
         ast->return_type,
         ast->body,
         method_env,  // Method environment with 'this'
@@ -11134,18 +11142,18 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     {
         size_t required_params = 0;
-        for (const auto& p : function.parameters) {
+        for (const auto& p : function.parameters()) {
             if (!p.default_value) {
                 ++required_params;
             } else {
                 break;  // All parameters after first default also have defaults (parser validated)
             }
         }
-        if (args.size() < required_params || args.size() > function.parameters.size()) {
+        if (args.size() < required_params || args.size() > function.parameters().size()) {
             return checked_result<script_value>(
                 make_error_code(runtime_error_code::argument_count_mismatch),
                 "Function expected {0} arguments but got {1}",
-                static_cast<uint64_t>(function.parameters.size()), static_cast<uint64_t>(args.size())
+                static_cast<uint64_t>(function.parameters().size()), static_cast<uint64_t>(args.size())
             );
         }
     }
@@ -11246,8 +11254,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Parameters go into the call frame for fast lookup.
     // Reference parameters still need special handling.
 
-    for (size_t i = 0; i < function.parameters.size(); ++i) {
-        const auto& param = function.parameters[i];
+    for (size_t i = 0; i < function.parameters().size(); ++i) {
+        const auto& param = function.parameters()[i];
 
         if (i >= args.size()) {
             // Must have a default value (validated by argument count check above)

@@ -32,6 +32,9 @@ public:
 			for (var i = 0; i < 100000; i++) { a_math.push(0.5 + i * 0.173); }
 			float f_math(float x) { return sqrt(x) * 2.0 + sqrt(x + 1.0) - pow(x, 0.25); }
 
+			var a_small = [];
+			for (var i = 0; i < 1000; i++) { a_small.push(0.5 + i * 0.173); }
+
 			var a_str = [];
 			for (var i = 0; i < 10000; i++) { a_str.push("payload_" + to_string(i * 37) + "_tail"); }
 			string f_str(string s) {
@@ -50,10 +53,14 @@ public:
 	}
 
 	void bench_at(const char* name, size_t workers, const char* key, const char* source) {
+		bench_at_n(name, workers, key, source, 3);
+	}
+
+	void bench_at_n(const char* name, size_t workers, const char* key, const char* source, int32_t iterations) {
 		benchmark(name, [this, workers, key, source]() {
 			test_engine->parallel_thread_count(workers);
 			run_bite(key, source);
-		}, 3);
+		}, iterations);
 	}
 
 	void forge_tests() override {
@@ -73,6 +80,20 @@ public:
 		bench_at("Math 100k doubles - parallel W=2", 2, "mp", k_math_parallel);
 		bench_at("Math 100k doubles - parallel W=4", 4, "mp", k_math_parallel);
 		bench_at("Math 100k doubles - parallel W=8", 8, "mp", k_math_parallel);
+
+		// Small-array row: context ACQUISITION dominates here - with slot reuse the
+		// per-call overhead collapses to the reset + detach of 1k doubles. More
+		// iterations: each call is short.
+		static constexpr const char* k_small_serial =
+			"var out = []; for (auto x : a_small) { out.push(f_math(x)); } out.size();";
+		static constexpr const char* k_small_parallel =
+			"parallel_transform(a_small, f_math).size();";
+		benchmark("Math 1k doubles - serial for", [this]() {
+			run_bite("sms", k_small_serial);
+		}, 20);
+		bench_at_n("Math 1k doubles - parallel W=1", 1, "smp", k_small_parallel, 20);
+		bench_at_n("Math 1k doubles - parallel W=4", 4, "smp", k_small_parallel, 20);
+		bench_at_n("Math 1k doubles - parallel W=8", 8, "smp", k_small_parallel, 20);
 
 		benchmark("String 10k - serial for", [this]() {
 			run_bite("ss", k_str_serial);

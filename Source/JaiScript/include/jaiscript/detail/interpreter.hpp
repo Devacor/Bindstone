@@ -1078,6 +1078,24 @@ namespace jai {
             // Pool envs minted before this point carry the shared epoch sink - drop them
             environment_pool_.clear();
             environment_pool_index_ = 0;
+            // Slot REUSE reset (worker contexts persist across regions): a prior call
+            // may have ended mid-chunk on an error - clear every piece of residual
+            // execution state so the slot starts this region pristine.
+            valueStack_.clear();
+            call_stack_.clear();
+            current_call_depth_ = 0;
+            is_unwinding_ = false;
+            current_exception_.reset();
+            active_exception_value_.reset();
+            trace_captured_ = false;
+            captured_trace_.clear();
+            hasBreakRequest_ = false;
+            hasContinueRequest_ = false;
+            hasYieldRequest_ = false;
+            returnValue_.reset();
+            hasReturnValue_ = false;
+            pending_call_ctx_ = nullptr;
+            external_ctx_stack_.clear();
             execution_budget(budget);
             arm_execution_deadline();
         }

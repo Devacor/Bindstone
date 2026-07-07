@@ -539,6 +539,45 @@ public:
 			}
 		});
 
+		test("slot_reuse_across_calls_consistent", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			const std::string src = R"(
+				int f(int x) { return x * 7 - 3; }
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push(i); }
+				return parallel_transform(a, f);
+			)";
+			auto r1 = e->execute(src);
+			auto r2 = e->execute(src);   // slots reused (same fingerprint)
+			auto r3 = e->execute(src);
+			check_true(arrays_equal(r1, r2));
+			check_true(arrays_equal(r1, r3));
+		});
+
+		test("slot_reuse_after_error_is_pristine", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			// First call fails mid-chunk (residual unwinding state in some slot)
+			auto r1 = e->execute(R"(
+				int f(int x) { if (x == 40) { throw "mid"; } return x; }
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push(i); }
+				try { parallel_transform(a, f); } catch (e) { return e; }
+				return "no-error";
+			)");
+			check_true(r1.as<std::string>().find("mid") != std::string::npos);
+			// Second call on the SAME engine reuses the slots and must run clean
+			auto r2 = e->execute(R"(
+				int g(int x) { return x + 1; }
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push(i); }
+				var out = parallel_transform(a, g);
+				return out[63];
+			)");
+			check_eq((int64_t)64, r2.as_int());
+		});
+
 		test("usage_errors", [this]() {
 			auto e = make_engine();
 			auto r = e->execute(R"(

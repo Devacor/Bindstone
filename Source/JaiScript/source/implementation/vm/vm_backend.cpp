@@ -4680,7 +4680,7 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 		const auto* thunk = stack_[args_base - 1].as_function().target<script_callable_thunk>();
 		if (thunk && thunk->eng == engine_ &&
 		    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn &&
-		    argc == thunk->payload.fn->parameters.size()) {
+		    argc == thunk->payload.fn->parameters().size()) {
 			const script_defined_function& fn = *thunk->payload.fn;
 			// Stateless ref binding: the call site travels as an argument; bind_parameters
 			// resolves ref args against the caller frame/env directly (no metadata channel)
@@ -4775,7 +4775,7 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 	const auto* thunk = func.target<script_callable_thunk>();
 	const bool direct = thunk && thunk->eng == engine_ &&
 	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
-	const bool in_loop = direct && arguments.size() == thunk->payload.fn->parameters.size();
+	const bool in_loop = direct && arguments.size() == thunk->payload.fn->parameters().size();
 
 	if (in_loop) {
 		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes switch_to_
@@ -5051,12 +5051,18 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 		final_closure_env = closure_env;
 	}
 
-	auto lambdaFunc = std::make_shared<script_defined_function>(
-		"<lambda>",
-		proto.lambda->parameters,
-		proto.lambda->return_type,
-		proto.body,
-		needs_capture_env ? final_closure_env : nullptr);
+	// Capture-free closures mint ONCE per node (closure_env = nullptr each time);
+	// capturing ones share the node's parameter storage
+	std::shared_ptr<script_defined_function> lambdaFunc = needs_capture_env ? nullptr : proto.lambda->mint_cache;
+	if (!lambdaFunc) {
+		lambdaFunc = std::make_shared<script_defined_function>(
+			"<lambda>",
+			shared_parameters_for(proto.lambda.get()),
+			proto.lambda->return_type,
+			proto.body,
+			needs_capture_env ? final_closure_env : nullptr);
+		if (!needs_capture_env) { proto.lambda->mint_cache = lambdaFunc; }
+	}
 
 	// Pre-compiled body chunk enters the cache so execute_callable finds it by body identity
 	auto cache_it = chunk_cache_.find(proto.body.get());
@@ -5580,7 +5586,7 @@ checked_result<void> vm_backend::static_member_value(member_expr* expr, script_v
 						payload.kind = script_callable::kind_type::function;
 						payload.fn = std::make_shared<script_defined_function>(
 							func_decl->name,
-							func_decl->parameters,
+							shared_parameters_for(func_decl.get()),
 							func_decl->return_type,
 							func_decl->body,
 							ns_env
@@ -6808,7 +6814,7 @@ checked_result<script_value> vm_backend::execute_method_ast(const std::shared_pt
 
 	script_defined_function script_func(
 		ast->name,
-		ast->parameters,
+		shared_parameters_for(ast.get()),
 		ast->return_type,
 		ast->body,
 		std::move(method_env),
@@ -8173,7 +8179,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	{
 		body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
 		if (!body_chunk) {
-			auto compiled = chunk_for_body(function.name, function.parameters, function.body, function.local_count);
+			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count);
 			function.backend_body_cache = compiled;
 			body_chunk = compiled.get();
 		}
@@ -8239,7 +8245,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(function.parameters, args, args_base, argc, rec.locals, *rec.f.code,
+		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.locals, *rec.f.code,
 		                        rec.prev_env, site, caller.locals, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -8842,26 +8848,26 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		~call_depth_guard() { --depth; }
 	} depth_guard(current_call_depth_);
 
-	if (args.size() != function.parameters.size()) {   // exact arity: no default-arg scan needed
+	if (args.size() != function.parameters().size()) {   // exact arity: no default-arg scan needed
 		size_t required_params = 0;
-		for (const auto& p : function.parameters) {
+		for (const auto& p : function.parameters()) {
 			if (!p.default_value) {
 				++required_params;
 			} else {
 				break;
 			}
 		}
-		if (args.size() < required_params || args.size() > function.parameters.size()) {
+		if (args.size() < required_params || args.size() > function.parameters().size()) {
 			return checked_result<script_value>(
 				make_error_code(runtime_error_code::argument_count_mismatch),
 				"Function expected {0} arguments but got {1}",
-				static_cast<uint64_t>(function.parameters.size()), static_cast<uint64_t>(args.size()));
+				static_cast<uint64_t>(function.parameters().size()), static_cast<uint64_t>(args.size()));
 		}
 	}
 
 	auto body_chunk = std::static_pointer_cast<chunk>(function.backend_body_cache);
 	if (!body_chunk) {
-		body_chunk = chunk_for_body(function.name, function.parameters, function.body, function.local_count);
+		body_chunk = chunk_for_body(function.name, function.parameters(), function.body, function.local_count);
 		function.backend_body_cache = body_chunk;
 	}
 
@@ -8902,7 +8908,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	};
 
 	{
-		auto bind_result = bind_parameters(function.parameters, args, 0, args.size(), locals, *body_chunk,
+		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), locals, *body_chunk,
 	                                   previousEnv, site, caller_locals, caller_code);
 		if (!bind_result) {
 			cleanup();

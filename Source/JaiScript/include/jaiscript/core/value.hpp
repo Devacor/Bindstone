@@ -1580,6 +1580,9 @@ namespace jai {
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             std::shared_ptr<void> data;     // The actual object
             bool is_class_instance_wrapper = false;  // True if data is a class_instance object (both C++ and script classes), false for raw data
+            // A coroutine handle IS a reference to a running computation: clone() shares
+            // it (reference semantics, like shared_ptr) instead of deep-copying.
+            bool is_coroutine_handle = false;
 
             // Registered-class T& binding: the live C++ object (data stays null). Non-owning!
             void* bound_ptr = nullptr;

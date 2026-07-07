@@ -175,6 +175,7 @@ script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_p
     obj->type_id = type_id;
     obj->data = std::move(handle);
     obj->is_class_instance_wrapper = false;
+    obj->is_coroutine_handle = true;
     v.storage_ = obj;
     return v;
 }
@@ -417,6 +418,14 @@ script_value script_value::clone() const {
             // Regular objects have VALUE semantics by default (deep copy)
             // Only shared_ptr<T> has reference semantics (handled by early return above)
             auto obj_holder = std::get<strong_ptr<object_holder>>(storage_);
+
+            // ...and coroutine handles: a handle references a RUNNING computation, so
+            // every copy shares it (field stores, aliases, params, containers all see
+            // the same resume/done state). Deep-copying a suspended coroutine is
+            // meaningless - this is the ruled reference-semantics-on-copy design.
+            if (obj_holder->is_coroutine_handle) {
+                return *this;
+            }
 
             if (obj_holder->is_class_instance_wrapper) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);

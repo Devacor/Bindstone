@@ -581,6 +581,14 @@ checked_result<expression_ptr> parser::primary() {
         return parse_map_literal();
     }
 
+    // Anonymous function expression: `function (params) {...}` (a no-capture lambda).
+    // `function name...` never reaches here (declaration() routes it first).
+    if (check(token_type::function_keyword) &&
+        current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::left_paren) {
+        advance(); // consume 'function'
+        return anonymous_function_expression();
+    }
+
     // Literals
     if (match(token_type::true_keyword)) {
         script_value val(script_value::ast_literal_tag{}, true);
@@ -1744,7 +1752,9 @@ checked_result<declaration_ptr> parser::declaration() {
     }
 
     // Check specifically for function keyword to handle function declarations
-    if (check(token_type::function_keyword)) {
+    // (`function (` falls through to expression parsing — anonymous function expression)
+    if (check(token_type::function_keyword) &&
+        !(current_ + 1 < tokens_.size() && tokens_[current_ + 1].type == token_type::left_paren)) {
         // `function name = expr;` / `function name;` declares a function-typed VARIABLE
         // (parse_type maps `function` to auto, matching function-typed parameters and the
         // namespace path); `function name(` stays a function declaration.
@@ -2050,6 +2060,20 @@ checked_result<expression_ptr> parser::lambda_expression() {
     lambda->default_capture = capture_result.second;
     JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after capture list"));
 
+    return finish_lambda_after_captures(std::move(lambda));
+}
+
+// Anonymous function expression: `function (params) {...}` — pure desugar to a
+// no-capture lambda ([]-equivalent: auto-capture, outer locals snapshot BY VALUE
+// at creation; explicit by-ref capture needs the lambda spelling)
+checked_result<expression_ptr> parser::anonymous_function_expression() {
+    auto lambda = std::make_shared<lambda_expr>(previous().location);
+    return finish_lambda_after_captures(std::move(lambda));
+}
+
+// Shared tail for [] lambdas and anonymous function expressions: parameters,
+// optional trailing return, scope/slot bookkeeping, body
+checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_ptr<lambda_expr> lambda) {
     // Parse parameters
     JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' for lambda parameters"));
     JAISCRIPT_TRY_ASSIGN(lambda->parameters, parse_parameter_list());

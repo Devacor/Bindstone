@@ -216,8 +216,9 @@ namespace jai {
             if (cached_true_.has_value()) cached_type_info_bool_ = cached_true_->get_type_info();
         }
 
-        // Wire (or clear) the step-debugger. Null when no session is attached — the
-        // statement hook is then a single relaxed pointer load per statement.
+        // Wire (or clear) the step-debugger. The statement hook itself tests only the
+        // plain cached gate debug_hook_, refreshed from this atomic at the debug sync
+        // points (sync_debug_hook): execute entry and the 1024-tick budget sample.
         void set_debug_controller(debug::controller* c) {
             debugger_.store(c, std::memory_order_release);
         }
@@ -762,10 +763,23 @@ namespace jai {
         // Interpreter lifetime is managed by engine, so engine will always outlive interpreter
         engine* engine_ = nullptr;
 
-        // Step-debugger controller (engine-owned). Null unless a session is attached;
-        // read once per statement in dispatch_stmt/dispatch_decl. Atomic because the
-        // transport thread may attach/detach while this thread is running.
+        // Step-debugger controller (engine-owned). Atomic because the transport thread
+        // may attach/detach while this thread is running — but it is NOT read per
+        // statement: sync_debug_hook (below) mirrors it into the plain gate at the debug
+        // sync points only (Dev ruling: no atomics on the statement path).
         std::atomic<debug::controller*> debugger_{nullptr};
+
+        // Script-thread cached statement-hook gate: non-null only while a debug session
+        // is enabled. dispatch_stmt/dispatch_decl test this one plain pointer per
+        // statement; when no debugger was ever constructed that test is the hook's
+        // entire cost. Written ONLY by sync_debug_hook on this thread.
+        debug::controller* debug_hook_ = nullptr;
+
+        // Debug sync point (out of line: needs the controller type). Refreshes
+        // debug_hook_ + the controller's hot cache, and hands a session-end a fresh
+        // budget deadline (the armed one is long past after a pause). Called at execute
+        // entry (prepare_for_execution) and every 1024 budget ticks.
+        void sync_debug_hook();
 
         // Cached common values to avoid repeated allocations (initialized in set_engine_reference)
         std::optional<script_value> cached_null_;
@@ -854,8 +868,19 @@ namespace jai {
 
         // Execution-budget check (see the public execution_budget API above)
         [[nodiscard]] JAI_FORCEINLINE bool execution_budget_exhausted() noexcept {
-            if (!budget_active_ || ++budget_tick_ < 1024) { return false; }
+            if (++budget_tick_ < 1024) [[likely]] { return false; }
             budget_tick_ = 0;
+            // Off-cycle debug sync: the ONLY mid-run point where this thread notices a
+            // debugger attach/detach or breakpoint edit (one relaxed load when no
+            // debugger was ever constructed). Interpreter-only until vm phase 5 — the
+            // vm twin keeps the plain budget shape.
+            if (debugger_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] {
+                sync_debug_hook();
+            }
+            // An armed debug session suspends the wall-clock deadline (a paused script
+            // must not be killed by the act of debugging); sync_debug_hook re-arms a
+            // fresh deadline when the session ends.
+            if (!budget_active_ || debug_hook_) { return false; }
             if (std::chrono::steady_clock::now() < execution_deadline_) { return false; }
             // Budget overruns are TERMINAL: no script catch may swallow a timeout
             limits_->terminal_error = true;

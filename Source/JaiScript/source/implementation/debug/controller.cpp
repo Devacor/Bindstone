@@ -17,17 +17,12 @@ controller::controller(engine* eng) : engine_(eng) {}
 void controller::set_enabled(bool on) {
     bool was = enabled_.exchange(on, std::memory_order_acq_rel);
     if (on == was) return;
-    if (on) {
-        // A script parked at a breakpoint must not be killed by the wall-clock budget.
-        // Suspend it for the whole session; restore on disable. (Phase-4 will replace
-        // this blunt suspend with a per-resume re-arm; see docs/DEBUGGER_DESIGN.md.)
-        saved_budget_ = engine_->execution_budget();
-        engine_->execution_budget(0.0);
-    } else {
-        engine_->execution_budget(saved_budget_);
-        // Leaving a session must never strand a parked thread or a live step mode.
-        detach();
-    }
+    // The interpreter notices at its next debug sync point (execute entry / the
+    // 1024-tick budget sample). While its hook is armed it suspends wall-clock deadline
+    // checks itself and re-arms a fresh deadline when the session ends — a script parked
+    // for minutes is never killed by the budget, and nothing here touches engine state
+    // cross-thread. Leaving a session must never strand a parked thread or a live step mode.
+    if (!on) detach();
 }
 
 void controller::set_breakpoints(const std::string& file, std::vector<int> lines) {
@@ -38,10 +33,12 @@ void controller::set_breakpoints(const std::string& file, std::vector<int> lines
     if (lines.empty()) next->erase(file);
     else (*next)[file] = std::move(lines);
     breakpoints_.store(std::move(next), std::memory_order_release);
+    bp_version_.fetch_add(1, std::memory_order_release);   // after the table: sync sees version -> at-least-as-new table
 }
 
 void controller::clear_breakpoints() {
     breakpoints_.store(std::make_shared<breakpoint_table>(), std::memory_order_release);
+    bp_version_.fetch_add(1, std::memory_order_release);
 }
 
 void controller::request_pause() {
@@ -146,11 +143,52 @@ std::vector<variable_info> controller::list_locals() const {
 // Hot path
 // ---------------------------------------------------------------------------
 
+// Runs only when wants_statement() passed (stepping, or the line bloom matched) — the
+// snapshot is the script thread's own cache, so no atomics/locks even here. The bloom
+// re-check keeps a step-over across a hot region from hashing the filename per statement.
 bool controller::breakpoint_hit(const std::string& file, int line) const {
-    auto table = breakpoints_.load(std::memory_order_acquire);
-    auto it = table->find(file);
-    if (it == table->end()) return false;
+    const uint64_t* bloom = hot_line_bloom_;
+    if (!bloom) return false;
+    const uint32_t b = static_cast<uint32_t>(line) & (line_bloom_bits - 1);
+    if (!((bloom[b >> 6] >> (b & 63u)) & 1u)) return false;
+    auto it = hot_bps_->find(file);
+    if (it == hot_bps_->end()) return false;
     return std::binary_search(it->second.begin(), it->second.end(), line);
+}
+
+bool controller::sync_hot_state() {
+    if (!enabled_.load(std::memory_order_acquire)) {
+        hot_step_or_pause_ = false;
+        hot_line_bloom_ = nullptr;
+        hot_line_bloom_storage_.clear();
+        hot_bps_.reset();
+        hot_bp_version_ = ~0ull;   // a re-armed session re-caches even an unchanged table
+        return false;
+    }
+    hot_step_or_pause_ = pending_pause_.load(std::memory_order_relaxed) != 0
+        || step_mode_.load(std::memory_order_relaxed) != static_cast<int>(step_mode::none);
+    const uint64_t version = bp_version_.load(std::memory_order_acquire);
+    if (version != hot_bp_version_) {
+        hot_bps_ = breakpoints_.load(std::memory_order_acquire);
+        bool any = false;
+        for (const auto& [file, lines] : *hot_bps_) {
+            if (!lines.empty()) { any = true; break; }
+        }
+        if (any) {
+            hot_line_bloom_storage_.assign(line_bloom_bits / 64, 0);
+            for (const auto& [file, lines] : *hot_bps_) {
+                for (int line : lines) {
+                    const uint32_t b = static_cast<uint32_t>(line) & (line_bloom_bits - 1);
+                    hot_line_bloom_storage_[b >> 6] |= (uint64_t{1} << (b & 63u));
+                }
+            }
+        } else {
+            hot_line_bloom_storage_.clear();
+        }
+        hot_line_bloom_ = hot_line_bloom_storage_.empty() ? nullptr : hot_line_bloom_storage_.data();
+        hot_bp_version_ = version;
+    }
+    return true;
 }
 
 bool controller::should_stop(const ast_node* node, int depth, std::string& reason_out) const {
@@ -179,6 +217,8 @@ void controller::on_statement(const ast_node* node, int depth) {
     // Reentrancy: a repl/inspection closure that runs script code must not itself trip
     // breakpoints or stepping (we'd park recursively). Same thread, so a plain flag.
     if (in_command_) return;
+    // A detach can race the cached gate; never park for a session that just ended.
+    if (!enabled_.load(std::memory_order_relaxed)) return;
     std::string reason;
     if (!should_stop(node, depth, reason)) return;
     // Consume a one-shot pause so it fires exactly once.
@@ -211,6 +251,10 @@ void controller::park(const stop_info& si) {
         if (resume_requested_) break;
     }
     paused_.store(false, std::memory_order_release);
+    lk.unlock();
+    // Park exit is a debug sync point: a step mode set by the resume side and any
+    // breakpoints edited during the pause must be live from the very next statement.
+    sync_hot_state();
 }
 
 } // namespace jai::debug

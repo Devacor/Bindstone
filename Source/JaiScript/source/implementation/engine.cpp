@@ -4,6 +4,7 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
 #include <jaiscript/detail/execution_limits.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
 #include <iostream>
 #include <fstream>
@@ -132,6 +133,10 @@ struct engine::implementation {
     // Per-engine execution-limit state (terminal latch, memory accounting): the active
     // backend caches a pointer, so reentrant executes share one instance
     detail::execution_limits limits_;
+
+    // Parallel machinery (parallel_transform v0): null until first touched, so an engine
+    // that never runs a region carries only this pointer
+    std::unique_ptr<detail::parallel_engine_state> parallel_;
 
     // Custom output stream for print() - nullptr means use std::cout
     std::shared_ptr<std::ostream> output_stream;
@@ -462,6 +467,15 @@ struct engine::implementation {
     // Update interpreter when an overloaded function changes
     void updateOverloadedFunction(const std::string& name, engine* engine_ptr);
     
+    // Parallel-region backstop: the engine's type_info intern tables are frozen while a
+    // region's workers run (pre-warmed at the barrier). A miss here means the warm pass
+    // missed a shape - fail the worker cleanly instead of racing the shared tables.
+    void deny_type_intern_in_region() const {
+        if (parallel_ && parallel_->active_region) [[unlikely]] {
+            throw jai::runtime_error("parallel_transform: type shape was not pre-warmed at the region barrier (internal) - please report this body shape");
+        }
+    }
+
     // Helper to ensure overload set has conversion registry
     OverloadSet& getOrCreateOverloadSet(const std::string& name) {
         auto& overloadSet = overloadedFunctions[name];
@@ -837,6 +851,15 @@ void engine::initialize_engine_reference() {
         return script_value(std::monostate{}, engine_weak);
     });
     
+    // Parallel builtins (parallel_transform v0; docs/parallel_design.md). thread_count()
+    // reports the worker count a region uses without constructing the pool.
+    add_function("thread_count", [this]() -> script_int {
+        return static_cast<script_int>(parallel_thread_count());
+    });
+    add_variadic_function("parallel_transform", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+        return detail::run_parallel_transform(*this, args);
+    });
+
     // Note: weak_ptr and shared_ptr are now handled as type constructors in the interpreter
     // They are keywords and follow C++ semantics:
     // - weak_ptr<T> var;           // Creates empty weak_ptr
@@ -1589,6 +1612,7 @@ type_info* engine::get_type_info_array(type_info* element_type) {
     }
 
     // Cache miss - construct full type_info and insert
+    impl->deny_type_intern_in_region();
     type_info temp = type_info::make_array(impl->string_symbolizer_, element_type);
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
@@ -1609,6 +1633,7 @@ type_info* engine::get_type_info_map(type_info* key_type, type_info* value_type)
     }
 
     // Cache miss - construct full type_info and insert
+    impl->deny_type_intern_in_region();
     type_info temp = type_info::make_map(impl->string_symbolizer_, key_type, value_type);
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
@@ -1628,6 +1653,7 @@ type_info* engine::get_type_info_object(const std::string& class_name) {
     }
 
     // Cache miss - construct full type_info and insert
+    impl->deny_type_intern_in_region();
     type_info temp = type_info::make_object(impl->string_symbolizer_, class_name);
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
@@ -1653,6 +1679,7 @@ type_info* engine::get_type_info_object(uint64_t type_id) {
     }
 
     // Cache miss - construct full type_info and insert
+    impl->deny_type_intern_in_region();
     type_info temp = type_info::make_object(impl->string_symbolizer_, class_name);
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
@@ -1671,6 +1698,7 @@ type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
     }
 
     // Cache miss - construct full type_info and insert
+    impl->deny_type_intern_in_region();
     type_info temp = type_info::make_weak_ptr(impl->string_symbolizer_, pointee_type);
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
@@ -1689,6 +1717,7 @@ type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {
     }
 
     // Cache miss - construct full type_info and insert
+    impl->deny_type_intern_in_region();
     type_info temp = type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type);
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
@@ -1707,6 +1736,7 @@ type_info* engine::get_type_info_reference(type_info* referenced_type) {
     }
 
     // Cache miss - construct full type_info and insert
+    impl->deny_type_intern_in_region();
     type_info temp = type_info::make_reference(impl->string_symbolizer_, referenced_type);
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
@@ -1762,6 +1792,7 @@ type_info* engine::get_type_info(const type_info& temp) {
     }
 
     // Insert the new type_info and return pointer to it
+    impl->deny_type_intern_in_region();
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
@@ -1827,7 +1858,77 @@ size_t engine::memory_cap() const {
 }
 
 detail::execution_limits& engine::execution_limits() noexcept {
+    // While a parallel region's workers run, every charge site resolves to the calling
+    // worker's own accounting through this ONE chokepoint (docs/parallel_design.md §2).
+    // Outside a region: a single never-taken null test on an allocation-path accessor.
+    if (detail::parallel_engine_state* p = impl->parallel_.get()) [[unlikely]] {
+        if (detail::parallel_region_table* region = p->active_region) {
+            if (auto* worker_limits = region->find(std::this_thread::get_id())) {
+                return *worker_limits;
+            }
+        }
+    }
     return impl->limits_;
+}
+
+detail::parallel_engine_state& engine::parallel_state() {
+    if (!impl->parallel_) {
+        impl->parallel_ = std::make_unique<detail::parallel_engine_state>();
+    }
+    return *impl->parallel_;
+}
+
+void engine::parallel_thread_count(size_t workers) {
+    parallel_state().thread_count_override = workers;
+}
+
+size_t engine::parallel_thread_count() const {
+    if (impl->parallel_ && impl->parallel_->thread_count_override) {
+        return impl->parallel_->thread_count_override;
+    }
+    const unsigned hw = std::thread::hardware_concurrency();
+    return hw ? hw : 1;
+}
+
+const std::vector<size_t>& engine::last_parallel_chunk_bounds() const {
+    static const std::vector<size_t> empty;
+    return impl->parallel_ ? impl->parallel_->last_chunk_bounds : empty;
+}
+
+// Per-worker copy of a registered callable: invoking the copy must bump no refcount the
+// engine's stored values share, so the inner std::function is copied into fresh function
+// values, and overload sets dispatch over a per-copy snapshot (findBestMatch returns a
+// copy of the stored overload value — the snapshot makes those copies worker-private).
+script_value engine::make_parallel_host_function_copy(const std::string& name) {
+    auto setIt = impl->overloadedFunctions.find(name);
+    if (setIt != impl->overloadedFunctions.end()) {
+        auto snapshot = std::make_shared<implementation::OverloadSet>();
+        snapshot->set_conversion_registry(impl->conversions);
+        snapshot->set_class_lookup(setIt->second.classes_by_type, setIt->second.classes_by_name);
+        snapshot->overloads.reserve(setIt->second.overloads.size());
+        for (auto overload : setIt->second.overloads) {   // copy, then re-mint the value
+            script_function inner = overload.function.as_function();
+            overload.function = script_value::make_function(std::move(inner), this);
+            snapshot->overloads.push_back(std::move(overload));
+        }
+        uint64_t name_id = impl->string_symbolizer_.intern(name);
+        script_function dispatcher = [snapshot, name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+            script_value bestMatch = snapshot->findBestMatch(args);
+            if (bestMatch.is_null()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "No matching overload found for '{0}' with {1} arguments", name_id, static_cast<uint64_t>(args.size()));
+            }
+            const script_function& func = bestMatch.as_function();
+            return func(args);
+        };
+        return script_value::make_function(std::move(dispatcher), this);
+    }
+    auto existing = impl->global_environment_->get(name);
+    if (existing && existing.value().is_function()) {
+        script_function inner = existing.value().as_function();
+        return script_value::make_function(std::move(inner), this);
+    }
+    return script_value(std::monostate{}, this);
 }
 
 std::vector<engine::stack_frame> engine::last_stack_trace() const {

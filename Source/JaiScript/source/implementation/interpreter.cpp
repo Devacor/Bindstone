@@ -2349,6 +2349,7 @@ interpreter::interpreter()
       environment_(std::make_shared<environment>(string_symbolizer_)),
       hasReturnValue_(false),
       current_method_this_(std::monostate{}, nullptr) {
+    env_symbolizer_ = string_symbolizer_;
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -2415,6 +2416,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
       environment_(std::make_shared<environment>(string_symbolizer_)),
       hasReturnValue_(false),
       current_method_this_(std::monostate{}, nullptr) {
+    env_symbolizer_ = string_symbolizer_;
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -2480,6 +2482,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
       environment_(global_env),
       hasReturnValue_(false),
       current_method_this_(std::monostate{}, nullptr) {
+    env_symbolizer_ = string_symbolizer_;
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -11103,7 +11106,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             // Create static method environment for static field access
             environment_ = std::make_shared<environment>(
                 function.closure_env->get_parent(),
-                string_symbolizer_,
+                env_symbolizer_,
                 function.closure_env->get_class_definition()
             );
         } else {
@@ -11907,8 +11910,10 @@ std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr
         env->reset(parent);
         return env;
     } else {
-        // Pool is exhausted, create new environment and add to pool
-        auto newEnv = std::make_shared<environment>(parent, string_symbolizer_);
+        // Pool is exhausted, create new environment and add to pool. env_symbolizer_ is
+        // the epoch sink: == string_symbolizer_ normally; a parallel worker's private
+        // instance, so worker env churn never bumps the shared engine epoch.
+        auto newEnv = std::make_shared<environment>(parent, env_symbolizer_);
         environment_pool_.emplace_back(newEnv);
         ++environment_pool_index_;
         return newEnv;
@@ -11945,7 +11950,7 @@ std::shared_ptr<environment> interpreter::get_pooled_method_environment(std::sha
         return env;
     } else {
         // Pool is exhausted, create new method environment and add to pool
-        auto newEnv = std::make_shared<environment>(parent, string_symbolizer_, std::move(this_obj));
+        auto newEnv = std::make_shared<environment>(parent, env_symbolizer_, std::move(this_obj));
         newEnv->set_access_context(access_ctx);
         environment_pool_.emplace_back(newEnv);
         ++environment_pool_index_;

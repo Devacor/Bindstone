@@ -162,7 +162,18 @@ namespace jai {
         
         // Explicit deep copy method
         script_value clone() const;
-        
+
+        // Parallel-region detach (parallel_transform v0): deep copy where EVERY heavy
+        // node gets a fresh strong_ptr - including strings, which clone() and plain
+        // copies deliberately share - bound primitives decode to detached values, and
+        // type_info tags are preserved on every node. The result's reachable set shares
+        // no control block with the source, so another thread may copy/mutate it freely.
+        // Value-semantic content only (null/int/float/string/char/bool + arrays/maps of
+        // the same); throws jai::runtime_error naming the offending type otherwise.
+        // collected_types (optional) receives every node's type_info for the region's
+        // pre-warm pass.
+        script_value parallel_detached_copy(std::vector<type_info*>* collected_types = nullptr) const;
+
     public:
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env);
 

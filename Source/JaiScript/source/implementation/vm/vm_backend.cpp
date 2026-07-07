@@ -395,7 +395,7 @@ struct vm_backend::frame_guard {
 };
 
 vm_backend::vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env)
-	: symbolizer_(symbolizer), environment_(std::move(global_env)), compiler_(symbolizer) {
+	: symbolizer_(symbolizer), env_symbolizer_(symbolizer), environment_(std::move(global_env)), compiler_(symbolizer) {
 	cached_global_env_ = environment_.get();
 	stack_.reserve(64);
 	frames_.reserve(64);
@@ -405,6 +405,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 	engine_ = engine_ref;
 	if (engine_) {
 		symbolizer_ = engine_->get_symbolizer();
+		env_symbolizer_ = symbolizer_;
 		if (auto global = engine_->get_global_environment()) {
 			environment_ = global;
 			cached_global_env_ = global.get();   // stable for the engine's lifetime
@@ -1142,7 +1143,7 @@ std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<envir
 		env->reset(std::move(parent));
 		return env;
 	}
-	return std::make_shared<environment>(std::move(parent), symbolizer_);
+	return std::make_shared<environment>(std::move(parent), env_symbolizer_);
 }
 
 std::shared_ptr<environment> vm_backend::acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx) {
@@ -1153,7 +1154,7 @@ std::shared_ptr<environment> vm_backend::acquire_method_scope_env(std::shared_pt
 		env->set_access_context(access_ctx);
 		return env;
 	}
-	auto env = std::make_shared<environment>(std::move(parent), symbolizer_, std::move(this_obj));
+	auto env = std::make_shared<environment>(std::move(parent), env_symbolizer_, std::move(this_obj));
 	env->set_access_context(access_ctx);
 	return env;
 }
@@ -1165,7 +1166,7 @@ std::shared_ptr<environment> vm_backend::acquire_static_scope_env(std::shared_pt
 		env->reset_as_static_method(std::move(parent), std::move(class_def));
 		return env;
 	}
-	return std::make_shared<environment>(std::move(parent), symbolizer_, std::move(class_def));
+	return std::make_shared<environment>(std::move(parent), env_symbolizer_, std::move(class_def));
 }
 
 void vm_backend::release_scope_env(std::shared_ptr<environment> env) {

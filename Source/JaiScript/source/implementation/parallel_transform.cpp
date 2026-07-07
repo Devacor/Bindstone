@@ -1,0 +1,872 @@
+// parallel_transform v0 (docs/parallel_design.md; docs/parallel_prove_or_serial.md §5,
+// RULED contract A). One builtin, three phases, all charged to the call itself:
+//
+//   ADMISSION (amortized per body): a fail-closed static walk over fn's AST — every node
+//   kind is whitelisted or the call errors ("parallel_transform: <reason> at line:col").
+//   The walk also snapshots the transitive call graph (script functions + whitelisted
+//   host functions) and every parse-time type the bodies reference.
+//
+//   BARRIER (single-threaded): per-worker execution contexts are built — own backend
+//   instance (engine's configured type), root environment with parent = nullptr (the
+//   hard partition: a lookup that would escape fails as undefined, it cannot race),
+//   private env-epoch sink, own execution_limits, per-worker copies of every callable
+//   the body needs (fresh strong_ptrs — invoking them bumps no shared refcount), and a
+//   detached input slice (script_value::parallel_detached_copy — the value-semantic
+//   tier's alias walk is exactly "clone everything", so exclusivity holds by
+//   construction). Type shapes are pre-warmed and the symbolizer/type tables freeze.
+//
+//   REGION: static contiguous chunks (n/thread_count(), boundary-shifted by the optional
+//   weight hint evaluated at the barrier), pinned pool workers + the calling thread,
+//   disjoint writes into the pre-sized result. engine::execution_limits() resolves to
+//   the calling worker's accounting through the installed region table. First error in
+//   ITERATION order wins at the join; a terminal worker failure (budget) latches the
+//   engine's terminal rail.
+
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>
+#include <jaiscript/detail/interpreter_backend.hpp>
+#include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/string_symbolizer.hpp>
+#include <jaiscript/vm/vm_backend.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <optional>
+#include <unordered_set>
+
+namespace jai::detail {
+
+namespace {
+
+	constexpr size_t k_parallel_small_n = 16;   // below this, one context on the calling thread
+
+	// v0 host whitelist: pure math (stdlib/math.hpp minus the random family) + to_string.
+	// Everything else — print, io, json, user bindings — errors at admission until the
+	// parallel_for annotation surface (parallel_design.md §5) exists.
+	bool parallel_host_whitelisted(std::string_view name) {
+		static constexpr std::string_view k_whitelist[] = {
+			"abs", "sign", "min", "max", "clamp",
+			"floor", "ceil", "round", "trunc",
+			"sqrt", "cbrt", "pow", "exp", "exp2", "log", "log2", "log10",
+			"sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+			"sinh", "cosh", "tanh",
+			"degrees", "radians", "fmod", "hypot",
+			"lerp", "mix", "unmix", "mix_in", "mix_out", "mix_in_out", "mix_out_in",
+			"unmix_in", "unmix_out", "unmix_in_out", "unmix_out_in",
+			"saturate", "wrap", "remap", "is_nan", "is_inf",
+			"to_string",
+		};
+		for (auto w : k_whitelist) {
+			if (name == w) { return true; }
+		}
+		return false;
+	}
+
+	bool primitive_ctor_name(std::string_view name) {
+		return name == "int" || name == "int64" || name == "float" || name == "double" ||
+		       name == "string" || name == "char" || name == "bool";
+	}
+
+	const script_callable* payload_from_function_value(const script_value& v) {
+		if (!v.is_function()) { return nullptr; }
+		const script_function& f = v.as_function();
+		if (const auto* thunk = f.target<script_callable_thunk>()) { return &thunk->payload; }
+		return nullptr;
+	}
+
+	// ============================== ADMISSION ==============================
+
+	struct admission_builder {
+		engine& eng;
+		string_symbolizer& sym;
+		parallel_admission adm;
+		std::unordered_set<const void*> visited_bodies;
+		std::unordered_set<uint64_t> collected_fn_ids;
+		std::unordered_set<uint64_t> collected_host_ids;
+		std::unordered_set<type_info*> collected_types;
+		std::vector<std::unordered_set<uint64_t>> scopes;   // current function's scopes
+		bool failed = false;
+
+		admission_builder(engine& e) : eng(e), sym(*e.get_symbolizer()) { adm.admitted = false; }
+
+		bool fail(const ast_node* node, std::string reason) {
+			if (!failed) {
+				failed = true;
+				adm.admitted = false;
+				adm.code = make_error_code(runtime_error_code::unsupported_operation);
+				adm.message = "parallel_transform: " + std::move(reason);
+				if (node) {
+					adm.message += " at " + std::to_string(node->location.line) + ":" +
+					               std::to_string(node->location.column);
+				}
+			}
+			return false;
+		}
+
+		void collect_type(type_info_ptr t) {
+			if (t.get() && collected_types.insert(t.get()).second) {
+				adm.referenced_types.push_back(t.get());
+			}
+		}
+
+		void declare(uint64_t id) { scopes.back().insert(id); }
+		bool is_local(uint64_t id) const {
+			for (const auto& s : scopes) {
+				if (s.count(id)) { return true; }
+			}
+			return false;
+		}
+
+		bool admit_function(const std::shared_ptr<script_defined_function>& fn, uint64_t global_name_id,
+		                    bool require_unary_value_param, const ast_node* call_node) {
+			if (!fn || !fn->body) {
+				return fail(call_node, "fn has no body known at admission time");
+			}
+			if (require_unary_value_param) {
+				if (fn->parameters.size() != 1) {
+					return fail(fn->body.get(), "fn must take exactly one parameter");
+				}
+				if (fn->parameters[0].is_reference) {
+					return fail(fn->body.get(), "fn may not take its element by reference (elements are detached copies)");
+				}
+			}
+			// Collect the graph entry before the visited check so recursion still records it
+			if (global_name_id != UINT64_MAX) {
+				if (collected_fn_ids.insert(global_name_id).second) {
+					adm.script_functions.emplace_back(global_name_id, fn);
+				}
+			} else {
+				adm.script_functions.emplace_back(global_name_id, fn);
+			}
+			if (!visited_bodies.insert(fn->body.get()).second) {
+				return true;   // already walked (recursion / shared target)
+			}
+
+			// Fresh scope stack per function
+			std::vector<std::unordered_set<uint64_t>> saved;
+			saved.swap(scopes);
+			scopes.emplace_back();
+			bool ok = true;
+			for (const auto& p : fn->parameters) {
+				if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }   // warm (idempotent lazy fill)
+				declare(p.symbol_id);
+				collect_type(p.type);
+				if (p.default_value && !walk_expr(p.default_value)) { ok = false; break; }
+			}
+			if (ok) {
+				collect_type(fn->return_type);
+				for (const auto& d : fn->body->declarations) {
+					if (!walk_stmt(d)) { ok = false; break; }
+				}
+			}
+			scopes.swap(saved);
+			return ok;
+		}
+
+		bool walk_stmt(const statement_ptr& s) {
+			if (!s) { return true; }
+			switch (s->get_type()) {
+			case node_type::expression_stmt:
+				return walk_expr(static_cast<expression_stmt*>(s.get())->expression);
+			case node_type::expression_decl:
+				return walk_expr(static_cast<expression_decl*>(s.get())->expression);
+			case node_type::statement_decl:
+				return walk_stmt(static_cast<statement_decl*>(s.get())->statement);
+			case node_type::block_stmt: {
+				auto* b = static_cast<block_stmt*>(s.get());
+				scopes.emplace_back();
+				for (const auto& d : b->declarations) {
+					if (!walk_stmt(d)) { scopes.pop_back(); return false; }
+				}
+				scopes.pop_back();
+				return true;
+			}
+			case node_type::if_stmt: {
+				auto* n = static_cast<if_stmt*>(s.get());
+				return walk_expr(n->condition) && walk_stmt(n->then_statement) && walk_stmt(n->else_statement);
+			}
+			case node_type::while_stmt: {
+				auto* n = static_cast<while_stmt*>(s.get());
+				return walk_expr(n->condition) && walk_stmt(n->body);
+			}
+			case node_type::for_stmt: {
+				auto* n = static_cast<for_stmt*>(s.get());
+				scopes.emplace_back();
+				bool ok = walk_stmt(n->initializer) && walk_expr(n->condition) &&
+				          walk_expr(n->update) && walk_stmt(n->body);
+				scopes.pop_back();
+				return ok;
+			}
+			case node_type::range_for_stmt: {
+				auto* n = static_cast<range_for_stmt*>(s.get());
+				if (!walk_expr(n->container)) { return false; }
+				if (n->variable_name_id == UINT64_MAX) { n->variable_name_id = sym.intern(n->variable_name); }
+				collect_type(n->element_type);
+				scopes.emplace_back();
+				declare(n->variable_name_id);
+				bool ok = walk_stmt(n->body);
+				scopes.pop_back();
+				return ok;
+			}
+			case node_type::return_stmt:
+				return walk_expr(static_cast<return_stmt*>(s.get())->value);
+			case node_type::break_stmt:
+			case node_type::continue_stmt:
+			case node_type::fallthrough_stmt:
+				return true;
+			case node_type::switch_stmt: {
+				auto* n = static_cast<switch_stmt*>(s.get());
+				if (!walk_expr(n->condition)) { return false; }
+				for (const auto& c : n->cases) {
+					if (!walk_expr(c->value)) { return false; }
+					scopes.emplace_back();
+					for (const auto& st : c->body) {
+						if (!walk_stmt(st)) { scopes.pop_back(); return false; }
+					}
+					scopes.pop_back();
+				}
+				if (n->default_case) {
+					scopes.emplace_back();
+					for (const auto& st : n->default_case->body) {
+						if (!walk_stmt(st)) { scopes.pop_back(); return false; }
+					}
+					scopes.pop_back();
+				}
+				return true;
+			}
+			case node_type::try_stmt: {
+				auto* n = static_cast<try_stmt*>(s.get());
+				if (!walk_stmt(n->try_block)) { return false; }
+				scopes.emplace_back();
+				if (!n->catch_var.empty()) { declare(sym.intern(n->catch_var)); }
+				bool ok = walk_stmt(n->catch_block);
+				scopes.pop_back();
+				return ok;
+			}
+			case node_type::variable_decl: {
+				auto* n = static_cast<variable_decl*>(s.get());
+				if (n->name_id == UINT64_MAX) { n->name_id = sym.intern(n->name); }
+				collect_type(n->type);
+				bool ok;
+				if (n->type.get() && n->type->is_reference()) {
+					// Reference declaration: the alias must root at worker-local storage
+					ok = walk_target(n->initializer, "reference declaration");
+				} else {
+					ok = walk_expr(n->initializer);
+				}
+				if (!ok) { return false; }
+				declare(n->name_id);
+				return true;
+			}
+			case node_type::destructuring_decl: {
+				auto* n = static_cast<destructuring_decl*>(s.get());
+				if (!walk_expr(n->initializer)) { return false; }
+				for (const auto& [name, id] : n->names) { declare(id); }
+				return true;
+			}
+			case node_type::function_decl:
+				return fail(s.get(), "function declarations are not allowed in a parallel body (v0)");
+			case node_type::class_decl:
+				return fail(s.get(), "class declarations are not allowed in a parallel body");
+			case node_type::namespace_decl:
+				return fail(s.get(), "namespace declarations are not allowed in a parallel body");
+			case node_type::enum_decl:
+				return fail(s.get(), "enum declarations are not allowed in a parallel body");
+			case node_type::include_decl:
+			case node_type::import_decl:
+				return fail(s.get(), "include/import is not allowed in a parallel body");
+			default:
+				return fail(s.get(), "statement is not allowed in a parallel body (v0)");
+			}
+		}
+
+		bool walk_expr(const expression_ptr& e) {
+			if (!e) { return true; }
+			switch (e->get_type()) {
+			case node_type::literal_expr:
+				return true;
+			case node_type::identifier_expr: {
+				auto* n = static_cast<identifier_expr*>(e.get());
+				if (is_local(n->symbol_id)) { return true; }
+				return fail(n, "body reads enclosing state '" + std::string(n->name) + "'");
+			}
+			case node_type::binary_expr: {
+				auto* n = static_cast<binary_expr*>(e.get());
+				return walk_expr(n->left) && walk_expr(n->right);
+			}
+			case node_type::unary_expr: {
+				auto* n = static_cast<unary_expr*>(e.get());
+				if (n->op.type == token_type::plus_plus || n->op.type == token_type::minus_minus) {
+					return walk_target(n->operand, "increment/decrement");
+				}
+				return walk_expr(n->operand);
+			}
+			case node_type::assignment_expr: {
+				auto* n = static_cast<assignment_expr*>(e.get());
+				return walk_target(n->target, "assignment") && walk_expr(n->value);
+			}
+			case node_type::call_expr:
+				return walk_call(static_cast<call_expr*>(e.get()));
+			case node_type::member_expr:
+				return fail(e.get(), "member access is not allowed in a parallel body (v0)");
+			case node_type::lambda_expr:
+				return fail(e.get(), "lambdas are not allowed in a parallel body (v0)");
+			case node_type::new_expr:
+				return fail(e.get(), "'new' is not allowed in a parallel body");
+			case node_type::this_expr:
+			case node_type::super_expr:
+				return fail(e.get(), "'this'/'super' is not allowed in a parallel body");
+			case node_type::ternary_expr: {
+				auto* n = static_cast<ternary_expr*>(e.get());
+				return walk_expr(n->condition) && walk_expr(n->then_expression) && walk_expr(n->else_expression);
+			}
+			case node_type::array_literal_expr: {
+				auto* n = static_cast<array_literal_expr*>(e.get());
+				for (const auto& el : n->elements) {
+					if (!walk_expr(el)) { return false; }
+				}
+				return true;
+			}
+			case node_type::map_literal_expr: {
+				auto* n = static_cast<map_literal_expr*>(e.get());
+				for (const auto& kv : n->entries) {
+					if (!walk_expr(kv.first) || !walk_expr(kv.second)) { return false; }
+				}
+				return true;
+			}
+			case node_type::throw_expr:
+				return walk_expr(static_cast<throw_expr*>(e.get())->value);
+			case node_type::yield_expr:
+				return fail(e.get(), "yield is not allowed in a parallel body");
+			case node_type::include_expr:
+				return fail(e.get(), "include is not allowed in a parallel body");
+			default:
+				return fail(e.get(), "expression is not allowed in a parallel body (v0)");
+			}
+		}
+
+		// Stores and reference bindings must root at worker-local storage
+		bool walk_target(const expression_ptr& t, const char* what) {
+			if (!t) { return fail(nullptr, std::string(what) + " target missing"); }
+			switch (t->get_type()) {
+			case node_type::identifier_expr: {
+				auto* n = static_cast<identifier_expr*>(t.get());
+				if (is_local(n->symbol_id)) { return true; }
+				return fail(n, "body writes enclosing state '" + std::string(n->name) + "'");
+			}
+			case node_type::binary_expr: {
+				auto* n = static_cast<binary_expr*>(t.get());
+				if (n->op.type == token_type::left_bracket) {
+					return walk_target(n->left, what) && walk_expr(n->right);
+				}
+				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
+			}
+			case node_type::member_expr:
+				return fail(t.get(), "member stores are not allowed in a parallel body (v0)");
+			default:
+				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
+			}
+		}
+
+		bool walk_call(call_expr* call) {
+			// Builtin container/string METHOD call: receiver expression walks under the
+			// normal rules (so it roots at worker-local values); the method itself comes
+			// from the shared registry both backends use.
+			if (call->callee && call->callee->get_type() == node_type::member_expr) {
+				auto* m = static_cast<member_expr*>(call->callee.get());
+				if (m->is_static) {
+					return fail(m, "static member calls are not allowed in a parallel body");
+				}
+				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }   // warm
+				if (!walk_expr(m->object)) { return false; }
+				for (const auto& a : call->arguments) {
+					if (!walk_expr(a)) { return false; }
+				}
+				return true;
+			}
+			if (!call->callee || call->callee->get_type() != node_type::identifier_expr) {
+				return fail(call, "call target is not statically resolvable in a parallel body (v0)");
+			}
+			auto* callee = static_cast<identifier_expr*>(call->callee.get());
+			const std::string callee_name(callee->name);
+			if (is_local(callee->symbol_id)) {
+				return fail(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body (v0)");
+			}
+			// Resolve the callee BEFORE walking arguments so the caller sees the most
+			// useful violation first (e.g. a nested parallel_transform names itself,
+			// not its function-valued argument)
+			bool callee_ok = false;
+			if (primitive_ctor_name(callee->name)) {
+				callee_ok = true;   // int(x)/float(x)/... conversions - backend-resolved, pure
+			} else {
+				auto global = eng.get_global_environment()->get(callee->symbol_id);
+				if (!global || !global.value().is_function()) {
+					return fail(callee, "call target '" + callee_name + "' is not a function known at admission time");
+				}
+				if (const script_callable* payload = payload_from_function_value(global.value())) {
+					if (payload->kind != script_callable::kind_type::function || !payload->fn) {
+						return fail(callee, "call target '" + callee_name + "' is not a plain function (v0)");
+					}
+					if (!admit_function(payload->fn, callee->symbol_id, false, callee)) { return false; }
+					callee_ok = true;
+				} else if (parallel_host_whitelisted(callee->name)) {
+					// Host binding (typed dispatcher / variadic): whitelist or reject
+					if (collected_host_ids.insert(callee->symbol_id).second) {
+						adm.host_functions.emplace_back(callee->symbol_id, callee_name);
+					}
+					callee_ok = true;
+				} else {
+					return fail(callee, "host function '" + callee_name + "' is not callable in a parallel body (v0)");
+				}
+			}
+			for (const auto& a : call->arguments) {
+				if (!walk_expr(a)) { return false; }
+			}
+			return callee_ok;
+		}
+	};
+
+	parallel_admission build_admission(engine& eng, const std::shared_ptr<script_defined_function>& fn) {
+		admission_builder builder(eng);
+		if (builder.admit_function(fn, UINT64_MAX, true, nullptr)) {
+			builder.adm.admitted = true;
+		}
+		return std::move(builder.adm);
+	}
+
+	bool admission_graph_current(engine& eng, const parallel_admission& adm) {
+		for (const auto& [id, sfn] : adm.script_functions) {
+			if (id == UINT64_MAX) { continue; }   // the root fn - caller-supplied, always current
+			auto cur = eng.get_global_environment()->get(id);
+			if (!cur || !cur.value().is_function()) { return false; }
+			const script_callable* p = payload_from_function_value(cur.value());
+			if (!p || p->kind != script_callable::kind_type::function || !p->fn || p->fn->body != sfn->body) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	const parallel_admission* admit_cached(engine& eng, parallel_engine_state& state,
+	                                       const std::shared_ptr<script_defined_function>& fn) {
+		const void* key = fn->body.get();
+		auto it = state.admission_cache.find(key);
+		if (it != state.admission_cache.end() && admission_graph_current(eng, it->second)) {
+			return &it->second;
+		}
+		auto [pos, inserted] = state.admission_cache.insert_or_assign(key, build_admission(eng, fn));
+		(void)inserted;
+		return &pos->second;
+	}
+
+	// ============================== WORKERS ==============================
+
+	struct worker_error_record {
+		size_t iteration = 0;
+		std::error_code code{};
+		std::string message;
+		bool terminal = false;
+	};
+
+	struct worker_context {
+		std::unique_ptr<string_symbolizer> env_epoch_sink;
+		std::shared_ptr<environment> root_env;
+		execution_limits limits;
+		std::unique_ptr<execution_backend> backend;
+		vm::vm_backend* vm = nullptr;
+		script_callable fn_payload;
+		std::vector<script_value> input;
+		size_t begin = 0;
+		size_t end = 0;
+		std::optional<worker_error_record> error;
+	};
+
+	// Worker-side value-semantic check for fn results (read-only const walk - no handle
+	// copies, so it never touches a refcount)
+	bool result_value_semantic(const script_value& raw, const char** what) {
+		const script_value& v = raw.is_reference() ? raw.deref() : raw;
+		switch (v.raw_storage_index()) {
+		case script_value::TYPEID_NULL:
+		case script_value::TYPEID_INT:
+		case script_value::TYPEID_FLOAT:
+		case script_value::TYPEID_STRING:
+		case script_value::TYPEID_CHAR:
+		case script_value::TYPEID_BOOL:
+			return true;
+		case script_value::TYPEID_CPP_BOUND:
+			if (v.is_int() || v.is_float() || v.is_string() || v.is_char() || v.is_bool() || v.is_null()) {
+				return true;   // bound primitive - decodes to a value-semantic read
+			}
+			*what = "bound host object";
+			return false;
+		case script_value::TYPEID_ARRAY: {
+			for (const auto& elem : v.unchecked_as_array()) {
+				if (!result_value_semantic(elem, what)) { return false; }
+			}
+			return true;
+		}
+		case script_value::TYPEID_MAP: {
+			for (const auto& [key, val] : v.unchecked_as_map()) {
+				if (!result_value_semantic(key, what) || !result_value_semantic(val, what)) { return false; }
+			}
+			return true;
+		}
+		case script_value::TYPEID_OBJECT: *what = "object"; return false;
+		case script_value::TYPEID_FUNCTION: *what = "function"; return false;
+		case script_value::TYPEID_SHARED_PTR: *what = "shared_ptr"; return false;
+		case script_value::TYPEID_WEAK_PTR: *what = "weak_ptr"; return false;
+		default: *what = "unsupported type"; return false;
+		}
+	}
+
+	std::unique_ptr<worker_context> provision_worker(engine& eng, const parallel_admission& adm,
+	                                                 std::chrono::nanoseconds budget,
+	                                                 bool use_vm) {
+		auto ctx = std::make_unique<worker_context>();
+		ctx->env_epoch_sink = std::make_unique<string_symbolizer>();
+		ctx->root_env = std::make_shared<environment>(ctx->env_epoch_sink.get());
+
+		const auto& outer = eng.execution_limits();
+		ctx->limits.memory_cap = outer.memory_cap;
+		ctx->limits.memory_cap_symbol_id = outer.memory_cap_symbol_id;
+		ctx->limits.memory_limit = outer.memory_limit;
+		if (outer.memory_limit != SIZE_MAX) {
+			const size_t already = std::min(outer.memory_used, outer.memory_limit);
+			ctx->limits.memory_limit = outer.memory_limit - already;
+		}
+
+		if (use_vm) {
+			auto backend = std::make_unique<vm::vm_backend>(eng.get_symbolizer(), ctx->root_env);
+			backend->set_engine_reference(&eng);
+			backend->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(), &ctx->limits, budget);
+			ctx->vm = backend.get();
+			ctx->backend = std::move(backend);
+		} else {
+			auto backend = std::make_unique<interpreter_backend>(eng.get_symbolizer(), ctx->root_env);
+			backend->set_engine_reference(&eng);
+			backend->get_interpreter()->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(),
+			                                                      &ctx->limits, budget);
+			ctx->backend = std::move(backend);
+		}
+
+		// Per-worker copies of every callable the body needs: fresh script_defined_function
+		// objects (own parameters vector, own backend_body_cache, closure_env = the worker
+		// root) wrapped in invokers bound to THIS worker's backend. Region-scoped values —
+		// they die at the join, so binding the backend pointer is safe here.
+		execution_backend* backend_ptr = ctx->backend.get();
+		bool first_entry = true;
+		for (const auto& [name_id, source_fn] : adm.script_functions) {
+			auto copy = std::make_shared<script_defined_function>(
+				source_fn->name, source_fn->parameters, source_fn->return_type,
+				source_fn->body, ctx->root_env, source_fn->local_count);
+			if (ctx->vm) { ctx->vm->precompile_parallel_function(*copy); }
+			script_callable payload;
+			payload.kind = script_callable::kind_type::function;
+			payload.fn = copy;
+			if (first_entry) {
+				ctx->fn_payload = payload;   // the root fn is always pushed first
+				first_entry = false;
+			}
+			if (name_id != UINT64_MAX) {
+				script_function invoker = [backend_ptr, payload](const std::vector<script_value>& a) {
+					return backend_ptr->execute_callable(payload, a);
+				};
+				ctx->root_env->define(name_id, script_value::make_function(invoker, &eng));
+			}
+		}
+		for (const auto& [name_id, name] : adm.host_functions) {
+			ctx->root_env->define(name_id, eng.make_parallel_host_function_copy(name));
+		}
+		return ctx;
+	}
+
+	void run_worker(worker_context& ctx, std::vector<script_value>& out, engine& eng) {
+		std::vector<script_value> call_args;
+		call_args.emplace_back(std::monostate{}, &eng);
+		size_t i = ctx.begin;
+		try {
+			for (; i < ctx.end; ++i) {
+				call_args[0] = std::move(ctx.input[i - ctx.begin]);
+				auto r = ctx.backend->execute_callable(ctx.fn_payload, call_args);
+				if (ctx.backend->is_unwinding()) {
+					// Uncaught script throw: surfaces as backend unwinding state, not a
+					// checked_result failure. The thrown value flattens to its message
+					// text across the join (v0).
+					ctx.error = worker_error_record{ i,
+						make_error_code(runtime_error_code::evaluation_failed),
+						ctx.backend->get_current_exception().what(),
+						ctx.limits.terminal_error };
+					return;
+				}
+				if (!r) {
+					ctx.error = worker_error_record{ i, r.error(),
+						format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
+					return;
+				}
+				const char* what = nullptr;
+				if (!result_value_semantic(r.value(), &what)) {
+					ctx.error = worker_error_record{ i,
+						make_error_code(runtime_error_code::unsupported_operation),
+						std::string("parallel_transform: fn returned a non-value-semantic result (") + what +
+							") for element " + std::to_string(i),
+						ctx.limits.terminal_error };
+					return;
+				}
+				out[i] = std::move(r).value();
+			}
+		} catch (const std::exception& e) {
+			ctx.error = worker_error_record{ i, make_error_code(runtime_error_code::cpp_exception),
+				e.what(), ctx.limits.terminal_error };
+		}
+	}
+
+	// ============================== BARRIER HELPERS ==============================
+
+	void prewarm_region_types(engine& eng, const std::vector<type_info*>& seed) {
+		(void)eng.symbolize("pair");   // map range-for pair name (hit for stdlib engines)
+		std::vector<type_info*> pending(seed);
+		pending.push_back(eng.get_type_info_int());
+		pending.push_back(eng.get_type_info_float());
+		pending.push_back(eng.get_type_info_string());
+		pending.push_back(eng.get_type_info_bool());
+		pending.push_back(eng.get_type_info_char());
+		pending.push_back(eng.get_type_info_void());
+		pending.push_back(eng.get_type_info_array(nullptr));
+		pending.push_back(eng.get_type_info_map(nullptr, nullptr));
+		eng.get_type_info_reference(nullptr);
+		std::unordered_set<type_info*> seen;
+		while (!pending.empty()) {
+			type_info* t = pending.back();
+			pending.pop_back();
+			if (!t || !seen.insert(t).second) { continue; }
+			eng.get_type_info_reference(t);
+			if (type_info* e = t->element_type().get()) { pending.push_back(e); }
+			if (type_info* k = t->key_type().get()) { pending.push_back(k); }
+			if (type_info* v = t->value_type().get()) { pending.push_back(v); }
+		}
+	}
+
+	std::vector<size_t> partition_flat(size_t n, size_t chunks) {
+		std::vector<size_t> bounds(chunks + 1);
+		for (size_t k = 0; k <= chunks; ++k) {
+			bounds[k] = n * k / chunks;
+		}
+		return bounds;
+	}
+
+	std::vector<size_t> partition_weighted(const std::vector<double>& weights, size_t chunks) {
+		double total = 0.0;
+		for (double w : weights) { total += w; }
+		if (!(total > 0.0)) { return partition_flat(weights.size(), chunks); }
+		std::vector<size_t> bounds(chunks + 1);
+		bounds[0] = 0;
+		bounds[chunks] = weights.size();
+		double prefix = 0.0;
+		size_t k = 1;
+		for (size_t i = 0; i < weights.size() && k < chunks; ++i) {
+			if (prefix >= total * static_cast<double>(k) / static_cast<double>(chunks)) {
+				bounds[k++] = i;
+			}
+			prefix += weights[i];
+		}
+		while (k < chunks) { bounds[k++] = weights.size(); }
+		return bounds;
+	}
+
+} // namespace
+
+checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args) {
+	parallel_engine_state& state = eng.parallel_state();
+	auto raise = [&state](std::error_code code, std::string message) {
+		state.error_text = std::move(message);
+		return checked_result<script_value>(code, std::string_view(state.error_text));
+	};
+	auto usage = [&raise](std::string message) {
+		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
+	};
+
+	if (state.region_running) {
+		return usage("parallel_transform: nested parallel regions are not supported (v0)");
+	}
+	if (args.size() < 2 || args.size() > 3) {
+		return usage("parallel_transform: expected (array, fn) or (array, fn, weight_fn)");
+	}
+	const script_value& array_value = args[0].is_reference() ? args[0].deref() : args[0];
+	if (!array_value.is_array()) {
+		return usage("parallel_transform: first argument must be an array");
+	}
+	const script_callable* fn_payload = payload_from_function_value(args[1]);
+	if (!fn_payload || fn_payload->kind != script_callable::kind_type::function || !fn_payload->fn || !fn_payload->fn->body) {
+		return usage("parallel_transform: fn must be a script-defined function");
+	}
+	const script_callable* weight_payload = nullptr;
+	if (args.size() == 3) {
+		weight_payload = payload_from_function_value(args[2]);
+		if (!weight_payload || weight_payload->kind != script_callable::kind_type::function ||
+		    !weight_payload->fn || !weight_payload->fn->body) {
+			return usage("parallel_transform: weight_fn must be a script-defined function");
+		}
+	}
+
+	struct running_guard {
+		parallel_engine_state& s;
+		running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
+		~running_guard() { s.region_running = false; }
+	} guard(state);
+
+	// ADMISSION (contract A: violations error, never silent-serial)
+	const parallel_admission* adm = admit_cached(eng, state, fn_payload->fn);
+	if (!adm->admitted) {
+		return raise(adm->code, adm->message);
+	}
+	const parallel_admission* weight_adm = nullptr;
+	if (weight_payload) {
+		weight_adm = admit_cached(eng, state, weight_payload->fn);
+		if (!weight_adm->admitted) {
+			return raise(weight_adm->code, weight_adm->message);
+		}
+		if (weight_payload->fn->parameters.size() != 1 || weight_payload->fn->parameters[0].is_reference) {
+			return usage("parallel_transform: weight_fn must take exactly one parameter by value");
+		}
+	}
+
+	const auto& source = array_value.as_array();
+	const size_t n = source.size();
+	std::vector<script_value> out(n, script_value(std::monostate{}, &eng));
+
+	size_t worker_count = eng.parallel_thread_count();
+	if (worker_count < 1) { worker_count = 1; }
+	if (worker_count > n) { worker_count = n ? n : 1; }
+	if (n < k_parallel_small_n) { worker_count = 1; }   // the ruled small-n knob: same
+	                                                    // semantics, one context, no fan-out
+
+	// Optional weight hint: evaluated per element at the barrier, single-threaded, on the
+	// engine's own backend (ruled §11 Q1). Chunk boundaries equalize cumulative weight.
+	std::vector<size_t> bounds;
+	if (weight_payload && worker_count > 1) {
+		std::vector<double> weights(n, 0.0);
+		engine::external_call_guard call_guard(&eng);
+		std::vector<script_value> weight_args;
+		weight_args.emplace_back(std::monostate{}, &eng);
+		for (size_t i = 0; i < n; ++i) {
+			weight_args[0] = source[i];
+			auto r = eng.get_execution_backend()->execute_callable(*weight_payload, weight_args);
+			if (!r) {
+				return raise(r.error(), "parallel_transform: weight_fn failed for element " +
+					std::to_string(i) + ": " + format_error(r, *eng.get_symbolizer()));
+			}
+			double w;
+			const script_value& wv = r.value().is_reference() ? r.value().deref() : r.value();
+			if (wv.is_int()) { w = static_cast<double>(wv.unchecked_as_int()); }
+			else if (wv.is_float()) { w = wv.unchecked_as_float(); }
+			else {
+				return usage("parallel_transform: weight_fn must return a number (element " + std::to_string(i) + ")");
+			}
+			if (!std::isfinite(w) || w < 0.0) {
+				return usage("parallel_transform: weight_fn returned a negative or non-finite weight (element " +
+					std::to_string(i) + ")");
+			}
+			weights[i] = w;
+		}
+		bounds = partition_weighted(weights, worker_count);
+	} else {
+		bounds = partition_flat(n, worker_count);
+	}
+	state.last_chunk_bounds = bounds;
+
+	// BARRIER: build the per-worker contexts, detach input slices, pre-warm type shapes.
+	const std::chrono::nanoseconds budget =
+		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
+	const backend_type engine_backend = eng.get_backend_type();
+	if (engine_backend == backend_type::custom) {
+		return usage("parallel_transform: custom execution backends are not supported");
+	}
+	const bool use_vm = engine_backend == backend_type::vm;
+
+	std::vector<type_info*> value_types;
+	std::vector<std::unique_ptr<worker_context>> contexts;
+	contexts.reserve(worker_count);
+	for (size_t k = 0; k < worker_count; ++k) {
+		auto ctx = provision_worker(eng, *adm, budget, use_vm);
+		ctx->begin = bounds[k];
+		ctx->end = bounds[k + 1];
+		ctx->input.reserve(ctx->end - ctx->begin);
+		for (size_t i = ctx->begin; i < ctx->end; ++i) {
+			try {
+				ctx->input.push_back(source[i].parallel_detached_copy(&value_types));
+			} catch (const std::exception& e) {
+				return usage("parallel_transform: element " + std::to_string(i) + ": " + e.what());
+			}
+		}
+		contexts.push_back(std::move(ctx));
+	}
+	prewarm_region_types(eng, [&] {
+		std::vector<type_info*> seed = adm->referenced_types;
+		if (weight_adm) { seed.insert(seed.end(), weight_adm->referenced_types.begin(), weight_adm->referenced_types.end()); }
+		seed.insert(seed.end(), value_types.begin(), value_types.end());
+		return seed;
+	}());
+
+	// REGION: pinned pool workers for chunks 1..W-1 (submit_to fixes each chunk's thread
+	// so the limits table can be built before fan-out), the calling thread runs chunk 0.
+	parallel_region_table table;
+	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits });
+	if (worker_count > 1) {
+		const size_t pool_workers_needed = worker_count - 1;
+		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
+			state.pool = std::make_unique<jai::thread_pool>(
+				std::max(pool_workers_needed, jai::thread_pool::default_worker_count()));
+		}
+		for (size_t k = 1; k < worker_count; ++k) {
+			table.entries.push_back({ state.pool->worker_thread_id(k - 1), &contexts[k]->limits });
+		}
+	}
+
+	eng.get_symbolizer()->set_frozen(true);
+	state.active_region = &table;
+	for (size_t k = 1; k < worker_count; ++k) {
+		worker_context* ctx = contexts[k].get();
+		std::vector<script_value>* out_ptr = &out;
+		engine* eng_ptr = &eng;
+		state.pool->submit_to(k - 1, [ctx, out_ptr, eng_ptr] { run_worker(*ctx, *out_ptr, *eng_ptr); });
+	}
+	run_worker(*contexts[0], out, eng);
+	if (worker_count > 1) {
+		state.pool->wait_idle();
+	}
+	state.active_region = nullptr;
+	eng.get_symbolizer()->set_frozen(false);
+
+	// JOIN: roll worker accounting up into the enclosing execute, then the first error in
+	// ITERATION order wins (deterministic under static chunks).
+	size_t rolled_up = 0;
+	for (const auto& ctx : contexts) {
+		rolled_up += ctx->limits.memory_used;
+	}
+	if (rolled_up) {
+		eng.execution_limits().memory_charge_deferred(rolled_up);
+	}
+	const worker_error_record* winner = nullptr;
+	for (const auto& ctx : contexts) {
+		if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {
+			winner = &*ctx->error;
+		}
+	}
+	if (winner) {
+		if (winner->terminal) {
+			eng.execution_limits().terminal_error = true;
+		}
+		std::error_code code = winner->code ? winner->code
+			: make_error_code(runtime_error_code::unsupported_operation);
+		return raise(code, winner->message.empty() ? std::string("parallel_transform: worker failed")
+		                                           : winner->message);
+	}
+	script_value result = script_value::make_array(nullptr, &eng);
+	result.as_array() = std::move(out);
+	return result;
+}
+
+} // namespace jai::detail

@@ -517,6 +517,8 @@ namespace jai::vm {
         void exec_yield(frame& f, const vm_instruction& ins);
         checked_result<void> exec_include(frame& f, const vm_instruction& ins);
         checked_result<void> exec_import(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_ref_return_bind(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_ref_return_lvalue(frame& f, const vm_instruction& ins);
 
         vm_coroutine_state& coroutine_fiber_state(coroutine_handle& handle);
         // Runs (or continues) the fiber; returns the yield value, the final return value on the

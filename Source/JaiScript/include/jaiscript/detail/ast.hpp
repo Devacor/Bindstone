@@ -491,6 +491,10 @@ namespace jai {
     class return_stmt : public statement {
     public:
         expression_ptr value;  // Can be null
+        // Enclosing function declares a reference return (int& f() / -> auto&): the
+        // value binds as a reference instead of evaluating to a copy. Stamped by the
+        // parser's ref_escape_marker pass (innermost function, coroutines excluded).
+        bool binds_reference = false;
 
         return_stmt(const source_location& loc, expression_ptr v = nullptr)
             : statement(loc, node_type::return_stmt), value(v) {}    };

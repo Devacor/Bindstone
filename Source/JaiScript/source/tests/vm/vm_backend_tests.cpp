@@ -1093,6 +1093,123 @@ public:
 			}
 		});
 
+		// Stage C (cells): typed reference returns. int& f() / -> auto& returns a
+		// usable reference; the holder's owner pin (cell/element/field) is the
+		// lifetime, so the returned ref outliving the frame is legal.
+		test("ref_return_grammar_example", [this]() {
+			// The exact grammar.md shape: reference returns + reference locals
+			const char* src = R"(
+				int& pick(array<int>& a, int i) { return a[i]; }
+				array<int> nums = [10, 20, 30, 40];
+				auto& slot = pick(nums, 2);
+				slot = 99;
+				nums[2];
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)99, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_return_local_cell_outlives_frame", [this]() {
+			// Returning a ref to a LOCAL is legal: the local boxes into a cell and the
+			// returned handle keeps it alive after the frame dies. Each call boxes a
+			// FRESH cell (no cross-call sharing).
+			const char* src = R"(
+				int& leak() { int v = 7; return v; }
+				auto& a = leak();
+				auto& b = leak();
+				a = a + 1;
+				b = b + 3;
+				a * 100 + b;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)810, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_return_method_field_trailing_arrow", [this]() {
+			// Method ref return (-> int&) over this.field: instance-pinned field ref
+			const char* src = R"(
+				class Orc {
+					int hp = 10;
+					function heal() -> int& { return this.hp; }
+				}
+				auto o = Orc();
+				auto& h = o.heal();
+				h = 50;
+				o.hp;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)50, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_return_chained_member_read", [this]() {
+			// f().field reads through the returned reference without an alias decl
+			const char* src = R"(
+				class Box { int v = 3; }
+				Box b = Box();
+				Box& get() { return b; }
+				get().v + 1;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)4, e->execute(src).as_int());
+			}
+		});
+
+		test("ref_return_non_lvalue_rejects", [this]() {
+			// A reference cannot bind a temporary - same text both backends
+			const char* src = R"(
+				int& bad() { return 1 + 1; }
+				var msg = "";
+				try { bad(); } catch (e) { msg = e; }
+				msg;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq(std::string("Function with reference return type must return an lvalue reference"),
+				         e->execute(src).as<std::string>());
+			}
+		});
+
+		test("ref_return_referent_type_mismatch_rejects", [this]() {
+			// No conversion can apply through a reference: the referent's base type
+			// must match the declared referent
+			const char* src = R"(
+				int& bad(array<float>& a) { return a[0]; }
+				array<float> fs = [1.5];
+				var msg = "";
+				try { bad(fs); } catch (e) { msg = e; }
+				msg;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq(std::string("Cannot return reference to 'float' from a function returning 'int&'"),
+				         e->execute(src).as<std::string>());
+			}
+		});
+
+		test("coroutine_ref_return_is_parse_error", [this]() {
+			// A suspended fiber's return channel is a value channel (explicit error);
+			// the parse error surfaces as a throw and the engine stays usable
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_throws([&]() { e->execute("coroutine int& co() { yield 1; } 5;"); });
+				check_eq((int64_t)7, e->execute("3 + 4").as_int());   // engine stays usable
+			}
+		});
+
 		// Stage 2 (Tier 1): field/subscript/chain lvalue arguments bind to reference
 		// parameters through the shared resolver (detail/ref_lvalue.hpp). Field refs pin
 		// the instance, element refs pin the vector; typed fields/elements enforce their

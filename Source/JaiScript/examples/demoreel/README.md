@@ -32,7 +32,7 @@ jai_demoreel --smoke             # headless: both backends, frame-hash parity + 
 jai_demoreel --smoke --frames N  # smoke frame budget (default 1700)
 jai_demoreel --capture I         # print scene I as plain text (ANSI stripped)
 jai_demoreel --reload-test       # headless hot-reload + backend-swap self-test
-jai_demoreel --precompiled       # boot from demoreel.jaib (saved on first run)
+jai_demoreel --precompiled       # boot from demoreel.jaibite (saved on first run)
 ```
 
 Keys while running:
@@ -205,8 +205,8 @@ for crash localization). Deliberately NOT part of the main test suite.
 ## --precompiled
 
 `engine->jaibite()` parses the concatenated scene source once; `--precompiled`
-saves the parsed AST as `demoreel.jaib` on first boot and loads it afterwards.
-Measured: parse ~8-12 ms vs .jaib load ~3.2-3.5 ms (and the .jaib saved by the
+saves the parsed AST as `demoreel.jaibite` on first boot and loads it afterwards.
+Measured: parse ~8-12 ms vs .jaibite load ~3.2-3.5 ms (and the .jaibite saved by the
 interpreter engine loads into the VM engine — `jaibite_load` re-interns symbols
 per engine, so one file serves both backends).
 

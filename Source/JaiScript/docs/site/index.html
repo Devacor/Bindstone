@@ -96,7 +96,7 @@ print("hp = {}", h.hp);</code></pre></div>
     script cannot catch-and-swallow its way past. Untrusted scripts are a configuration, not a rewrite.</p>
     <p><a href="embedding/05-safety-rails.html">Safety Rails →</a></p></div>
   <div class="pillar"><h3><span class="pnum">07</span>Parse once, run anywhere</h3>
-    <p><code>engine-&gt;jaibite(source)</code> parses once, executes many, and <code>save("level.jaib")</code>
+    <p><code>engine-&gt;jaibite(source)</code> parses once, executes many, and <code>save("level.jaibite")</code>
     ships precompiled — symbols relocate on load, so one file serves any engine. Even naive
     <code>execute(str)</code> in a loop pays the parse once via the source cache.</p>
     <p><a href="embedding/04-jaibite.html">jaibite →</a></p></div>

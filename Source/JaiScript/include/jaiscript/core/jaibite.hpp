@@ -16,6 +16,11 @@ namespace jai {
     using declaration_ptr = std::shared_ptr<declaration>;
     class script_value;
 
+    // Canonical file extension for saved bites. save()/jaibite_load() take explicit
+    // paths (the convention is not enforced); the format keeps its "JBIT" magic
+    // regardless of filename.
+    inline constexpr const char* k_jaibite_extension = ".jaibite";
+
     // Engine-bound pre-parsed script: engine->jaibite("...") lexes and parses once,
     // then execute() re-runs without re-lexing/parsing (and the vm backend caches its
     // compiled chunk in compiled_, so re-execution is pure dispatch). Never share a

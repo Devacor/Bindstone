@@ -91,12 +91,12 @@ scripts are a configuration, not a rewrite.
 ```cpp
 auto bite = engine->jaibite(source);   // parse once
 bite.execute();                        // run many
-bite.save("level.jaib");               // ship precompiled
-auto loaded = other_engine->jaibite_load("level.jaib");  // symbols relocate
+bite.save("level.jaibite");            // ship precompiled
+auto loaded = other_engine->jaibite_load("level.jaibite");  // symbols relocate
 ```
 
 The engine also caches source strings transparently, so even naive `execute(str)` in a
-loop pays the parse once. Loading a `.jaib` skips parsing entirely and re-interns symbols
+loop pays the parse once. Loading a `.jaibite` skips parsing entirely and re-interns symbols
 into the loading engine — save on one engine, load on another.
 
 ## The receipts

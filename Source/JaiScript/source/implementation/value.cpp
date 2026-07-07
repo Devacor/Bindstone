@@ -528,6 +528,79 @@ script_value script_value::clone() const {
     return result;
 }
 
+// Parallel-region detach (see value.hpp): fresh strong_ptr for EVERY heavy node
+// (strings included), bound primitives decoded, type_info preserved, value-semantic
+// content only. The one kernel the parallel_transform barrier trusts for exclusivity.
+script_value script_value::parallel_detached_copy(std::vector<type_info*>* collected_types) const {
+    if (!engine_) {
+        throw runtime_error("Cannot detach script_value: missing engine pointer");
+    }
+    const size_t idx = raw_storage_index();
+    if (idx == TYPEID_REFERENCE) {
+        return deref().parallel_detached_copy(collected_types);
+    }
+    if (collected_types && type_info_.get()) {
+        collected_types->push_back(type_info_.get());
+    }
+    script_value result(std::monostate{}, engine_);
+    result.type_info_ = type_info_;
+    switch (idx) {
+        case TYPEID_NULL:
+        case TYPEID_INT:
+        case TYPEID_FLOAT:
+        case TYPEID_CHAR:
+        case TYPEID_BOOL:
+            result.storage_ = storage_;
+            break;
+        case TYPEID_STRING: {
+            const auto& handle = std::get<strong_ptr<script_string>>(storage_);
+            if (!handle) { break; }   // null handle shares nothing
+            engine_->execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
+            result.storage_ = make_strong<script_string>(*handle);
+            break;
+        }
+        case TYPEID_ARRAY: {
+            const auto& handle = std::get<strong_ptr<std::vector<script_value>>>(storage_);
+            if (!handle) { break; }
+            engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (handle->size() + 1));
+            auto fresh = make_strong<std::vector<script_value>>();
+            fresh->reserve(handle->size());
+            for (const auto& elem : *handle) {
+                fresh->push_back(elem.parallel_detached_copy(collected_types));
+            }
+            result.storage_ = fresh;
+            break;
+        }
+        case TYPEID_MAP: {
+            const auto& handle = std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
+            if (!handle) { break; }
+            engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (handle->size() + 1));
+            auto fresh = make_strong<std::map<script_value, script_value>>();
+            for (const auto& [key, val] : *handle) {
+                fresh->emplace(key.parallel_detached_copy(collected_types), val.parallel_detached_copy(collected_types));
+            }
+            result.storage_ = fresh;
+            break;
+        }
+        case TYPEID_CPP_BOUND: {
+            if (bound_semantic_index() != TYPEID_NULL) {
+                // Decode, then re-detach so bound strings get fresh storage too
+                return bound_decoded_temp().parallel_detached_copy(collected_types);
+            }
+            throw runtime_error("value is not value-semantic (bound host object)");
+        }
+        default: {
+            const char* what = idx == TYPEID_OBJECT ? "object"
+                : idx == TYPEID_FUNCTION ? "function"
+                : idx == TYPEID_SHARED_PTR ? "shared_ptr"
+                : idx == TYPEID_WEAK_PTR ? "weak_ptr"
+                : "unsupported type";
+            throw runtime_error(std::string("value is not value-semantic (") + what + ")");
+        }
+    }
+    return result;
+}
+
 const script_function& script_value::as_function() const {
     const script_value& val = deref();
     if (val.current_type() != script_value_type::jai_function_type) {

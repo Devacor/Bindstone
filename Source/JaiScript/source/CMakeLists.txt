@@ -10,6 +10,7 @@ set(JAISCRIPT_SOURCES
     implementation/interpreter.cpp
     implementation/interpreter_dispatch.cpp
     implementation/lexer.cpp
+    implementation/parallel_transform.cpp
     implementation/parse_errors.cpp
     implementation/parser.cpp
     implementation/runtime_errors.cpp

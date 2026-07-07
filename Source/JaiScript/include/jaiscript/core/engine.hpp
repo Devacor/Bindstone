@@ -38,6 +38,7 @@ namespace jai {
 
     namespace detail {
         struct execution_limits;
+        struct parallel_engine_state;
     }
 
     namespace serialization {
@@ -214,8 +215,28 @@ namespace jai {
         size_t memory_cap() const;
 
         // Per-engine execution-limit state (terminal-error latch, memory accounting)
-        // shared by the backend and the builtin-method chokepoints. Internal.
+        // shared by the backend and the builtin-method chokepoints. Internal. While a
+        // parallel region's workers are running this resolves to the CALLING WORKER's
+        // own accounting (docs/parallel_design.md §2); outside a region it is the plain
+        // engine instance with one never-taken null test.
         detail::execution_limits& execution_limits() noexcept;
+
+        // === PARALLEL EXECUTION (parallel_transform v0; docs/parallel_design.md) ===
+        // Worker count the next parallel_transform uses (also the thread_count() builtin).
+        // 0 = auto (hardware concurrency). The calling thread runs one chunk; the pool
+        // supplies the rest.
+        void parallel_thread_count(size_t workers);
+        size_t parallel_thread_count() const;
+
+        // Chunk boundaries chosen by the most recent parallel_transform (n+1 bounds for n
+        // chunks). Instrumentation for tests/benchmarks — never observable from script.
+        const std::vector<size_t>& last_parallel_chunk_bounds() const;
+
+        // Internal: engine-owned parallel machinery (lazily created) and the per-worker
+        // provisioning helper (fresh copies of registered callables whose invocation
+        // shares no refcounts with the engine's stored values).
+        detail::parallel_engine_state& parallel_state();
+        script_value make_parallel_host_function_copy(const std::string& name);
 
         using stack_frame = ::jai::stack_frame;
         std::vector<stack_frame> last_stack_trace() const;

@@ -64,6 +64,34 @@ namespace jai::vm {
         // Compiles without executing (disassembler/tests)
         std::shared_ptr<chunk> compile_only(const std::vector<declaration_ptr>& declarations);
 
+        // === Parallel worker setup (parallel_transform v0) ===
+        // Pins this instance to a worker context built at the region barrier: root
+        // environment (parent = nullptr, the hard partition), a private env-epoch sink
+        // (worker env churn never bumps the shared engine epoch), the worker's own
+        // limits, and an armed budget clock. cached_global_env_ goes null so the per-ip
+        // env-lookup caches never engage (workers never run top-level frames either) -
+        // no epoch reads, no cache writes into chunks. Workers never call
+        // prepare_for_execution, so nothing here is ever repointed at shared state.
+        void configure_parallel_worker(std::shared_ptr<environment> root_env,
+                                       string_symbolizer* env_epoch_sink,
+                                       detail::execution_limits* worker_limits,
+                                       std::chrono::nanoseconds budget) {
+            environment_ = std::move(root_env);
+            cached_global_env_ = nullptr;
+            env_symbolizer_ = env_epoch_sink;
+            limits_ = worker_limits;
+            scope_env_pool_.clear();   // pooled envs minted earlier carry the shared sink
+            execution_budget_ = budget;
+            arm_execution_deadline();
+        }
+
+        // Compile a per-worker function copy's body on the MAIN thread at the region
+        // barrier (compilation interns; workers must only ever hit) and pin the chunk on
+        // the copy's own backend_body_cache.
+        void precompile_parallel_function(const script_defined_function& fn) {
+            fn.backend_body_cache = chunk_for_body(fn.name, fn.parameters, fn.body, fn.local_count);
+        }
+
     private:
         struct frame {
             chunk* code = nullptr;
@@ -113,6 +141,9 @@ namespace jai::vm {
         std::vector<pending_call_site> external_site_stack_;
 
         string_symbolizer* symbolizer_;
+        // Epoch sink handed to every environment this vm constructs (== symbolizer_
+        // everywhere except a parallel worker; see configure_parallel_worker)
+        string_symbolizer* env_symbolizer_ = nullptr;
         std::shared_ptr<environment> environment_;
         engine* engine_ = nullptr;
         environment* cached_global_env_ = nullptr;   // env_lookup_cached gate (never dereferenced)

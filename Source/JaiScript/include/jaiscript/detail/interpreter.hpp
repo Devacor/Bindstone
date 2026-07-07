@@ -530,6 +530,11 @@ namespace jai {
         // script_string symbolizer for variable names
         std::unique_ptr<string_symbolizer> ownedSymbolizer_;  // Only used if we own it
         string_symbolizer* string_symbolizer_;  // Points to either owned or external
+
+        // Epoch sink handed to every environment this interpreter constructs. Equal to
+        // string_symbolizer_ everywhere except a parallel worker, whose private instance
+        // keeps worker env churn from bumping the shared engine env-epoch.
+        string_symbolizer* env_symbolizer_ = nullptr;
         
         // Current environment for variable storage
         std::shared_ptr<environment> environment_;
@@ -1039,6 +1044,25 @@ namespace jai {
         // Set the subscript resolver callback
         void set_subscript_resolver(subscript_resolver resolver) {
             subscriptResolver_ = std::move(resolver);
+        }
+
+        // Parallel worker setup (parallel_transform v0): pins this instance to a worker
+        // context built at the region barrier - root environment (parent = nullptr, the
+        // hard partition), a private env-epoch sink, the worker's own limits, and an
+        // armed budget clock. Workers never call prepare_for_execution, so nothing here
+        // is ever repointed at engine-shared state.
+        void configure_parallel_worker(std::shared_ptr<environment> root_env,
+                                       string_symbolizer* env_epoch_sink,
+                                       detail::execution_limits* worker_limits,
+                                       std::chrono::nanoseconds budget) {
+            environment_ = std::move(root_env);
+            env_symbolizer_ = env_epoch_sink;
+            limits_ = worker_limits;
+            // Pool envs minted before this point carry the shared epoch sink - drop them
+            environment_pool_.clear();
+            environment_pool_index_ = 0;
+            execution_budget(budget);
+            arm_execution_deadline();
         }
 
         // Environment pooling functions (public: scoped_method_environment uses them)

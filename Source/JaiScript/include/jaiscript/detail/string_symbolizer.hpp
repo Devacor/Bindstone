@@ -7,6 +7,7 @@
 #include <deque>
 #include <string>
 #include <string_view>
+#include <cassert>
 #include <cstdint>
 #include <limits>
 
@@ -44,6 +45,10 @@ namespace jai {
 			if (auto it = index_.find(sv); it != index_.end())
 				return it->second;
 
+			// Parallel-region tripwire: workers may only ever HIT (reads). A miss while
+			// frozen means the pre-warm set missed a shape - fix the warm pass.
+			assert(!frozen_ && "string_symbolizer: intern miss during a parallel region");
+
 			// Copy once into deque (stable address), then map a string_view to it (no second copy).
 			auto& stored = storage_.emplace_back(sv);
 			const std::string_view key{ stored.data(), stored.size() };
@@ -60,6 +65,8 @@ namespace jai {
 		[[nodiscard]] std::pair<id_type, std::string_view> intern_with_view(std::string_view sv) const noexcept {
 			if (auto it = index_.find(sv); it != index_.end())
 				return { it->second, ids_[it->second] };
+
+			assert(!frozen_ && "string_symbolizer: intern miss during a parallel region");
 
 			auto& stored = storage_.emplace_back(sv);
 			const std::string_view key{ stored.data(), stored.size() };
@@ -82,12 +89,18 @@ namespace jai {
 		[[nodiscard]] inline std::uint64_t env_epoch() const noexcept { return env_epoch_; }
 		inline void bump_env_epoch() noexcept { ++env_epoch_; }
 
+		// Debug tripwire for parallel regions: while frozen, an intern MISS asserts (the
+		// pre-warm pass at the region barrier must make every worker intern a HIT). Reads
+		// are unaffected; zero cost on the hit path.
+		inline void set_frozen(bool frozen) noexcept { frozen_ = frozen; }
+
 		// Get/create getter ID for a member - caches to avoid repeated concatenation.
 		// Returns both ID and interned string_view for the "_get_<member>" name.
 		[[nodiscard]] std::pair<id_type, std::string_view> get_getter_id_with_view(id_type member_id) const noexcept {
 			if (auto it = getter_cache_.find(member_id); it != getter_cache_.end())
 				return { it->second, ids_[it->second] };
 
+			assert(!frozen_ && "string_symbolizer: getter-id miss during a parallel region");
 			std::string getter_name = "_get_" + std::string(get_string(member_id));
 			auto [id, view] = intern_with_view(getter_name);
 			getter_cache_[member_id] = id;
@@ -100,6 +113,7 @@ namespace jai {
 			if (auto it = setter_cache_.find(member_id); it != setter_cache_.end())
 				return { it->second, ids_[it->second] };
 
+			assert(!frozen_ && "string_symbolizer: setter-id miss during a parallel region");
 			std::string setter_name = "_set_" + std::string(get_string(member_id));
 			auto [id, view] = intern_with_view(setter_name);
 			setter_cache_[member_id] = id;
@@ -112,6 +126,7 @@ namespace jai {
 			if (auto it = class_var_cache_.find(class_name_id); it != class_var_cache_.end())
 				return { it->second, ids_[it->second] };
 
+			assert(!frozen_ && "string_symbolizer: class-var-id miss during a parallel region");
 			std::string class_var_name = "__class_" + std::string(get_string(class_name_id));
 			auto [id, view] = intern_with_view(class_var_name);
 			class_var_cache_[class_name_id] = id;
@@ -141,6 +156,9 @@ namespace jai {
 		mutable id_type this_id_{ std::numeric_limits<id_type>::max() };
 
 		std::uint64_t env_epoch_ = 1;
+
+		// Parallel-region tripwire (see set_frozen)
+		bool frozen_ = false;
 
 		// Caches for getter/setter/class_var ID lookups (name_id -> derived_id)
 		mutable std::unordered_map<id_type, id_type> getter_cache_;

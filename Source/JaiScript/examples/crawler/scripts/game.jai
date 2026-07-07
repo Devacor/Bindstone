@@ -37,13 +37,15 @@ class Game {
 	var known_scrolls = {};
 	var potion_looks = {};
 	var scroll_looks = {};
+	var boss_co = null;         // Vexadrach's multi-phase fight script (floor 10)
 
 	Game() {}
 
 	// Vexadrach's choreography as a coroutine METHOD: the handle pins the Game
 	// instance, so phase state (enraged, mid-telegraph) survives across turns
-	// with no free-function/global plumbing. Only the handle needs a global
-	// slot (BOSS_CO in state.jai — handles still refuse to live in fields).
+	// with no free-function/global plumbing. The handle itself lives in the
+	// boss_co field above — handles are reference-semantic now, so a field
+	// holds the SAME live coroutine every alias sees.
 	coroutine void boss_brain(int boss_id) {
 		var enraged = false;
 		while (true) {
@@ -213,7 +215,7 @@ function enter_floor() -> void {
 	G.statue_used = false;
 	G.mural_used = false;
 	G.player.stubborn_spent = false;
-	BOSS_CO = null;
+	G.boss_co = null;
 	populate_floor();
 	face_open_direction();
 	view_cache_invalidate();
@@ -779,7 +781,7 @@ function load_game() -> bool {
 		if (state["ground"][i]["kind"] == "_pad") { continue; }
 		G.ground.push(load_item(state, "ground", i));
 	}
-	BOSS_CO = null;   // the boss restarts his pattern; his memory is short
+	G.boss_co = null;   // the boss restarts his pattern; his memory is short
 	view_cache_invalidate();
 	log_msg(col("96", `Welcome back to floor ${G.floor}, ${G.player.name}.`));
 	return true;

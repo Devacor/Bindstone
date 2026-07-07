@@ -1,7 +1,7 @@
 // Monster AI. Per-monster brains are procedural (behavior switch + state in
-// fields) because coroutine handles refuse to live inside objects/containers
-// under value semantics. The boss is the exception: one monster, one global
-// slot, one genuine multi-phase coroutine (BOSS_CO in state.jai).
+// fields) — cheap and stateless. The boss is the exception: one monster, one
+// genuine multi-phase coroutine, whose handle lives in a Game FIELD
+// (G.boss_co — handles are reference-semantic now, fields just work).
 
 function sees_player(var& m) -> bool {
 	if (cheb(m.x, m.y, G.player.x, G.player.y) > 9) { return false; }
@@ -128,9 +128,9 @@ function monster_act(var& m) -> void {
 		case "boss": {
 			// CRAWLER DELTA: the choreography is now a coroutine METHOD on Game
 			// (game.jai) — the handle pins G, its phase state survives across
-			// turns, and only the handle itself needs a global slot (BOSS_CO).
-			if (BOSS_CO == null || BOSS_CO.done()) { BOSS_CO = G.boss_brain(m.id); }
-			BOSS_CO.resume();
+			// turns, and the handle lives in G's own boss_co field.
+			if (G.boss_co == null || G.boss_co.done()) { G.boss_co = G.boss_brain(m.id); }
+			G.boss_co.resume();
 			break;
 		}
 	}

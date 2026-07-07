@@ -677,23 +677,18 @@ class engine;
             }
         }
 
+        // No parameter_storage scope_guard here: these are only reached from the
+        // no-reference-parameters branch of bind(), where every value_converter<T> is a
+        // by-value conversion that never consults the engine's parameter storage. Keeping
+        // the call path free of engine writes lets ref-free bindings (the whole math
+        // stdlib) run inside parallel regions without touching shared engine state.
         template<typename ArgsTuple, typename F, size_t... Is>
         static void call_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
-            // Create parameter storage on stack
-            detail::parameter_storage storage;
-            detail::parameter_storage::scope_guard guard(eng, &storage);
-
-            // Call function with conversions using the storage
             func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
-        
+
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
         static R call_non_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
-            // Create parameter storage on stack
-            detail::parameter_storage storage;
-            detail::parameter_storage::scope_guard guard(eng, &storage);
-
-            // Call function with conversions using the storage
             return func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
         

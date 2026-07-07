@@ -7579,19 +7579,13 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         needs_capture_env ? final_closure_env : nullptr  // Only use closure env if we have captures
     );
     
-    // Create a script_function wrapper resolving the live backend at call time
-    // (capture lambdaFunc by value inside the payload to keep it alive)
+    // Create a script_function wrapper resolving the live backend at call time.
+    // Named thunk (not an anonymous lambda) so callers can recover the payload via
+    // std::function::target<script_callable_thunk>() - vm parity (exec_closure).
     script_callable payload;
     payload.kind = script_callable::kind_type::function;
     payload.fn = lambdaFunc;
-    engine* eng = engine_;
-    script_function funcWrapper = [eng, payload](const std::vector<script_value>& args) -> checked_result<script_value> {
-        execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
-        if (!backend) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
-        }
-        return backend->execute_callable(payload, args);
-    };
+    script_function funcWrapper = script_callable_thunk{engine_, std::move(payload)};
 
     // Push the lambda as a function value
     push_value(script_value::make_function(funcWrapper, engine_));
@@ -9383,18 +9377,13 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         decl->local_count  // Slot count for stack allocation
     );
 
-    // Create wrapper function resolving the live backend at call time
+    // Create wrapper function resolving the live backend at call time. Named thunk so
+    // callers can recover the payload via target<script_callable_thunk>() - vm parity.
     script_callable payload;
     payload.kind = script_callable::kind_type::function;
     payload.fn = scriptFunc;
-    engine* eng = engine_;
-    script_value functionValue = script_value::make_function([eng, payload](const std::vector<script_value>& args) -> checked_result<script_value> {
-        execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
-        if (!backend) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
-        }
-        return backend->execute_callable(payload, args);
-    }, engine_);
+    script_value functionValue = script_value::make_function(
+        script_function(script_callable_thunk{engine_, std::move(payload)}), engine_);
 
     // Define the function in current environment
     environment_->define(decl->name_id, functionValue);

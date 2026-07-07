@@ -119,9 +119,10 @@ Three mechanisms, one per hazard class:
   a capture) deep-clones that element at the barrier; correctness never depends on the fast
   path. Value semantics makes alias-freedom the common case (docs/JaiScript_DeepCopyDesign.md —
   assignments and parameter passing deep-copy), so aliases exist only where someone made one on
-  purpose (`reference_holder`, value.hpp:1586). References carry `weak_ptr<environment>
-  sourceEnv` and frame-lifetime anchors (invariants.md §3) that do not survive a thread
-  crossing — a ref reachable from an element forces that element onto the clone path.
+  purpose (`reference_holder`, value.hpp). References are owner-pinned handles
+  (cell/element/field/map-entry, invariants.md §3) whose strong_ptr refcounts are NON-ATOMIC
+  and whose pins alias engine-owned state — a ref reachable from an element forces that
+  element onto the clone path.
 - **(b) Everything else read from outer scope** (captures, globals, config objects) —
   **first-touch gate**: on a thread's first touch of each outer variable, a short global lock +
   `script_value::clone()` (value.hpp:164 — deep copy) into that thread's read cache; lock-free

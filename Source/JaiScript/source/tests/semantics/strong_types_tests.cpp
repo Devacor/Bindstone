@@ -1404,6 +1404,19 @@ public:
                 h()
             )", "20", "fused int fast path");
         });
+
+        // type_of on a shared-pointer-semantic instance must match a value instance: both "object".
+        test("type_of_shared_and_value_instance_both_object", [this, check_both]() {
+            const char* decl = "class P { int v = 0; } ";
+            check_both((std::string(decl) + "auto p = P(); type_of(p)").c_str(), "object", "value instance");
+            check_both((std::string(decl) + "var p = new P(); type_of(p)").c_str(), "object", "new P()");
+            check_both((std::string(decl) + "shared_ptr<P> p = P(); type_of(p)").c_str(), "object", "shared_ptr<P> p = P()");
+            check_both((std::string(decl) + "auto p = shared_ptr<P>(); type_of(p)").c_str(), "object", "auto p = shared_ptr<P>()");
+            // value == shared, on the same class, in one program
+            check_both((std::string(decl) +
+                "auto a = P(); auto b = new P(); type_of(a) + \"==\" + type_of(b)").c_str(),
+                "object==object", "value == shared");
+        });
     }
 };
 

@@ -4630,8 +4630,9 @@ checked_result<void> vm_backend::exec_decl_ref_ident(frame& f, const vm_instruct
 		}
 		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
 	}
-	script_value refValue = script_value::make_reference(targetPtr, environment_);
-	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(refValue));
+	// Box the variable's storage into a cell and alias it (escape-legal: the ref
+	// keeps the cell alive after the env dies)
+	return define_decl_value(f, decl->name_id, decl->slot_index, share_env_ref(*targetPtr));
 }
 
 checked_result<void> vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
@@ -4933,8 +4934,9 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 					if (capture_by_ref_default) {
 						script_value* targetPtr = environment_->get_value_ptr(var_id);
 						if (targetPtr) {
-							script_value refValue = script_value::make_reference(targetPtr, environment_);
-							captureEnv->define(var_id, std::move(refValue));
+							// Cell share (escape-legal): the capture stays live after
+							// the captured env dies
+							captureEnv->define(var_id, share_env_ref(*targetPtr));
 						}
 					} else {
 						auto capture_result = environment_->get(var_id);
@@ -4987,8 +4989,9 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 			} else if (capture.by_reference) {
 				script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
 				if (targetPtr) {
-					script_value refValue = script_value::make_reference(targetPtr, environment_);
-					captureEnv->define(capture.symbol_id, std::move(refValue));
+					// Cell share (escape-legal): the capture stays live after the
+					// captured env dies
+					captureEnv->define(capture.symbol_id, share_env_ref(*targetPtr));
 				} else {
 					return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
 						"Cannot capture variable '{0}' by reference", capture.symbol_id);
@@ -8611,26 +8614,31 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 	return result;
 }
 
-checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage, call_frame& locals, size_t param_slot) {
-	if (storage.is_reference()) {
-		if (!storage.get_reference_holder()) {
-			return checked_result<void>(
-				make_error_code(runtime_error_code::invalid_reference),
-				"Reference target is null");
-		}
-		// Share the holder: zero alloc; cells alias the same box, element/field refs
-		// keep their container/instance re-resolution
-		locals.set_local(param_slot, script_value(storage));
-		return {};
+// Box-in-place + share: non-ref storage moves into a cell and the storage becomes the
+// handle (all read/store paths handle the boxed form); ref storage just shares its
+// holder. The one way env-variable storage is ever bound by reference — decl refs,
+// [&] captures, ref returns. Cached counted-for pointers may alias the old payload
+// bytes, so boxing demotes active fast loops to their generic paths (cold path: first
+// ref bind only). KEEP BYTE-PARALLEL with the interpreter's share_boxed_env_storage.
+script_value vm_backend::share_env_ref(script_value& storage) {
+	if (!storage.is_reference()) {
+		script_value inner = std::move(storage);
+		storage = script_value::make_cell_reference(std::move(inner), engine_);
+		for (auto& cs : cfor_states_) { cs.fast = false; }
 	}
-	// Box on demand: the variable predates its escape mark (cross-execute global, C++
-	// define, dynamic shape). Its storage becomes the cell - reads/stores already handle
-	// the boxed form. Cached counted-for pointers may alias the old payload bytes, so
-	// demote active fast loops to their generic paths (cold path: first ref bind only).
-	script_value inner = std::move(storage);
-	storage = script_value::make_cell_reference(std::move(inner), engine_);
-	for (auto& cs : cfor_states_) { cs.fast = false; }
-	locals.set_local(param_slot, script_value(storage));
+	return script_value(storage);
+}
+
+checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage, call_frame& locals, size_t param_slot) {
+	if (storage.is_reference() && !storage.get_reference_holder()) {
+		return checked_result<void>(
+			make_error_code(runtime_error_code::invalid_reference),
+			"Reference target is null");
+	}
+	// Share the holder (zero alloc; cells alias the same box, element/field refs keep
+	// their container/instance re-resolution), boxing on demand when the variable
+	// predates its escape mark (cross-execute global, C++ define, dynamic shape)
+	locals.set_local(param_slot, share_env_ref(storage));
 	return {};
 }
 

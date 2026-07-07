@@ -355,6 +355,9 @@ namespace jai::vm {
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark
         checked_result<void> bind_reference_to_storage(script_value& storage, call_frame& locals, size_t param_slot);
+        // Box-in-place + share for env-variable storage (decl refs, [&] captures, ref
+        // returns); boxing demotes active counted-for fast states
+        script_value share_env_ref(script_value& storage);
         void clear_this_on_frame_exit(const std::shared_ptr<environment>& entry_env);
         script_value implicit_this_result(call_frame& locals);
         script_value implicit_result_for_record(call_record& rec);

@@ -125,6 +125,19 @@ Counter::PI;</code></pre></div>
 Counter::twice_count() = 6
 == result: 3.141590</code></pre></div>
 <p><em>(pinned: language/static_field_tests.cpp, static_method_tests.cpp — including statics with inheritance; namespaces can override class statics of the same name, see Kitchen Sink)</em></p>
+<h2 id="name-resolution-in-methods">Name resolution in methods<a class="hlink" href="#name-resolution-in-methods" aria-label="link">&#8203;</a></h2>
+<p>A bare identifier inside a method resolves in this order, identical on both backends and for reads AND writes (audited 2026-07 with a cross-backend probe matrix):</p>
+<ol>
+<li>the active <strong>catch variable</strong> (innermost <code>catch</code>)</li>
+<li><strong>locals and parameters</strong> of the current function &mdash; including range-for variables, <code>auto&amp;</code> reference declarations, and constructor parameters (declaration-point scoped: a use <em>before</em> the local&#x27;s declaration resolves outward)</li>
+<li><strong>enclosing scopes / explicit lambda captures</strong></li>
+<li><strong>globals</strong> (variables and free functions)</li>
+<li>instance <strong>fields</strong> (implicit <code>this</code>, including inherited fields)</li>
+<li>instance <strong>methods</strong> (as bound methods)</li>
+<li><strong>static fields</strong>, then static methods</li>
+</ol>
+<p>Two consequences worth knowing. First, <strong>globals shadow fields</strong>: if a global <code>hp</code> exists, a bare <code>hp</code> in any method reads and writes the global, not the field &mdash; and defining a new global <em>after</em> a class definition steals that class&#x27;s bare-name field accesses from then on. <code>this.hp</code> always reaches the field, and the static checker&#x27;s shadowing warnings (below) flag the declaration-side collisions. Second, <code>[=]</code>/<code>[&amp;]</code> lambdas do <strong>not</strong> capture <code>this</code>: a bare field read inside one is an undefined-variable error; capture <code>[this]</code> explicitly.</p>
+<p>The static checker (<code>engine::static_checking(check_mode::warn)</code> or <code>check()</code>) emits <strong>warning-severity</strong> shadowing diagnostics &mdash; never errors, even in strict mode, because shadowing is legal: a local/parameter/range-for/catch variable that shadows a <em>field</em> of the enclosing class (&quot;local &#x27;hp&#x27; shadows field &#x27;hp&#x27; of class &#x27;Creature&#x27; (field declared at 4:2)&quot;), a local that shadows an outer local, and a declaration that shadows a global the same function already read. Constructor parameters named after the field they initialize (<code>C(int hp) { this.hp = hp; }</code>) are the established idiom and stay silent. <em>(pinned: semantics/static_check_tests.cpp shadow_* tests; language/script_class_tests.cpp name_resolution_* pins)</em></p>
 <h2 id="hot-reload-with-permissive-migration">Hot reload with permissive migration<a class="hlink" href="#hot-reload-with-permissive-migration" aria-label="link">&#8203;</a></h2>
 <p>Re-executing a <code>class</code> declaration on the same engine <strong>reloads</strong> the class. Live instances migrate permissively: fields that still exist <strong>keep their current values</strong> (including still-default ones), brand-new fields get the new defaults, removed fields drop. The two <code>execute()</code> calls below run on one engine (marked <code>//=== execute</code>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config {

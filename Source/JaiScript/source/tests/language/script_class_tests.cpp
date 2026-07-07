@@ -999,6 +999,59 @@ public:
             check_eq(outputs[0], outputs[1], "statics/ref access parity");
         });
 
+        // ------------------------------------------------- bare-name resolution order
+        // 2026-07 audit pins (docs/site/guide/07-classes.html "Name resolution in
+        // methods"): catch var > locals/params > enclosing scopes > GLOBALS > fields >
+        // methods > statics, identical on both backends for reads AND writes. The
+        // surprising row - globals shadow fields - is DELIBERATELY pinned; this.name
+        // always reaches the field.
+
+        test("name_resolution_locals_and_params_shadow_fields", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = make_engine();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                auto r = e->execute(R"(
+                    class C {
+                        string hp = "field";
+                        function local_wins() -> string { var hp = "local"; return hp; }
+                        function param_wins(var hp) -> string { return hp; }
+                        function catch_wins() -> string { try { throw "caught"; } catch (hp) { return hp; } }
+                        function field_when_alone() -> string { return hp; }
+                    }
+                    auto c = C();
+                    c.local_wins() + "|" + c.param_wins("param") + "|" + c.catch_wins() + "|" + c.field_when_alone()
+                )");
+                check_eq(std::string("local|param|caught|field"), r.as<std::string>());
+            }
+        });
+
+        test("name_resolution_globals_shadow_fields", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = make_engine();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                // reads AND writes go to the global; this.g always reaches the field;
+                // a global defined AFTER the class steals bare reads from then on
+                auto r = e->execute(R"(
+                    var g = "global";
+                    class C {
+                        string g = "field";
+                        function read_bare() -> string { return g; }
+                        function write_bare() -> void { g = "written"; }
+                        function read_this() -> string { return this.g; }
+                    }
+                    var c = C();
+                    c.write_bare();
+                    var before_late = "";
+                    class Late { string v = "field"; function probe() -> string { return v; } }
+                    var lc = Late();
+                    before_late = lc.probe();
+                    var v = "late-global";
+                    c.read_bare() + "|" + c.read_this() + "|" + g + "|" + before_late + "|" + lc.probe()
+                )");
+                check_eq(std::string("written|field|written|field|late-global"), r.as<std::string>());
+            }
+        });
+
         test("member_access_hot_reload_and_host_api", [this]() {
             // Hot reload is permissive: enforcement consults the CURRENT class_definition
             // at access time — instances keep working, new accesses follow new labels.

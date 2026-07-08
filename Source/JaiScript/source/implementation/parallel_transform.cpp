@@ -66,6 +66,14 @@ namespace jai::detail {
 		size_t end = 0;
 		std::optional<parallel_worker_error> error;
 
+		// Captured-read provisioning for THIS call: name ids defined into root_env
+		// (nulled at the join - a dormant slot must hold no borrow raw pointers), and
+		// the heavy nodes of every snapshot/string capture (a result that reaches into
+		// one of these must detach, or two iterations on one worker could alias while
+		// two on different workers don't - a worker-count-visible difference)
+		std::vector<uint64_t> capture_name_ids;
+		std::unordered_set<const void*> provisioned_nodes;
+
 		// Provisioning fingerprint: reuse is valid only while these match the current
 		// call. Script bodies are identity-compared (hot reload swaps bodies -> rebuild);
 		// host copies are refreshed on every reuse instead of fingerprinted.
@@ -109,6 +117,30 @@ namespace {
 		       name == "string" || name == "char" || name == "bool";
 	}
 
+	// Read-only builtin container/string methods admissible on a CAPTURED receiver
+	// (union of the array/map/string registries' non-mutating entries). Captured method
+	// receivers always provision as per-worker snapshots, so even element-copying
+	// methods (keys/values/slice/front/...) only touch worker-private structure. A
+	// method outside this list may mutate the receiver - that write would land on the
+	// worker's private snapshot and silently diverge across worker counts, so admission
+	// rejects it (the statically-free half of the write wall).
+	bool parallel_readonly_method(std::string_view name) {
+		static constexpr std::string_view k_readonly[] = {
+			// array
+			"size", "empty", "front", "back", "index_of", "has", "contains",
+			"first", "last", "length", "slice", "join",
+			// map
+			"keys", "values", "get", "to_array",
+			// string
+			"at", "substr", "find", "rfind", "find_first_of", "find_last_of",
+			"find_first_not_of", "find_last_not_of",
+		};
+		for (auto m : k_readonly) {
+			if (name == m) { return true; }
+		}
+		return false;
+	}
+
 	const script_callable* payload_from_function_value(const script_value& v) {
 		if (!v.is_function()) { return nullptr; }
 		const script_function& f = v.as_function();
@@ -126,10 +158,44 @@ namespace {
 		std::unordered_set<uint64_t> collected_fn_ids;
 		std::unordered_set<uint64_t> collected_host_ids;
 		std::unordered_set<type_info*> collected_types;
+		std::unordered_map<uint64_t, size_t> capture_index;   // name id -> adm.captures slot
 		std::vector<std::unordered_set<uint64_t>> scopes;   // current function's scopes
 		bool failed = false;
 
 		admission_builder(engine& e) : eng(e), sym(*e.get_symbolizer()) { adm.admitted = false; }
+
+		// Captured-read touch collection (the CHEAP half of the two-layer design: the
+		// walk only records which enclosing names the body touches and whether every
+		// touch is a subscript read; enforcement of no-writes is the write wall plus
+		// the statically-free rejections below). subscript_root keeps the name eligible
+		// for the borrow (raw-read) tier; any other read demotes it to snapshot.
+		void touch_capture(identifier_expr* n, bool subscript_root) {
+			auto [it, inserted] = capture_index.try_emplace(n->symbol_id, adm.captures.size());
+			if (inserted) {
+				adm.captures.push_back({ n->symbol_id, n->name, subscript_root });   // name view = symbolizer storage (permanent)
+			} else if (!subscript_root) {
+				adm.captures[it->second].borrow_eligible = false;
+			}
+		}
+
+		// The enclosing identifier at the root of a bare name or a [ ]-chain
+		// (nullptr when the expression roots elsewhere or at a local)
+		identifier_expr* enclosing_root(const expression_ptr& e) const {
+			const expression* cur = e.get();
+			while (cur) {
+				if (cur->get_type() == node_type::identifier_expr) {
+					auto* ident = static_cast<identifier_expr*>(const_cast<expression*>(cur));
+					return is_local(ident->symbol_id) ? nullptr : ident;
+				}
+				if (cur->get_type() == node_type::binary_expr &&
+				    static_cast<const binary_expr*>(cur)->op.type == token_type::left_bracket) {
+					cur = static_cast<const binary_expr*>(cur)->left.get();
+					continue;
+				}
+				return nullptr;
+			}
+			return nullptr;
+		}
 
 		bool fail(const ast_node* node, std::string reason) {
 			if (!failed) {
@@ -241,6 +307,14 @@ namespace {
 			}
 			case node_type::range_for_stmt: {
 				auto* n = static_cast<range_for_stmt*>(s.get());
+				if (n->is_reference) {
+					// By-ref iteration mutates elements in place - on captured state
+					// that is a write (and on a snapshot it would silently diverge)
+					if (identifier_expr* root = enclosing_root(n->container)) {
+						return fail(n, "cannot iterate captured state '" + std::string(root->name) +
+						               "' by reference in a parallel body (captured reads are read-only)");
+					}
+				}
 				if (!walk_expr(n->container)) { return false; }
 				if (n->variable_name_id == UINT64_MAX) { n->variable_name_id = sym.intern(n->variable_name); }
 				collect_type(n->element_type);
@@ -292,7 +366,7 @@ namespace {
 				bool ok;
 				if (n->type.get() && n->type->is_reference()) {
 					// Reference declaration: the alias must root at worker-local storage
-					ok = walk_target(n->initializer, "reference declaration");
+					ok = walk_target(n->initializer, "reference declaration", /*aliasing*/ true);
 				} else {
 					ok = walk_expr(n->initializer);
 				}
@@ -330,10 +404,24 @@ namespace {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(e.get());
 				if (is_local(n->symbol_id)) { return true; }
-				return fail(n, "body reads enclosing state '" + std::string(n->name) + "'");
+				// Captured read (whole-value use): the barrier classifies and provisions
+				// it per worker; writes to it are rejected at walk_target / the wall
+				touch_capture(n, false);
+				return true;
 			}
 			case node_type::binary_expr: {
 				auto* n = static_cast<binary_expr*>(e.get());
+				if (n->op.type == token_type::left_bracket) {
+					// Subscript READ rooted at an enclosing name: the borrow-eligible
+					// capture shape (raw element reads through the region borrow)
+					if (n->left && n->left->get_type() == node_type::identifier_expr) {
+						auto* root = static_cast<identifier_expr*>(n->left.get());
+						if (!is_local(root->symbol_id)) {
+							touch_capture(root, true);
+							return walk_expr(n->right);
+						}
+					}
+				}
 				return walk_expr(n->left) && walk_expr(n->right);
 			}
 			case node_type::unary_expr: {
@@ -387,19 +475,25 @@ namespace {
 			}
 		}
 
-		// Stores and reference bindings must root at worker-local storage
-		bool walk_target(const expression_ptr& t, const char* what) {
+		// Stores and reference bindings must root at worker-local storage. These are the
+		// statically-FREE write rejections (early diagnostics for the runtime write
+		// wall): a store or alias rooted at an enclosing name errors here with position.
+		bool walk_target(const expression_ptr& t, const char* what, bool aliasing = false) {
 			if (!t) { return fail(nullptr, std::string(what) + " target missing"); }
 			switch (t->get_type()) {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(t.get());
 				if (is_local(n->symbol_id)) { return true; }
+				if (aliasing) {
+					return fail(n, std::string(what) + " would alias enclosing state '" + std::string(n->name) +
+					               "' (captured reads are read-only)");
+				}
 				return fail(n, "body writes enclosing state '" + std::string(n->name) + "'");
 			}
 			case node_type::binary_expr: {
 				auto* n = static_cast<binary_expr*>(t.get());
 				if (n->op.type == token_type::left_bracket) {
-					return walk_target(n->left, what) && walk_expr(n->right);
+					return walk_target(n->left, what, aliasing) && walk_expr(n->right);
 				}
 				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
 			}
@@ -412,15 +506,30 @@ namespace {
 
 		bool walk_call(call_expr* call) {
 			// Builtin container/string METHOD call: receiver expression walks under the
-			// normal rules (so it roots at worker-local values); the method itself comes
-			// from the shared registry both backends use.
+			// normal rules (so it roots at worker-local or captured values); the method
+			// itself comes from the shared registry both backends use.
 			if (call->callee && call->callee->get_type() == node_type::member_expr) {
 				auto* m = static_cast<member_expr*>(call->callee.get());
 				if (m->is_static) {
 					return fail(m, "static member calls are not allowed in a parallel body");
 				}
 				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }   // warm
-				if (!walk_expr(m->object)) { return false; }
+				// A method on captured state must be a known read-only builtin: anything
+				// else may mutate the (worker-private snapshot of the) receiver, which
+				// would silently diverge across worker counts
+				if (identifier_expr* root = enclosing_root(m->object)) {
+					if (!parallel_readonly_method(m->member)) {
+						return fail(m, "method '" + std::string(m->member) + "' may mutate captured state '" +
+						               std::string(root->name) + "'");
+					}
+					if (m->object->get_type() == node_type::identifier_expr) {
+						touch_capture(root, false);   // whole-container method receiver
+					} else if (!walk_expr(m->object)) {
+						return false;   // subscript-chain receiver: subscript walk records the touch
+					}
+				} else if (!walk_expr(m->object)) {
+					return false;
+				}
 				for (const auto& a : call->arguments) {
 					if (!walk_expr(a)) { return false; }
 				}
@@ -450,6 +559,16 @@ namespace {
 						return fail(callee, "call target '" + callee_name + "' is not a plain function (v0)");
 					}
 					if (!admit_function(payload->fn, callee->symbol_id, false, callee)) { return false; }
+					// A by-ref parameter receiving captured state is a write channel
+					// (the callee may store through it) - reject the alias statically
+					const auto& params = payload->fn->parameters();
+					for (size_t i = 0; i < call->arguments.size() && i < params.size(); ++i) {
+						if (!params[i].is_reference) { continue; }
+						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+							return fail(root, "argument passes enclosing state '" + std::string(root->name) +
+							                  "' by reference (captured reads are read-only)");
+						}
+					}
 					callee_ok = true;
 				} else if (parallel_host_whitelisted(callee->name)) {
 					// Host binding (typed dispatcher / variadic): whitelist or reject
@@ -505,32 +624,53 @@ namespace {
 
 
 	// Worker-side value-semantic check for fn results (read-only const walk - no handle
-	// copies, so it never touches a refcount)
-	bool result_value_semantic(const script_value& raw, const char** what) {
+	// copies, so it never touches a refcount). Also detects results that reach into the
+	// worker's provisioned captures (snapshot nodes / a live borrow): the caller
+	// materializes those through the silent deep clone so nothing worker-owned or
+	// worker-count-dependent escapes the region.
+	bool result_value_semantic(const script_value& raw, const char** what,
+	                           const std::unordered_set<const void*>* worker_nodes = nullptr,
+	                           bool* aliases_worker_state = nullptr) {
 		const script_value& v = raw.is_reference() ? raw.deref() : raw;
 		switch (v.raw_storage_index()) {
 		case script_value::TYPEID_NULL:
 		case script_value::TYPEID_INT:
 		case script_value::TYPEID_FLOAT:
-		case script_value::TYPEID_STRING:
 		case script_value::TYPEID_CHAR:
 		case script_value::TYPEID_BOOL:
 			return true;
+		case script_value::TYPEID_STRING:
+			if (worker_nodes && aliases_worker_state && worker_nodes->count(&v.unchecked_as_string())) {
+				*aliases_worker_state = true;
+			}
+			return true;
 		case script_value::TYPEID_CPP_BOUND:
-			if (v.is_int() || v.is_float() || v.is_string() || v.is_char() || v.is_bool() || v.is_null()) {
+			// ONE cached semantic-index read (repeated is_* probes each re-deref)
+			if (v.bound_semantic_index() != script_value::TYPEID_NULL || v.is_null()) {
 				return true;   // bound primitive - decodes to a value-semantic read
 			}
 			*what = "bound host object";
 			return false;
+		case script_value::TYPEID_PARALLEL_BORROW:
+			// A borrow escaping into the result: legal shape, but it must materialize
+			if (aliases_worker_state) { *aliases_worker_state = true; }
+			return true;
 		case script_value::TYPEID_ARRAY: {
+			if (worker_nodes && aliases_worker_state && worker_nodes->count(&v.unchecked_as_array())) {
+				*aliases_worker_state = true;
+			}
 			for (const auto& elem : v.unchecked_as_array()) {
-				if (!result_value_semantic(elem, what)) { return false; }
+				if (!result_value_semantic(elem, what, worker_nodes, aliases_worker_state)) { return false; }
 			}
 			return true;
 		}
 		case script_value::TYPEID_MAP: {
+			if (worker_nodes && aliases_worker_state && worker_nodes->count(&v.unchecked_as_map())) {
+				*aliases_worker_state = true;
+			}
 			for (const auto& [key, val] : v.unchecked_as_map()) {
-				if (!result_value_semantic(key, what) || !result_value_semantic(val, what)) { return false; }
+				if (!result_value_semantic(key, what, worker_nodes, aliases_worker_state) ||
+				    !result_value_semantic(val, what, worker_nodes, aliases_worker_state)) { return false; }
 			}
 			return true;
 		}
@@ -686,7 +826,10 @@ namespace {
 					return;
 				}
 				const char* what = nullptr;
-				if (!result_value_semantic(r.value(), &what)) {
+				bool aliases_worker_state = false;
+				if (!result_value_semantic(r.value(), &what,
+				                           ctx.provisioned_nodes.empty() ? nullptr : &ctx.provisioned_nodes,
+				                           &aliases_worker_state)) {
 					ctx.error = parallel_worker_error{ i,
 						make_error_code(runtime_error_code::unsupported_operation),
 						std::string("parallel_transform: fn returned a non-value-semantic result (") + what +
@@ -694,7 +837,10 @@ namespace {
 						ctx.limits.terminal_error };
 					return;
 				}
-				out[i] = std::move(r).value();
+				// A result reaching into this worker's captures (snapshot nodes or a
+				// borrow) materializes via the silent deep clone: iteration results must
+				// never share structure in a worker-count-dependent way
+				out[i] = aliases_worker_state ? r.value().parallel_detached_copy() : std::move(r).value();
 			}
 		} catch (const std::exception& e) {
 			ctx.error = parallel_worker_error{ i, make_error_code(runtime_error_code::cpp_exception),
@@ -727,6 +873,53 @@ namespace {
 			if (type_info* v = t->value_type().get()) { pending.push_back(v); }
 		}
 	}
+
+	// Borrow admission (content half): TRUE when every element of the container is a
+	// plain primitive, i.e. nothing reachable carries a refcount - element reads through
+	// the borrow are then raw const reads minting worker-local values, safe against the
+	// non-atomic strong counts by construction. Const walk, no handle copies.
+	bool parallel_content_all_primitive(const script_value& v) {
+		switch (v.raw_storage_index()) {
+		case script_value::TYPEID_ARRAY: {
+			for (const auto& elem : v.unchecked_as_array()) {
+				switch (elem.raw_storage_index()) {
+				case script_value::TYPEID_NULL:
+				case script_value::TYPEID_INT:
+				case script_value::TYPEID_FLOAT:
+				case script_value::TYPEID_CHAR:
+				case script_value::TYPEID_BOOL:
+					break;
+				default:
+					return false;
+				}
+			}
+			return true;
+		}
+		case script_value::TYPEID_MAP: {
+			for (const auto& [key, val] : v.unchecked_as_map()) {
+				const size_t ki = key.raw_storage_index();
+				const size_t vi = val.raw_storage_index();
+				auto primitive = [](size_t idx) {
+					return idx == script_value::TYPEID_NULL || idx == script_value::TYPEID_INT ||
+					       idx == script_value::TYPEID_FLOAT || idx == script_value::TYPEID_CHAR ||
+					       idx == script_value::TYPEID_BOOL;
+				};
+				if (!primitive(ki) || !primitive(vi)) { return false; }
+			}
+			return true;
+		}
+		default:
+			return false;
+		}
+	}
+
+	// One captured name, resolved at the barrier from the LIVE global value
+	struct resolved_capture {
+		const parallel_admission::capture_entry* entry = nullptr;
+		std::optional<script_value> source;  // deref'd live value; for a borrow this handle
+		                                     // IS the region anchor (held until the join)
+		parallel_capture_kind kind = parallel_capture_kind::scalar;
+	};
 
 	std::vector<size_t> partition_flat(size_t n, size_t chunks) {
 		std::vector<size_t> bounds(chunks + 1);
@@ -812,6 +1005,65 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		}
 	}
 
+	// CAPTURED READS: resolve every touched enclosing name against the LIVE global
+	// environment and classify how it provisions (parallel_capture_kind). The borrow
+	// tier NEVER shares a refcount with a worker: the source handle held here is the
+	// region anchor (counts stationary - the write wall stops every decrement, this
+	// anchor plus the global cell outlive the region) and workers only ever copy the
+	// raw borrow view. Everything else is copied INTO each worker at this barrier
+	// (single-threaded) - direct cross-thread reads of shared containers are never
+	// legal, even read-only ones: non-atomic strong_ptr counts make an element handle
+	// copy a data race.
+	std::vector<resolved_capture> captures;
+	state.last_captures.clear();
+	captures.reserve(adm->captures.size());
+	for (const auto& entry : adm->captures) {
+		auto global = eng.get_global_environment()->get(entry.name_id);
+		if (!global) {
+			return usage("parallel_transform: captured name '" + std::string(entry.name) + "' is not defined at the region barrier");
+		}
+		resolved_capture cap;
+		cap.entry = &entry;
+		cap.source = global.value().deref();
+		switch (cap.source->raw_storage_index()) {
+		case script_value::TYPEID_NULL:
+		case script_value::TYPEID_INT:
+		case script_value::TYPEID_FLOAT:
+		case script_value::TYPEID_CHAR:
+		case script_value::TYPEID_BOOL:
+			cap.kind = parallel_capture_kind::scalar;
+			break;
+		case script_value::TYPEID_CPP_BOUND: {
+			// ONE cached semantic-index read, then compare (never repeated is_* probes)
+			const size_t sem = cap.source->bound_semantic_index();
+			if (sem == script_value::TYPEID_NULL && !cap.source->is_null()) {
+				return usage("parallel_transform: captured name '" + std::string(entry.name) + "' is not value-semantic (bound host object)");
+			}
+			// Decode ONCE at the barrier (clone detaches a bound primitive/string):
+			// every worker sees the same barrier-time value
+			cap.source = cap.source->clone();
+			cap.kind = sem == script_value::TYPEID_STRING
+				? parallel_capture_kind::string : parallel_capture_kind::scalar;
+			break;
+		}
+		case script_value::TYPEID_STRING:
+			cap.kind = parallel_capture_kind::string;
+			break;
+		case script_value::TYPEID_ARRAY:
+		case script_value::TYPEID_MAP:
+			cap.kind = (entry.borrow_eligible && parallel_content_all_primitive(*cap.source))
+				? parallel_capture_kind::borrow : parallel_capture_kind::snapshot;
+			break;
+		case script_value::TYPEID_FUNCTION:
+			return usage("parallel_transform: captured name '" + std::string(entry.name) +
+			             "' is a function value (only direct calls to statically-known functions are allowed in a parallel body)");
+		default:
+			return usage("parallel_transform: captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
+		}
+		state.last_captures.emplace_back(entry.name_id, cap.kind);
+		captures.push_back(std::move(cap));
+	}
+
 	const auto& source = array_value.as_array();
 	const size_t n = source.size();
 	std::vector<script_value> out(n, script_value(std::monostate{}, &eng));
@@ -873,6 +1125,27 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	}
 	std::vector<parallel_worker_slot*> contexts;
 	contexts.reserve(worker_count);
+
+	// Whatever way this call exits, no capture define survives it: a dormant slot must
+	// never hold a borrow's raw pointer (the viewed container may die with its global),
+	// and snapshots release with the region rather than idling in slot envs.
+	struct capture_define_guard {
+		engine& eng;
+		std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
+		size_t count;
+		~capture_define_guard() {
+			for (size_t k = 0; k < count && k < slots.size(); ++k) {
+				parallel_worker_slot* slot = slots[k].get();
+				if (!slot) { continue; }
+				for (uint64_t id : slot->capture_name_ids) {
+					slot->root_env->define(id, script_value(std::monostate{}, &eng));
+				}
+				slot->capture_name_ids.clear();
+				slot->provisioned_nodes.clear();
+			}
+		}
+	} capture_guard{ eng, state.worker_slots, worker_count };
+
 	for (size_t k = 0; k < worker_count; ++k) {
 		auto& slot = state.worker_slots[k];
 		if (slot && slot_matches(*slot, *adm, *fn_payload->fn, use_vm)) {
@@ -889,6 +1162,38 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			} catch (const std::exception& e) {
 				return usage("parallel_transform: element " + std::to_string(i) + ": " + e.what());
 			}
+		}
+		// Provision the captured reads into THIS worker's root env (single-threaded,
+		// charged to the enclosing execute): scalars copy, strings/snapshots detach
+		// (memory_cap-charged inside parallel_detached_copy), borrows mint the
+		// zero-copy view. Defines are per call - content may have changed since the
+		// last region - and are nulled again at the join.
+		slot->capture_name_ids.clear();
+		slot->provisioned_nodes.clear();
+		std::vector<const void*> capture_nodes;
+		for (const auto& cap : captures) {
+			script_value provisioned(std::monostate{}, &eng);
+			try {
+				switch (cap.kind) {
+				case parallel_capture_kind::scalar:
+					provisioned = *cap.source;
+					break;
+				case parallel_capture_kind::string:
+				case parallel_capture_kind::snapshot:
+					capture_nodes.clear();
+					provisioned = cap.source->parallel_detached_copy(&value_types, &capture_nodes);
+					slot->provisioned_nodes.insert(capture_nodes.begin(), capture_nodes.end());
+					break;
+				case parallel_capture_kind::borrow:
+					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
+					provisioned = script_value::make_parallel_borrow(*cap.source, &eng);
+					break;
+				}
+			} catch (const std::exception& e) {
+				return usage("parallel_transform: captured name '" + std::string(cap.entry->name) + "': " + e.what());
+			}
+			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
+			slot->capture_name_ids.push_back(cap.entry->name_id);
 		}
 		contexts.push_back(slot.get());
 	}
@@ -956,6 +1261,66 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	script_value result = script_value::make_array(nullptr, &eng);
 	result.as_array() = std::move(out);
 	return result;
+}
+
+// Tier-1 raw read through a region borrow (see parallel_transform.hpp). Runs on worker
+// threads: every message below is a static literal (checked_result never allocates) and
+// NOTHING here interns against the frozen symbolizer or copies a shared handle -
+// primitive elements mint plain values, anything heavier rides the silent deep clone.
+checked_result<script_value> parallel_borrow_subscript_read(const script_value& borrow,
+                                                            const script_value& index_raw,
+                                                            engine* eng,
+                                                            bool lvalue_write) {
+	if (lvalue_write) {
+		// The runtime write wall: admission catches the visible shapes with positions;
+		// this is the chokepoint that makes the borrow sound regardless
+		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+			"cannot write enclosing state in a parallel body (captured containers are read-only)");
+	}
+	const script_value& index = index_raw.deref();
+	if (const auto* arr = borrow.parallel_borrow_array()) {
+		if (!index.is_int()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_index_type),
+				"Array index must be an integer");
+		}
+		const script_int i = index.unchecked_as_int();
+		if (i < 0 || i >= static_cast<script_int>(arr->size())) {
+			// Static text (no interned numbers): worker threads may not intern, and the
+			// twins' numeric form would - the captured-array read names the condition
+			return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds),
+				"Array index out of bounds reading a captured array in a parallel body");
+		}
+		const script_value& elem = (*arr)[static_cast<size_t>(i)];
+		switch (elem.raw_storage_index()) {
+		case script_value::TYPEID_NULL:
+		case script_value::TYPEID_INT:
+		case script_value::TYPEID_FLOAT:
+		case script_value::TYPEID_CHAR:
+		case script_value::TYPEID_BOOL:
+			return script_value(elem);   // raw const read -> worker-local mint, zero refcount traffic
+		default:
+			return elem.parallel_detached_copy();   // tier 3 (defensive: borrows are all-primitive)
+		}
+	}
+	if (const auto* map = borrow.parallel_borrow_map()) {
+		auto it = map->find(index);
+		if (it == map->end()) {
+			return script_value(std::monostate{}, eng);   // read misses yield null (twin semantics)
+		}
+		const script_value& elem = it->second;
+		switch (elem.raw_storage_index()) {
+		case script_value::TYPEID_NULL:
+		case script_value::TYPEID_INT:
+		case script_value::TYPEID_FLOAT:
+		case script_value::TYPEID_CHAR:
+		case script_value::TYPEID_BOOL:
+			return script_value(elem);
+		default:
+			return elem.parallel_detached_copy();
+		}
+	}
+	return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+		"parallel borrow subscript on a non-container value (internal)");
 }
 
 } // namespace jai::detail

@@ -42,6 +42,7 @@ namespace jai {
     namespace detail {
         struct execution_limits;
         struct parallel_engine_state;
+        enum class parallel_capture_kind : int;
     }
 
     namespace serialization {
@@ -305,6 +306,12 @@ namespace jai {
         // Chunk boundaries chosen by the most recent parallel_transform (n+1 bounds for n
         // chunks). Instrumentation for tests/benchmarks — never observable from script.
         const std::vector<size_t>& last_parallel_chunk_bounds() const;
+
+        // How the most recent parallel_transform provisioned each captured enclosing
+        // name (scalar/string/borrow/snapshot), keyed by INTERNED symbol id (resolve via
+        // symbolize()). Instrumentation: pins the borrow-vs-snapshot classification in
+        // tests — never observable from script.
+        const std::vector<std::pair<uint64_t, detail::parallel_capture_kind>>& last_parallel_captures() const;
 
         // Internal: engine-owned parallel machinery (lazily created) and the per-worker
         // provisioning helper (fresh copies of registered callables whose invocation

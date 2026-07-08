@@ -4,6 +4,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>   // parallel_capture_kind (classification pins)
 #include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai;
@@ -223,15 +224,307 @@ public:
 			check_true(msg.find(" at ") != std::string::npos);   // location suffix
 		});
 
-		test("rejects_enclosing_read", [this]() {
+		// === Captured reads (v0.5): enclosing state is READABLE, proven-read-only ===
+
+		test("captures_enclosing_scalar_reads", [this]() {
 			auto e = make_engine();
-			auto r = e->execute(R"(
+			jai::stdlib::register_all(*e);
+			const std::string src = R"(
 				var scale = 4;
-				int f(int x) { return x * scale; }
-				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
-				return "no-error";
+				var bias = 0.5;
+				var enabled = true;
+				var tag = "v";
+				string f(int x) {
+					var v = enabled ? x * scale + bias : 0.0;
+					return tag + to_string(v);
+				}
+				var a = [];
+				for (var i = 0; i < 48; i++) { a.push(i); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+		});
+
+		test("captured_grid_subscript_borrow", [this]() {
+			auto e = make_engine();
+			// The motivating shape: a flat all-primitive grid consumed by subscript reads.
+			// On the vm this provisions as a BORROW (zero-copy raw reads); elsewhere as a
+			// snapshot - semantics identical either way (pinned below).
+			const std::string src = R"(
+				var grid = [];
+				for (var i = 0; i < 900; i++) { grid.push(i * 7 % 256); }
+				var w = 30;
+				int f(int row) {
+					var total = 0;
+					for (var x = 0; x < w; x++) { total += grid[row * w + x]; }
+					return total * 2 + grid[row];
+				}
+				var rows = [];
+				for (var r = 0; r < 30; r++) { rows.push(r); }
+				var pout = parallel_transform(rows, f);
+				var sout = [];
+				for (auto r : rows) { sout.push(f(r)); }
+				return [pout, sout];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+			// Classification pin: an all-primitive, subscript-only grid rides the borrow
+			// tier (zero-copy raw reads) on BOTH backends; the scalar copies per worker
+			const auto& caps = e->last_parallel_captures();
+			const uint64_t grid_id = e->symbolize("grid");
+			const uint64_t w_id = e->symbolize("w");
+			bool saw_grid = false, saw_w = false;
+			for (const auto& [id, kind] : caps) {
+				if (id == grid_id) {
+					saw_grid = true;
+					check_eq((int)detail::parallel_capture_kind::borrow, (int)kind);
+				}
+				if (id == w_id) {
+					saw_w = true;
+					check_eq((int)detail::parallel_capture_kind::scalar, (int)kind);
+				}
+			}
+			check_true(saw_grid);
+			check_true(saw_w);
+		});
+
+		test("captured_string_table_snapshots", [this]() {
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			// Non-primitive content (strings) -> per-worker snapshot at the barrier: dense
+			// re-reads then cost nothing extra (the glyph-palette workload)
+			const std::string src = R"(
+				var pal = [];
+				for (var i = 0; i < 16; i++) { pal.push("c" + to_string(i * 3)); }
+				string f(int x) { return pal[x % 16] + "|" + pal[(x * 5) % 16]; }
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push(i); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+			const auto& caps = e->last_parallel_captures();
+			const uint64_t pal_id = e->symbolize("pal");
+			bool saw = false;
+			for (const auto& [id, kind] : caps) {
+				if (id == pal_id) {
+					saw = true;
+					check_eq((int)detail::parallel_capture_kind::snapshot, (int)kind);
+				}
+			}
+			check_true(saw);
+		});
+
+		test("captured_map_reads", [this]() {
+			auto e = make_engine();
+			// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot
+			const std::string src = R"(
+				var lut = {};
+				lut[1] = 10; lut[2] = 20; lut[3] = 30; lut[4] = 40;
+				var names = {"a": 1, "b": 2};
+				int f(int x) {
+					var hit = lut[x % 4 + 1];
+					return hit + names["a"] + names["b"];
+				}
+				var a = [];
+				for (var i = 0; i < 40; i++) { a.push(i); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+			)";
+			check_matches_serial_at(e, src, {1, 4});
+		});
+
+		test("captured_nested_containers_and_iteration", [this]() {
+			auto e = make_engine();
+			// Nested containers (array of arrays) and by-VALUE iteration over a captured
+			// container: both provision as snapshots and match serial exactly
+			const std::string src = R"(
+				var table = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+				int f(int x) {
+					var total = table[x % 3][x % 2] * 100;
+					for (auto row : table) {
+						for (auto v : row) { total += v; }
+					}
+					return total + table.size();
+				}
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(i); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+			)";
+			check_matches_serial_at(e, src, {1, 4});
+		});
+
+		test("captured_readonly_methods_and_weight_fn_reads", [this]() {
+			auto e = make_engine();
+			// Read-only builtin methods on captured receivers are admitted (size/contains);
+			// the weight fn runs at the barrier on the engine backend, so its enclosing
+			// reads are plain global reads
+			const std::string src = R"(
+				var pool = [5, 6, 7, 8];
+				var heavy = 3.0;
+				int f(int x) {
+					if (pool.contains(x % 10)) { return x + pool.size(); }
+					return x;
+				}
+				float w(int x) { return heavy; }
+				var a = [];
+				for (var i = 0; i < 40; i++) { a.push(i); }
+				var pout = parallel_transform(a, f, w);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+			)";
+			check_matches_serial_at(e, src, {1, 4});
+		});
+
+		test("captured_snapshot_result_never_aliases", [this]() {
+			auto e = make_engine();
+			// `return s` shares the worker's snapshot handle - the result path must
+			// materialize it, or elements produced by ONE worker would alias each other
+			// while elements from different workers don't (worker-count-visible!)
+			for (size_t workers : {size_t(1), size_t(8)}) {
+				e->parallel_thread_count(workers);
+				auto r = e->execute(R"(
+					var s = [1, 2, 3];
+					var f(int i) { return s; }
+					var a = [];
+					for (var i = 0; i < 24; i++) { a.push(i); }
+					var pout = parallel_transform(a, f);
+					pout[0].push(99);
+					return [pout[0].size(), pout[1].size(), pout[23].size()];
+				)");
+				const auto& sizes = r.as_array();
+				check_eq((int64_t)4, sizes[0].as_int());
+				check_eq((int64_t)3, sizes[1].as_int());
+				check_eq((int64_t)3, sizes[2].as_int());
+			}
+		});
+
+		test("captured_snapshot_charges_memory_cap_borrow_does_not", [this]() {
+			auto e = make_engine();
+			e->execution_budget(0);   // Debug-interpreter array build outruns the 1s default
+			e->execute(R"(
+				var big = [];
+				for (var i = 0; i < 8000; i++) { big.push(i); }
 			)");
-			check_true(r.as<std::string>().find("body reads enclosing state 'scale'") != std::string::npos);
+			e->memory_cap(32 * 1024);
+			e->parallel_thread_count(4);
+			// Whole-value read -> snapshot -> barrier detach charges the enclosing
+			// execute's memory accounting -> catchable memory-cap raise at a back-edge
+			auto r = e->execute(R"(
+				var f(int i) { return big; }
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(i); }
+				try {
+					var pout = parallel_transform(a, f);
+					for (var i = 0; i < 4; i++) { var nudge = i; }
+					return "no-error";
+				} catch (e) { return e; }
+			)");
+			check_true(r.as<std::string>().find("memory cap") != std::string::npos);
+
+			// Borrow tier: subscript-only reads of the same container copy NOTHING, so
+			// the same cap stays untouched (both backends)
+			{
+				auto e2 = make_engine();
+				e2->execution_budget(0);
+				e2->execute(R"(
+					var big = [];
+					for (var i = 0; i < 8000; i++) { big.push(i); }
+				)");
+				e2->memory_cap(32 * 1024);
+				e2->parallel_thread_count(4);
+				auto r2 = e2->execute(R"(
+					int f(int i) { return big[i * 7 % 8000]; }
+					var a = [];
+					for (var i = 0; i < 64; i++) { a.push(i); }
+					try {
+						var pout = parallel_transform(a, f);
+						for (var i = 0; i < 4; i++) { var nudge = i; }
+						return pout[0];
+					} catch (e) { return e; }
+				)");
+				check_true(r2.is_int());
+			}
+		});
+
+		test("captured_write_rejection_matrix", [this]() {
+			auto e = make_engine();
+			auto expect_error = [&](const char* body_line, const char* fragment) {
+				const std::string src = std::string(R"(
+					var g = [1, 2, 3];
+					int helper_ref(int& a) { return a; }
+					int f(int x) { )") + body_line + R"( return x; }
+					try { parallel_transform([1, 2, 3, 4], f); } catch (e) { return e; }
+					return "no-error";
+				)";
+				auto r = e->execute(src);
+				auto msg = r.as<std::string>();
+				check_true(msg.find(fragment) != std::string::npos);
+				check_true(msg.find(" at ") != std::string::npos);   // line:col position
+			};
+			expect_error("g = [9];", "body writes enclosing state 'g'");
+			expect_error("g[0] = 5;", "body writes enclosing state 'g'");
+			expect_error("g[0] += 1;", "body writes enclosing state 'g'");
+			expect_error("g[0]++;", "body writes enclosing state 'g'");
+			expect_error("g.push(4);", "method 'push' may mutate captured state 'g'");
+			expect_error("g.sort();", "method 'sort' may mutate captured state 'g'");
+			expect_error("var& r = g;", "reference declaration would alias enclosing state 'g'");
+			expect_error("helper_ref(g[0]);", "argument passes enclosing state 'g' by reference");
+			expect_error("for (auto& v : g) { }", "cannot iterate captured state 'g' by reference");
+		});
+
+		test("captured_reads_deterministic_1_2_8", [this]() {
+			auto e = make_engine();
+			// Grid-consumption determinism: byte-identical output at every worker count
+			const std::string src = R"(
+				var grid = [];
+				for (var i = 0; i < 2048; i++) { grid.push((i * 76241) % 65536); }
+				int f(int row) {
+					var acc = 0;
+					for (var x = 0; x < 64; x++) { acc = (acc * 31 + grid[row * 64 + x]) % 1000003; }
+					return acc;
+				}
+				var rows = [];
+				for (var r = 0; r < 32; r++) { rows.push(r); }
+				return parallel_transform(rows, f);
+			)";
+			e->parallel_thread_count(1);
+			auto r1 = e->execute(src);
+			e->parallel_thread_count(2);
+			auto r2 = e->execute(src);
+			e->parallel_thread_count(8);
+			auto r8 = e->execute(src);
+			check_true(arrays_equal(r1, r2));
+			check_true(arrays_equal(r1, r8));
+		});
+
+		test("captured_snapshot_equals_barrier_content", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			// The region sees exactly the barrier-time content, every call (pin: content
+			// changes BETWEEN calls are visible, content is frozen DURING one)
+			auto r = e->execute(R"(
+				var cfg = [10];
+				int f(int x) { return cfg[0] + x; }
+				var a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+				var first = parallel_transform(a, f);
+				cfg[0] = 20;
+				var second = parallel_transform(a, f);
+				return [first[0], second[0]];
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)11, vals[0].as_int());
+			check_eq((int64_t)21, vals[1].as_int());
 		});
 
 		test("rejects_host_call_print", [this]() {

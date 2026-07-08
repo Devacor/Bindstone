@@ -18,6 +18,7 @@
 #include <jaiscript/detail/thread_pool.hpp>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -50,6 +51,17 @@ namespace jai::detail {
         }
     };
 
+    // How a captured enclosing name is provisioned into the workers, decided at the
+    // barrier from the LIVE value (admission only collects the touches):
+    //   scalar   - plain per-worker copy (null/int/float/char/bool; bound primitives decode)
+    //   string   - per-worker detached copy (string storage is shared under plain copy)
+    //   borrow   - zero-copy view of the shared container (all-primitive content AND
+    //              every body touch is a subscript read - the raw-read fast tier)
+    //   snapshot - one per-worker detached deep copy at the barrier (everything else:
+    //              non-primitive content or non-subscript uses such as iteration,
+    //              read-only methods, whole-value reads)
+    enum class parallel_capture_kind : int { scalar = 0, string = 1, borrow = 2, snapshot = 3 };
+
     // Amortized admission verdict for one function body (keyed by body block pointer).
     // The graph snapshot records what the body needs provisioned per worker; entries are
     // re-verified against the live global environment at every region entry (hot reload
@@ -67,6 +79,17 @@ namespace jai::detail {
         // Parse-time type_infos referenced by the bodies (pre-warm set: reference-of and
         // component shapes are interned at the barrier so workers never intern).
         std::vector<type_info*> referenced_types;
+        // Enclosing names the bodies TOUCH in read positions (captured reads). Admission
+        // collects the touches and rejects the statically-visible WRITE shapes; value
+        // classification happens per region entry at the barrier (parallel_capture_kind).
+        // Keyed by the interned symbol id; `name` is a zero-alloc view into the
+        // symbolizer's permanent storage, used only when composing an error message.
+        struct capture_entry {
+            uint64_t name_id = 0;
+            std::string_view name;
+            bool borrow_eligible = true;   // every touch was a subscript read root
+        };
+        std::vector<capture_entry> captures;
     };
 
     // A reusable worker execution context (definition private to parallel_transform.cpp:
@@ -84,6 +107,10 @@ namespace jai::detail {
         std::unordered_map<const void*, parallel_admission> admission_cache;
         std::string error_text;                            // owns the message a re-raise views
         std::vector<size_t> last_chunk_bounds;             // instrumentation (tests/bench)
+        // Instrumentation: how the most recent region provisioned each captured name
+        // (engine::last_parallel_captures) - pins borrow-vs-snapshot classification.
+        // INTERNED symbol ids, never std::string (no per-region allocation).
+        std::vector<std::pair<uint64_t, parallel_capture_kind>> last_captures;
 
         // Worker-context reuse (Dev-greenlit): slots built inside the first region
         // persist and are RESET per call (limits re-slice, budget re-arm, residual-state
@@ -99,6 +126,18 @@ namespace jai::detail {
 
     // The builtin bodies (registered by the engine constructor).
     checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args);
+
+    // Subscript READ through a parallel borrow - the tier-1 raw-read path. Called by
+    // BOTH backends' subscript twins when the (deref'd) receiver is a parallel borrow
+    // (parity by construction; error text matches the twins' byte-for-byte, pre-formatted
+    // so no worker-side intern happens against the frozen symbolizer). Primitive elements
+    // mint plain worker-local values (zero refcount traffic); non-primitive elements
+    // materialize through the refcount-silent deep clone (tier 3 - defensive: the barrier
+    // only borrows all-primitive content). lvalue_write is the runtime write wall.
+    checked_result<script_value> parallel_borrow_subscript_read(const script_value& borrow,
+                                                                const script_value& index,
+                                                                engine* eng,
+                                                                bool lvalue_write);
 
 } // namespace jai::detail
 

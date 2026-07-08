@@ -337,6 +337,13 @@ script_value script_value::clone() const {
         throw runtime_error("Cannot clone script_value: missing engine pointer");
     }
 
+    // Parallel captured-read borrow: cloning IS the tier-3 materialization boundary
+    // (store kernel / explicit clone inside a region). The silent deep clone reads the
+    // shared container by const& only - no transient handle copies, no refcount race.
+    if (raw_storage_index() == TYPEID_PARALLEL_BORROW) {
+        return parallel_detached_copy();
+    }
+
     // shared_ptr<T> is a TYPE MARKER that indicates reference semantics for normal operations,
     // but clone() should perform a deep copy to create an independent instance
     if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
@@ -514,14 +521,18 @@ script_value script_value::clone() const {
 
 // Parallel-region detach (see value.hpp): fresh strong_ptr for EVERY heavy node
 // (strings included), bound primitives decoded, type_info preserved, value-semantic
-// content only. The one kernel the parallel_transform barrier trusts for exclusivity.
-script_value script_value::parallel_detached_copy(std::vector<type_info*>* collected_types) const {
+// content only. The one kernel the parallel_transform barrier trusts for exclusivity,
+// and the region's REFCOUNT-SILENT deep clone: every element is read by const& and
+// rebuilt fresh - no transient shallow copy of a shared handle ever exists, so this
+// may traverse a borrowed (region-frozen) container from a worker thread.
+script_value script_value::parallel_detached_copy(std::vector<type_info*>* collected_types,
+                                                  std::vector<const void*>* collected_nodes) const {
     if (!engine_) {
         throw runtime_error("Cannot detach script_value: missing engine pointer");
     }
     const size_t idx = raw_storage_index();
     if (idx == TYPEID_REFERENCE) {
-        return deref().parallel_detached_copy(collected_types);
+        return deref().parallel_detached_copy(collected_types, collected_nodes);
     }
     if (collected_types && type_info_.get()) {
         collected_types->push_back(type_info_.get());
@@ -540,7 +551,9 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             const auto& handle = std::get<strong_ptr<script_string>>(storage_);
             if (!handle) { break; }   // null handle shares nothing
             engine_->execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
-            result.storage_ = make_strong<script_string>(*handle);
+            auto fresh = make_strong<script_string>(*handle);
+            if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
+            result.storage_ = fresh;
             break;
         }
         case TYPEID_ARRAY: {
@@ -550,8 +563,9 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             auto fresh = make_strong<std::vector<script_value>>();
             fresh->reserve(handle->size());
             for (const auto& elem : *handle) {
-                fresh->push_back(elem.parallel_detached_copy(collected_types));
+                fresh->push_back(elem.parallel_detached_copy(collected_types, collected_nodes));
             }
+            if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
             break;
         }
@@ -561,17 +575,46 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (handle->size() + 1));
             auto fresh = make_strong<std::map<script_value, script_value>>();
             for (const auto& [key, val] : *handle) {
-                fresh->emplace(key.parallel_detached_copy(collected_types), val.parallel_detached_copy(collected_types));
+                fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes),
+                               val.parallel_detached_copy(collected_types, collected_nodes));
             }
+            if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
             break;
         }
         case TYPEID_CPP_BOUND: {
             if (bound_semantic_index() != TYPEID_NULL) {
                 // Decode, then re-detach so bound strings get fresh storage too
-                return bound_decoded_temp().parallel_detached_copy(collected_types);
+                return bound_decoded_temp().parallel_detached_copy(collected_types, collected_nodes);
             }
             throw runtime_error("value is not value-semantic (bound host object)");
+        }
+        case TYPEID_PARALLEL_BORROW: {
+            // Materialize the borrow: silent deep clone of the VIEWED container. The
+            // viewed structure is all-primitive by the barrier's classification, and the
+            // traversal below reads it by const& only.
+            const auto& tag = std::get<parallel_borrow_tag>(storage_);
+            if (const auto* arr = parallel_borrow_array()) {
+                engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (arr->size() + 1));
+                auto fresh = make_strong<std::vector<script_value>>();
+                fresh->reserve(arr->size());
+                for (const auto& elem : *arr) {
+                    fresh->push_back(elem.parallel_detached_copy(collected_types, collected_nodes));
+                }
+                if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
+                result.storage_ = fresh;
+            } else if (const auto* map = parallel_borrow_map()) {
+                engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (map->size() + 1));
+                auto fresh = make_strong<std::map<script_value, script_value>>();
+                for (const auto& [key, val] : *map) {
+                    fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes),
+                                   val.parallel_detached_copy(collected_types, collected_nodes));
+                }
+                if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
+                result.storage_ = fresh;
+            }
+            (void)tag;
+            break;
         }
         default: {
             const char* what = idx == TYPEID_OBJECT ? "object"
@@ -583,6 +626,44 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
         }
     }
     return result;
+}
+
+// === Parallel captured-read borrow (see value.hpp) ===
+
+script_value script_value::make_parallel_borrow(const script_value& source, engine* eng) {
+    const script_value& v = source.deref();
+    script_value result(std::monostate{}, eng);
+    result.type_info_ = v.type_info_;
+    parallel_borrow_tag tag;
+    if (v.raw_storage_index() == TYPEID_ARRAY) {
+        const auto& handle = std::get<strong_ptr<std::vector<script_value>>>(v.storage_);
+        tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get()));
+    } else if (v.raw_storage_index() == TYPEID_MAP) {
+        const auto& handle = std::get<strong_ptr<std::map<script_value, script_value>>>(v.storage_);
+        tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get())) | parallel_borrow_tag::k_map_bit;
+    } else {
+        throw runtime_error("make_parallel_borrow: source must be an array or map");
+    }
+    result.storage_ = tag;
+    return result;
+}
+
+const std::vector<script_value>* script_value::parallel_borrow_array() const noexcept {
+    if (const auto* tag = std::get_if<TYPEID_PARALLEL_BORROW>(&storage_)) {
+        if (!tag->is_map_kind()) {
+            return static_cast<const std::vector<script_value>*>(tag->pointer());
+        }
+    }
+    return nullptr;
+}
+
+const std::map<script_value, script_value>* script_value::parallel_borrow_map() const noexcept {
+    if (const auto* tag = std::get_if<TYPEID_PARALLEL_BORROW>(&storage_)) {
+        if (tag->is_map_kind()) {
+            return static_cast<const std::map<script_value, script_value>*>(tag->pointer());
+        }
+    }
+    return nullptr;
 }
 
 const script_function& script_value::as_function() const {
@@ -923,6 +1004,7 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
                     case TYPEID_FUNCTION:   return std::get_if<TYPEID_FUNCTION>(&v.storage_)->get();
                     case TYPEID_SHARED_PTR: return std::get_if<TYPEID_SHARED_PTR>(&v.storage_)->get();  // holder identity; runtime-unreachable (alt 11 never constructed)
                     case TYPEID_REFERENCE:  return std::get_if<TYPEID_REFERENCE>(&v.storage_)->get();
+                    case TYPEID_PARALLEL_BORROW: return std::get_if<TYPEID_PARALLEL_BORROW>(&v.storage_)->pointer();  // viewed container = stable identity (region-internal, defensive)
                     default:                return nullptr;  // invalid/weak_ptr: treated as one equivalence class
                 }
             };

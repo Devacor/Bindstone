@@ -4,11 +4,14 @@ Status: DESIGN with the v0 slice SHIPPED — **`parallel_transform(arr, fn[, wei
 `thread_count()` are live** (the prove_or_serial §5 sequencing step; implementation:
 `detail/parallel_transform.hpp` + `source/implementation/parallel_transform.cpp`, tests in
 `source/tests/language/parallel_transform_tests.cpp`, scaling benches in
-`source/tests/performance/parallel_transform_bench.cpp`). The `parallel_for` keyword,
-`thread_storage` pads, and the binding annotations remain design-only. Dev rulings
-2026-07-06 are final where marked RULED. All four §11 questions are RULED — the only
-remaining open sub-item is the Q1 weight-hint syntax spelling for the future KEYWORD form;
-the shipped BUILTIN needs no new syntax (the hint is simply the third argument).
+`source/tests/performance/parallel_transform_bench.cpp`) — and the v0.5 slice SHIPPED
+(2026-07-08): **captured reads** (§13) — a body may READ enclosing globals under the
+scalar/string/borrow/snapshot provisioning tiers; enclosing WRITES stay errors in every
+shape. The `parallel_for` keyword, `thread_storage` pads, and the binding annotations
+remain design-only. Dev rulings 2026-07-06 are final where marked RULED. All four §11
+questions are RULED — the only remaining open sub-item is the Q1 weight-hint syntax
+spelling for the future KEYWORD form; the shipped BUILTIN needs no new syntax (the hint
+is simply the third argument).
 
 ## 0. Ground truth: script values can never be shared live across threads
 
@@ -308,6 +311,10 @@ contract (§1) and the write check (§4c) are updated to match.
    iteration-order error selection, per-worker budget/cap rails, 1-vs-N determinism +
    fuzz battery both backends). Deferred from v0 toward the steps below: pads, captured
    reads (first-touch gate), own-element mutation, command buffer/annotations, objects.
+1.6. **Captured reads land (v0.5)** (DONE — §13: touch-collection admission + the
+   scalar/string/borrow/snapshot provisioning tiers + the runtime write wall; supersedes
+   the first-touch-gate spelling of Q3 for the builtin — the barrier provisions
+   everything up front, and the borrow tier makes the proven case cheaper than any gate).
 2. **`parallel_for` sequential-semantics first** (~1k lines): parse, both backends,
    `thread_storage` pads, the enclosing-write wall, binding annotations + command buffer,
    print buffering, `thread_count()` — running on ONE thread. Gate: full foundry green on both
@@ -324,6 +331,118 @@ contract (§1) and the write check (§4c) are updated to match.
    the walk itself).
 
 Step 2 before steps 3-4 is the load-bearing ordering.
+
+## 13. SHIPPED (v0.5, 2026-07-08): captured reads — read enclosing state, proven read-only
+
+A `parallel_transform` body may READ enclosing globals. Writes to enclosing state remain
+errors in every shape, always (contract A). Implementation:
+`source/implementation/parallel_transform.cpp` (admission + barrier + the borrow kernel),
+`core/value.hpp` variant alternative 15 (`parallel_borrow_tag`), both backends' subscript
+twins call the ONE shared kernel `detail::parallel_borrow_subscript_read` (parity by
+construction, invariants.md §6).
+
+### 13a. Two-layer design (Dev-ruled): cheap admission + runtime write wall
+
+The admission walk does NOT prove read-onlyness — it only **collects the enclosing names
+the body touches** (touch-collection; interned ids, one flag per name) and rejects, as
+*free static diagnostics with line:col*, every write shape it can already see: direct
+assigns, subscript/compound/incdec stores rooted at an enclosing name, `var&` alias
+declarations, by-reference arguments into script callees, by-reference iteration over a
+captured container, and any method on a captured receiver that is not a known read-only
+builtin (a mutating method on a worker's private snapshot would silently diverge across
+worker counts — so unknown = rejected, fail-closed). Soundness never depends on the
+walker: the runtime write wall (the kernel's lvalue_write check; snapshots are
+worker-private) holds regardless.
+
+### 13b. Provisioning tiers (classified per region entry, from the LIVE value)
+
+Every captured name resolves against the global environment at the barrier
+(single-threaded) and provisions per worker as one of (`detail::parallel_capture_kind`,
+pinned by `engine::last_parallel_captures()`):
+
+- **scalar** — null/int/float/char/bool (bound primitives decode once at the barrier):
+  plain per-worker copy. Free.
+- **string** — per-worker detached copy (string storage is shared under plain copy).
+- **borrow** — the raw-read fast tier: the container is **all-primitive** AND every body
+  touch is a **subscript read**. Workers get ONE tagged raw pointer
+  (`parallel_borrow_tag`, variant alt 15) whose copies touch no refcount; element reads
+  mint worker-local primitives — **zero copies, zero refcount traffic, zero memory_cap
+  charge**. GLOOM's bit-packed int64 map/pixel grids are literally free to read.
+- **snapshot** — everything else (non-primitive content, or any non-subscript use:
+  iteration, read-only methods, whole-value reads): ONE detached deep copy per worker at
+  the barrier, memory_cap-charged. The snapshot tier survives (Dev's escape clause)
+  because dense re-reads of heavy elements — GLOOM's glyph palettes, hundreds of escape
+  strings read per pixel row — would pay a per-READ deep clone under a borrow, but pay
+  once per region under a snapshot.
+
+### 13c. Why the borrow is sound (and why direct shared reads never are)
+
+`strong_ptr` counts are non-atomic (§0): even a read-only element copy of a live shared
+container is a data race. The borrow never copies a shared handle — the value the worker
+holds is a raw tagged pointer, and the ONE shared kernel reads elements by const& and
+mints fresh worker-local values. Stability: (a) the write wall forbids every mutation of
+enclosing state during the region, so the viewed container never reallocates and its
+interior is frozen; (b) the barrier holds one anchor handle per borrowed container for
+the region's duration, so the count is stationary and the container outlives the region.
+Borrows are region-internal: the store kernel (`clone_for_assignment` →
+`script_value::clone()`) and the region's result path materialize them through the
+refcount-silent deep clone (`parallel_detached_copy` — traversal reads by const& and
+constructs fresh nodes; it never makes even a transient shallow copy), so no borrow
+survives the join, and a dormant worker slot holds no raw pointer (defines are nulled at
+every region exit). Results that reach into a worker's snapshot ALSO materialize —
+otherwise two iterations on one worker could alias while two on different workers don't,
+a worker-count-visible difference.
+
+Semantics: reads see barrier-time content, indistinguishable from pure since writes are
+banned; iteration-order error selection, budget rails, and 1-vs-N determinism are
+unchanged and re-pinned over capture workloads.
+
+### 13d. Host-const bonus: DEFERRED (design note)
+
+The proposal — auto-mark const-qualified host METHODS as read-safe callables inside
+parallel bodies via dynamic_binder's static knowledge of member-function constness — has
+no reachable surface in v0.5: parallel bodies cannot hold host objects at all (elements,
+captures, and results are value-semantic only; member access is rejected at admission),
+so there is no receiver a const method could be invoked on. The plumbing only becomes
+meaningful with the §5 binding-annotation sweep / object tier, where `const T&`-receiver
+methods would slot in as automatic `read_world`/`self_only` candidates — the binder can
+detect constness via the member-function-pointer type at registration (cheap), but the
+admission walker would also need static receiver typing to resolve WHICH binding a
+member call hits, which is exactly the object-tier work. Revisit there.
+
+### 13e. The pair idiom (the sanctioned pattern where capture isn't enough)
+
+Captured reads cover shared INPUT. When each iteration also needs distinct per-element
+inputs AND you want structured multi-value outputs, the standard approach is
+**pair-shaped elements**: pack each element as `{input...}`, return `{outputs...}`, and
+collect from the transform result — hand-chunking like GLOOM's 16-column ray records
+remains the way to amortize per-element costs the scheduler can't see. Worked example:
+
+```jaiscript
+var grid = [];        // shared read-only input: captured, not carried per element
+// ... fill grid ...
+var jobs = [];
+for (var s = 0; s < 8; s++) { jobs.push([s * 128, s * 128 + 128, s]); }   // {x0, x1, tag}
+var f(var job) {
+    int x0 = job[0];
+    int x1 = job[1];
+    var best = 0;
+    var total = 0;
+    for (var x = x0; x < x1; x++) {
+        var v = grid[x];                  // captured read (borrow tier)
+        total += v;
+        if (v > best) { best = v; }
+    }
+    return [job[2], total, best];         // pair-shaped output
+}
+for (auto r : parallel_transform(jobs, f)) {
+    // r[0] = tag, r[1] = total, r[2] = best — collected in iteration order
+}
+```
+
+This is now SECONDARY to capture: use captured reads for shared inputs, the pair idiom
+for per-chunk inputs/outputs; `thread_storage` pads (§1) remain the future answer for
+accumulation across iterations.
 
 ## Appendix: possible future — background jobs on separate engines
 

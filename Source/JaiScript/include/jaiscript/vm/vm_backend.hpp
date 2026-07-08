@@ -70,6 +70,10 @@ namespace jai::vm {
         bool is_unwinding() const override { return is_unwinding_; }
         const script_exception& get_current_exception() const override { return current_exception_.value(); }
 
+        // Host-boundary discriminator (same rule as resume_coroutine's host-level
+        // detection): false only when no frames are live and depth is zero
+        bool is_executing() const override { return current_call_depth_ != 0 || !frames_.empty(); }
+
         std::vector<stack_frame> last_stack_trace() const override { return captured_trace_; }
         std::string format_stack_trace() const override;
 

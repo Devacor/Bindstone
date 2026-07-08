@@ -386,6 +386,99 @@ public:
 			}
 		});
 
+		// ============================================================
+		// Item E: an uncaught script throw crossing the host boundary through a
+		// stored callable (get_variable + as_function) must propagate as the same
+		// script_exception engine::execute throws - with the ORIGINAL message. It
+		// used to be swallowed: the thunk returned success(null) with the backend's
+		// unwinding flag latched, so hosts saw nonsense downstream errors
+		// ("script_value is not a boolean. Actual type: 0") and a poisoned engine.
+		// ============================================================
+
+		test("host_callable_uncaught_throw_carries_message", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				e->execute(R"(
+					function boom() { throw "the actual message"; }
+					function fine() { return 7; }
+				)");
+				auto boom = e->get_variable("boom");
+				std::string caught = "<no throw>";
+				try {
+					auto r = boom.as_function()(std::vector<jai::script_value>{});
+					if (!r.has_value()) { caught = std::string("<checked error> ") + std::string(r.message()); }
+				} catch (const jai::script_exception& ex) {
+					caught = ex.what();
+				}
+				check_true(caught.find("the actual message") != std::string::npos,
+					backend_tag(use_vm) + "host sees the thrown message, got: " + caught);
+
+				// ...and matches execute()'s uncaught-throw report for the same script
+				std::string exec_msg = "<no throw>";
+				try { e->execute("boom();"); } catch (const jai::script_exception& ex) { exec_msg = ex.what(); }
+				check_true(exec_msg.find("the actual message") != std::string::npos,
+					backend_tag(use_vm) + "execute() baseline carries the message");
+
+				// the engine stays usable after the boundary throw
+				auto fine = e->get_variable("fine");
+				auto r2 = fine.as_function()(std::vector<jai::script_value>{});
+				check_true(r2.has_value(), backend_tag(use_vm) + "engine usable after boundary throw");
+				check_eq((int64_t)7, r2.value().as_int(), backend_tag(use_vm) + "next host call returns real value");
+			}
+		});
+
+		test("host_callable_throw_mid_script_stays_catchable", [this]() {
+			// A host function that reinvokes a script callable MID-SCRIPT must not
+			// steal the throw: the calling script's try/catch still sees the
+			// original thrown VALUE (the boundary conversion is host-level only).
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto stored = std::make_shared<jai::script_value>(std::monostate{}, e.get());
+				e->add_function("call_stored", [stored]() -> jai::script_value {
+					auto r = stored->as_function()(std::vector<jai::script_value>{});
+					if (!r.has_value()) { throw std::runtime_error(std::string(r.message())); }
+					return r.value();
+				});
+				e->execute(R"(function inner() { throw "inner payload"; })");
+				*stored = e->get_variable("inner");
+				auto r = e->execute(R"(
+					var got = "";
+					try { call_stored(); } catch (err) { got = err; }
+					got;
+				)");
+				check_eq(std::string("inner payload"), r.as<std::string>(),
+					backend_tag(use_vm) + "script catch still sees the original thrown value");
+			}
+		});
+
+		test("host_callable_after_nested_execute_stays_mid_script", [this]() {
+			// Dev ruling: the executing state is a COUNTER (semaphore), not a bool.
+			// A host callback that runs a NESTED execute() and then invokes a
+			// throwing stored callable is still MID-SCRIPT after the nested execute
+			// returns - the boundary conversion must not fire, and the outer
+			// script's catch still sees the original thrown value.
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto stored = std::make_shared<jai::script_value>(std::monostate{}, e.get());
+				jai::engine* raw = e.get();
+				e->add_function("nested_then_call", [stored, raw]() -> jai::script_value {
+					raw->execute("var nested_side = 1;");   // nested execute enters and EXITS
+					auto r = stored->as_function()(std::vector<jai::script_value>{});
+					if (!r.has_value()) { throw std::runtime_error(std::string(r.message())); }
+					return r.value();
+				});
+				e->execute(R"(function inner() { throw "counted payload"; })");
+				*stored = e->get_variable("inner");
+				auto r = e->execute(R"(
+					var got = "";
+					try { nested_then_call(); } catch (err) { got = err; }
+					got;
+				)");
+				check_eq(std::string("counted payload"), r.as<std::string>(),
+					backend_tag(use_vm) + "post-nested-execute callable throw stays script-catchable");
+			}
+		});
+
 		// Plain value decls from reference-producing initializers COPY (C++'s
 		// `int x = f();` for `int& f()`); alias binding stays the auto&/ref-decl
 		// spelling (pinned in vm_backend_tests ref_return_*).

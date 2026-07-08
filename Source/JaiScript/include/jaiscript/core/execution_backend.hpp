@@ -121,6 +121,13 @@ public:
     virtual bool is_unwinding() const = 0;
     virtual const script_exception& get_current_exception() const = 0;
 
+    // True while a script is running on this backend (live frames / a top-level
+    // execute in flight). The host-boundary discriminator: a stored-callable
+    // invocation at is_executing()==false is a fresh host entry (same rule as the
+    // backends' host-level resume detection), so an uncaught script throw converts
+    // to a thrown script_exception there instead of staying a latched flag.
+    virtual bool is_executing() const { return false; }
+
     // Stack trace captured at the last unwind (empty if the backend doesn't track one)
     virtual std::vector<stack_frame> last_stack_trace() const { return {}; }
     virtual std::string format_stack_trace() const { return {}; }

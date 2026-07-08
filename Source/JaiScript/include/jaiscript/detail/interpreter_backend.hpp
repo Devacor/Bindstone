@@ -88,6 +88,10 @@ public:
         return interpreter_->is_unwinding();
     }
 
+    bool is_executing() const override {
+        return interpreter_->is_executing();
+    }
+
     const script_exception& get_current_exception() const override {
         return interpreter_->get_current_exception();
     }

@@ -347,6 +347,11 @@ namespace jai {
         bool is_unwinding() const { return is_unwinding_; }
         const script_exception& get_current_exception() const { return current_exception_.value(); }
 
+        // Host-boundary discriminator (same rule as resume_coroutine's host-level
+        // detection): false only when no execute is in flight (counted - nested
+        // executes decrement without clearing the outer run) and no frames are live
+        bool is_executing() const { return execute_depth_ != 0 || current_call_depth_ != 0; }
+
         const std::vector<stack_trace_entry>& last_stack_trace() const { return captured_trace_; }
         std::string format_stack_trace() const;
 
@@ -639,10 +644,12 @@ namespace jai {
         bool hasBreakRequest_ = false;
         bool hasContinueRequest_ = false;
 
-        // True while execute() runs a program - a reentrant execute (host callback
-        // mid-script, e.g. hot reload) isolates itself at top level and must not
-        // reset the environment pool the outer run still uses
-        bool executing_ = false;
+        // Execute-nesting depth (a COUNTER, not a flag - Dev ruling: a nested C++
+        // execute() on the same engine must not clear the outer run's in-flight
+        // state on exit). Non-zero while any execute() runs a program - a reentrant
+        // execute (host callback mid-script, e.g. hot reload) isolates itself at
+        // top level and must not reset the environment pool the outer run still uses
+        int execute_depth_ = 0;
 
         // Coroutine support
         coroutine_handle* active_coroutine_ = nullptr;

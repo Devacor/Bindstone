@@ -25,6 +25,17 @@ namespace jai::vm {
         std::vector<uint32_t> arg_lvalue_nodes;
         uint32_t member_node = k_invalid_u32;      // op_call_method: member_expr node index
         uint64_t receiver_symbol = UINT64_MAX;     // op_call_method: identifier receiver symbol id
+        // Monomorphic in-loop callee cache (flat-stack stage 1): keyed on the address of
+        // the loaded function value's shared script_function payload; ic_pin keeps that
+        // object alive so a hit can never be a recycled address (ABA) — a redefined name
+        // mints a new script_function, so the site misses and revalidates (at most one
+        // superseded function stays pinned per site until the refill). Never WRITTEN on
+        // parallel workers (chunks are shared across worker function copies; same
+        // cached_global_env_ gate as the env-lookup caches).
+        mutable const script_function* ic_identity = nullptr;
+        mutable const script_defined_function* ic_fn = nullptr;
+        mutable strong_ptr<script_function> ic_pin;
+        mutable uint32_t ic_argc = 0;
     };
 
     struct function_proto {

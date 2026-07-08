@@ -147,6 +147,44 @@ public:
             }
         });
 
+        // RULED (2026-07, flat-stack stage 1): transient_k is CALIBRATION, not
+        // semantics — but every change to the transient-copy structure must be
+        // REPORTED with direction + cause, never silently retuned (Dev: "a regression
+        // isn't silent"). This audit pins the exact script-visible count for a
+        // canonical call shape PER BACKEND, so any change to per-call copies fails
+        // here and forces the report:
+        //   DOWNWARD (fewer copies, e.g. stage-2 in-place binding eliding the arg
+        //   slice) = a win — update the pin WITH a proof of safety in the commit
+        //   (which copy was elided, why no observable aliasing change).
+        //   UPWARD (more copies) = a copy regression — justify or treat as a defect.
+        // Ledger at this pin (transient_k: interp 2 / vm 3, use_count builtin):
+        //   top-level a.use_count(): 1 alias + builtin transients - k = 1 (both).
+        //   inside probe(a): interp = outer(1) + args-vector copy(1) + param slot(1)
+        //   + builtin transients(2) - k(2) = 3; vm = outer(1) + param slot(1)
+        //   [stack arg copy erased before the body runs] + builtin transients(3)
+        //   - k(3) = 2. The cross-backend DIFFERENCE is the interp's live args
+        //   vector, absorbed deliberately by design (the ladder itself stays
+        //   byte-identical — see the pins above).
+        test("transient_count_audit_canonical_call", [this]() {
+            const char* src = R"(
+                class T { int x = 1; }
+                shared_ptr<T> a = T();
+                function probe(auto p) -> auto { return p.use_count(); }
+                var inside = probe(a);
+                var top = a.use_count();
+                to_string(inside) + ":" + to_string(top);
+            )";
+            std::string expected[2] = {"3:1", "2:1"};   // interp, vm
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                stdlib::register_all(*e);
+                check_eq(expected[use_vm ? 1 : 0], e->execute(src).as<std::string>(),
+                         use_vm ? "vm transient audit (report any change: copies-per-call moved)"
+                                : "interp transient audit (report any change: copies-per-call moved)");
+            }
+        });
+
         test("cpp_ref_count_sees_cpp_extraction", [this]() {
             // cpp_ref_count() preserves the pre-ruling number: script aliases leave it
             // at 1; a C++-side share (holder->data copy) bumps it

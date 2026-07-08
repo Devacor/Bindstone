@@ -12135,22 +12135,45 @@ std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr
     }
 }
 
-// Release an environment back to the pool
-// For block scopes: clears values immediately (safe because blocks don't return values)
-// For function scopes: just returns to pool, will be cleared on next reuse
-void interpreter::release_environment(std::shared_ptr<environment> env, bool clear_now) {
+// Release an environment back to the pool.
+// Lifetime ruling (2026-07, flat-stack stage 1): a freed pool slot holds NOTHING — a dead
+// frame's env must not keep its values or parent chain (a lambda's capture env!) alive
+// until slot reuse; weak_ptr expiry is script-observable. The epilogue flattens/derefs
+// return values BEFORE release, and references are owner-pinned (cells), so resetting
+// here is lawful — the old defer-to-reuse behavior was a pre-cells relic. Escaped envs
+// (still referenced beyond the pool + the caller's handle: an escaping closure_env, a
+// suspended coroutine chain) keep SOLE ownership and their slot is re-minted, so they
+// are never wiped by later reuse either — same escape rule reset_environment_pool
+// applies between executes (vm release_scope_env parity).
+// Parameter is const&: unshared == use_count() of exactly 2 (pool entry + the caller's
+// handle). Callers must pass a named handle, never a fresh temporary copy (a temp adds
+// a count and demotes the release to the escape path — safe, but re-mints needlessly).
+void interpreter::release_environment(const std::shared_ptr<environment>& env, bool clear_now) {
     if (!env) return;
-
-    // Clear environment if requested (safe for blocks, but not for functions with return values)
-    if (clear_now) {
-        env->reset(nullptr);
-    }
 
     // Only the pool TOP may be released. Decrementing for anything else (a non-pooled
     // make_shared env, or an out-of-order release) hands the caller's still-live scope
     // to the next get_pooled_environment, which reset()s it into a self-parent cycle.
     if (environment_pool_index_ > 0 && environment_pool_[environment_pool_index_ - 1] == env) {
-        --environment_pool_index_;
+        if (env.use_count() <= 2) {
+            // Reset BEFORE freeing the slot: value destruction can run script
+            // destructors, whose calls re-enter the pool — the slot must still read
+            // as in-use so those frames acquire HIGHER slots, not the one mid-reset
+            // (also keeps script dtor order identical to the old clear_now path).
+            env->reset(nullptr);
+            --environment_pool_index_;
+        } else {
+            // Escaped: the outside holder owns it from now on; re-mint the freed slot
+            --environment_pool_index_;
+            environment_pool_[environment_pool_index_] = std::make_shared<environment>(nullptr, env_symbolizer_);
+        }
+        return;
+    }
+
+    // Non-pooled env: clear when the caller vouches it is dead (block scopes); a live
+    // escapee just drops the caller's handle and its refcount governs.
+    if (clear_now && env.use_count() <= 1) {
+        env->reset(nullptr);
     }
 }
 

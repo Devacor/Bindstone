@@ -147,6 +147,24 @@ namespace jai::vm {
 
         struct frame_guard;
 
+        // Return-epilogue classification, cached per script_defined_function
+        // (backend_return_conv) and stamped on the record at push. unclassified routes
+        // through the legacy decision (method frames); the prim_* classes pass a
+        // storage-matching result through verbatim — exactly what the full path's
+        // identity try_convert produces for primitives.
+        enum class return_conv : uint8_t {
+            unclassified = 0,
+            none,          // untyped / any / void / auto: deref-only epilogue
+            ref,           // reference return: pass-through kernel (full route)
+            prim_int,
+            prim_float,
+            prim_bool,
+            prim_char,
+            prim_string,
+            check,         // typed: full convert_return_value route
+        };
+        static return_conv classify_return_conv(const type_info_ptr& t);
+
         // One logical script->script activation executed inside the current native run()
         // (Squirrel EnterFrame shape). Records live behind unique_ptr in a grow-only pool
         // so &rec.f stays address-stable (frames_ entries, try_record.owner and rec.caller
@@ -156,6 +174,7 @@ namespace jai::vm {
             call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
             script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
             type_info_ptr return_type;                 // pop drivers convert the result against this
+            uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
             std::shared_ptr<function_decl> ast_pin;    // method frames: resolved overload outlives a mid-call hot reload
             bool method_result_anchor = false;         // method frames: replicate make_bound_method's keep-alive fix-up
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f

@@ -1037,7 +1037,16 @@ namespace jai {
 
         // Function call helpers
         // Returns checked_result - exceptions only thrown at execute() boundary
-        checked_result<script_value> call_function(const script_defined_function& function, const std::vector<script_value>& args);
+        // method_ctx supplies the method scope pieces (definition env, receiver, access
+        // class) directly for the direct-dispatch fast path - same net frame/env shape
+        // as a method-env closure_env carrier, minus the carrier.
+        struct method_call_override {
+            const std::shared_ptr<environment>* definition_env;
+            const script_value* this_obj;
+            class_definition* access_ctx;
+        };
+        checked_result<script_value> call_function(const script_defined_function& function, const std::vector<script_value>& args,
+                                                   const method_call_override* method_ctx = nullptr);
         // Stateless reference-parameter binding from the call-site arg expression,
         // factored out of call_function so its locals don't sit in the
         // per-recursion-level frame (Debug stack ceiling)

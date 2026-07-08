@@ -60,6 +60,13 @@ if(GLOOM_PORT_CHAI)
         GLOOM_SOURCE_SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/chai/scripts"
     )
     gloom_msvc_settings(gloom_chai)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ports/chai/scripts")  # guard until the port's scripts are committed
+        add_custom_command(TARGET gloom_chai POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_CURRENT_SOURCE_DIR}/ports/chai/scripts
+                $<TARGET_FILE_DIR:gloom_chai>/gloom_scripts_chai
+        )
+    endif()
     message(STATUS "GLOOM: gloom_chai enabled (${GLOOM_CHAISCRIPT_ROOT})")
 endif()
 
@@ -73,6 +80,9 @@ if(GLOOM_PORT_SQUIRREL)
     file(GLOB GLOOM_SQSTDLIB_SOURCES "${GLOOM_SQUIRREL_ROOT}/sqstdlib/*.cpp")
     add_library(gloom_squirrel_runtime STATIC ${GLOOM_SQUIRREL_SOURCES} ${GLOOM_SQSTDLIB_SOURCES})
     target_include_directories(gloom_squirrel_runtime PUBLIC "${GLOOM_SQUIRREL_ROOT}/include")
+    # double SQFloat (the 32-bit default sinks IEEE-754 double sim conformance);
+    # PUBLIC so the adapter TU sees the same layout (it static_asserts this)
+    target_compile_definitions(gloom_squirrel_runtime PUBLIC SQUSEDOUBLE)
     if(MSVC)
         target_compile_options(gloom_squirrel_runtime PRIVATE /W2)
         set_property(TARGET gloom_squirrel_runtime PROPERTY
@@ -85,6 +95,11 @@ if(GLOOM_PORT_SQUIRREL)
         GLOOM_SOURCE_SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/squirrel/scripts"
     )
     gloom_msvc_settings(gloom_squirrel)
+    add_custom_command(TARGET gloom_squirrel POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/ports/squirrel/scripts
+            $<TARGET_FILE_DIR:gloom_squirrel>/gloom_scripts_squirrel
+    )
     message(STATUS "GLOOM: gloom_squirrel enabled (${GLOOM_SQUIRREL_ROOT})")
 endif()
 
@@ -114,5 +129,12 @@ if(GLOOM_PORT_LUA)
         GLOOM_SOURCE_SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/lua/scripts"
     )
     gloom_msvc_settings(gloom_lua)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ports/lua/scripts")  # guard until the port's scripts are committed
+        add_custom_command(TARGET gloom_lua POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_CURRENT_SOURCE_DIR}/ports/lua/scripts
+                $<TARGET_FILE_DIR:gloom_lua>/gloom_scripts_lua
+        )
+    endif()
     message(STATUS "GLOOM: gloom_lua enabled (${GLOOM_LUA_ROOT} + ${GLOOM_SOL2_ROOT})")
 endif()

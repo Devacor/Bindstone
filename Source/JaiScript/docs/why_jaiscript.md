@@ -105,10 +105,11 @@ to opt out).
 ## The receipts
 
 - **1,500+ tests green on both backends**, every commit. Differential fuzzing in CI.
-- **Performance**: the VM beats Squirrel on most head-to-head benchmarks (13W/6L) and
-  holds its own against Lua 5.4 outside of call-dense recursion (a known gap with a
-  planned fix — see `docs/parallel_design.md` siblings for the roadmap docs). Loops fuse
-  into superinstructions; a 1000-iteration hot loop runs ~45µs.
+- **Performance**: the VM beats Squirrel on most head-to-head benchmarks (12W/6L/1T),
+  sweeps ChaiScript 29W/0L, and holds its own against Lua 5.4 outside of call-dense
+  recursion (a known gap with a planned fix — the full 2026-07 head-to-head is
+  `docs/PERFORMANCE.md`). Loops fuse into superinstructions; a 1000-iteration hot loop
+  runs ~47µs.
 - **`script_value` is 32 bytes**, static-assert-gated, two per cache line.
 - **A complete roguelike** (`examples/roguelike`, ~2,700 lines of JaiScript) and a
   **demoscene reel** (`examples/demoreel`) are written in it — both double as
@@ -123,9 +124,10 @@ to opt out).
   The idiom is `&` parameters for anything heavy — cheap by design. If you write
   Python-shaped code expecting reference semantics, your first hour will surprise you;
   read the reference section above and it won't.
-- **Call-dense recursion is slower than Lua** today (~5× on a fib microbenchmark). Most
-  game scripts are loop- and method-shaped, where the gap is small to none — but the
-  register-window VM redesign that closes it is on the roadmap, not a hope.
+- **Call-dense recursion is slower than Lua** today (~9× on a fib(15) microbenchmark,
+  measured 2026-07). Most game scripts are loop- and method-shaped, where the gap is
+  small to none — but the register-window VM redesign that closes it is on the roadmap,
+  not a hope.
 - **Two backends cost maintenance.** That's the price of the executable spec, and shared
   semantic kernels (`detail/ref_lvalue.hpp` pattern) are steadily shrinking the duplicated
   surface.

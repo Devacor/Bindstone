@@ -2603,7 +2603,7 @@ void interpreter::prepare_for_execution() {
     // itself. Clearing here used to hand the outer frame the GLOBAL env to release
     // into the pool, which later recycled (and wiped) it. Mirrors the vm backend's
     // frames_-based reentrancy guard.
-    if (executing_) {
+    if (execute_depth_ != 0) {
         return;
     }
 
@@ -2674,7 +2674,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         std::optional<script_value> saved_return;
         bool saved_has_return = false;
 
-        explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->executing_) {
+        explicit reentry_isolation(interpreter* interp) : self(interp), reentrant(interp->execute_depth_ != 0) {
             if (reentrant) {
                 saved_env = self->environment_;
                 saved_call_stack = std::move(self->call_stack_);
@@ -2685,7 +2685,9 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 saved_has_return = self->hasReturnValue_;
                 self->environment_ = self->get_global_environment();
             }
-            self->executing_ = true;
+            // Counted, not a flag (Dev ruling): a nested execute's exit decrements
+            // symmetrically and can never clear the outer run's in-flight state
+            ++self->execute_depth_;
         }
         ~reentry_isolation() {
             if (reentrant) {
@@ -2694,9 +2696,8 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 self->valueStack_ = std::move(saved_values);
                 self->returnValue_ = std::move(saved_return);
                 self->hasReturnValue_ = saved_has_return;
-            } else {
-                self->executing_ = false;
             }
+            --self->execute_depth_;
         }
     } isolation(this);
 
@@ -12326,7 +12327,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
     // Depth alone is not enough: a TOP-LEVEL script statement calling resume() also
     // runs at call depth 0, and re-arming there let `for(..){ h.resume(); }` push the
     // deadline forever (fuzz livelock seeds 3507/8285/1213/8356/8391).
-    if (current_call_depth_ == 0 && !executing_) {
+    if (current_call_depth_ == 0 && execute_depth_ == 0) {
         arm_execution_deadline();
         limits_->reset_for_execute();
     }

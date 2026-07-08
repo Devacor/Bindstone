@@ -42,7 +42,21 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
-    return backend->execute_callable(payload, args);
+    // Host-boundary detection BEFORE the call (the backends' host-level-resume rule):
+    // an invocation with no execute in flight is a fresh host entry.
+    const bool host_boundary = !backend->is_executing() && !backend->is_unwinding();
+    auto result = backend->execute_callable(payload, args);
+    if (host_boundary && result.has_value() && backend->is_unwinding()) [[unlikely]] {
+        // Uncaught script throw crossing the host boundary: report EXACTLY like
+        // engine::execute's uncaught-throw path (same script_exception type, the
+        // original message), then scrub so the engine stays usable. Mid-script host
+        // callbacks keep the latched unwinding flag instead - the calling script's
+        // catch must still see the original thrown VALUE.
+        script_exception ex = backend->get_current_exception();
+        backend->prepare_for_execution();
+        throw ex;
+    }
+    return result;
 }
 
 namespace {
@@ -2401,6 +2415,11 @@ size_t engine::parallel_thread_count() const {
 const std::vector<size_t>& engine::last_parallel_chunk_bounds() const {
     static const std::vector<size_t> empty;
     return impl->parallel_ ? impl->parallel_->last_chunk_bounds : empty;
+}
+
+const std::vector<std::pair<uint64_t, detail::parallel_capture_kind>>& engine::last_parallel_captures() const {
+    static const std::vector<std::pair<uint64_t, detail::parallel_capture_kind>> empty;
+    return impl->parallel_ ? impl->parallel_->last_captures : empty;
 }
 
 // Per-worker copy of a registered callable: invoking the copy must bump no refcount the

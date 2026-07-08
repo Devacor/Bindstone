@@ -123,5 +123,5 @@ Guaranteed (standard C++20, verified by §3):
 
 Windows-only (all deliberate, all guarded):
 - The `native_stack_low()` headroom guard's actual measurement (§1).
-- `examples/` (crawler, demoreel, roguelike): VT-mode console setup, `_kbhit`/`_getch`.
+- `examples/` (crawler, demoreel, gloom): VT-mode console setup, `_kbhit`/`_getch`.
 - The MSVC-specific fast paths (`_mul128`) — equivalents exist for GCC/Clang.

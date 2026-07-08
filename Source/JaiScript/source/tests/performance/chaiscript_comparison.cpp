@@ -117,8 +117,11 @@ public:
         )");
 
         jai_engine->execute("function factorial(auto n) -> auto { if (n <= 1) { return 1; } return n * factorial(n - 1); }");
+        // Idiomatic &: ChaiScript arrays are reference-semantic, so a by-value JaiScript
+        // param deep-clones the array per call (per recursion LEVEL for binarySearch) and
+        // measures the clone, not the algorithm (docs/aliasing_costs.md)
         jai_engine->execute(R"(
-            function binarySearch(auto arr, auto target, auto left, auto right) -> auto {
+            function binarySearch(array<int>& arr, auto target, auto left, auto right) -> auto {
                 if (left > right) { return -1; }
                 auto mid = (left + right) / 2;
                 auto val = arr[mid];
@@ -128,7 +131,7 @@ public:
             }
         )");
         jai_engine->execute(R"(
-            function bubbleSort(auto arr) -> auto {
+            function bubbleSort(array<int>& arr) {
                 auto n = arr.size();
                 for (auto i = 0; i < n; i = i + 1) {
                     for (auto j = 0; j < n - i - 1; j = j + 1) {
@@ -139,7 +142,6 @@ public:
                         }
                     }
                 }
-                return arr;
             }
         )");
         jai_engine->execute("function fib(auto n) -> auto { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }");
@@ -920,6 +922,9 @@ public:
 
         // ===== Binary Search (Recursion + Array Access) =====
         test("JaiScript vs ChaiScript: Binary Search", [this]() {
+            // One-shot gate: the & retune must still find the target
+            check_eq((int64_t)5, jai_engine->execute("auto gateArr = [1, 3, 5, 7, 9, 11, 13, 15]; binarySearch(gateArr, 11, 0, 7);").as_int());
+
             benchmark("JaiScript - Binary Search", [this]() {
                 jai_engine->execute("auto testArr = [1, 3, 5, 7, 9, 11, 13, 15]; binarySearch(testArr, 11, 0, 7);");
             });
@@ -932,6 +937,9 @@ public:
 
         // ===== Bubble Sort (Nested Loops + Array Manipulation) =====
         test("JaiScript vs ChaiScript: Bubble Sort", [this]() {
+            // One-shot gate: & param sorts the CALLER's array in place now
+            check_eq((int64_t)1, jai_engine->execute("auto gateSort = [9, 3, 7, 1, 5, 8, 2, 6, 4, 10]; bubbleSort(gateSort); gateSort[0];").as_int());
+
             benchmark("JaiScript - Bubble Sort (10 elements)", [this]() {
                 jai_engine->execute("auto unsorted = [9, 3, 7, 1, 5, 8, 2, 6, 4, 10]; bubbleSort(unsorted);");
             });
@@ -1040,7 +1048,7 @@ public:
             // - Pointer chasing through object references
             // Build a BST with 15 nodes, traverse it, calculate height, and perform rotations
 
-            benchmark("JaiScript - BST (15 nodes)", [this]() {
+            benchmark("JaiScript - BST (15 nodes) [naive by-value]", [this]() {
                 jai_engine->execute(R"(
                     auto tree_root = TreeNode(8);
                     tree_root = insertNode(tree_root, 4);

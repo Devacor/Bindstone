@@ -1008,7 +1008,7 @@ public:
             // - Pointer chasing through object references
             // Build a BST with 15 nodes, traverse it, calculate height, and perform rotations
 
-            benchmark("JaiScript - BST (15 nodes)", [this]() {
+            benchmark("JaiScript - BST (15 nodes) [naive by-value]", [this]() {
                 jai_engine->execute(R"(
                     auto tree_root = TreeNode(8);
                     tree_root = insertNode(tree_root, 4);

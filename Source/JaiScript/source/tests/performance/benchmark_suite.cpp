@@ -375,7 +375,7 @@ public:
             bite->execute();
         });
 
-        benchmark("BST insert/sum/rotate (15 nodes)", [this]() {
+        benchmark("BST insert/sum/rotate (15 nodes) [naive by-value]", [this]() {
             if (!bite) {
                 test_engine->execute(R"(
                     class TreeNode {
@@ -549,6 +549,239 @@ public:
             }
             bite->execute();
         });
+
+        // === Aliasing strategy study: plain value vs T& vs shared_ptr<T> ===
+        // Same computation, same gated result in every variant; only the holding/passing
+        // strategy differs. The Creature is deliberately meaty (string name + 8-int stats
+        // array + 4 scalars) so the by-value clone cost is the real thing it would be in
+        // game code. Per-call figure = row / 200.
+
+        benchmark("Aliasing read: pass Creature by value (x200 calls)", [this]() {
+            // Naive by-value: every call deep-clones name + stats + scalars
+            if (!bite) {
+                test_engine->execute(R"(
+                    class Creature {
+                        string name = "";
+                        int hp = 0;
+                        int attack = 0;
+                        int defense = 0;
+                        int level = 0;
+                        array<int> stats = [];
+                        Creature(string n) {
+                            name = n; hp = 100; attack = 12; defense = 7; level = 5;
+                            stats = [3, 1, 4, 1, 5, 9, 2, 6];
+                        }
+                    }
+                    function power(Creature c) -> int {
+                        auto total = c.attack * 2 + c.defense * 3 + c.level;
+                        for (auto s : c.stats) { total += s; }
+                        return total + c.hp / 10;
+                    }
+                    auto cv = Creature("Grubwell");
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto i = 0; i < 200; ++i) { acc += power(cv); }
+                    if (acc != 18200) { throw "aliasing read by-value mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Aliasing read: pass Creature& (x200 calls)", [this]() {
+            // Ref param: the call shares the variable's cell, zero clones
+            if (!bite) {
+                test_engine->execute(R"(
+                    class Creature {
+                        string name = "";
+                        int hp = 0;
+                        int attack = 0;
+                        int defense = 0;
+                        int level = 0;
+                        array<int> stats = [];
+                        Creature(string n) {
+                            name = n; hp = 100; attack = 12; defense = 7; level = 5;
+                            stats = [3, 1, 4, 1, 5, 9, 2, 6];
+                        }
+                    }
+                    function power(Creature& c) -> int {
+                        auto total = c.attack * 2 + c.defense * 3 + c.level;
+                        for (auto s : c.stats) { total += s; }
+                        return total + c.hp / 10;
+                    }
+                    auto cv = Creature("Grubwell");
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto i = 0; i < 200; ++i) { acc += power(cv); }
+                    if (acc != 18200) { throw "aliasing read by-ref mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Aliasing read: pass shared_ptr<Creature> (x200 calls)", [this]() {
+            // Reference-semantic instance (new = shared_ptr sugar): calls copy the handle
+            if (!bite) {
+                test_engine->execute(R"(
+                    class Creature {
+                        string name = "";
+                        int hp = 0;
+                        int attack = 0;
+                        int defense = 0;
+                        int level = 0;
+                        array<int> stats = [];
+                        Creature(string n) {
+                            name = n; hp = 100; attack = 12; defense = 7; level = 5;
+                            stats = [3, 1, 4, 1, 5, 9, 2, 6];
+                        }
+                    }
+                    function power(shared_ptr<Creature> c) -> int {
+                        auto total = c.attack * 2 + c.defense * 3 + c.level;
+                        for (auto s : c.stats) { total += s; }
+                        return total + c.hp / 10;
+                    }
+                    var cs = new Creature("Grubwell");
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto i = 0; i < 200; ++i) { acc += power(cs); }
+                    if (acc != 18200) { throw "aliasing read shared_ptr mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        // Held-instance axis: same compute as a METHOD, called through each holder
+        // (methods bind self by reference, so no variant clones — this isolates the
+        // per-call holder cost: plain local vs ref alias vs shared_ptr handle)
+
+        benchmark("Aliasing method: held by value (x200 calls)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    class Creature {
+                        string name = "";
+                        int hp = 0;
+                        int attack = 0;
+                        int defense = 0;
+                        int level = 0;
+                        array<int> stats = [];
+                        Creature(string n) {
+                            name = n; hp = 100; attack = 12; defense = 7; level = 5;
+                            stats = [3, 1, 4, 1, 5, 9, 2, 6];
+                        }
+                        function power() -> int {
+                            auto total = attack * 2 + defense * 3 + level;
+                            for (auto s : stats) { total += s; }
+                            return total + hp / 10;
+                        }
+                    }
+                    auto cv = Creature("Grubwell");
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto i = 0; i < 200; ++i) { acc += cv.power(); }
+                    if (acc != 18200) { throw "aliasing method value mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Aliasing method: held by Creature& alias (x200 calls)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    class Creature {
+                        string name = "";
+                        int hp = 0;
+                        int attack = 0;
+                        int defense = 0;
+                        int level = 0;
+                        array<int> stats = [];
+                        Creature(string n) {
+                            name = n; hp = 100; attack = 12; defense = 7; level = 5;
+                            stats = [3, 1, 4, 1, 5, 9, 2, 6];
+                        }
+                        function power() -> int {
+                            auto total = attack * 2 + defense * 3 + level;
+                            for (auto s : stats) { total += s; }
+                            return total + hp / 10;
+                        }
+                    }
+                    auto cv = Creature("Grubwell");
+                    auto& cr = cv;
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto i = 0; i < 200; ++i) { acc += cr.power(); }
+                    if (acc != 18200) { throw "aliasing method ref mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Aliasing method: held by shared_ptr (x200 calls)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    class Creature {
+                        string name = "";
+                        int hp = 0;
+                        int attack = 0;
+                        int defense = 0;
+                        int level = 0;
+                        array<int> stats = [];
+                        Creature(string n) {
+                            name = n; hp = 100; attack = 12; defense = 7; level = 5;
+                            stats = [3, 1, 4, 1, 5, 9, 2, 6];
+                        }
+                        function power() -> int {
+                            auto total = attack * 2 + defense * 3 + level;
+                            for (auto s : stats) { total += s; }
+                            return total + hp / 10;
+                        }
+                    }
+                    var cs = new Creature("Grubwell");
+                )");
+                bite = test_engine->jaibite(R"(
+                    auto acc = 0;
+                    for (auto i = 0; i < 200; ++i) { acc += cs.power(); }
+                    if (acc != 18200) { throw "aliasing method shared_ptr mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        // Minimal mutation pair: the smallest function that REQUIRES aliasing
+        // (by-value heal would mutate a discarded clone)
+
+        benchmark("Aliasing mutate: heal(Unit&) (x200 calls)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    class Unit { int hp = 0; Unit(int h) { hp = h; } }
+                    function heal(Unit& u, int amount) { u.hp += amount; }
+                )");
+                bite = test_engine->jaibite(R"(
+                    var u = Unit(0);
+                    for (auto i = 0; i < 200; ++i) { heal(u, 5); }
+                    if (u.hp != 1000) { throw "aliasing heal ref mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
+
+        benchmark("Aliasing mutate: heal(shared_ptr<Unit>) (x200 calls)", [this]() {
+            if (!bite) {
+                test_engine->execute(R"(
+                    class Unit { int hp = 0; Unit(int h) { hp = h; } }
+                    function heal(shared_ptr<Unit> u, int amount) { u.hp += amount; }
+                )");
+                bite = test_engine->jaibite(R"(
+                    var u = new Unit(0);
+                    for (auto i = 0; i < 200; ++i) { heal(u, 5); }
+                    if (u.hp != 1000) { throw "aliasing heal shared_ptr mismatch"; }
+                )");
+            }
+            bite->execute();
+        }, 300);
 
         // === String Performance Benchmarks ===
         // These measure the shared_ptr string optimization effectiveness

@@ -3001,6 +3001,163 @@ public:
 			check_eq(std::string("0,0"), i1, "interp ternary condition");
 			check_eq(i1, v1, "ternary condition parity (no tail cmp fusion)");
 		});
+
+		// === Flat-stack stage 1 pins: callee inline cache + return classification ===
+		// (docs/flatstack_design.md §4 — lifetime pins land BEFORE stage 2's atomic core)
+
+		test("stage1_callee_cache_revalidates_on_redefinition", [this, run_both_backends]() {
+			// The same call site runs the old body, then the redefined body (with a
+			// DIFFERENT return type: the per-function conversion class must re-derive
+			// on the new function object, and the site's cached callee must miss)
+			auto [i1, v1] = run_both_backends(R"(
+				function f(auto n) -> int { return n + 1; }
+				var a = 0;
+				for (var i = 0; i < 3; i += 1) { a = f(a); }
+				function f(auto n) -> string { return "s" + n; }
+				var b = f(a);
+				"" + a + ":" + b;
+			)");
+			check_eq(std::string("3:s3"), i1, "interp redefinition at a warm call site");
+			check_eq(i1, v1, "redefinition parity (vm cache revalidates)");
+		});
+
+		test("stage1_callee_cache_polymorphic_site", [this, run_both_backends]() {
+			// One call site alternating between two function values: the monomorphic
+			// cache must revalidate per callee, never call the wrong body
+			auto [i1, v1] = run_both_backends(R"(
+				function inc(auto x) -> auto { return x + 1; }
+				function dbl(auto x) -> auto { return x * 2; }
+				var h = inc;
+				var s = "";
+				for (var i = 0; i < 4; i += 1) {
+					s += "" + h(3) + ",";
+					h = (i % 2 == 0) ? dbl : inc;
+				}
+				s;
+			)");
+			check_eq(std::string("4,6,4,6,"), i1, "interp polymorphic site");
+			check_eq(i1, v1, "polymorphic site parity");
+		});
+
+		test("stage1_closure_callee_capture_dies_with_scope", [this, run_both_backends]() {
+			// RULED (2026-07, flat-stack stage 1): a DEAD lambda's captures keep
+			// nothing. The interpreter used to read false here — a freed pool slot
+			// retained its parent chain (the capture env) until slot reuse
+			// (release_environment kept parent+values); the vm's pool always dropped
+			// them at release. Both backends now report expiry, and the vm's callee
+			// cache must never re-add a pin (closures are excluded from it; the
+			// capture-env leak class is also guarded by C++ alive counts in
+			// Comprehensive Scope Tests::mixed_scopes_comprehensive).
+			auto [i1, v1] = run_both_backends(R"(
+				class T { int x = 1; }
+				shared_ptr<T> a = T();
+				var w = weak_ptr<T>(a);
+				function run(auto p) -> auto {
+					var l = [p]() { return p.x; };
+					var s = 0;
+					for (var i = 0; i < 3; i += 1) { s += l(); }
+					return s;
+				}
+				var s = run(a);
+				a = null;
+				"" + s + ":" + w.expired();
+			)");
+			check_eq(std::string("3:true"), i1, "interp: dead lambda keeps nothing (ruled)");
+			check_eq(i1, v1, "capture-lifetime parity (vm callee cache adds no pin)");
+		});
+
+		test("stage1_live_lambda_capture_keeps_object_alive", [this, run_both_backends]() {
+			// RULED positive twin: a LIVE lambda's by-value shared_ptr capture keeps
+			// the object alive after every other alias dies; dropping the lambda
+			// releases it.
+			auto [i1, v1] = run_both_backends(R"(
+				class T { int x = 1; }
+				shared_ptr<T> a = T();
+				var w = weak_ptr<T>(a);
+				function mk(auto p) -> auto { return [p]() { return p.x; }; }
+				var l = mk(a);
+				a = null;
+				var alive_while_held = !w.expired();
+				var r = l();
+				l = null;
+				"" + r + ":" + alive_while_held + ":" + w.expired();
+			)");
+			check_eq(std::string("1:true:true"), i1, "interp live-capture lifetime (ruled)");
+			check_eq(i1, v1, "live-capture lifetime parity");
+		});
+
+		test("stage1_weak_expiry_at_return_boundary", [this, run_both_backends]() {
+			// Callee locals die AT return (stage-2 lifetime pin: frame windows must
+			// destroy the frame's values at the same boundary pop_script_frame_core
+			// does today)
+			auto [i1, v1] = run_both_backends(R"(
+				class T { int x = 1; }
+				var w = null;
+				function make() -> auto {
+					shared_ptr<T> p = T();
+					w = weak_ptr<T>(p);
+					return 7;
+				}
+				var r = make();
+				"" + r + ":" + w.expired();
+			)");
+			check_eq(std::string("7:true"), i1, "interp return-boundary expiry");
+			check_eq(i1, v1, "return-boundary expiry parity");
+		});
+
+		test("stage1_arg_copies_do_not_outlive_call", [this, run_both_backends]() {
+			// No stray argument copy (stack slice, pooled vector, cache pin) may keep
+			// the object alive once the caller's own alias is gone (stage-2 pin: the
+			// in-place-args design must keep this exact boundary)
+			auto [i1, v1] = run_both_backends(R"(
+				class T { int x = 5; }
+				function take(auto p) -> auto { return p.x; }
+				shared_ptr<T> a = T();
+				var w = weak_ptr<T>(a);
+				var r = 0;
+				for (var i = 0; i < 3; i += 1) { r += take(a); }
+				var before = w.expired();
+				a = null;
+				"" + r + ":" + before + ":" + w.expired();
+			)");
+			check_eq(std::string("15:false:true"), i1, "interp arg-copy lifetime");
+			check_eq(i1, v1, "arg-copy lifetime parity");
+		});
+
+		test("stage1_typed_return_classification_routes", [this, run_both_backends]() {
+			// Every return_conv class: matching primitive pass-through keeps value AND
+			// type tagging (the typed stores below enforce it); mismatched primitive
+			// converts (float->int truncates); ref params flatten on value returns;
+			// auto stays deref-only
+			auto [i1, v1] = run_both_backends(R"(
+				function fi() -> int { return 5; }
+				function ff() -> float { return 1.5; }
+				function fs() -> string { return "ok"; }
+				function fb() -> bool { return true; }
+				function ftrunc() -> int { return 2.7; }
+				function fauto(auto n) -> auto { return n; }
+				function fref(int& r) -> int { return r; }
+				var q = 9;
+				int ti = fi();
+				float tf = ff();
+				string ts = fs();
+				bool tb = fb();
+				"" + ti + ":" + tf + ":" + ts + ":" + tb
+				   + ":" + ftrunc() + ":" + fauto(4) + ":" + fref(q);
+			)");
+			check_eq(i1, v1, "typed-return route parity");
+			check(i1.rfind("5:", 0) == 0, "int return value: " + i1);
+			check(i1.find(":2:") != std::string::npos, "float->int return truncates (pinned): " + i1);
+		});
+
+		test("stage1_typed_return_mismatch_error_parity", [this, run_both_backends]() {
+			// A string returned from -> int must fail identically on both backends
+			auto [i1, v1] = run_both_backends(R"(
+				function bad() -> int { return "nope"; }
+				bad();
+			)");
+			check_eq(i1, v1, "typed-return mismatch error parity (byte-identical text)");
+		});
 	}
 };
 

@@ -4831,15 +4831,44 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	// arg vector, no per-arg move. Default-arg and arity-error calls fall through.
 	if (stack_.size() > argc && stack_[stack_.size() - argc - 1].is_function()) {
 		const size_t args_base = stack_.size() - argc;
-		const auto* thunk = stack_[args_base - 1].as_function().target<script_callable_thunk>();
-		if (thunk && thunk->eng == engine_ &&
-		    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn &&
-		    argc == thunk->payload.fn->parameters().size()) {
-			const script_defined_function& fn = *thunk->payload.fn;
+		const script_value& calleeVal = stack_[args_base - 1];
+		const script_defined_function* direct_fn = nullptr;
+		// Monomorphic callee cache hit: same pinned script_function payload at the same
+		// arity skips the target<>() RTTI validate (see call_site in chunk.hpp). The raw
+		// TYPEID gate keeps reference callees on the validate path (is_function derefs);
+		// the cached_global_env_ gate keeps workers out of chunk caches entirely (reads
+		// AND writes), mirroring env_lookup_cached.
+		if (cached_global_env_ &&
+		    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION &&
+		    &calleeVal.unchecked_as_function() == site.ic_identity &&
+		    argc == site.ic_argc) {
+			direct_fn = site.ic_fn;
+		} else {
+			const auto* thunk = calleeVal.as_function().target<script_callable_thunk>();
+			if (thunk && thunk->eng == engine_ &&
+			    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn &&
+			    argc == thunk->payload.fn->parameters().size()) {
+				direct_fn = thunk->payload.fn.get();
+				// Fill gated exactly like the env-lookup caches: parallel workers share
+				// chunks with the main engine and must never write them. Closure callees
+				// (closure_env set) are NEVER cached: ic_pin holding one would pin its
+				// capture env — captured objects would outlive their scope, which is
+				// script-observable (alive counts, script destructor timing). Plain
+				// functions pin only engine-internal state (body AST, params).
+				if (cached_global_env_ && !thunk->payload.fn->closure_env &&
+				    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
+					site.ic_pin = *std::get_if<script_value::TYPEID_FUNCTION>(&calleeVal.get_storage());
+					site.ic_identity = &calleeVal.unchecked_as_function();
+					site.ic_fn = direct_fn;
+					site.ic_argc = static_cast<uint32_t>(argc);
+				}
+			}
+		}
+		if (direct_fn) {
 			// Stateless ref binding: the call site travels as an argument; bind_parameters
 			// resolves ref args against the caller frame/env directly (no metadata channel)
 			try {
-				return push_script_frame(f, std::move(stack_[args_base - 1]), fn,
+				return push_script_frame(f, std::move(stack_[args_base - 1]), *direct_fn,
 				                         stack_, args_base, argc, &site);
 			} catch (const script_exception& e) {
 				// pre-record throws leave callee+args on the stack; drop them like the
@@ -8437,6 +8466,10 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	++call_records_top_;
 	rec.caller = &caller;
 	rec.return_type = function.return_type;
+	if (function.backend_return_conv == 0) {
+		function.backend_return_conv = static_cast<uint8_t>(classify_return_conv(function.return_type));
+	}
+	rec.return_conv_class = function.backend_return_conv;
 	rec.callee_pin = std::move(callee);
 	// Moved, not copied: every branch below either overwrites environment_ or copies
 	// rec.prev_env back (lazy no-closure); the catch restores it on setup failure
@@ -8570,6 +8603,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	++call_records_top_;
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
+	rec.return_conv_class = 0;   // method frames keep the legacy epilogue decision
 	rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload
 	rec.method_result_anchor = true;
 	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
@@ -8694,9 +8728,40 @@ checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_i
 	if (ins.a) {
 		stack_.pop_back();
 	}
-	// Untyped/any returns take convert_return_value's no-op route inline (deref only,
-	// no conversion call, no checked_result round trip)
-	if (!rec.return_type || rec.return_type->base_type == script_value_type::jai_any_type) {
+	// The record's cached classification picks the epilogue without re-deriving it from
+	// type_info per return. none = convert_return_value's no-op route inline (deref only);
+	// prim_* pass a storage-matching plain result through verbatim — the identical value
+	// the full path's identity try_convert yields for primitives (raw-index gate excludes
+	// bound values and references; mismatches fall to the full route below, so conversion
+	// and error behavior are byte-identical). unclassified (method frames) keeps the
+	// legacy decision.
+	bool deref_only = false;
+	switch (static_cast<return_conv>(rec.return_conv_class)) {
+		case return_conv::none:
+			deref_only = true;
+			break;
+		case return_conv::unclassified:
+			deref_only = !rec.return_type || rec.return_type->base_type == script_value_type::jai_any_type;
+			break;
+		case return_conv::prim_int:
+			deref_only = result.raw_storage_index() == script_value::TYPEID_INT;
+			break;
+		case return_conv::prim_float:
+			deref_only = result.raw_storage_index() == script_value::TYPEID_FLOAT;
+			break;
+		case return_conv::prim_bool:
+			deref_only = result.raw_storage_index() == script_value::TYPEID_BOOL;
+			break;
+		case return_conv::prim_char:
+			deref_only = result.raw_storage_index() == script_value::TYPEID_CHAR;
+			break;
+		case return_conv::prim_string:
+			deref_only = result.raw_storage_index() == script_value::TYPEID_STRING;
+			break;
+		default:   // ref / check: full route
+			break;
+	}
+	if (deref_only) {
 		if (result.is_reference()) {
 			result = result.deref();
 		}
@@ -8834,6 +8899,32 @@ script_value vm_backend::implicit_this_result(call_frame& locals) {
 		return function_env->get_parent()->get_this_object();
 	}
 	return make_null();
+}
+
+// Stage-1 classification for the return epilogue: derived once per function from its
+// return_type (cached on script_defined_function::backend_return_conv). Mirrors
+// convert_return_value's decision EXACTLY: ref-typed returns take the pass-through
+// kernel; any/void/auto/unnamed types convert nothing (deref-only); primitive base
+// types may pass a storage-matching result through verbatim; everything else runs the
+// full conversion.
+vm_backend::return_conv vm_backend::classify_return_conv(const type_info_ptr& t) {
+	if (!t || t->base_type == script_value_type::jai_any_type) {
+		return return_conv::none;
+	}
+	if (t->base_type == script_value_type::jai_reference_type) {
+		return return_conv::ref;
+	}
+	if (t->type_name.empty() || t->type_name == "void" || t->type_name == "auto") {
+		return return_conv::none;
+	}
+	switch (t->base_type) {
+		case script_value_type::jai_int_type: return return_conv::prim_int;
+		case script_value_type::jai_float_type: return return_conv::prim_float;
+		case script_value_type::jai_bool_type: return return_conv::prim_bool;
+		case script_value_type::jai_char_type: return return_conv::prim_char;
+		case script_value_type::jai_string_type: return return_conv::prim_string;
+		default: return return_conv::check;
+	}
 }
 
 checked_result<script_value> vm_backend::convert_return_value(script_value result, const type_info_ptr& return_type) {

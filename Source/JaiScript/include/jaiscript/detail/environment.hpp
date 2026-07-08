@@ -375,6 +375,13 @@ namespace jai {
         // filled through const refs on the call path; per-engine, single backend.
         mutable std::shared_ptr<void> backend_body_cache;
 
+        // Backend-cached return-type classification (vm flat-stack stage 1): values are
+        // vm_backend's return_conv enum, 0 = not yet classified. Derived purely from
+        // return_type on first call; mutable like backend_body_cache (workers hold
+        // private function copies, so lazy fills never cross threads). Interpreter
+        // ignores it.
+        mutable uint8_t backend_return_conv = 0;
+
         // Precomputed so ref-free call sites can skip the per-call arg-metadata build
         bool has_reference_parameters = false;
 

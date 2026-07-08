@@ -21,7 +21,7 @@ its optimization-history table survives as Appendix B.
    statement-, container-, string-, and object-shaped; the losses are deep recursion and the
    raw-loop family.
 4. **vs Lua 5.4: an honest split, 7W / 10L / 2T.** JaiScript wins or ties statements,
-   containers, and null checks; Lua wins loops (~2–8×) and above all call-dense recursion —
+   containers, and null checks; Lua wins loops (~2–4× post-fusion) and above all call-dense recursion —
    **fib(15) is ~9× faster in Lua** (697 vs 76 µs). Structural, diagnosed, and on the
    roadmap (flat-stack VM rewrite — see Known gaps).
 5. **`parallel_transform` reaches 4.8× over the serial loop at W=8 on a 4C/8T machine**
@@ -104,22 +104,22 @@ per-frame hot paths until the rewrite lands.
 | benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
 |---|---|---|---|---|---|
 | For loop, 100 iters | 14 | 9 | 4 | 9 | 30 |
-| Hot loop 1000 (`sum += i`) | 133 | 88 | 10 | 36 | — |
-| Hot loop 1000 `[precompiled]` | 132 | 88 | 7 | 29 | — |
-| Hot loop 1000, fused shape (`sum += i * 2`)* | 150 | **47** | — | — | — |
+| Hot loop 1000 (`sum += i`)* | 133 | **42** | 10 | 36 | — |
+| Hot loop 1000 `[precompiled]`* | 132 | **42** | 7 | 29 | — |
+| Hot loop 1000, fused shape (`sum += i * 2`) | 150 | **47** | — | — | — |
 | Range-for, 10 elements | 5 | 2 | 4 | 7 | — |
 | Range-for by copy, 100 elements | 28 | 18 | — | — | 31 |
 
-\* perf-suite row; the comparison suites' hot loop uses a single-operand RHS that
-`op_compound_fused` doesn't cover yet — that one fusion gap is the whole 88-vs-47 difference.
+\* re-measured at 2191c59b (single-operand compound fusion landed: bare identifier/const
+RHS joins `op_compound_fused`, min-of-5): the comparison-suite hot loop dropped 88 → 42 µs.
+The other cells in this table are the 3528ea86 measurement session's.
 
-**Winner: Lua** (2.4–8×, and none of it is recompile artifact — the precompiled rows agree).
-Against Squirrel the VM splits the class: tie on the counted for-loop, win on range-for
-(2 vs 7), loss on the unfused hot loop (88 vs 36). **Roadmap item with the payoff already
-measured: extending compound fusion to single-operand RHS moves 88 toward 47**, which flips
-the Squirrel row and halves Lua's edge on the most-quoted loop benchmark. Per-iteration
-reality check: the fused VM loop runs **47 ns/iteration**, and range-for is where JaiScript's
-loop machinery is already the best of the four.
+**Winner: Lua, by 4.2×** (down from 8.8× pre-fusion; none of it is recompile artifact — the
+precompiled rows agree). Against Squirrel the VM now splits the class three ways: tie on the
+counted for-loop, win on range-for (2 vs 7), and the hot loop narrowed from a clear loss to
+42 vs 36 (~1.2×, harness noise territory but not yet a flip). Per-iteration reality check:
+the fused VM loop runs **42–47 ns/iteration**, and range-for is where JaiScript's loop
+machinery is already the best of the four.
 
 ### Containers
 
@@ -196,8 +196,8 @@ is free where BoxedValue is a malloc.
 
 | vs | verdict (VM backend) | where they win | where JaiScript wins |
 |---|---|---|---|
-| **Lua 5.4** | 7W / 10L / 2T | recursion (9–14×), loops (2–8×), BST, C++ interop, concat | statements, containers, range-for, null checks — and every Lua win except recursion/BST is ≤8 µs absolute |
-| **Squirrel** | **12W / 6L / 1T** | fib (4×), locals recursion (5×), hot loop (2.4×), both BSTs, C++ BST | everything else: statements 4–5×, containers 2–4×, methods 2×, strings 1.4×, range-for 2.3× |
+| **Lua 5.4** | 7W / 10L / 2T | recursion (9–14×), loops (2–4× post-fusion), BST, C++ interop, concat | statements, containers, range-for, null checks — and every Lua win except recursion/BST is ≤8 µs absolute |
+| **Squirrel** | **12W / 6L / 1T** | fib (4×), locals recursion (5×), hot loop (42 vs 36 post-fusion — a near-tie), both BSTs, C++ BST | everything else: statements 4–5×, containers 2–4×, methods 2×, strings 1.4×, range-for 2.3× |
 | **ChaiScript** | **29W / 0L** (all live rows) | nothing measured | everything, 1.6× (C++-adjacent) to ~20× (recursion), typically 8–20× |
 
 (The previously published Squirrel line was 13W/6L; at HEAD the counted for-loop reads
@@ -359,9 +359,10 @@ across processes.
   frame cost; opcode counts are already at parity. Fix: the flat-stack / register-window VM
   rewrite (a roadmap commitment, not a hope; Squirrel's same-architecture calls at 4×
   demonstrate the headroom).
-- **Single-operand compound fusion** (`sum += i`): the comparison-suite hot loop misses
-  `op_compound_fused` and runs 88 µs where the fused shape runs 47. Extending fusion flips a
-  Squirrel loss and halves the visible Lua loop gap — the cheapest win on this page.
+- ~~**Single-operand compound fusion** (`sum += i`)~~ **LANDED (2191c59b)**: bare
+  identifier/const RHS joined `op_compound_fused`; the comparison-suite hot loop runs
+  42 µs (was 88), Lua's loop margin fell 8.8× → 4.2×, and the Squirrel hot-loop row
+  narrowed to 42 vs 36 (a near-tie, not the predicted flip).
 - **Method-call dispatch (~2.4 µs/call both backends)**: the idiom ladder shows it dwarfing
   free calls (0.4–0.9 µs); flattened dispatch already landed, the binder/lookup path is next.
 - **C++ interop dispatch**: sol2 usertypes at 18 µs vs `dynamic_binder` at 49 µs on the
@@ -392,7 +393,12 @@ across processes.
   to `array<int>&` so both sides pass arrays by reference — the old spelling measured
   JaiScript deep-clones against ChaiScript's reference-semantic arrays). Rival
   `[precompiled]` rows use each engine's native precompilation, JaiScript's use
-  `engine::jaibite`.
+  `engine::jaibite`. **Deprecation note (Dev ruling, 2026-07-08):** the explicit-jaibite
+  `[precompiled]` twins were scaffolding to show parse-free numbers; the parse-avoidance
+  ladder (da8eac7e) made plain `execute()` the parse-free warm path, so future refreshes
+  fold or drop those rows — keep a precompiled row only where that language's users
+  genuinely precompile (e.g. Lua's loadbuffer-then-call embedding shape), symmetrically.
+  Don't read a dropped `[precompiled]` row in a future table as a measurement change.
 - **Backends**: every JaiScript number is reported for both the tree-walking interpreter and
   the bytecode VM (`--backend=vm`). Full regression suite (88 suites / 1844 tests) green on
   both backends at HEAD 3528ea86 as part of this measurement session.

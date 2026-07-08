@@ -58,10 +58,17 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
 };
 
 lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename)
-    : source_(source), filename_(filename), symbolizer_(symbolizer), current_(0), line_(1), column_(1) {}
+    : source_(source), filename_(filename), symbolizer_(symbolizer), current_(0), line_(1), column_(1) {
+    // A leading UTF-8 BOM (Notepad's / PowerShell Set-Content's default) is invisible
+    // content, not a token — strip it once here, at position 0 only. A U+FEFF later in
+    // the file is left alone (it is a real, if exotic, character there).
+    if (source_.rfind("\xEF\xBB\xBF", 0) == 0) source_.erase(0, 3);
+}
 
 lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::unordered_set<std::string>& registeredTypes, const std::string& filename)
-    : source_(source), filename_(filename), symbolizer_(symbolizer), current_(0), line_(1), column_(1), registered_types_(registeredTypes) {}
+    : source_(source), filename_(filename), symbolizer_(symbolizer), current_(0), line_(1), column_(1), registered_types_(registeredTypes) {
+    if (source_.rfind("\xEF\xBB\xBF", 0) == 0) source_.erase(0, 3);
+}
 
 std::vector<token> lexer::tokenize() {
     std::vector<token> tokens;
@@ -90,6 +97,18 @@ token lexer::next_token() {
     if (!pending_tokens_.empty()) {
         pending_tokens_.clear();
         pending_index_ = 0;
+    }
+
+    // A UTF-16 BOM can only lead the file; catch it here (position 1:1) with a clear
+    // encoding message instead of a garbage 'Unexpected character' on the 0xFF/0xFE byte.
+    // Consume the rest so the run ends in eof rather than re-firing the error forever.
+    if (current_ == 0 && source_.size() >= 2) {
+        unsigned char b0 = static_cast<unsigned char>(source_[0]);
+        unsigned char b1 = static_cast<unsigned char>(source_[1]);
+        if ((b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF)) {
+            current_ = source_.size();
+            return error_token("UTF-16 encoding is not supported - save the file as UTF-8");
+        }
     }
 
     skip_whitespace();
@@ -279,9 +298,17 @@ void lexer::skip_whitespace() {
         char c = peek();
         switch (c) {
             case ' ':
-            case '\r':
             case '\t':
                 advance();
+                break;
+            case '\r':
+                advance();
+                // A lone CR (classic-Mac line ending) is a newline; a CR that leads a CRLF
+                // is not counted here — the following '\n' counts it (no double-count).
+                if (peek() != '\n') {
+                    line_++;
+                    column_ = 1;
+                }
                 break;
             case '\n':
                 advance();
@@ -611,6 +638,15 @@ void lexer::scan_template_string() {
                     default: current_part += '\\'; current_part += escaped; break;
                 }
             }
+        } else if (peek() == '\r') {
+            // Template strings may span source lines, so a raw line ending lands in the
+            // string VALUE. Normalize CRLF and lone CR to '\n' so a script saved with any
+            // line-ending style yields byte-identical strings. (An explicit \r escape,
+            // handled above, is untouched.)
+            advance();                       // consume '\r'
+            if (peek() == '\n') advance();   // fold a trailing '\n' into the one newline
+            current_part += '\n';
+            line_++; column_ = 1;
         } else {
             if (peek() == '\n') { line_++; column_ = 0; }
             current_part += advance();

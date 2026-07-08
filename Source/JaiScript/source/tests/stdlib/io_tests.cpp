@@ -66,6 +66,43 @@ public:
             check_eq(std::string("{} 7\n"), capture->str(), "format path processes {{ }} escapes");
         });
 
+        // ============================================================
+        // Spec placeholders: {:spec} / {n:spec} — same mini-language as
+        // template-string ${x:spec}, through the one shared formatter
+        // ============================================================
+
+        test("format_spec_placeholders", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(std::string("3.14"), engine->execute(R"(format("{:.2f}", 3.14159);)").as<std::string>());
+            check_eq(std::string("    42"), engine->execute(R"(format("{0:>6}", 42);)").as<std::string>());
+            check_eq(std::string("ff FF"), engine->execute(R"(format("{:x} {0:X}", 255);)").as<std::string>());
+            check_eq(std::string("x=1 y=2.5"), engine->execute(R"(format("x={} y={1:.1f}", 1, 2.5);)").as<std::string>());
+        });
+
+        test("print_spec_placeholder", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto capture = std::make_shared<std::ostringstream>();
+            engine->set_output_stream(capture);
+            engine->execute(R"(print("[{:>5}]", 42);)");
+            check_eq(std::string("[   42]\n"), capture->str());
+        });
+
+        test("format_spec_invalid_stays_literal", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            // Lenient like invalid positional indexes: a non-parsing spec is not a placeholder
+            check_eq(std::string("1 {:zz}"), engine->execute(R"(format("{} {:zz}", 1);)").as<std::string>());
+        });
+
+        test("format_spec_type_mismatch_throws", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(var msg = ""; try { format("{:.1f}", "abc"); } catch (e) { msg = e; } msg;)");
+            check_eq(std::string("format spec ':.1f' does not apply to string value"), result.as<std::string>());
+        });
+
         test("output_capture_multiple_args", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);

@@ -132,6 +132,31 @@ padded: 007
 <p><strong>Current caveat</strong> (see Value Semantics + INTENT_QUESTIONS): calling a string method through a <em>ref declaration</em> (<code>auto&amp; r = s; r.to_upper();</code>) crashes at the pinned commit — call it on the variable itself, which works fine.</p>
 <h2 id="strings-and">Strings and <code>+</code><a class="hlink" href="#strings-and" aria-label="link">&#8203;</a></h2>
 <p>Concatenation with <code>+</code> returns a new string and is the safe non-mutating way to build text: <code>s = s + &quot;!&quot;</code>. Mixed <code>string + number</code> stringifies the number. *(pinned: language/operator_tests.hpp <code>string_concatenation</code>; stdlib/string_tests.cpp)*</p>
+<h2 id="template-strings-format-specs">Template strings &amp; format specs<a class="hlink" href="#template-strings-format-specs" aria-label="link">&#8203;</a></h2>
+<p>Backtick strings interpolate any expression with <code>${...}</code> (the lexer desugars them to plain string concatenation). A splice can end in a <strong>format spec</strong> — <code>${expr:spec}</code>, a deliberate <code>std::format</code> subset: <code>[[fill]align][width][.precision][f|x|X|b]</code>. This kills the to_string-then-pad dance in HUD code:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var name = &quot;Vex&quot;;
+var hp = 73.5;
+var gold = 1234;
+print(`${name:&lt;8}|${gold:8}|`);                // strings left-align, numbers right-align
+print(`${hp:.1f} ${gold:*&gt;8} ${gold:^8}|`);    // fixed float; fill+align; centered
+print(`${gold:x} ${gold:X} ${5:b}`);           // hex / HEX / binary (ints only)
+print(`HP ${hp:&gt;6.1f}/${100.0:&lt;6.1f} G${gold:&gt;7} ${name:&lt;12}|`);
+var crit = true;
+print(`${crit ? &quot;CRIT&quot; : &quot;hit&quot;} for ${(crit ? 150 : 100):&gt;5}|`);  // ternaries still work
+try {
+    print(`${name:.2f}`);                      // spec/type mismatch: catchable runtime error
+} catch (e) {
+    print(&quot;caught: {}&quot;, e);
+}
+print(format(&quot;{:.2f} vs {0:&gt;8}&quot;, 3.14159));    // same specs in format()/print placeholders</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Vex     |    1234|
+73.5 ****1234   1234  |
+4d2 4D2 101
+HP   73.5/100.0  G   1234 Vex         |
+CRIT for   150|
+caught: format spec &#x27;:.2f&#x27; does not apply to string value
+3.14 vs 3.141590</code></pre></div>
+<p>The rules: <code>.N</code> means <em>fixed</em> (bare or with <code>f</code>; <code>:f</code> alone is 6 decimals), <code>^</code> centering puts the odd fill char on the right, and a malformed spec (<code>${x:q}</code>, <code>${x:06}</code> — no zero-pad flag, spell it <code>0&gt;N</code>) is rejected <strong>at lex time</strong> with <code>Unsupported format spec &#x27;:q&#x27; in template string</code>. The spec starts at a top-level <code>:</code> that closes no ternary <code>?</code>, so <code>${a ? b : c}</code> stays an expression and <code>${m[&quot;k&quot;]:6}</code> / map-literal colons just work; parenthesize a ternary to give it a spec. Splices desugar to the engine-core builtin <code>format_value(value, &quot;spec&quot;)</code> — available on every engine, one shared implementation, so <strong>both backends produce byte-identical output and error text</strong>. Full grammar: <code>docs/grammar.md</code> "Template Strings". <em>(pinned: stdlib/string_tests.cpp <code>template_spec_*</code>, stdlib/io_tests.cpp <code>format_spec_*</code>)</em></p>
 <h2 id="parallel-transform">parallel_transform (v0, shipped)<a class="hlink" href="#parallel-transform" aria-label="link">&#8203;</a></h2>
 <p><code>parallel_transform(arr, fn)</code> maps a pure script function over an array on multiple threads and returns a <strong>new</strong> array with <code>out[i] = fn(arr[i])</code> — same result at every thread count, byte-identical to a serial loop. An optional third argument, <code>parallel_transform(arr, fn, weight_fn)</code>, balances chunks by per-element effort (e.g. weigh strings by length); <code>thread_count()</code> reports the worker count. There is no new syntax — these are ordinary builtins.</p>
 <div class="codeblock"><pre><code>int f(int x) { return x * x + 1; }

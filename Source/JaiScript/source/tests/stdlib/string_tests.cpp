@@ -556,6 +556,152 @@ public:
             auto result = engine->execute("`line1\nline2`;");
             check_eq(result.as<std::string>(), "line1\nline2");
         });
+
+        // ============================================================
+        // Template-string format specs: ${expr:spec}
+        // spec = [[fill]align][width][.precision][f|x|X|b] (docs/grammar.md)
+        // ============================================================
+
+        test("template_spec_float_precision", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var pi = 3.14159; `${pi:.2f}`;)").as<std::string>(), "3.14");
+            check_eq(engine->execute(R"(var pi = 3.14159; `${pi:.0f}`;)").as<std::string>(), "3");
+            check_eq(engine->execute(R"(var pi = 3.14159; `${pi:.3}`;)").as<std::string>(), "3.142");  // bare .N is fixed
+            check_eq(engine->execute(R"(var h = 80.0; `${h:f}`;)").as<std::string>(), "80.000000");    // :f default precision 6
+        });
+
+        test("template_spec_width_align_int", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var gold = 1234; `${gold:6}`;)").as<std::string>(), "  1234");  // numbers right-align
+            check_eq(engine->execute(R"(var gold = 1234; `${gold:<6}`;)").as<std::string>(), "1234  ");
+            check_eq(engine->execute(R"(var gold = 1234; `${gold:^6}`;)").as<std::string>(), " 1234 ");
+        });
+
+        test("template_spec_width_align_string", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var name = "Bob"; `${name:6}`;)").as<std::string>(), "Bob   ");  // strings left-align
+            check_eq(engine->execute(R"(var name = "Bob"; `${name:>6}`;)").as<std::string>(), "   Bob");
+            check_eq(engine->execute(R"(var name = "Bob"; `${name:^7}`;)").as<std::string>(), "  Bob  ");
+        });
+
+        test("template_spec_fill_char", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var gold = 1234; `${gold:*>8}`;)").as<std::string>(), "****1234");
+            check_eq(engine->execute(R"(var name = "Bob"; `${name:-<6}`;)").as<std::string>(), "Bob---");
+            check_eq(engine->execute(R"(var n = 7; `${n:0>4}`;)").as<std::string>(), "0007");  // '0' fill with explicit align
+        });
+
+        test("template_spec_hex_binary", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var n = 255; `${n:x}`;)").as<std::string>(), "ff");
+            check_eq(engine->execute(R"(var n = 255; `${n:X}`;)").as<std::string>(), "FF");
+            check_eq(engine->execute(R"(var n = 5; `${n:b}`;)").as<std::string>(), "101");
+            check_eq(engine->execute(R"(var n = -255; `${n:x}`;)").as<std::string>(), "-ff");
+        });
+
+        test("template_spec_int_as_fixed", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var gold = 1234; `${gold:.1f}`;)").as<std::string>(), "1234.0");
+        });
+
+        test("template_spec_width_precision_fill_combo", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var pi = 3.14159; `${pi:>8.2f}`;)").as<std::string>(), "    3.14");
+            check_eq(engine->execute(R"(var pi = 3.14159; `${pi:*^9.1f}`;)").as<std::string>(), "***3.1***");
+        });
+
+        test("template_spec_char_bool", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var c = 'a'; `${c:3}`;)").as<std::string>(), "a  ");
+            check_eq(engine->execute(R"(var f = true; `${f:6}`;)").as<std::string>(), "true  ");
+        });
+
+        // The ambiguity rule: a ternary's top-level ':' closes its '?' and stays part of
+        // the expression; only a top-level ':' that closes NO ternary starts a spec.
+        test("template_spec_ternary_still_expression", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var a = true; `${a ? 1 : 2}`;)").as<std::string>(), "1");
+            check_eq(engine->execute(R"(var a = false; var b = true; `${a ? 1 : b ? 2 : 3}`;)").as<std::string>(), "2");
+            check_eq(engine->execute(R"(var a = true; `${(a ? 1 : 2):3}`;)").as<std::string>(), "  1");  // spec after parenthesized ternary
+        });
+
+        test("template_spec_after_subscript", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var m = {"k": 42}; `${m["k"]:6}`;)").as<std::string>(), "    42");
+            check_eq(engine->execute(R"(`${ {"k": 3}["k"]:4}`;)").as<std::string>(), "   3");  // map literal's ':' is nested
+        });
+
+        test("template_spec_nested_template", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(engine->execute(R"(var pi = 3.14159; `${`${pi:.1f}`:>8}`;)").as<std::string>(), "     3.1");
+        });
+
+        test("template_spec_core_no_stdlib", [this]() {
+            // Engine-core feature: works without stdlib::register_all
+            auto engine = make_engine();
+            check_eq(engine->execute(R"(var x = 3.5; `${x:.1f}`;)").as<std::string>(), "3.5");
+            check_eq(engine->execute(R"(format_value(255, "X");)").as<std::string>(), "FF");  // desugar target, directly callable
+        });
+
+        test("template_spec_bound_global", [this]() {
+            auto engine = make_engine();
+            float hp = 87.5f;
+            engine->add_global_ref("hp", hp);
+            check_eq(engine->execute(R"(`${hp:>7.1f}`;)").as<std::string>(), "   87.5");
+        });
+
+        test("template_spec_malformed_is_lex_error", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto expect_lex_error = [&](const std::string& source, const std::string& fragment) {
+                try {
+                    engine->execute(source);
+                    check(false, "expected a parse error for: " + source);
+                } catch (const std::exception& e) {
+                    check(std::string(e.what()).find(fragment) != std::string::npos,
+                          "error for '" + source + "' should mention \"" + fragment + "\", got: " + e.what());
+                }
+            };
+            expect_lex_error(R"(var x = 1; `${x:q}`;)", "Unsupported format spec ':q' in template string");
+            expect_lex_error(R"(var x = 1; `${x:}`;)", "Unsupported format spec ':' in template string");
+            expect_lex_error(R"(var x = 1; `${x:06}`;)", "Unsupported format spec ':06' in template string");  // no zero-pad flag
+            expect_lex_error(R"(var x = 1; `${x:.f}`;)", "Unsupported format spec ':.f' in template string");
+            expect_lex_error(R"(var x = 1; `${x:5.}`;)", "Unsupported format spec ':5.' in template string");
+            expect_lex_error(R"(var x = 1; `${x: 5}`;)", "Unsupported format spec ': 5' in template string");  // spec is raw text after ':'
+        });
+
+        test("template_spec_type_mismatch_is_runtime_error", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            // Catchable in-script, with identical text on both backends (one shared kernel)
+            check_eq(engine->execute(R"(var name = "Bob"; var msg = ""; try { `${name:.2f}`; } catch (e) { msg = e; } msg;)").as<std::string>(),
+                     "format spec ':.2f' does not apply to string value");
+            check_eq(engine->execute(R"(var f = true; var msg = ""; try { `${f:x}`; } catch (e) { msg = e; } msg;)").as<std::string>(),
+                     "format spec ':x' does not apply to bool value");
+            check_eq(engine->execute(R"(var pi = 3.5; var msg = ""; try { `${pi:b}`; } catch (e) { msg = e; } msg;)").as<std::string>(),
+                     "format spec ':b' does not apply to float value");
+        });
+
+        test("template_spec_hud_line", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto result = engine->execute(R"(
+                var hp = 73.5; var maxhp = 100.0; var gold = 1234; var name = "Grubwell";
+                `HP ${hp:>6.1f}/${maxhp:<6.1f} G${gold:>7} ${name:<12}|`;
+            )");
+            check_eq(result.as<std::string>(), "HP   73.5/100.0  G   1234 Grubwell    |");
+        });
     }
 };
 

@@ -282,6 +282,110 @@ public:
 			}
 		});
 
+		// ============================================================
+		// Item B: string subscript. `s[i]` is a read-only CHAR read (C++-familiar);
+		// writes are a clear error (strings share storage under copy - subscript
+		// writes would need copy-on-write, noted as future work). Bounds/type error
+		// text matches the array style, with the numbers actually printed (the
+		// placeholder machinery resolves symbol ids, so raw counts printed garbage
+		// like "Array index bool out of bounds for array of size class_definition").
+		// Char-char ordering comparisons ride in (the demoreel key[0] path needs
+		// c0 >= '1' && c0 <= '9').
+		// ============================================================
+
+		test("string_subscript_reads_char", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					var s = "hello";
+					char c = s[1];
+					var parts = [];
+					parts.push(type_of(c));
+					parts.push(to_string(c == 'e'));
+					parts.push(type_of(s.at(1)));       // at() keeps returning a 1-char string
+					parts.push(to_string(s[s.size() - 1] == 'o'));
+					int count = 0;
+					for (int i = 0; i < s.size(); ++i) { if (s[i] == 'l') { count = count + 1; } }
+					parts.push(to_string(count));
+					parts.push(s);                       // source string untouched
+					parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3] + " " + parts[4] + " " + parts[5];
+				)");
+				check_eq(std::string("char true string true 2 hello"), r.as<std::string>(), backend_tag(use_vm) + "string subscript reads chars");
+			}
+		});
+
+		test("string_subscript_errors_byte_identical", [this]() {
+			auto run_catch = [](bool use_vm, const char* src) -> std::string {
+				auto e = gloom_engine(use_vm);
+				try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
+				return "<no throw>";
+			};
+			// Each case: interp and vm messages must be byte-IDENTICAL, and carry the
+			// expected core text (the engine boundary appends the error-code category)
+			const std::pair<const char*, const char*> cases[] = {
+				{ R"(var s = "hello"; s[99];)", "String index 99 out of bounds for string of size 5" },
+				{ R"(var s = "hello"; s[-1];)", "String index -1 out of bounds for string of size 5" },
+				{ R"(var s = "hello"; s["k"];)", "String index must be an integer" },
+				{ R"(var s = "hello"; s[0] = 'x';)", "Strings are read-only through subscript: use substr()/+ to build a new string" },
+				{ R"(var a = [1]; a[5];)", "Array index 5 out of bounds for array of size 1" },
+			};
+			for (const auto& [src, core] : cases) {
+				const std::string interp_msg = run_catch(false, src);
+				const std::string vm_msg = run_catch(true, src);
+				check_eq(interp_msg, vm_msg, std::string("backend parity: ") + core);
+				check_true(interp_msg.find(core) != std::string::npos, std::string("core text present: ") + interp_msg);
+			}
+		});
+
+		test("char_ordering_comparisons", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					char a = 'a';
+					char m = 'm';
+					var ok = (a < m) && (a <= 'a') && (m > a) && (m >= 'm') && !('z' < a);
+					ok;
+				)");
+				check_true(r.as<bool>(), backend_tag(use_vm) + "char-char ordering comparisons");
+				// mixed char/int ordering stays a deliberate error (no silent promotion)
+				auto e2 = gloom_engine(use_vm);
+				bool threw = false;
+				try { e2->execute("var x = 'a' < 1;"); } catch (const std::exception& ex) {
+					threw = std::string(ex.what()).find("Invalid operands for < operator") != std::string::npos;
+				}
+				check_true(threw, backend_tag(use_vm) + "char/int ordering stays an error");
+			}
+		});
+
+		test("demoreel_handle_key_shape_is_live", [this]() {
+			// The exact examples/demoreel reel.jai handle_key shape GLOOM flagged as
+			// dead (`char c0 = key[0];` would throw): now live end to end.
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					int nscenes = 9;
+					int started = -1;
+					function start_scene(int i) { started = i; }
+					function handle_key(string key) {
+						if (key == "") { return; }
+						if (key.size() == 1) {
+							char c0 = key[0];
+							if (c0 >= '1' && c0 <= '9') {
+								int d = key.to_int();
+								if (d <= nscenes) { start_scene(d - 1); }
+							}
+							else if (c0 == '0') { start_scene(nscenes - 1); }
+						}
+					}
+					handle_key("7");
+					int seven = started;
+					handle_key("0");
+					seven * 100 + started;
+				)");
+				check_eq((int64_t)608, r.as_int(), backend_tag(use_vm) + "reel.jai handle_key digit routing works");
+			}
+		});
+
 		// Plain value decls from reference-producing initializers COPY (C++'s
 		// `int x = f();` for `int& f()`); alias binding stays the auto&/ref-decl
 		// spelling (pinned in vm_backend_tests ref_return_*).

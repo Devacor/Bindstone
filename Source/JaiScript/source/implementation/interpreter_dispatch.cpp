@@ -372,6 +372,9 @@ checked_result<script_value> interpreter::handle_less(const script_value& left, 
         if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
             return make_bool_fast(left.unchecked_as_string() < right.unchecked_as_string());
         }
+        if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
+            return make_bool_fast(left.unchecked_as_char() < right.unchecked_as_char());
+        }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
     }
 
@@ -431,6 +434,9 @@ checked_result<script_value> interpreter::handle_less_equal(const script_value& 
         }
         if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
             return make_bool_fast(left.unchecked_as_string() <= right.unchecked_as_string());
+        }
+        if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
+            return make_bool_fast(left.unchecked_as_char() <= right.unchecked_as_char());
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
     }
@@ -492,6 +498,9 @@ checked_result<script_value> interpreter::handle_greater(const script_value& lef
         if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
             return make_bool_fast(left.unchecked_as_string() > right.unchecked_as_string());
         }
+        if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
+            return make_bool_fast(left.unchecked_as_char() > right.unchecked_as_char());
+        }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
     }
 
@@ -551,6 +560,9 @@ checked_result<script_value> interpreter::handle_greater_equal(const script_valu
         }
         if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
             return make_bool_fast(left.unchecked_as_string() >= right.unchecked_as_string());
+        }
+        if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
+            return make_bool_fast(left.unchecked_as_char() >= right.unchecked_as_char());
         }
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
     }

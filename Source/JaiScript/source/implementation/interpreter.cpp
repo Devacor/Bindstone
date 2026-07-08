@@ -3459,9 +3459,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             const auto& array = left.unchecked_as_array();
 
             if (index < 0 || index >= static_cast<script_int>(array.size())) {
+                // Numbers intern as symbols: the {0}/{1} machinery resolves symbol ids,
+                // so raw counts printed garbage names ("Array index bool out of bounds
+                // for array of size class_definition")
                 return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
                     "Array index {0} out of bounds for array of size {1}",
-                    static_cast<uint64_t>(index), static_cast<uint64_t>(array.size()));
+                    string_symbolizer_->intern(std::to_string(index)),
+                    string_symbolizer_->intern(std::to_string(array.size())));
             }
 
             // Check if the left side is an lvalue (variable, member access, or subscript)
@@ -3574,6 +3578,27 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     push_value(script_value(std::monostate{}, engine_));
                 }
             }
+        } else if (left.is_string()) {
+            // Read-only char subscript (C++-familiar s[i]). Writes stay an error:
+            // strings share storage under copy, so subscript writes would need
+            // copy-on-write - future work, a clear error instead of a silent trap.
+            // (KEEP BYTE-PARALLEL with vm_backend::exec_index)
+            if (!right.is_int()) {
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
+            }
+            if (want_lvalue_write) {
+                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                    "Strings are read-only through subscript: use substr()/+ to build a new string");
+            }
+            const auto& str = left.unchecked_as_string();
+            script_int index = right.unchecked_as_int();
+            if (index < 0 || index >= static_cast<script_int>(str.size())) {
+                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
+                    "String index {0} out of bounds for string of size {1}",
+                    string_symbolizer_->intern(std::to_string(index)),
+                    string_symbolizer_->intern(std::to_string(str.size())));
+            }
+            push_value(script_value(static_cast<script_char>(str[static_cast<size_t>(index)]), engine_));
         } else {
             if (left.is_object()) {
                 // First, try to find operator[] as a method on the object (for class instances)

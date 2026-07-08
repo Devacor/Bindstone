@@ -1,3 +1,15 @@
+// The MSBuild JaiScript unity (Source/JaiScript/source/jaiscript.cpp) omits the debug TUs
+// and parallel_transform.cpp, so the host compiles them here. connector.cpp must come
+// first: it includes winsock2 before anything can drag in windows.h. Sockets are desktop
+// Windows only by design — shipping/mobile builds compile no socket code
+// (see docs/DEBUGGER_DESIGN.md).
+#ifdef _WIN32
+#define JAISCRIPT_ENABLE_DEBUGGER
+#include "JaiScript/source/implementation/debug/connector.cpp"
+#endif
+#include "JaiScript/source/implementation/debug/controller.cpp"
+#include "JaiScript/source/implementation/parallel_transform.cpp"
+
 #include "MV/Script/script.h"
 
 #include <cstdlib>
@@ -38,6 +50,53 @@ namespace MV {
 		return enabled;
 	}
 
+	namespace {
+		bool scriptDebugOn_ = true;
+		int scriptDebugPortOffset_ = 0;
+		int lastScriptDebugPort_ = 0;
+
+#ifdef JAISCRIPT_ENABLE_DEBUGGER
+		// Exclusive-bind probe: the connector's own listener sets SO_REUSEADDR, which on
+		// Windows lets a second bind on a taken port "succeed" (in-process or a second
+		// Bindstone instance) — probe without it to find a genuinely free port.
+		bool debugPortFree(int a_port) {
+			static const bool wsaReady = [] { WSADATA wsa; return ::WSAStartup(MAKEWORD(2, 2), &wsa) == 0; }();
+			if (!wsaReady) { return false; }
+			SOCKET probe = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+			if (probe == INVALID_SOCKET) { return false; }
+			sockaddr_in address{};
+			address.sin_family = AF_INET;
+			address.sin_port = htons(static_cast<u_short>(a_port));
+			address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+			bool available = ::bind(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+			::closesocket(probe);
+			return available;
+		}
+
+		void attachScriptDebugger(jai::engine& a_engine) {
+			if (!scriptDebugEnabled()) { return; }
+			int base = jai::debug::default_port + scriptDebugPortOffset();
+			for (int candidate = base; candidate < base + 80; candidate += 10) {
+				if (!debugPortFree(candidate)) { continue; }
+				auto connector = jai::debug::listen(a_engine, candidate);
+				if (connector->port() == candidate) {
+					lastScriptDebugPort_ = candidate;
+					MV::info("Script debugger listening on 127.0.0.1:", candidate, " (VS Code: Attach to JaiScript; breakpoints need MV_SCRIPT_INTERPRETER=1)");
+					return;
+				}
+				a_engine.set_debug_connector(nullptr);
+			}
+			MV::warning("Script debugger: no free port at ", base, " (+10 steps tried); running without the debug listener");
+		}
+#endif
+	}
+
+	void scriptDebugEnabled(bool a_enabled) { scriptDebugOn_ = a_enabled; }
+	bool scriptDebugEnabled() { return scriptDebugOn_ && !environmentFlag("MV_SCRIPT_NO_DEBUG"); }
+	void scriptDebugPortOffset(int a_offset) { scriptDebugPortOffset_ = a_offset; }
+	int scriptDebugPortOffset() { return scriptDebugPortOffset_; }
+	int lastScriptDebugPort() { return lastScriptDebugPort_; }
+
 	std::shared_ptr<jai::engine> makeScriptEngine(const Services& a_services, size_t a_memoryCapBytes) {
 		auto engine = jai::engine::make();
 		if (environmentFlag("MV_SCRIPT_INTERPRETER")) {
@@ -54,6 +113,9 @@ namespace MV {
 		});
 		jai::stdlib::register_all(*engine);
 		jai::bind_registrar<MV::Services>(*engine, a_services);
+#ifdef JAISCRIPT_ENABLE_DEBUGGER
+		attachScriptDebugger(*engine);
+#endif
 		return engine;
 	}
 

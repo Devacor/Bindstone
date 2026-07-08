@@ -8,6 +8,7 @@
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
 #include <jaiscript/debug/controller.hpp>   // step-debugger statement hook (phase 5)
 #include <cassert>
 #include <cmath>
@@ -6741,7 +6742,33 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 		// and migrate_fields converts against the NEW types (retype ruling)
 		class_def->replace_field_declared_types(std::move(new_field_types), true);
 
-		class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_);
+		// Structural identity (position-insensitive AST key): identical reload adopts the
+		// freshly minted ASTs but skips per-instance migration. Interpreter twin:
+		// interpreter::visit_class_decl.
+		std::vector<uint8_t> structural_key;
+		bool structurally_identical = false;
+		if (class_def->structural_key_shape_matches(decl->members.size(), decl->base_classes.size())) {
+			try {
+				structural_key = detail::structural_node_key(decl, *symbolizer_);
+				structurally_identical = (structural_key == class_def->structural_key());
+			} catch (...) {
+				structural_key.clear();
+			}
+		}
+
+		class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_,
+		                          structurally_identical);
+
+		if (structural_key.empty()) {
+			try {
+				structural_key = detail::structural_node_key(decl, *symbolizer_);
+			} catch (...) {
+				structural_key.clear();
+			}
+		}
+		if (!structural_key.empty()) {
+			class_def->set_structural_key(std::move(structural_key), decl->members.size(), decl->base_classes.size());
+		}
 
 		class_def->retain_static_fields(new_static_field_ids);
 
@@ -6789,7 +6816,6 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 			auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(field_id);
 			class_def->add_method_by_id(setter_id, setter);
 		}
-		class_def->initialize_fingerprint();
 	}
 
 	if (!engine_) {

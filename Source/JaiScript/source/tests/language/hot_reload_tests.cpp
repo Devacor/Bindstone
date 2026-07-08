@@ -962,7 +962,7 @@ public:
                       "Should see at least 2x speedup when fields unchanged");
         });
 
-        test("identical_class_fingerprint", [this]() {
+        test("identical_class_structural_identity", [this]() {
             auto engine = jai::foundry::make_engine();
             
             auto test_results = std::make_shared<std::vector<std::string>>();
@@ -1016,8 +1016,10 @@ public:
             
             log_messages.clear();
 
-            auto start_identical = std::chrono::high_resolution_clock::now();
-            
+            // Structural-identity fast path is asserted via the deterministic counter,
+            // not wall-clock (the old timing check was variance-dominated and flaky).
+            // The first redefinition below SEEDS the structural key (lazy) and the
+            // second identical one must take the fast path.
             engine->execute(R"(
                 class Calculator {
                     auto result = 0.0;
@@ -1044,19 +1046,78 @@ public:
                     }
                 }
             )");
-            
-            auto end_identical = std::chrono::high_resolution_clock::now();
-            auto duration_identical = std::chrono::duration_cast<std::chrono::microseconds>(
-                end_identical - start_identical).count();
-            
+
+            auto calc_def = engine->get_class_definition("Calculator");
+            check_not_null(calc_def.get(), "Calculator definition should be registered");
+            check_eq((size_t)0, calc_def->identical_redefinitions());   // first redefinition seeds the key
+
+            // Byte-identical re-execute (cached parse, same AST): must take the fast path.
+            engine->execute(R"(
+                class Calculator {
+                    auto result = 0.0;
+                    auto memory = 0.0;
+
+                    void add(x) {
+                        result = result + x;
+                        log_action("add called");
+                    }
+
+                    void multiply(x) {
+                        result = result * x;
+                        log_action("multiply called");
+                    }
+
+                    void store() {
+                        memory = result;
+                        log_action("store called");
+                    }
+
+                    void recall() {
+                        result = memory;
+                        log_action("recall called");
+                    }
+                }
+            )");
+            check_eq((size_t)1, calc_def->identical_redefinitions());
+
+            // Cosmetic shift (leading comment moves every line): STILL structurally
+            // identical — positions are excluded from the key — and the fresh AST is
+            // adopted, so future stack traces carry the shifted line numbers.
+            engine->execute(R"(
+                // reload after a whitespace/comment-only edit
+                class Calculator {
+                    auto result = 0.0;
+                    auto memory = 0.0;
+
+                    void add(x) {
+                        result = result + x;
+                        log_action("add called");
+                    }
+
+                    void multiply(x) {
+                        result = result * x;
+                        log_action("multiply called");
+                    }
+
+                    void store() {
+                        memory = result;
+                        log_action("store called");
+                    }
+
+                    void recall() {
+                        result = memory;
+                        log_action("recall called");
+                    }
+                }
+            )");
+            check_eq((size_t)2, calc_def->identical_redefinitions());
+
             engine->execute(R"(
                 global_calc.add(10);
                 check_value("result is 25", global_calc.result == 25.0);
                 check_value("memory still 15", global_calc.memory == 15.0);
             )");
-            
-            auto start_changed = std::chrono::high_resolution_clock::now();
-            
+
             engine->execute(R"(
                 class Calculator {
                     auto result = 0.0;
@@ -1083,15 +1144,15 @@ public:
                     }
                 }
             )");
-            
-            auto end_changed = std::chrono::high_resolution_clock::now();
-            auto duration_changed = std::chrono::duration_cast<std::chrono::microseconds>(
-                end_changed - start_changed).count();
-            
+
+            // A real body change must NOT take the fast path...
+            check_eq((size_t)2, calc_def->identical_redefinitions());
+
             engine->execute(R"(
                 global_calc.add(5);  // Should log "add v2 called"
             )");
-            
+
+            // ...and the updated method must actually be live.
             bool found_v2 = false;
             for (const auto& msg : log_messages) {
                 if (msg == "add v2 called") {
@@ -1100,18 +1161,7 @@ public:
                 }
             }
             check_true(found_v2, "Updated method should be called");
-            
-            std::cerr << "\nFingerprint optimization results:" << std::endl;
-            std::cerr << "  Identical class redefinition: " << duration_identical << " uS" << std::endl;
-            std::cerr << "  Changed class redefinition: " << duration_changed << " uS" << std::endl;
-            std::cerr << std::endl;
-            
-            // parsing cost is identical for both; optimization saves only migration time, so
-            // timing variance dominates at this granularity — allow generous tolerance
-            int64_t tolerance_us = 1000;  // 1ms variance budget
-            check_true(duration_identical <= duration_changed + tolerance_us,
-                      "Identical class redefinition should be roughly as fast as changed (within tolerance)");
-            
+
             for (const auto& result : *test_results) {
                 if (result.find("FAIL") != std::string::npos) {
                     check(false, result);

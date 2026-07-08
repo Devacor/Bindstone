@@ -504,6 +504,25 @@ coroutine int f() { yield 1; }              //   (top level and class methods; N
                                             //    yet inside namespaces)
 ```
 
+The same catalog applies verbatim INSIDE CLASSES — including `var`/`auto` returns.
+(GLOOM's feel notes claimed `var name() { ... }` methods silently vanished; the full
+form family is verified and pinned in gloom_feedback_tests.cpp var_auto_method_forms —
+if a method ever "disappears," suspect a recoverable parse error in the BODY, not the
+`var` spelling):
+
+```cpp
+class G {
+    var gather() { return {"fwd": true}; }     // var-returning method
+    auto pick() { return 3; }                  // auto-returning method
+    static var mk() { return 42; }             // static + var
+    coroutine var brain() { yield 1; }         // coroutine + var
+    var take(var kinds) { return kinds[0]; }   // var params too
+}
+class H : G {
+    override var gather() { return {}; }       // override + var (before the type)
+}
+```
+
 Function-typed variables and fields hold any callable (auto semantics):
 
 ```cpp

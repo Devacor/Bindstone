@@ -479,6 +479,84 @@ public:
 			}
 		});
 
+		// ============================================================
+		// Item A: `var name() { ... }` methods. GLOOM's feel notes claimed the
+		// spelling silently vanished (no parse error, "no member" at call time) and
+		// required `function name() -> var`. The reported failure does NOT
+		// reproduce at HEAD in any shape (incl. the real GLOOM Game class, jaibite
+		// cache reload and include-hot-reload) - grammar.md's form catalog says
+		// class methods accept every free-function spelling, and they do. These
+		// pins keep the whole var/auto method family from EVER vanishing silently.
+		// ============================================================
+
+		test("var_auto_method_forms", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					class G {
+						int hp = 3;
+						var pilot = null;
+						var gather() { return {"fwd": true, "n": hp}; }   // map-literal return (the GLOOM shape)
+						auto pick() { return hp * 2; }
+						static var mk() { return 42; }
+						coroutine var brain() {
+							for (int i = 0; i < 2; ++i) { yield i; }
+							yield 99;
+						}
+						var take(var kinds) { return kinds[0]; }
+					}
+					class H : G {
+						override var gather() { return {"fwd": false, "n": 0}; }
+					}
+					auto g = G();
+					auto h = H();
+					var inp = g.gather();
+					auto co = g.brain();
+					co.resume();
+					var second = co.resume();
+					var parts = [];
+					parts.push(to_string(inp["n"]));
+					parts.push(to_string(g.pick()));
+					parts.push(to_string(G::mk()));
+					parts.push(to_string(g.take([7, 8])));
+					parts.push(to_string(second));
+					parts.push(to_string(h.gather()["fwd"]));
+					parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3] + " " + parts[4] + " " + parts[5];
+				)");
+				check_eq(std::string("3 6 42 7 1 false"), r.as<std::string>(), backend_tag(use_vm) + "var/auto/static/coroutine/override method forms all callable");
+			}
+		});
+
+		test("var_function_forms_top_level_and_namespace", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					var f() { return 41; }
+					namespace ns {
+						var helper() { return 8; }
+						class Inner { var val() { return 9; } }
+					}
+					auto i = ns::Inner();
+					f() * 100 + ns::helper() * 10 + i.val();
+				)");
+				check_eq((int64_t)4189, r.as_int(), backend_tag(use_vm) + "top-level and namespaced var functions/methods");
+			}
+		});
+
+		test("var_method_survives_class_redefinition", [this]() {
+			// Re-executing the class (hot-reload path) must keep var methods callable
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				const char* cls = R"(class R { int n = 1; var getn() { return n; } })";
+				e->execute(cls);
+				auto r1 = e->execute("auto r = R(); r.getn();");
+				check_eq((int64_t)1, r1.as_int(), backend_tag(use_vm) + "var method before reload");
+				e->execute(cls);   // same parse unit again = reload
+				auto r2 = e->execute("auto r2 = R(); r2.getn();");
+				check_eq((int64_t)1, r2.as_int(), backend_tag(use_vm) + "var method after reload");
+			}
+		});
+
 		// Plain value decls from reference-producing initializers COPY (C++'s
 		// `int x = f();` for `int& f()`); alias binding stays the auto&/ref-decl
 		// spelling (pinned in vm_backend_tests ref_return_*).

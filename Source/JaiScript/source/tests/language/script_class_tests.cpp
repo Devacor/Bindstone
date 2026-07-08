@@ -1118,12 +1118,22 @@ public:
                 )");
                 check_eq((int64_t)1, e->execute("a.x").as_int());
                 check_eq((int64_t)2, e->execute("b.y").as_int());
-                // PRE-EXISTING leniency (pinned, reported 2026-07): a typed shared_ptr
-                // decl does NOT class-check its initializer - the wrong class aliases
-                // silently (reproduces on a fresh engine; unrelated to the intern bug).
-                // If Dev rules enforcement, flip this to check_throws.
-                e->execute("shared_ptr<Bar> lenient = Foo();");
-                check_eq((int64_t)1, e->execute("lenient.x").as_int());
+                // Dev ruling (2026-07): typed shared_ptr decls ENFORCE the pointee
+                // class - wrong-class value init and wrong-class sp-aliasing both
+                // error; upcasts (script chains) stay legal; null stays assignable.
+                check_throws([&]() { e->execute("shared_ptr<Bar> wrong = Foo();"); });
+                check_throws([&]() { e->execute("shared_ptr<Bar> wrong2 = a;"); });   // aliasing a shared_ptr<Foo>
+                e->execute(R"(
+                    class Base { int bv = 5; }
+                    class Derived : Base { int dv = 6; }
+                    shared_ptr<Base> up1 = Derived();
+                    var d = new Derived();
+                    shared_ptr<Base> up2 = d;
+                    shared_ptr<Base> nul = null;
+                )");
+                check_eq((int64_t)5, e->execute("up1.bv").as_int());
+                check_eq((int64_t)5, e->execute("up2.bv").as_int());
+                check_eq(true, e->execute("nul == null").as<bool>());
             }
         });
 

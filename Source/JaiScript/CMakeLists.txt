@@ -91,3 +91,10 @@ if(JAISCRIPT_BUILD_EXAMPLES)
     add_subdirectory(examples/crawler)
 endif()
 # --- end jai_crawler ---
+
+# --- jaiscript runner (tools/jaiscript): standalone file runner / REPL / --watch live-coding ---
+option(JAISCRIPT_BUILD_RUNNER "Build the standalone jaiscript runner/REPL executable" ON)
+if(JAISCRIPT_BUILD_RUNNER)
+    add_subdirectory(tools/jaiscript)
+endif()
+# --- end jaiscript runner ---

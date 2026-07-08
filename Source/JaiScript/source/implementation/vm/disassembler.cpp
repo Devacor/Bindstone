@@ -89,7 +89,13 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_compound_fused:
 				if (ins.a < ch.compound_fused_protos.size()) {
 					const auto& cp = ch.compound_fused_protos[ins.a];
-					out << " rhs_proto=" << cp.rhs_proto << " slot=";
+					if (cp.rhs_proto == k_invalid_u32) {
+						if (cp.rhs.const_index != k_invalid_u32) out << " rhs=const:" << cp.rhs.const_index;
+						else out << " rhs=ident";
+					} else {
+						out << " rhs_proto=" << cp.rhs_proto;
+					}
+					out << " slot=";
 					if (cp.slot == k_invalid_u32) out << "env";
 					else out << cp.slot;
 					if (cp.symbol < ch.symbols.size() && symbolizer) {

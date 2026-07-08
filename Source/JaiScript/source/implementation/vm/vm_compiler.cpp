@@ -147,10 +147,15 @@ size_t vm_compiler::emit(opcode op, uint32_t a, uint32_t b, uint32_t c) {
 // Conditional exit jump for an already-compiled condition. When the condition's
 // result comes from a fused comparison, the pair collapses into op_fused_cmp_jump
 // (one dispatch, no bool through the stack). Returns the instruction to patch_jump.
+// Gated on the condition node's own shape: the collapse rewrites code.back() in place,
+// and a ternary condition's else-arm also leaves a fused comparison there — but the
+// then-arm's exit jump targets one PAST it, so rewriting would let the then path skip
+// the test and fall into the body with its value stranded on the stack.
 size_t vm_compiler::emit_cond_jump_false(const expression* cond_expr) {
 	const uint32_t proved = expression_returns_bool(cond_expr) ? 1u : 0u;
 	auto& code = chunk_->code;
-	if (!code.empty() && code.back().op == opcode::op_binary_fused) {
+	if (!code.empty() && code.back().op == opcode::op_binary_fused &&
+	    cond_expr && cond_expr->get_type() == node_type::binary_expr) {
 		switch (static_cast<token_type>(chunk_->fused_binary_protos[code.back().a].op)) {
 			case token_type::less:
 			case token_type::less_equal:
@@ -171,16 +176,45 @@ size_t vm_compiler::emit_cond_jump_false(const expression* cond_expr) {
 	return emit(opcode::op_jump_if_false, k_invalid_u32, proved);
 }
 
-// Compound store to an identifier whose RHS was just compiled. When the RHS is a fused
-// binary with at least one constant operand (the cache-slot budget: left/right/target),
-// the pair collapses into op_compound_fused.
-void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint32_t kind_flags) {
+// Compound store to an identifier whose RHS was just compiled. When the RHS's last
+// instruction produces the whole RHS value — a fused binary (`sum += i * 2`), a bare
+// identifier load (`sum += i`), or a constant (`sum += 1`) — the pair collapses into
+// op_compound_fused. Gated on the RHS node's own shape: the peephole rewrites
+// code.back() in place, and a ternary RHS's else-arm also leaves a fusable tail there —
+// but the then-arm's exit jump targets one PAST it, so rewriting that tail would let
+// the then path skip the store entirely.
+void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint32_t kind_flags, const expression* rhs) {
 	auto& code = chunk_->code;
-	if (!code.empty() && code.back().op == opcode::op_binary_fused) {
-		const fused_binary_proto& p = chunk_->fused_binary_protos[code.back().a];
-		if (p.left.const_index != k_invalid_u32 || p.right.const_index != k_invalid_u32) {
-			compound_fused_proto cp;
-			cp.rhs_proto = code.back().a;
+	if (!code.empty() && rhs) {
+		compound_fused_proto cp;
+		bool fuse = false;
+		switch (rhs->get_type()) {
+		case node_type::binary_expr:
+			if (code.back().op == opcode::op_binary_fused) {
+				cp.rhs_proto = code.back().a;
+				fuse = true;
+			}
+			break;
+		case node_type::identifier_expr:
+			if (code.back().op == opcode::op_load) {
+				cp.rhs_proto = k_invalid_u32;
+				cp.rhs.slot = code.back().a;
+				cp.rhs.symbol = code.back().b;
+				cp.rhs.load_flags = code.back().c;
+				fuse = true;
+			}
+			break;
+		case node_type::literal_expr:
+			if (code.back().op == opcode::op_const) {
+				cp.rhs_proto = k_invalid_u32;
+				cp.rhs.const_index = code.back().a;
+				fuse = true;
+			}
+			break;
+		default:
+			break;
+		}
+		if (fuse) {
 			cp.symbol = symbol_index;
 			cp.slot = slot;
 			cp.kind_flags = kind_flags;
@@ -1016,7 +1050,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 		} else {
 			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
-			     compound_kind_for(assign->op.type) | compound_flag_no_result);
+			     compound_kind_for(assign->op.type) | compound_flag_no_result, assign->value.get());
 		}
 		return true;
 	}
@@ -1249,7 +1283,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			default: kind = compound_plus; break;
 			}
 			if (!as_statement) kind |= compound_flag_result_needed;
-			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind);
+			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind, expr->value.get());
 		}
 		return;
 	}

@@ -739,20 +739,26 @@ void vm_backend::pop_external_call_scope() {
 	}
 }
 
-// Suspended-fiber snapshot. Invariant: op_yield only fires in the coroutine's own body frame
-// (any function it called has already returned), so this frame is always the topmost VM frame
-// and its stack/try/iter slices sit at the top of the shared vectors — saved relative to the
-// fiber's bases, re-based on the next resume.
+// Suspended-fiber state. Invariant: op_yield only fires in the coroutine's own body frame
+// (any function it called has already returned), so at every suspend the vm's live stacks
+// hold ONLY this fiber's state — which is exactly what the stage-4 whole-stack swap parks
+// in the storage below (see run_fiber's fiber_stacks_swap guard).
 struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	std::shared_ptr<chunk> body_chunk;
-	call_frame locals;
-	size_t ip = 0;
+	call_frame locals;                      // frame-kind metadata (name, method receiver)
+	frame f;                                // PERSISTENT fiber frame: window over the fiber stack,
+	                                        // ip survives suspends, try_record.owner stays valid
 	std::shared_ptr<environment> entry_env;
 	std::shared_ptr<environment> current_env;
-	std::vector<script_value> saved_stack;
-	std::vector<try_record> saved_try;      // stack_size/iter_size stored relative to fiber bases
-	std::vector<iter_state> saved_iter;
-	std::vector<counted_for_state> saved_cfor;
+	// Stage 4 per-fiber stacks: the fiber OWNS its value/try/iter/cfor stacks; a resume
+	// swaps them whole with the vm's live ones (O(1)) and the exit guard swaps back on
+	// every path. Absolute indices inside (window_base, try stack_size, bases) are
+	// fiber-stack absolute and stay valid across suspends - the old copy-out/copy-in
+	// and rebase arithmetic is gone. Nested resumes nest LIFO through the same guard.
+	std::vector<script_value> stack_storage;
+	std::vector<try_record> try_storage;
+	std::vector<iter_state> iter_storage;
+	std::vector<counted_for_state> cfor_storage;
 	bool started = false;
 };
 
@@ -779,6 +785,13 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 
 	auto& state = coroutine_fiber_state(handle);
 	const auto prev_status = handle.get_status();
+	if (prev_status == coroutine_handle::status::running) {
+		// Defensive twin of coroutine_handle::resume's guard (script paths never get
+		// here): activating a running fiber would swap its live stacks out from under it
+		return checked_result<script_value>(
+			make_error_code(runtime_error_code::evaluation_failed),
+			"Coroutine is already running");
+	}
 	handle.set_status(coroutine_handle::status::running);
 
 	if (prev_status == coroutine_handle::status::created) {
@@ -808,13 +821,10 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 		state.body_chunk = body_chunk;
 		state.locals = call_frame{};
 		state.locals.function_name = function->name;
-		state.locals.reserve_locals(std::max(function->local_count, body_chunk->local_count));
 
 		auto closure_env = handle.get_closure_env();
-		state.locals.closure_env = closure_env ? closure_env : environment_;
-		state.entry_env = std::make_shared<environment>(state.locals.closure_env, symbolizer_);
+		state.entry_env = std::make_shared<environment>(closure_env ? closure_env : environment_, symbolizer_);
 		state.current_env = state.entry_env;
-		state.ip = 0;
 
 		// Method coroutine: the fiber frame is a method frame over the pinned receiver
 		// ('this' also resolves via the closure env; the frame copy serves the Tier-1
@@ -823,15 +833,62 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 			state.locals.set_this(handle.receiver());
 		}
 
+		// The persistent fiber frame: a window over the fiber's OWN stack (base 0);
+		// parameter binding happens inside run_fiber once the fiber stack is live
+		state.f.code = body_chunk.get();
+		state.f.pin = body_chunk;
+		state.f.ip = 0;
+		state.f.locals = &state.locals;
+		state.f.entry_env = state.entry_env;
+		state.f.window_backed = true;
+		state.f.window_base = 0;
+		state.f.window_live = 0;
+		state.f.stack_base = 0;
+		state.f.top_level = false;
+	}
+
+	return run_fiber(handle, state);
+}
+
+checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_coroutine_state& state) {
+	coroutine_handle* prev_active = active_coroutine_;
+	active_coroutine_ = &handle;
+
+	// Stage 4: activate the fiber's OWN stacks by whole-vector swap (O(1)); the guard
+	// swaps back on EVERY exit (yield, completion, error, throw), leaving the fiber's
+	// state parked in its storage and the resumer's stacks live again. Nested resumes
+	// nest LIFO. call_records_ and frames_ stay shared: in-fiber script calls pop
+	// before any yield (op_yield asserts records_base), and stack traces span the
+	// resume chain exactly as before.
+	struct fiber_stacks_swap {
+		vm_backend* vm;
+		vm_coroutine_state* st;
+		fiber_stacks_swap(vm_backend* v, vm_coroutine_state* c) : vm(v), st(c) { flip(); }
+		~fiber_stacks_swap() { flip(); }
+		void flip() {
+			std::swap(vm->stack_.vec(), st->stack_storage);
+			std::swap(vm->try_records_, st->try_storage);
+			std::swap(vm->iter_states_, st->iter_storage);
+			std::swap(vm->cfor_states_, st->cfor_storage);
+		}
+	} stacks_guard(this, &state);
+
+	auto prev_env = environment_;
+	environment_ = state.current_env ? state.current_env : state.entry_env;
+
+	// First resume: bind parameters into the fiber frame's window now that the fiber
+	// stack is live (defaults run their chunks here; conversions may re-enter script)
+	if (!state.started) {
+		auto function = handle.get_function();
+		auto* body_chunk = state.body_chunk.get();
 		const auto& args = handle.get_args();
-		auto prev_env = environment_;
-		environment_ = state.entry_env;
 		for (size_t i = 0; i < function->parameters.size(); ++i) {
 			const auto& param = function->parameters[i];
 			if (i >= args.size()) {
 				auto default_chunk = i < body_chunk->param_default_chunks.size() ? body_chunk->param_default_chunks[i] : nullptr;
 				if (!default_chunk) {
 					environment_ = prev_env;
+					active_coroutine_ = prev_active;
 					handle.set_status(coroutine_handle::status::failed);
 					return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Missing compiled default argument");
 				}
@@ -839,14 +896,20 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 				df.code = default_chunk.get();
 				df.pin = default_chunk;
 				df.ip = 0;
-				df.locals = &state.locals;
+				df.locals = state.f.locals;
+				df.window_backed = state.f.window_backed;
+				df.window_base = state.f.window_base;
+				df.window_live = state.f.window_live;
 				df.entry_env = environment_;
 				df.stack_base = stack_.size();
 				df.top_level = false;
 				auto dr = run(df);
 				if (!dr) {
-					stack_.erase(stack_.begin() + df.stack_base, stack_.end());
+					if (stack_.size() > df.stack_base) {
+						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
+					}
 					environment_ = prev_env;
+					active_coroutine_ = prev_active;
 					handle.set_status(coroutine_handle::status::failed);
 					return dr.error_value();
 				}
@@ -856,7 +919,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 					if (stack_.size() > df.stack_base) {
 						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
 					}
-					frame_slot_set(state.locals, param.slot_index, make_null());
+					frame_slot_set(state.f, param.slot_index, make_null());
 					continue;
 				}
 				script_value default_val = std::move(stack_.back());
@@ -864,12 +927,13 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
 				}
-				frame_slot_set(state.locals, param.slot_index, std::move(default_val));
+				frame_slot_set(state.f, param.slot_index, std::move(default_val));
 				continue;
 			}
 			auto converted_result = try_convert_for_parameter(args[i], param.type);
 			if (!converted_result) {
 				environment_ = prev_env;
+				active_coroutine_ = prev_active;
 				handle.set_status(coroutine_handle::status::failed);
 				return converted_result.error_value();
 			}
@@ -881,55 +945,19 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 			if (param.ref_escaping && !bound.is_reference()) {
 				bound = script_value::make_cell_reference(std::move(bound), engine_);
 			}
-			frame_slot_set(state.locals, param.slot_index, std::move(bound));
+			frame_slot_set(state.f, param.slot_index, std::move(bound));
 		}
-		environment_ = prev_env;
+		// Body slots exist behind window_live so operand temps start above the window
+		{
+			const size_t window_slots = std::max(function->local_count, body_chunk->local_count);
+			for (size_t filled = stack_.size() - state.f.window_base; filled < window_slots; ++filled) {
+				stack_.push_back(make_null());
+			}
+		}
 		state.started = true;
 	}
 
-	return run_fiber(handle, state);
-}
-
-checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_coroutine_state& state) {
-	coroutine_handle* prev_active = active_coroutine_;
-	active_coroutine_ = &handle;
-
-	frame f;
-	f.code = state.body_chunk.get();
-	f.pin = state.body_chunk;
-	f.ip = state.ip;
-	f.locals = &state.locals;
-	f.entry_env = state.entry_env;
-	f.top_level = false;
-
-	auto prev_env = environment_;
-	environment_ = state.current_env ? state.current_env : state.entry_env;
-
-	// Restore the fiber's stack / iter / try slices above the caller's current tops.
-	const size_t stack_base = stack_.size();
-	f.stack_base = stack_base;
-	for (auto& v : state.saved_stack) { stack_.push_back(std::move(v)); }
-	state.saved_stack.clear();
-
-	const size_t iter_base = iter_states_.size();
-	for (auto& is : state.saved_iter) { iter_states_.push_back(std::move(is)); }
-	state.saved_iter.clear();
-
-	const size_t cfor_base = cfor_states_.size();
-	for (auto& cs : state.saved_cfor) { cfor_states_.push_back(cs); }
-	state.saved_cfor.clear();
-
-	const size_t try_base = try_records_.size();
-	for (auto& tr : state.saved_try) {
-		tr.owner = &f;
-		tr.stack_size += stack_base;
-		tr.iter_size += iter_base;
-		tr.cfor_size += cfor_base;
-		try_records_.push_back(std::move(tr));
-	}
-	state.saved_try.clear();
-
-	frames_.push_back(&f);
+	frames_.push_back(&state.f);
 
 	const bool prev_yielding = yielding_;
 	yielding_ = false;
@@ -941,7 +969,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	std::optional<checked_result<void>> body_result;
 	std::exception_ptr pending;
 	try {
-		body_result.emplace(run(f));
+		body_result.emplace(run(state.f));
 	} catch (...) {
 		pending = std::current_exception();
 	}
@@ -950,24 +978,10 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	frames_.pop_back();
 
 	if (yielding_) {
-		// Suspend: snapshot the fiber's frame slices relative to its bases, then truncate.
-		state.ip = f.ip;
+		// Suspend is O(1): the fiber frame (ip included) is persistent and the guard
+		// parks the whole stacks in state storage on scope exit - nothing to copy,
+		// nothing to rebase.
 		state.current_env = environment_;
-		for (size_t i = stack_base; i < stack_.size(); ++i) { state.saved_stack.push_back(std::move(stack_[i])); }
-		stack_.erase(stack_.begin() + stack_base, stack_.end());
-		for (size_t i = try_base; i < try_records_.size(); ++i) {
-			try_record tr = std::move(try_records_[i]);
-			tr.owner = nullptr;
-			tr.stack_size -= stack_base;
-			tr.iter_size -= iter_base;
-			tr.cfor_size -= cfor_base;
-			state.saved_try.push_back(std::move(tr));
-		}
-		try_records_.erase(try_records_.begin() + try_base, try_records_.end());
-		for (size_t i = iter_base; i < iter_states_.size(); ++i) { state.saved_iter.push_back(std::move(iter_states_[i])); }
-		iter_states_.erase(iter_states_.begin() + iter_base, iter_states_.end());
-		for (size_t i = cfor_base; i < cfor_states_.size(); ++i) { state.saved_cfor.push_back(cfor_states_[i]); }
-		cfor_states_.erase(cfor_states_.begin() + cfor_base, cfor_states_.end());
 
 		// Deref: a reference into the fiber's own locals would dangle once abandoned.
 		script_value yielded = handle.last_value();
@@ -984,11 +998,13 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		return yielded;
 	}
 
-	// Completed, errored, or threw: discard any leftover fiber frame slices.
-	if (try_records_.size() > try_base) { try_records_.erase(try_records_.begin() + try_base, try_records_.end()); }
-	if (iter_states_.size() > iter_base) { iter_states_.erase(iter_states_.begin() + iter_base, iter_states_.end()); }
-	if (cfor_states_.size() > cfor_base) { cfor_states_.erase(cfor_states_.begin() + cfor_base, cfor_states_.end()); }
-	if (stack_.size() > stack_base) { stack_.erase(stack_.begin() + stack_base, stack_.end()); }
+	// Completed, errored, or threw: the fiber's stacks die here (window included) -
+	// clear while they are still the live ones; the guard then swaps the empties back
+	// into state storage.
+	try_records_.clear();
+	iter_states_.clear();
+	cfor_states_.clear();
+	stack_.clear();
 
 	const bool completed_has_return = has_return_value_;
 	std::optional<script_value> completed_return = std::move(return_value_);

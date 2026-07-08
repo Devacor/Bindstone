@@ -9066,7 +9066,7 @@ checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
             }
             if (detail::is_ref_bindable_lvalue(stmt->value.get())) {
                 auto resolved = detail::resolve_ref_lvalue(stmt->value.get(),
-                    call_stack_.empty() ? nullptr : &call_stack_.back(),
+                    detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
                     environment_.get(), engine_, string_symbolizer_);
                 if (!resolved) {
                     return resolved.error_value();
@@ -11116,7 +11116,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     // Field/subscript/chain lvalue argument: resolve through the shared helper into
     // an owner-pinned reference (Tier 1)
     if (argExpr && detail::is_ref_bindable_lvalue(argExpr)) {
-        auto resolved = detail::resolve_ref_lvalue(argExpr, caller_locals,
+        auto resolved = detail::resolve_ref_lvalue(argExpr, detail::caller_frame_view{caller_locals},
                                                    caller_env.get(), engine_, string_symbolizer_);
         if (!resolved) {
             return resolved.error_value();

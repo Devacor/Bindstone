@@ -40,7 +40,26 @@ namespace jai::detail {
 
     class ast_writer {
     public:
-        explicit ast_writer(const string_symbolizer& symbols) : symbols_(symbols) {}
+        // include_locations = false produces a POSITION-INSENSITIVE encoding (structural
+        // identity keys, e.g. hot-reload redefinition equality) — never deserialized.
+        explicit ast_writer(const string_symbolizer& symbols, bool include_locations = true)
+            : symbols_(symbols), include_locations_(include_locations) {}
+
+        // Structural key for one subtree: string table + node encoding, a deterministic
+        // pure function of AST structure (symbol ids persist as first-seen table indices,
+        // so engine-local id values never leak in). Byte equality = structural equality.
+        std::vector<uint8_t> node_key(const ast_node* n) {
+            node(n);
+            std::vector<uint8_t> out;
+            out.reserve(8 + body_.size() + table_.size() * 8);
+            append_varint(out, table_.size());
+            for (const auto& s : table_) {
+                append_varint(out, s.size());
+                out.insert(out.end(), s.begin(), s.end());
+            }
+            out.insert(out.end(), body_.begin(), body_.end());
+            return out;
+        }
 
         std::vector<uint8_t> serialize(const std::vector<declaration_ptr>& decls, uint64_t fingerprint,
                                        uint32_t flags = 0) {
@@ -104,6 +123,9 @@ namespace jai::detail {
         void slot(size_t s) { varint(s == SIZE_MAX ? 0 : uint64_t(s) + 1); }
 
         void location(const source_location& loc) {
+            if (!include_locations_) {
+                return;
+            }
             str(loc.filename);
             varint(loc.line);
             varint(loc.column);
@@ -487,6 +509,7 @@ namespace jai::detail {
         }
 
         const string_symbolizer& symbols_;
+        bool include_locations_ = true;
         std::vector<uint8_t> body_;
         std::vector<std::string> table_;
         std::unordered_map<std::string, uint64_t> table_lookup_;
@@ -1169,6 +1192,14 @@ namespace jai::detail {
                                                             engine* eng, uint64_t& fingerprint_out,
                                                             uint32_t* flags_out = nullptr) {
         return ast_reader(data, size, eng).deserialize(fingerprint_out, flags_out);
+    }
+
+    // Position-insensitive structural identity key for one AST subtree (hot-reload
+    // redefinition equality): byte-equal keys = structurally identical code, regardless
+    // of line/column shifts or the surrounding source. Throws (jaibite_fail) on
+    // unserializable nodes — callers treat that as "not identical".
+    inline std::vector<uint8_t> structural_node_key(const ast_node* n, const string_symbolizer& symbols) {
+        return ast_writer(symbols, /*include_locations=*/false).node_key(n);
     }
 
 } // namespace jai::detail

@@ -1057,27 +1057,42 @@ public:
         return { nullptr, nullptr };
     }
 
-    void initialize_fingerprint() {
-        current_fingerprint_ = compute_fingerprint(field_defaults_, methods_, static_methods_);
+    // Structural identity for hot reload: the class_decl subtree serialized WITHOUT
+    // source locations (detail::structural_node_key). Exact compare — no collision
+    // risk — and comment/whitespace/line-shift edits still match. Stored lazily by the
+    // backends after each redefinition; empty = no key yet (first definition).
+    const std::vector<uint8_t>& structural_key() const { return structural_key_; }
+    void set_structural_key(std::vector<uint8_t> key, size_t member_count, size_t base_count) {
+        structural_key_ = std::move(key);
+        key_member_count_ = member_count;
+        key_base_count_ = base_count;
     }
+    // O(1) discriminators — only walk the new AST when these already agree.
+    bool structural_key_shape_matches(size_t member_count, size_t base_count) const {
+        return !structural_key_.empty() && key_member_count_ == member_count && key_base_count_ == base_count;
+    }
+    // Deterministic fast-path observability (tests assert this instead of wall-clock).
+    size_t identical_redefinitions() const { return identical_redefinitions_; }
 
     void redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults,
                         const std::unordered_map<uint64_t, script_value>& new_methods,
                         const std::unordered_map<uint64_t, script_value>& new_static_methods,
-                        engine* engine_ref) {
+                        engine* engine_ref,
+                        bool structurally_identical = false) {
         field_defaults_cache_valid_ = false;
-        size_t new_fingerprint = compute_fingerprint(new_field_defaults, new_methods, new_static_methods);
 
-        if (new_fingerprint == current_fingerprint_) {
-            for (size_t i = 0; i < instances_.size(); ++i) {
-                if (auto instance = instances_[i].lock()) {
-                    try {
-                        instance->set_class_definition(shared_from_this());
-                    } catch (const std::exception& e) {
-                        (void)e;
-                    }
-                }
-            }
+        if (structurally_identical) {
+            // Identical reload (structural AST equality, established by the caller):
+            // ADOPT the new ASTs — methods were re-minted from the fresh parse, so
+            // debugger/error positions track cosmetic shifts — and skip all
+            // per-instance and derived-class work (no field or body changed;
+            // set_class_definition would re-point instances at this same object).
+            methods_ = new_methods;
+            static_methods_ = new_static_methods;
+            recompute_property_getters(new_methods, engine_ref);
+            store_field_defaults(new_field_defaults, engine_ref);
+            method_metadata_.clear();
+            ++identical_redefinitions_;
             return;
         }
         bool fields_changed = false;
@@ -1145,36 +1160,9 @@ public:
         methods_ = new_methods;
         static_methods_ = new_static_methods;
 
-        has_property_getters_ = false;
-        for (const auto& parent : parent_classes_) {
-            if (parent && parent->has_property_getters()) {
-                has_property_getters_ = true;
-                break;
-            }
-        }
-        if (!has_property_getters_ && cpp_base_class_ && cpp_base_class_->has_property_getters()) {
-            has_property_getters_ = true;
-        }
-        if (!has_property_getters_ && engine_ref) {
-            for (const auto& [method_id, _] : new_methods) {
-                std::string_view name = engine_ref->get_symbolizer()->get_string(method_id);
-                if (name.size() > 5 && name.substr(0, 5) == "_get_") {
-                    has_property_getters_ = true;
-                    break;
-                }
-            }
-        }
+        recompute_property_getters(new_methods, engine_ref);
 
-        field_defaults_.clear();
-        for (const auto& [id, value] : new_field_defaults) {
-            if (value.get_engine() == nullptr && engine_ref) {
-                script_value value_with_engine(value);
-                value_with_engine.set_engine(engine_ref);
-                field_defaults_[id] = value_with_engine;
-            } else {
-                field_defaults_[id] = value;
-            }
-        }
+        store_field_defaults(new_field_defaults, engine_ref);
 
         // Migrate against a SNAPSHOT of the current instances. A hot_reload_migrate hook can
         // construct new same-class instances, which register into instances_ mid-migration;
@@ -1239,8 +1227,6 @@ public:
             std::remove_if(derived_classes_.begin(), derived_classes_.end(),
                 [](const std::weak_ptr<class_definition>& w) { return w.expired(); }),
             derived_classes_.end());
-
-        current_fingerprint_ = new_fingerprint;
     }
 
     void update_instances_from_base() {
@@ -1346,79 +1332,44 @@ private:
 
     std::vector<std::weak_ptr<class_definition>> derived_classes_;
 
-    size_t current_fingerprint_ = 0;
+    std::vector<uint8_t> structural_key_;
+    size_t key_member_count_ = 0;
+    size_t key_base_count_ = 0;
+    size_t identical_redefinitions_ = 0;
 
-    template<typename T>
-    static void hash_combine(size_t& seed, const T& val) {
-        seed ^= std::hash<T>{}(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref) {
+        has_property_getters_ = false;
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->has_property_getters()) {
+                has_property_getters_ = true;
+                break;
+            }
+        }
+        if (!has_property_getters_ && cpp_base_class_ && cpp_base_class_->has_property_getters()) {
+            has_property_getters_ = true;
+        }
+        if (!has_property_getters_ && engine_ref) {
+            for (const auto& [method_id, _] : new_methods) {
+                std::string_view name = engine_ref->get_symbolizer()->get_string(method_id);
+                if (name.size() > 5 && name.substr(0, 5) == "_get_") {
+                    has_property_getters_ = true;
+                    break;
+                }
+            }
+        }
     }
 
-    static size_t compute_fingerprint(
-        const std::unordered_map<uint64_t, script_value>& field_defaults,
-        const std::unordered_map<uint64_t, script_value>& methods,
-        const std::unordered_map<uint64_t, script_value>& static_methods = {}) {
-
-        size_t hash = 0;
-
-        std::vector<uint64_t> field_ids;
-        field_ids.reserve(field_defaults.size());
-        for (const auto& [id, _] : field_defaults) {
-            field_ids.push_back(id);
-        }
-        std::sort(field_ids.begin(), field_ids.end());
-
-        for (const auto& id : field_ids) {
-            hash_combine(hash, id);
-        }
-
-        std::vector<std::pair<uint64_t, size_t>> method_hashes;
-        method_hashes.reserve(methods.size());
-        for (const auto& [id, value] : methods) {
-            size_t impl_hash = 0;
-            if (value.is_function()) {
-                try {
-                    const auto& func = value.as_function();
-                    if (func.target_type() != typeid(void)) {
-                        impl_hash = reinterpret_cast<size_t>(&func);
-                    }
-                } catch (...) {
-                    impl_hash = 0;
-                }
+    void store_field_defaults(const std::unordered_map<uint64_t, script_value>& new_field_defaults, engine* engine_ref) {
+        field_defaults_.clear();
+        for (const auto& [id, value] : new_field_defaults) {
+            if (value.get_engine() == nullptr && engine_ref) {
+                script_value value_with_engine(value);
+                value_with_engine.set_engine(engine_ref);
+                field_defaults_[id] = value_with_engine;
+            } else {
+                field_defaults_[id] = value;
             }
-            method_hashes.emplace_back(id, impl_hash);
         }
-        std::sort(method_hashes.begin(), method_hashes.end());
-
-        for (const auto& [id, impl_hash] : method_hashes) {
-            hash_combine(hash, id);
-            hash_combine(hash, impl_hash);
-        }
-
-        std::vector<std::pair<uint64_t, size_t>> static_method_hashes;
-        static_method_hashes.reserve(static_methods.size());
-        for (const auto& [id, value] : static_methods) {
-            size_t impl_hash = 0;
-            if (value.is_function()) {
-                try {
-                    const auto& func = value.as_function();
-                    if (func.target_type() != typeid(void)) {
-                        impl_hash = reinterpret_cast<size_t>(&func);
-                    }
-                } catch (...) {
-                    impl_hash = 0;
-                }
-            }
-            static_method_hashes.emplace_back(id, impl_hash);
-        }
-        std::sort(static_method_hashes.begin(), static_method_hashes.end());
-
-        for (const auto& [id, impl_hash] : static_method_hashes) {
-            hash_combine(hash, id);
-            hash_combine(hash, std::string("static"));
-            hash_combine(hash, impl_hash);
-        }
-
-        return hash;
     }
 };
 

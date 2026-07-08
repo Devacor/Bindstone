@@ -6,6 +6,7 @@
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
+#include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
 #include <sstream>
@@ -9993,9 +9994,35 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // and migrate_fields converts against the NEW types (retype ruling)
         class_def->replace_field_declared_types(std::move(new_field_types), true);
 
-        // Call redefine_class with the new field defaults and methods
-        // Call redefine_class to migrate existing instances
-        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_);
+        // Structural identity (position-insensitive AST key): an identical reload adopts
+        // the freshly minted ASTs (line info stays current) but skips all per-instance
+        // migration work. Shape counts gate the O(nodes) walk; serializer failure = not
+        // identical. The key stores lazily, so the first redefinition always compares
+        // false and seeds it.
+        std::vector<uint8_t> structural_key;
+        bool structurally_identical = false;
+        if (class_def->structural_key_shape_matches(decl->members.size(), decl->base_classes.size())) {
+            try {
+                structural_key = detail::structural_node_key(decl, *string_symbolizer_);
+                structurally_identical = (structural_key == class_def->structural_key());
+            } catch (...) {
+                structural_key.clear();
+            }
+        }
+
+        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_,
+                                  structurally_identical);
+
+        if (structural_key.empty()) {
+            try {
+                structural_key = detail::structural_node_key(decl, *string_symbolizer_);
+            } catch (...) {
+                structural_key.clear();
+            }
+        }
+        if (!structural_key.empty()) {
+            class_def->set_structural_key(std::move(structural_key), decl->members.size(), decl->base_classes.size());
+        }
 
         // Statics dropped from the new definition must no longer be accessible.
         class_def->retain_static_fields(new_static_field_ids);
@@ -10060,8 +10087,6 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             auto [setter_id, _2] = string_symbolizer_->get_setter_id_with_view(field_id);
             class_def->add_method_by_id(setter_id, setter);
         }
-        // Initialize fingerprint for future comparisons
-        class_def->initialize_fingerprint();
     }
     
     // Validate unresolved identifiers before finalizing the class

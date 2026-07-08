@@ -210,6 +210,68 @@ public:
         check_eq(static_cast<int64_t>(14), eng->get_variable("r").as_int());
     }
 
+    // A parameter whose ONLY use is a bare compound rhs (`total += bump`) keeps its name
+    // at a stop: the vm fuses that op_load away, so naming rides the compound_fused
+    // proto's bare rhs operand (the interpreter reads the frame's AST as usual).
+    void frame_locals_name_bare_compound_rhs(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        auto& dbg = eng->debugger();
+
+        std::mutex m;
+        std::condition_variable cv;
+        bool stopped = false;
+        dbg.set_on_stopped([&](const jai::debug::stop_info&) {
+            std::lock_guard<std::mutex> lk(m);
+            stopped = true;
+            cv.notify_all();
+        });
+
+        dbg.set_breakpoints("<script>", {4});
+        dbg.set_enabled(true);
+
+        const std::string src =
+            "function acc(int seed, int bump) -> int {\n"   // line 1
+            "    int total = seed;\n"                       // line 2
+            "    total += bump;\n"                          // line 3  (bare compound rhs)
+            "    return total;\n"                           // line 4  (breakpoint)
+            "}\n"
+            "auto r = acc(30, 12);\n";                      // line 6
+
+        std::atomic<bool> done{false};
+        std::thread script([&] { eng->execute(src); done = true; });
+
+        bool got_stop = false;
+        {
+            std::unique_lock<std::mutex> lk(m);
+            got_stop = cv.wait_for(lk, std::chrono::seconds(5), [&] { return stopped; });
+        }
+
+        std::vector<jai::debug::variable_info> locals;
+        bool got_locals = false;
+        if (got_stop) {
+            std::promise<std::vector<jai::debug::variable_info>> pv;
+            auto fut = pv.get_future();
+            dbg.post_command([&] { pv.set_value(dbg.list_locals()); });
+            got_locals = fut.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+            if (got_locals) locals = fut.get();
+            dbg.resume();
+        }
+        dbg.detach();
+        script.join();
+
+        check_true(got_stop);
+        check_true(got_locals);
+        auto value_of = [&](const char* name) -> std::string {
+            for (const auto& v : locals) { if (v.name == name) return v.value; }
+            return "<missing>";
+        };
+        check_eq(std::string("30"), value_of("seed"));
+        check_eq(std::string("12"), value_of("bump"));
+        check_eq(std::string("42"), value_of("total"));
+        check_true(done.load());
+        check_eq(static_cast<int64_t>(42), eng->get_variable("r").as_int());
+    }
+
     // Dev ruling: parallel regions are ATOMIC to the debugger. A breakpoint inside the
     // body never fires while the body runs as part of a region — including chunk 0 on
     // the calling thread (structural: every region context is a fresh slot backend the
@@ -296,6 +358,12 @@ public:
         });
         test("vm_frame_locals_at_breakpoint", [this]() {
             frame_locals_at_breakpoint(jai::backend_type::vm);
+        });
+        test("frame_locals_name_bare_compound_rhs", [this]() {
+            frame_locals_name_bare_compound_rhs(jai::backend_type::interpreter);
+        });
+        test("vm_frame_locals_name_bare_compound_rhs", [this]() {
+            frame_locals_name_bare_compound_rhs(jai::backend_type::vm);
         });
         test("parallel_region_atomic_to_debugger", [this]() {
             parallel_region_atomic_to_debugger(jai::backend_type::interpreter);

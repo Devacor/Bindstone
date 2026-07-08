@@ -107,10 +107,13 @@ namespace jai::vm {
         script_value* ptr = nullptr;
     };
 
-    // op_compound_fused: `target op= <fused binary rhs>` in one dispatch. The rhs proto
-    // must have at least one constant operand (cache-slot budget: left/right/target).
+    // op_compound_fused: `target op= <rhs>` in one dispatch. Binary mode: rhs_proto indexes
+    // fused_binary_protos (identifier operands in any mix — rhs cache roles 0/1 plus target
+    // role 2 stay within the per-ip budget). Bare mode (rhs_proto == k_invalid_u32): rhs is
+    // a single identifier or constant operand (`sum += i` / `sum += 1`).
     struct compound_fused_proto {
-        uint32_t rhs_proto = 0;         // fused_binary_protos index
+        uint32_t rhs_proto = 0;         // fused_binary_protos index; k_invalid_u32 = bare rhs
+        fused_operand rhs;              // bare-mode operand (identifier or constant)
         uint32_t symbol = 0;            // chunk::symbols index (store target)
         uint32_t slot = k_invalid_u32;  // target frame slot (k_invalid_u32 = env)
         uint32_t kind_flags = 0;        // compound kind | compound_flag_*

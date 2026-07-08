@@ -548,6 +548,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 		if (p.slot != k_invalid_u32 && p.symbol < f->code->symbols.size()) {
 			slot_names.emplace_back(p.slot, symbolizer_->get_string(f->code->symbols[p.symbol]));
 		}
+		note_operand(p.rhs);   // bare-mode identifier rhs (binary-mode protos leave it invalid)
 	}
 	for (const auto& p : f->code->iter_protos) {
 		if (p.slot != SIZE_MAX && p.var_symbol != UINT64_MAX) {
@@ -4060,14 +4061,15 @@ checked_result<void> vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruct
 	return {};
 }
 
-// BINARY_FUSED+COMPOUND_STORE superinstruction (`target op= <fused rhs>`). Fast path:
-// plain int target (slot or cached top-level env local) with all-int cheap-shape rhs,
-// arithmetic kinds only — error surfaces copied verbatim from the pair. Anything else
-// runs the pair's two exec bodies back to back (parity by construction). Never touches
-// f.ip: the dispatch case breaks, so the loop-bottom unwind check and ++ip run as usual.
+// RHS+COMPOUND_STORE superinstruction (`target op= <fused rhs | bare identifier/const>`).
+// Fast path: plain int target (slot or cached top-level env local) with all-int
+// cheap-shape rhs, arithmetic kinds only — error surfaces copied verbatim from the pair.
+// Anything else runs the pair's two exec bodies back to back (parity by construction).
+// Never touches f.ip: the dispatch case breaks, so the loop-bottom unwind check and
+// ++ip run as usual.
 checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 	const compound_fused_proto& cp = f.code->compound_fused_protos[ins.a];
-	const fused_binary_proto& p = f.code->fused_binary_protos[cp.rhs_proto];
+	const bool bare_rhs = cp.rhs_proto == k_invalid_u32;
 
 	if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0) {
 		script_value* varPtr = nullptr;
@@ -4078,81 +4080,125 @@ checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruct
 			varPtr = env_lookup_cached(f, f.ip * 3 + 2, f.code->symbols[cp.symbol]);
 		}
 		if (varPtr && varPtr->raw_storage_index() == script_value::TYPEID_INT) {
-			const script_value* lp = fused_cmp_operand(f, p.left, f.ip * 3);
-			const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 3 + 1) : nullptr;
-			if (rp && lp->raw_storage_index() == script_value::TYPEID_INT &&
-			    rp->raw_storage_index() == script_value::TYPEID_INT) {
-				const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
-				script_int rhs = 0;
-				bool arithmetic = true;
-				switch (static_cast<token_type>(p.op)) {
-				case token_type::plus:
-					if (!ints::try_add(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '+'");
-					break;
-				case token_type::minus:
-					if (!ints::try_sub(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '-'");
-					break;
-				case token_type::star:
-					if (!ints::try_mul(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '*'");
-					break;
-				case token_type::slash:
-					if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-					if (!ints::try_div(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '/'");
-					break;
-				case token_type::percent:
-					if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-					rhs = ints::mod(a, b);
-					break;
-				default:
-					arithmetic = false;   // comparisons etc: pair semantics below
-					break;
+			script_int rhs = 0;
+			bool arithmetic = false;
+			if (bare_rhs) {
+				// A bare load can't raise: any non-int/uncached shape just bails to the pair
+				const script_value* vp = fused_cmp_operand(f, cp.rhs, f.ip * 3);
+				if (vp && vp->raw_storage_index() == script_value::TYPEID_INT) {
+					rhs = vp->unchecked_as_int();
+					arithmetic = true;
 				}
-				if (arithmetic) {
-					const uint32_t kind = cp.kind_flags & compound_kind_mask;
-					script_int& tref = varPtr->unchecked_as_int_ref();
-					script_int rr = 0;
-					bool stored = true;
-					switch (kind) {
-					case compound_plus:
-						if (!ints::try_add(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '+='");
+			} else {
+				const fused_binary_proto& p = f.code->fused_binary_protos[cp.rhs_proto];
+				const script_value* lp = fused_cmp_operand(f, p.left, f.ip * 3);
+				const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 3 + 1) : nullptr;
+				if (rp && lp->raw_storage_index() == script_value::TYPEID_INT &&
+				    rp->raw_storage_index() == script_value::TYPEID_INT) {
+					const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+					arithmetic = true;
+					switch (static_cast<token_type>(p.op)) {
+					case token_type::plus:
+						if (!ints::try_add(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '+'");
 						break;
-					case compound_minus:
-						if (!ints::try_sub(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '-='");
+					case token_type::minus:
+						if (!ints::try_sub(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '-'");
 						break;
-					case compound_star:
-						if (!ints::try_mul(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '*='");
+					case token_type::star:
+						if (!ints::try_mul(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '*'");
 						break;
-					case compound_slash:
-						if (rhs == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-						if (!ints::try_div(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '/='");
+					case token_type::slash:
+						if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+						if (!ints::try_div(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '/'");
+						break;
+					case token_type::percent:
+						if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+						rhs = ints::mod(a, b);
 						break;
 					default:
-						stored = false;   // %=: the pair surfaces unknown_operator
+						arithmetic = false;   // comparisons etc: pair semantics below
 						break;
 					}
-					if (stored) {
-						tref = rr;
-						if (!(cp.kind_flags & compound_flag_no_result)) {
-							stack_.push_back((cp.kind_flags & compound_flag_result_needed) ? varPtr->clone() : *varPtr);
-						}
-						return {};
+				}
+			}
+			if (arithmetic) {
+				const uint32_t kind = cp.kind_flags & compound_kind_mask;
+				script_int& tref = varPtr->unchecked_as_int_ref();
+				script_int rr = 0;
+				bool stored = true;
+				switch (kind) {
+				case compound_plus:
+					if (!ints::try_add(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '+='");
+					break;
+				case compound_minus:
+					if (!ints::try_sub(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '-='");
+					break;
+				case compound_star:
+					if (!ints::try_mul(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '*='");
+					break;
+				case compound_slash:
+					if (rhs == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+					if (!ints::try_div(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '/='");
+					break;
+				default:
+					stored = false;   // %=: the pair surfaces unknown_operator
+					break;
+				}
+				if (stored) {
+					tref = rr;
+					if (!(cp.kind_flags & compound_flag_no_result)) {
+						stack_.push_back((cp.kind_flags & compound_flag_result_needed) ? varPtr->clone() : *varPtr);
 					}
+					return {};
 				}
 			}
 		}
 	}
 
-	// Verbatim pair: the fused rhs pushes its result, then the compound store pops it
-	vm_instruction rhs_ins = ins;
-	rhs_ins.a = cp.rhs_proto;
-	auto rhs_result = exec_binary_fused(f, rhs_ins);
-	if (!rhs_result) {
-		return rhs_result;
-	}
-	if (is_unwinding_) [[unlikely]] {
-		// Pair parity: the store never ran; result stays pushed for the loop-bottom
-		// unwind handling (the dispatch case breaks into it)
-		return {};
+	// Verbatim pair: the rhs (fused binary / load / const) pushes its result, then the
+	// compound store pops it
+	if (bare_rhs) {
+		if (cp.rhs.const_index != k_invalid_u32) {
+			// KEEP BYTE-PARALLEL with run_dispatch's op_const case: engine-less parse-time
+			// template re-materialized with the engine (strings get a fresh payload)
+			const script_value& tmpl = f.code->constants[cp.rhs.const_index];
+			const auto& storage = tmpl.get_storage();
+			switch (storage.index()) {
+				case script_value::TYPEID_INT: stack_.push_back(script_value(std::get<script_int>(storage), engine_)); break;
+				case script_value::TYPEID_FLOAT: stack_.push_back(script_value(std::get<script_float>(storage), engine_)); break;
+				case script_value::TYPEID_STRING: stack_.push_back(script_value(*std::get<strong_ptr<script_string>>(storage), engine_)); break;
+				case script_value::TYPEID_CHAR: stack_.push_back(script_value(std::get<script_char>(storage), engine_)); break;
+				case script_value::TYPEID_BOOL: stack_.push_back(script_value(std::get<script_bool>(storage), engine_)); break;
+				case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
+				default: {
+					script_value copy = tmpl;
+					copy.set_engine(engine_);
+					stack_.push_back(std::move(copy));
+					break;
+				}
+			}
+		} else {
+			vm_instruction load_ins = ins;
+			load_ins.a = cp.rhs.slot;
+			load_ins.b = cp.rhs.symbol;
+			load_ins.c = cp.rhs.load_flags;
+			auto load_result = exec_load(f, load_ins);
+			if (!load_result) {
+				return load_result;
+			}
+		}
+	} else {
+		vm_instruction rhs_ins = ins;
+		rhs_ins.a = cp.rhs_proto;
+		auto rhs_result = exec_binary_fused(f, rhs_ins);
+		if (!rhs_result) {
+			return rhs_result;
+		}
+		if (is_unwinding_) [[unlikely]] {
+			// Pair parity: the store never ran; result stays pushed for the loop-bottom
+			// unwind handling (the dispatch case breaks into it)
+			return {};
+		}
 	}
 	vm_instruction store_ins = ins;
 	store_ins.a = cp.symbol;

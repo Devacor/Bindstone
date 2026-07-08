@@ -2806,6 +2806,201 @@ public:
 			check_eq(std::string("caught+caught2:42"), i_out, "interp env restored after throwing bind");
 			check_eq(i_out, v_out, "throwing-bind parity");
 		});
+
+		// ---- compound fusion: bare identifier/constant rhs + ident+ident rhs ----
+		// `sum += i` / `sum += 1` now compile to op_compound_fused (bare-rhs mode) and
+		// `sum += i + j` fuses without the old one-constant-operand gate. These pin result
+		// parity, the overflow raise point + text, and the ternary-tail no-fuse guard.
+
+		test("compound_fused_bare_ident_results", [this, run_both_backends]() {
+			auto [i1, v1] = run_both_backends(R"(
+				auto sum = 0;
+				for (auto i = 0; i < 1000; ++i) { sum += i; }
+				sum;
+			)");
+			check_eq(std::string("499500"), i1, "interp bare-ident hot loop");
+			check_eq(i1, v1, "bare-ident hot loop parity");
+			auto [i2, v2] = run_both_backends(R"(
+				function h() -> int {
+					int sum = 0;
+					for (int i = 0; i < 100; ++i) { sum += i; }
+					return sum;
+				}
+				h();
+			)");
+			check_eq(std::string("4950"), i2, "interp bare-ident loop through frame slots");
+			check_eq(i2, v2, "bare-ident slot parity");
+			auto [i3, v3] = run_both_backends(R"(
+				var a = 10; var b = 3; var log = "";
+				a += b; log += "" + a;
+				a -= b; log += "," + a;
+				a *= b; log += "," + a;
+				a /= b; log += "," + a;
+				a %= b; log += "," + a;
+				log;
+			)");
+			check_eq(std::string("13,10,30,10,1"), i3, "interp all compound kinds, ident rhs");
+			check_eq(i3, v3, "all-kinds ident rhs parity");
+		});
+
+		test("compound_fused_bare_literal_results", [this, run_both_backends]() {
+			auto [i1, v1] = run_both_backends(R"(
+				var a = 10; var f = 1.5; var s = "x";
+				a += 5; a -= 2; a *= 3; a /= 2; a %= 7;
+				f += 0.25;
+				s += "y";
+				"" + a + "|" + f + "|" + s;
+			)");
+			check_eq(i1, v1, "bare literal rhs parity");
+			check_true(i1.find("5|1.75") == 0 && i1.find("|xy") != std::string::npos,
+				"bare literal rhs values (got: " + i1 + ")");
+		});
+
+		test("compound_fused_bare_result_value", [this, run_both_backends]() {
+			auto [i1, v1] = run_both_backends(R"(
+				var a = 10; var b = 4;
+				var r = (a += b);
+				var r2 = (a += 1);
+				"" + r + "," + r2 + "," + a;
+			)");
+			check_eq(std::string("14,15,15"), i1, "interp compound-expression result value");
+			check_eq(i1, v1, "compound-expression result parity");
+		});
+
+		test("compound_fused_ident_ident_rhs", [this, run_both_backends]() {
+			auto [i1, v1] = run_both_backends(R"(
+				auto sum = 0; auto j = 7;
+				for (auto i = 0; i < 100; ++i) { sum += i + j; }
+				sum;
+			)");
+			check_eq(std::string("5650"), i1, "interp ident+ident rhs");
+			check_eq(i1, v1, "ident+ident rhs parity");
+		});
+
+		test("compound_fused_bare_mixed_type_bails", [this, run_both_backends]() {
+			// int target, float ident rhs: the int-only fast path must bail and the pair's
+			// typed store-back converts each iteration (0+2.5->2, 2+2.5->4, 4+2.5->6, 6+2.5->8)
+			auto [i1, v1] = run_both_backends(R"(
+				function h() -> string {
+					int x = 0;
+					float f = 2.5;
+					for (int i = 0; i < 4; ++i) { x += f; }
+					return "" + x;
+				}
+				h();
+			)");
+			check_eq(std::string("8"), i1, "interp bare mixed-type conversion");
+			check_eq(i1, v1, "bare mixed-type parity");
+		});
+
+		test("compound_fused_bare_catch_var_rhs", [this, run_both_backends]() {
+			// current_catch_var_id_ bails the fast path; the pair's exec_load resolves the
+			// catch variable from the active exception
+			auto [i1, v1] = run_both_backends(R"(
+				var s = 10;
+				try { throw 5; } catch (err) { s += err; }
+				s;
+			)");
+			check_eq(std::string("15"), i1, "interp catch-var rhs");
+			check_eq(i1, v1, "catch-var rhs parity");
+		});
+
+		test("compound_fused_bare_ref_rhs", [this, run_both_backends]() {
+			auto [i1, v1] = run_both_backends(R"(
+				var arr = [1, 2, 3];
+				var& r = arr[1];
+				var s = 10;
+				s += r;
+				s;
+			)");
+			check_eq(std::string("12"), i1, "interp reference rhs derefs");
+			check_eq(i1, v1, "reference rhs parity");
+		});
+
+		test("compound_fused_overflow_error_texts", [this]() {
+			auto expect_both = [&](const char* src, const std::string& needle, const std::string& what) {
+				std::string msg[2];
+				int idx = 0;
+				for (bool use_vm : {false, true}) {
+					auto e = jai::engine::make();
+					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					try { e->execute(src); }
+					catch (const std::exception& ex) { msg[idx] = ex.what(); }
+					++idx;
+				}
+				check_eq(msg[0], msg[1], what + " error text is byte-identical across backends");
+				check_true(msg[0].find(needle) != std::string::npos,
+					what + " keeps the informative text (got: " + msg[0] + ")");
+			};
+			auto e = jai::engine::make();
+			if (e->throw_on_overflow()) {
+				expect_both("var a = 9223372036854775807; var b = 1; a += b;",
+					"Integer overflow in '+='", "bare ident +=");
+				expect_both("var a = 9223372036854775807; a += 1;",
+					"Integer overflow in '+='", "bare literal +=");
+				expect_both("var a = -9223372036854775807; var b = 2; a -= b;",
+					"Integer overflow in '-='", "bare ident -=");
+				expect_both("var a = 4611686018427387904; var b = 4; a *= b;",
+					"Integer overflow in '*='", "bare ident *=");
+				expect_both("var a = -9223372036854775807 - 1; var b = -1; a /= b;",
+					"Integer overflow in '/='", "bare ident /=");
+				expect_both("var a = 9223372036854775807; var b = 1; var c = 1; a += b + c;",
+					"Integer overflow in '+='", "ident+ident rhs +=");
+			}
+			// zero divisors surface the pair's codes/messages regardless of policy
+			expect_both("var a = 10; var b = 0; a /= b;", "ivision by zero", "bare ident /= 0");
+			expect_both("var a = 10; var b = 0; a %= b;", "odulo by zero", "bare ident %= 0");
+		});
+
+		test("compound_fused_overflow_same_iteration", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (!e->throw_on_overflow()) { return; }
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				bool threw = false;
+				try {
+					e->execute(
+						"var sum = 9223372036854775800; var n = -1;"
+						"for (var i = 0; i < 100; ++i) { n = i; sum += i; }");
+				} catch (const std::exception&) { threw = true; }
+				check_true(threw, use_vm ? "vm raises" : "interp raises");
+				// 800+0+1+2+3 = 806; += 4 overflows, so the raise is at i == 4 with sum intact
+				check_eq(static_cast<int64_t>(4), e->get_variable("n").as_int());
+				check_eq(static_cast<int64_t>(9223372036854775806LL), e->get_variable("sum").as_int());
+			}
+		});
+
+		// The peephole rewrites code.back() in place, so a ternary rhs/condition whose
+		// else-arm leaves a fusable tail must NOT fuse: the then-arm's exit jump targets one
+		// past that tail, and rewriting it made the then path skip the store/test entirely.
+		test("ternary_tail_compound_not_fused", [this, run_both_backends]() {
+			auto [i1, v1] = run_both_backends(R"(
+				var i = 3;
+				var sum = 10; var c = true;
+				sum += c ? 5 : i * 2;
+				var sum2 = 10; var d = false;
+				sum2 += d ? 5 : i * 2;
+				var sum3 = 10;
+				sum3 += c ? i : 7;
+				var sum4 = 10;
+				sum4 += c ? 5 : i;
+				"" + sum + "," + sum2 + "," + sum3 + "," + sum4;
+			)");
+			check_eq(std::string("15,16,13,15"), i1, "interp ternary compound rhs");
+			check_eq(i1, v1, "ternary compound rhs parity (no tail fusion)");
+		});
+
+		test("ternary_tail_condition_not_fused", [this, run_both_backends]() {
+			auto [i1, v1] = run_both_backends(R"(
+				var i = 0; var c = true;
+				while (c ? false : i < 2) { i += 100; c = false; }
+				var j = 0;
+				if (c ? false : j < 5) { j = 999; }
+				"" + i + "," + j;
+			)");
+			check_eq(std::string("0,0"), i1, "interp ternary condition");
+			check_eq(i1, v1, "ternary condition parity (no tail cmp fusion)");
+		});
 	}
 };
 

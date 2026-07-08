@@ -11,6 +11,15 @@
 
 var PIXW = 2;        // pixels per cell horizontally (set by gloom_boot)
 var PIXH = 2;        // pixels per cell vertically
+// The pixel grid + its geometry live at GLOBAL scope (not Game fields) so the
+// glyph-row parallel bodies can read them as CAPTURED state: PIX is a flat
+// all-primitive int array consumed only by subscript reads, so the region
+// borrows it - zero copies, raw element reads. VW/VH capture as scalars;
+// ROWIDX is the parallel_transform input (one element per glyph row).
+var PIX = [];
+var VW = 0;
+var VH = 0;
+var ROWIDX = [];
 var RESET = "";
 var QUADG = [];      // quadrant glyphs by TL|TR<<1|BL<<2|BR<<3
 var SEXTG = [];      // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
@@ -225,7 +234,7 @@ function sprite_lut(string name, int band, int flash) -> var {
 // G's buffers into reference parameters once and everything below works on
 // plain locals. (Language feedback: the decl/arg asymmetry is surprising.)
 function render_view() -> var {
-	return render_view_impl(G.pix, G.zbuf, G.rowparts);
+	return render_view_impl(PIX, G.zbuf, G.rowparts);
 }
 
 function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
@@ -420,7 +429,7 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 
 	// --- 6. pixel grid -> sub-cell glyph rows -------------------------------
 	if (PIXH == 3) { return rows_sext(pix, rowparts); }
-	if (PIXW == 2) { return rows_quad(pix, rowparts); }
+	if (PIXW == 2) { return rows_quad(); }
 	return rows_half(pix, rowparts);
 }
 
@@ -451,76 +460,85 @@ function rows_half(var& pix, var& parts) -> var {
 	return rows;
 }
 
-// quad mode: 2x2 pixels per cell, two colors by luminosity partition
-function rows_quad(var& pix, var& parts) -> var {
-	int vw = G.vw;
-	var& fgs = PAL_FG;
-	var& bgs = PAL_BG;
-	var& lums = PAL_LUM;
-	var& qg = QUADG;
-	var rows = [];
-	int vrows = G.vh / 2;
+// quad mode: 2x2 pixels per cell, two colors by luminosity partition.
+// ONE glyph row, written as a parallel_transform body over CAPTURED state
+// (docs/parallel_design.md Â§13): PIX and PAL_LUM are all-primitive and touched
+// only by subscript reads, so the region BORROWS them (zero-copy raw element
+// reads - the pixel grid never rides inside the elements); PAL_FG/PAL_BG/QUADG
+// are string tables (per-worker snapshots at the barrier, dense re-reads then
+// free); VW/RESET capture as scalar copies. No var& aliases of captured names
+// (aliases are rejected by admission) - subscript the globals directly. The
+// SAME function runs in a plain serial loop when HOST_WORKERS == 0.
+function gloom_row_quad(int ry) -> string {
+	var parts = [];
+	int vw = VW;
 	int cells = vw / 2;
-	for (int ry = 0; ry < vrows; ++ry) {
-		parts.clear();
-		int pfg = -1;
-		int pbg = -1;
-		int itop = ry * 2 * vw;
-		int ibot = itop + vw;
-		for (int cx = 0; cx < cells; ++cx) {
-			int xx = cx * 2;
-			int p0 = pix[itop + xx];
-			int p1 = pix[itop + xx + 1];
-			int p2 = pix[ibot + xx];
-			int p3 = pix[ibot + xx + 1];
-			if (p0 == p1 && p0 == p2 && p0 == p3) {
-				if (p0 != pbg) { parts.push(bgs[p0]); pbg = p0; }
-				parts.push(" ");
-				continue;
-			}
-			// wall slices split cells into vertical or horizontal halves far
-			// more often than not — cheap two-color paths before the full
-			// luminosity partition
-			if (p0 == p2 && p1 == p3) {
-				if (p0 != pfg) { parts.push(fgs[p0]); pfg = p0; }
-				if (p1 != pbg) { parts.push(bgs[p1]); pbg = p1; }
-				parts.push(qg[5]);                 // left half
-				continue;
-			}
-			if (p0 == p1 && p2 == p3) {
-				if (p0 != pfg) { parts.push(fgs[p0]); pfg = p0; }
-				if (p2 != pbg) { parts.push(bgs[p2]); pbg = p2; }
-				parts.push(qg[3]);                 // upper half
-				continue;
-			}
-			int l0 = lums[p0];
-			int l1 = lums[p1];
-			int l2 = lums[p2];
-			int l3 = lums[p3];
-			int lmin = l0;
-			int lmax = l0;
-			int fgp = p0;
-			int bgp = p0;
-			if (l1 < lmin) { lmin = l1; bgp = p1; }
-			if (l1 > lmax) { lmax = l1; fgp = p1; }
-			if (l2 < lmin) { lmin = l2; bgp = p2; }
-			if (l2 > lmax) { lmax = l2; fgp = p2; }
-			if (l3 < lmin) { lmin = l3; bgp = p3; }
-			if (l3 > lmax) { lmax = l3; fgp = p3; }
-			int thr = (lmin + lmax + 1) / 2;
-			int bits = 0;
-			if (l0 >= thr) { bits = 1; }
-			if (l1 >= thr) { bits += 2; }
-			if (l2 >= thr) { bits += 4; }
-			if (l3 >= thr) { bits += 8; }
-			if (fgp != pfg) { parts.push(fgs[fgp]); pfg = fgp; }
-			if (bits != 15 && bgp != pbg) { parts.push(bgs[bgp]); pbg = bgp; }
-			parts.push(qg[bits]);
+	int pfg = -1;
+	int pbg = -1;
+	int itop = ry * 2 * vw;
+	int ibot = itop + vw;
+	for (int cx = 0; cx < cells; ++cx) {
+		int xx = cx * 2;
+		int p0 = PIX[itop + xx];
+		int p1 = PIX[itop + xx + 1];
+		int p2 = PIX[ibot + xx];
+		int p3 = PIX[ibot + xx + 1];
+		if (p0 == p1 && p0 == p2 && p0 == p3) {
+			if (p0 != pbg) { parts.push(PAL_BG[p0]); pbg = p0; }
+			parts.push(" ");
+			continue;
 		}
-		parts.push(RESET);
-		rows.push(parts.join(""));
+		// wall slices split cells into vertical or horizontal halves far
+		// more often than not - cheap two-color paths before the full
+		// luminosity partition
+		if (p0 == p2 && p1 == p3) {
+			if (p0 != pfg) { parts.push(PAL_FG[p0]); pfg = p0; }
+			if (p1 != pbg) { parts.push(PAL_BG[p1]); pbg = p1; }
+			parts.push(QUADG[5]);                 // left half
+			continue;
+		}
+		if (p0 == p1 && p2 == p3) {
+			if (p0 != pfg) { parts.push(PAL_FG[p0]); pfg = p0; }
+			if (p2 != pbg) { parts.push(PAL_BG[p2]); pbg = p2; }
+			parts.push(QUADG[3]);                 // upper half
+			continue;
+		}
+		int l0 = PAL_LUM[p0];
+		int l1 = PAL_LUM[p1];
+		int l2 = PAL_LUM[p2];
+		int l3 = PAL_LUM[p3];
+		int lmin = l0;
+		int lmax = l0;
+		int fgp = p0;
+		int bgp = p0;
+		if (l1 < lmin) { lmin = l1; bgp = p1; }
+		if (l1 > lmax) { lmax = l1; fgp = p1; }
+		if (l2 < lmin) { lmin = l2; bgp = p2; }
+		if (l2 > lmax) { lmax = l2; fgp = p2; }
+		if (l3 < lmin) { lmin = l3; bgp = p3; }
+		if (l3 > lmax) { lmax = l3; fgp = p3; }
+		int thr = (lmin + lmax + 1) / 2;
+		int bits = 0;
+		if (l0 >= thr) { bits = 1; }
+		if (l1 >= thr) { bits += 2; }
+		if (l2 >= thr) { bits += 4; }
+		if (l3 >= thr) { bits += 8; }
+		if (fgp != pfg) { parts.push(PAL_FG[fgp]); pfg = fgp; }
+		if (bits != 15 && bgp != pbg) { parts.push(PAL_BG[bgp]); pbg = bgp; }
+		parts.push(QUADG[bits]);
 	}
-	return rows;
+	parts.push(RESET);
+	return parts.join("");
+}
+
+function rows_quad() -> var {
+	if (HOST_WORKERS == 0) {
+		var rows = [];
+		int vrows = VH / 2;
+		for (int ry = 0; ry < vrows; ++ry) { rows.push(gloom_row_quad(ry)); }
+		return rows;
+	}
+	return parallel_transform(ROWIDX, gloom_row_quad);
 }
 
 // sext mode: 2x3 pixels per cell (Unicode 13 "Symbols for Legacy Computing")

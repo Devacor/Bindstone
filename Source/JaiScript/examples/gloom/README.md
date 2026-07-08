@@ -96,16 +96,21 @@ including yours, standing in your own spell is a choice).
 
 ## parallel_transform, honestly
 
-Two systems run through `parallel_transform` every tick, both bodies in
-`pure.jai` (the admission contract: element + locals only, math whitelist):
+Three systems run through `parallel_transform` every tick — two pure bodies in
+`pure.jai` (element + locals only, math whitelist) and one captured-reads body
+in `render.jai`:
 
-- **Wall rays** — the pure-value contract means shared inputs ride inside every
-  element, so elements are column *chunks* (16 of them), each carrying the map
-  snapshot packed 15-tiles-per-int64; the DDA inner loop is pure shift/mask.
-  One ray per cell column; sprites and particles keep full sub-cell resolution.
+- **Wall rays** — written pre-capture: shared inputs ride inside every element,
+  so elements are column *chunks* (16 of them), each carrying the map snapshot
+  packed 15-tiles-per-int64; the DDA inner loop is pure shift/mask. One ray per
+  cell column; sprites and particles keep full sub-cell resolution. (This is
+  the pair idiom — with captured reads it could read a global snapshot instead;
+  kept as-is as the hand-chunking reference shape.)
 - **Particles** — the 288-slot pool is a flat value array stepped by one pure
-  function (fixed timestep baked in as a literal, since the body can't read
-  enclosing state).
+  function (fixed timestep baked in as a literal).
+- **Glyph rows (quad)** — `gloom_row_quad(ry)` reads the CAPTURED pixel grid
+  (borrow tier: zero-copy) and palette tables (per-worker snapshots); see the
+  v0.5 section below.
 
 `--workers 0` runs the same pure functions in a plain serial loop — determinism
 across worker counts is checked by construction (`--smoke` hashes are identical
@@ -136,17 +141,50 @@ sim ~2 ms, ray chunk build ~1 ms, ray transform ~1.5 ms (2.2x over its serial
 cost at W=4), wall paint ~6 ms, sprites+particles ~3 ms, **glyph-row building
 ~16 ms**.
 
-The honest headline: the *parallel* parts are cheap and scale (the ray stage
-alone runs 2.2x at W=4), but they are a small slice — the serial consumption
-of the pixel grid is the wall. An element read through the VM costs ~0.5 µs,
-and the row builder must read all 13.6k sub-pixels per frame; that one stage
-costs more than rays, paint, and sim combined, so total ms/tick barely moves
-with worker count (Amdahl, working as advertised). A `parallel_for` with
-per-thread pads over row bands would dissolve it; the builtin's value-only
-contract can't, because the pixel grid would have to ride inside the elements.
-One curiosity: `--pix half` emits MORE bytes per frame than quad (35.6 KB vs
-21.5 KB) because flat quad cells are a 1-byte space on background while every
-half-mode cell is a 3-byte half-block glyph.
+The honest headline (v0, historical): the *parallel* parts were cheap and
+scaled (the ray stage alone ran 2.2x at W=4), but they were a small slice — the
+serial consumption of the pixel grid was the wall. An element read through the
+VM costs ~0.5 µs, and the row builder must read all 13.6k sub-pixels per frame;
+that one stage cost more than rays, paint, and sim combined, so total ms/tick
+barely moved with worker count (Amdahl, working as advertised). The v0
+value-only contract couldn't touch it, because the pixel grid would have had to
+ride inside the elements. One curiosity: `--pix half` emits MORE bytes per
+frame than quad (35.6 KB vs 21.5 KB) because flat quad cells are a 1-byte space
+on background while every half-mode cell is a 3-byte half-block glyph.
+
+### Captured reads dissolve the glyph wall (v0.5, 2026-07-08)
+
+`parallel_transform` captured reads (docs/parallel_design.md §13) let a body
+READ enclosing globals, so the quad glyph-row builder is now a per-row function
+over `ROWIDX` reading the pixel grid as a captured **borrow** (`PIX` is a flat
+all-primitive int array touched only by subscript — zero copies, raw element
+reads; the escape-string palettes `PAL_FG`/`PAL_BG` snapshot per worker per
+frame). `--workers 0` runs the same row function in a serial loop; frame bytes
+are **byte-identical** to the old serial builder at every worker count and
+STATE_HASH is untouched (all reference checkpoints re-verified, incl. 3000 →
+4080154357 and seed 7 → 1696980843).
+
+Before/after on the same binary (min-of-3 interleaved runs, quad, seed 666,
+300 ticks, loaded dev machine — absolute numbers differ from the quiet-machine
+table above; the DELTA is the claim):
+
+| workers (quad) | VM before | VM after | interp before | interp after |
+|---|---|---|---|---|
+| 0 (serial) | 46.6 | 45.3 | 53.3 | 58.3 |
+| 1 | 39.1 | 37.3 | 47.5 | 45.4 |
+| 4 | 46.3 | **35.3** | 50.6 | 40.5 |
+| 8 | 41.1 | **33.0** | 51.9 | 37.3 |
+
+Reading it honestly: at W=4 the vm drops ~11 ms/tick — the ~16-23 ms glyph
+stage roughly halves (Amdahl residue: the per-frame palette snapshots, the
+barrier's all-primitive scan of the 13.6k-int grid, and the serial paint stages
+that still dominate). Serial (`--workers 0`) is a wash on the vm and a few ms
+slower on the interpreter — the row function allocates its parts array per row
+and reads globals instead of `var&`-cached aliases (captured names may not be
+aliased), the small price of one implementation serving both paths. Residual
+restructuring cost beyond the capture itself: moving the grid from a `Game`
+field to the global `PIX` (captures resolve global names), plus `VW`/`VH`/
+`ROWIDX` globals — a ~20-line diff, no algorithm changes.
 
 ## Determinism
 

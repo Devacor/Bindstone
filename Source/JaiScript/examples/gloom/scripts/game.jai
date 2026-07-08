@@ -76,8 +76,9 @@ public:
 	int ep_ticks = 0;
 	int deaths = 0;
 
-	// render scratch (allocated once; bg rebaked per map)
-	var pix = [];
+	// render scratch (allocated once; bg rebaked per map). The pixel grid itself
+	// is the GLOBAL `PIX` (render.jai) so the glyph-row parallel bodies can
+	// capture-borrow it.
 	var bg = [];
 	var zbuf = [];
 	var rowparts = [];
@@ -93,8 +94,13 @@ public:
 		vw = w_ * PIXW;
 		vh = (h_ - 6) * PIXH;
 		fx = new ParticlePool();
-		pix = [];
-		for (int i = 0; i < vw * vh; ++i) { pix.push(0); }
+		VW = vw;
+		VH = vh;
+		PIX = [];
+		for (int i = 0; i < vw * vh; ++i) { PIX.push(0); }
+		ROWIDX = [];
+		int vrows = PIXH == 3 ? vh / 3 : vh / 2;
+		for (int r = 0; r < vrows; ++r) { ROWIDX.push(r); }
 		zbuf = [];
 		for (int i = 0; i < vw; ++i) { zbuf.push(99.0); }
 	}
@@ -279,7 +285,7 @@ public:
 			}
 
 			// --- combat: nearest visible enemy inside 12 tiles. Below 40 hp the
-			// pilot disengages unless cornered — navigation will chase medkits.
+			// pilot disengages unless cornered ï¿½ navigation will chase medkits.
 			bool desperate = hp < 40;
 			bool found = false;
 			float tgt_x = 0.0;

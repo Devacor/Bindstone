@@ -45,6 +45,20 @@ public:
 				var t = s + "|" + to_string(s.size() * 3);
 				return t.substr(0, t.size() % 11 + 6) + to_string(t.size());
 			}
+
+			// Captured-read grid consumption (the GLOOM glyph shape): a shared read-only
+			// grid consumed by row, elements are just row indices - the grid rides the
+			// borrow tier (all-primitive + subscript-only reads => zero-copy raw reads)
+			var grid = [];
+			for (var i = 0; i < 65536; i++) { grid.push((i * 2654435) % 65536); }
+			var gw = 256;
+			int f_row(int row) {
+				var acc = 0;
+				for (var x = 0; x < gw; x++) { acc = (acc * 31 + grid[row * gw + x]) % 1000003; }
+				return acc;
+			}
+			var grid_rows = [];
+			for (var r = 0; r < 256; r++) { grid_rows.push(r); }
 		)");
 	}
 
@@ -106,6 +120,19 @@ public:
 		bench_at("String 10k - parallel W=2", 2, "sp", k_str_parallel);
 		bench_at("String 10k - parallel W=4", 4, "sp", k_str_parallel);
 		bench_at("String 10k - parallel W=8", 8, "sp", k_str_parallel);
+
+		// Captured reads: 256 rows x 256 borrowed-grid element reads per row (65k reads
+		// total). Serial baseline runs the same fn over the same rows in a plain loop.
+		static constexpr const char* k_grid_serial =
+			"var out = []; for (auto r : grid_rows) { out.push(f_row(r)); } out.size();";
+		static constexpr const char* k_grid_parallel =
+			"parallel_transform(grid_rows, f_row).size();";
+		benchmark("Captured grid 256x256 - serial for", [this]() {
+			run_bite("gs", k_grid_serial);
+		}, 5);
+		bench_at_n("Captured grid 256x256 - parallel W=1", 1, "gp", k_grid_parallel, 5);
+		bench_at_n("Captured grid 256x256 - parallel W=4", 4, "gp", k_grid_parallel, 5);
+		bench_at_n("Captured grid 256x256 - parallel W=8", 8, "gp", k_grid_parallel, 5);
 	}
 };
 

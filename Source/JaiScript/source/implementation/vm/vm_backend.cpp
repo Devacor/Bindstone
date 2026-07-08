@@ -8,6 +8,7 @@
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
 #include <jaiscript/debug/controller.hpp>   // step-debugger statement hook (phase 5)
 #include <cassert>
@@ -4429,6 +4430,17 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 	script_value left_raw = std::move(stack_.back());
 	stack_.pop_back();
 	script_value& left = left_raw.deref();
+
+	if (left.raw_storage_index() == script_value::TYPEID_PARALLEL_BORROW) {
+		// Parallel captured-read borrow: element reads go through the shared kernel
+		// (detail/parallel_transform.hpp - parity with the interpreter twin by
+		// construction); writes hit the runtime write wall inside it. No element
+		// reference is ever minted into a borrowed container.
+		auto elem = detail::parallel_borrow_subscript_read(left, right, engine_, lvalue_write);
+		if (!elem) { return checked_result<void>(elem.error(), elem.static_message()); }
+		stack_.push_back(std::move(elem).value());
+		return {};
+	}
 
 	if (left.is_array()) {
 		if (!right.is_int()) {

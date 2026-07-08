@@ -714,6 +714,8 @@ array<map<string, int>> locations = [
 
 weak_ptr<Creature> target;
 shared_ptr<Creature> leader = boss;      // explicit reference semantics (no clone on assign)
+shared_ptr<auto> chief = boss;           // pointee INFERRED from the initializer's class,
+                                         // then enforced like the explicit spelling (note 16)
 
 var boss2 = new Creature("Boss");        // `new` = shared_ptr sugar: boss2 is a
 auto ally = boss2;                        // shared_ptr<Creature>; copies alias, so
@@ -838,13 +840,30 @@ string healthLevel = health > 75 ? "healthy" :
     copy, so subscript writes would need copy-on-write; possible future work. `char`
     supports the full comparison set including ordering (`c >= '1' && c <= '9'`);
     char-vs-int ordering is deliberately an error (no silent promotion).
-15. **Parallel Builtins (v0, no new syntax)**: `parallel_transform(arr, fn)` and
+15. **Parallel Builtins (v0.5, no new syntax)**: `parallel_transform(arr, fn)` and
     `parallel_transform(arr, fn, weight_fn)` are ordinary builtin CALLS — the optional
     weight hint is simply the third argument (the `parallel_for` keyword and its hint
     syntax are future work; see docs/parallel_design.md). `fn` must be a script-defined
     function of one value parameter whose body passes the parallel admission walk
-    (no reads/writes of enclosing state, no unwhitelisted host calls, no lambdas/
-    classes/yield); elements and results must be value-semantic (null/int/float/
-    string/char/bool + arrays/maps of the same). Violations raise
+    (no unwhitelisted host calls, no lambdas/classes/yield); elements and results must
+    be value-semantic (null/int/float/string/char/bool + arrays/maps of the same).
+    **Captured reads (v0.5)**: the body may READ enclosing globals — scalars, strings,
+    and value-semantic containers — seeing barrier-time content, identical at every
+    worker count (an all-primitive container touched only by subscript reads is a
+    zero-copy "borrow"; everything else is copied per worker at the barrier and
+    charged to memory_cap). WRITES to enclosing state stay errors in every shape:
+    direct assigns, subscript/compound/incdec stores, mutating (or unknown) methods
+    on captured receivers, `var&` aliases, by-reference arguments, and by-reference
+    iteration over captured containers. Violations raise
     "parallel_transform: <reason> at line:col" — never silently serial.
     `thread_count()` reports the worker count a region will use.
+16. **Typed shared_ptr declarations enforce their pointee** (Dev ruling 2026-07):
+    `shared_ptr<Bar> wrong = Foo();` and wrong-class sp-aliasing error ("type must match
+    or be a subclass"); derived→base upcasts stay legal, null initialization is fine, and
+    null stays assignable after establishment. `shared_ptr<auto>` INFERS the pointee from
+    the initializer's exact class, then enforces it exactly like the explicit spelling
+    (construct-and-share `shared_ptr<auto> v = T();` included) — a missing, null, or
+    non-class initializer has nothing to infer and errors (use `var`, or an explicit
+    `shared_ptr<T>`). `shared_ptr<var>` (a DYNAMIC pointee, re-bindable across classes)
+    is future work: it parses and initializes leniently today, but cross-class
+    reassignment errors against the `any` pointee.

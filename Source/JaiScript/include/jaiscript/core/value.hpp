@@ -168,11 +168,35 @@ namespace jai {
         // copies deliberately share - bound primitives decode to detached values, and
         // type_info tags are preserved on every node. The result's reachable set shares
         // no control block with the source, so another thread may copy/mutate it freely.
+        // This is also the region's REFCOUNT-SILENT deep clone: traversal reads elements
+        // by const& and constructs fresh nodes - it never makes even a transient shallow
+        // copy of a shared handle, so it may read a borrowed (shared, region-frozen)
+        // container from a worker thread without racing the non-atomic strong counts.
         // Value-semantic content only (null/int/float/string/char/bool + arrays/maps of
         // the same); throws jai::runtime_error naming the offending type otherwise.
         // collected_types (optional) receives every node's type_info for the region's
-        // pre-warm pass.
-        script_value parallel_detached_copy(std::vector<type_info*>* collected_types = nullptr) const;
+        // pre-warm pass; collected_nodes (optional) receives the address of every heavy
+        // node the copy MINTED (string/array/map payloads) so the region can later
+        // recognize results that alias a worker-provisioned value.
+        script_value parallel_detached_copy(std::vector<type_info*>* collected_types = nullptr,
+                                            std::vector<const void*>* collected_nodes = nullptr) const;
+
+        // === Parallel captured-read borrow (docs/parallel_design.md, captured reads) ===
+        // A borrow VIEW of an enclosing container: one raw tagged pointer, so copying the
+        // value never touches a refcount - the one operation a worker may not perform on
+        // shared structure (strong_ptr counts are non-atomic; even a read-only element
+        // copy races). Sound because during a region (a) the write wall forbids every
+        // mutation of enclosing state, so the viewed container never reallocates and its
+        // interior pointers are stable, and (b) the barrier holds one anchor handle per
+        // borrowed container, so the count is stationary and the container outlives the
+        // region. Borrows are region-internal: the store kernel (clone_for_assignment)
+        // and the region's result path materialize them via the silent deep clone, so no
+        // borrow survives the join. `source` must be a (deref'd) array or map.
+        static script_value make_parallel_borrow(const script_value& source, engine* eng);
+        bool is_parallel_borrow() const noexcept { return raw_storage_index() == TYPEID_PARALLEL_BORROW; }
+        // Viewed container accessors (nullptr when the borrow is of the other kind)
+        const std::vector<script_value>* parallel_borrow_array() const noexcept;
+        const std::map<script_value, script_value>* parallel_borrow_map() const noexcept;
 
     public:
         // Engine-aware factory methods (preferred - ALWAYS use these)
@@ -261,6 +285,7 @@ namespace jai {
                         default: return script_value_type::jai_null_type;
                     }
                 }
+                case 15: return script_value_type::jai_invalid_type;    // parallel borrow: region-internal, never a script-visible type
                 default: return script_value_type::jai_invalid_type;
             }
         }
@@ -395,6 +420,15 @@ namespace jai {
             return *this;
         }
 
+    public:
+        // Invoke ON THE DEREF'D value (a reference-to-bound holds a reference_holder, so a
+        // bare-this lookup would answer TYPEID_NULL). Public: ONE cached semantic-index read
+        // then compare beats repeated is_int()/is_float()/... probes (each re-derefs) -
+        // classification sites cache this once (hand-tuned dispatch discipline, §4).
+        size_t bound_semantic_index() const noexcept {
+            auto* box = bound_box();
+            return box ? box->semantic_index : TYPEID_NULL;
+        }
     private:
         struct cpp_bound_holder;  // defined next to object_holder below
         // Invoke these ON THE DEREF'D value: a reference-to-bound holds a reference_holder
@@ -402,10 +436,6 @@ namespace jai {
         const cpp_bound_holder* bound_box() const noexcept {
             auto* b = std::get_if<TYPEID_CPP_BOUND>(&storage_);
             return b ? b->get() : nullptr;
-        }
-        size_t bound_semantic_index() const noexcept {
-            auto* box = bound_box();
-            return box ? box->semantic_index : TYPEID_NULL;
         }
         bool bound_semantic_is(size_t idx) const noexcept {
             auto* box = bound_box();
@@ -1677,6 +1707,18 @@ namespace jai {
         // Tag type for invalid values
         struct invalid_tag {};
 
+        // Parallel captured-read borrow payload (variant alternative 15): ONE tagged raw
+        // pointer to an engine-owned container that a parallel region proved read-only.
+        // Trivially copyable ON PURPOSE - copying a borrow must never touch a refcount
+        // (see make_parallel_borrow). Low bit = kind (0 array, 1 map); container
+        // allocations are 8+ aligned so the bit is free.
+        struct parallel_borrow_tag {
+            uintptr_t bits = 0;
+            static constexpr uintptr_t k_map_bit = 1;
+            const void* pointer() const noexcept { return reinterpret_cast<const void*>(bits & ~k_map_bit); }
+            bool is_map_kind() const noexcept { return (bits & k_map_bit) != 0; }
+        };
+
         // Variant indices for ultra-fast unchecked access
         // IMPORTANT: Keep this enum in sync with the storage variant below!
         enum class storage_index : size_t {
@@ -1694,7 +1736,8 @@ namespace jai {
             jai_shared_ptr = 11,
             jai_weak_ptr = 12,
             jai_invalid = 13,
-            jai_cpp_bound = 14
+            jai_cpp_bound = 14,
+            jai_parallel_borrow = 15
         };
 
     public:
@@ -1715,6 +1758,7 @@ namespace jai {
         static constexpr size_t TYPEID_WEAK_PTR = 12;
         static constexpr size_t TYPEID_INVALID = 13;
         static constexpr size_t TYPEID_CPP_BOUND = 14;
+        static constexpr size_t TYPEID_PARALLEL_BORROW = 15;
     private:
 
         // Type-erased storage using variant for efficiency
@@ -1737,7 +1781,8 @@ namespace jai {
             strong_ptr<shared_value_holder>,              // 11 - shared_ptr<T> (boxed; never runtime-constructed - real shared_ptr values are alt 8 + type_info marker)
             jai::weaker_ptr<object_holder>,                 // 12 - weak_ptr<T>
             invalid_tag,                                  // 13 - Invalid value marker
-            strong_ptr<cpp_bound_holder>                  // 14 - C++ primitive/string/opaque binding box
+            strong_ptr<cpp_bound_holder>,                 // 14 - C++ primitive/string/opaque binding box
+            parallel_borrow_tag                           // 15 - parallel captured-read borrow (region-internal)
         >;
         static_assert(std::is_nothrow_move_constructible_v<storage> && std::is_nothrow_move_assignable_v<storage>,
                       "every alternative must stay nothrow-move (valueless_by_exception + noexcept move depend on it)");

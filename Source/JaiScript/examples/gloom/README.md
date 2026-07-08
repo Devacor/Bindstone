@@ -2,9 +2,12 @@
 
 A real-time 2.5D raycast shooter in the terminal — one tight four-map episode of
 corridors, keycards, secrets, and things that roar before they charge — written
-**entirely in JaiScript**. The C++ host (`main.cpp`) is the same thin shell as the
-crawler/demoreel: a VT console, held-key input, a seeded `Rng`, a monotonic clock,
-flags as globals. Everything else — the raycaster, the sub-cell renderer, enemy
+**entirely in JaiScript**. The C++ host (`gloom_host.*` + `gloom_adapter_jai.cpp`)
+is the same thin shell as the crawler/demoreel: a VT console, held-key input, a
+seeded `Rng`, a monotonic clock, flags as globals — now split into a shared,
+runtime-agnostic core and a per-language adapter so the cross-language
+comparison ports (ChaiScript/Squirrel/Lua, opt-in CMake targets) reuse the
+exact harness. PORTING.md is the porter's guide. Everything else — the raycaster, the sub-cell renderer, enemy
 brains, weapons, particles, the episode, the autopilot — is script.
 
 GLOOM is the crawler's bigger sibling and a deliberate dogfood of this month's
@@ -165,7 +168,11 @@ words with the landlord.
 ## Files
 
 ```
-main.cpp            thin host: console, held keys, Rng, clock, flags, smoke/bench harness
+gloom_host.hpp/.cpp thin SHARED host: console, held keys, Rng, clock, flags,
+                    smoke/bench harness; language-agnostic (PORTING.md has the
+                    adapter contract for the cross-language comparison ports)
+gloom_adapter_jai.cpp  the JaiScript adapter + main() (this exe)
+gloom_adapter_{chai,squirrel,lua}.cpp  port scaffolds (opt-in CMake targets)
 scripts/state.jai   RNG global
 scripts/util.jai    math helpers, mix32, the truecolor palette intern
 scripts/defs.jai    weapons, bestiary, pickups, ALL sprite art, weapon HUD art

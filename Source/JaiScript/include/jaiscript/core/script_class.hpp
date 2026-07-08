@@ -319,6 +319,20 @@ inline bool class_definition::has_static_method_with_arity(uint64_t name_id, siz
     return false;
 }
 
+// Dev ruling (2026-07): a defaulted-parameter constructor is NOT a converting
+// constructor (deliberate C++ divergence) - implicit conversion requires a TRUE
+// one-parameter constructor; opt in with a delegating overload
+// (Money(int a) : this(a, 0) {}). Explicit construction keeps the arity window.
+// Host-registered classes are unaffected (their ctor overloads are exact-arity).
+inline bool has_true_single_param_conversion_ctor(const std::shared_ptr<class_definition>& def) {
+    auto script_def = std::dynamic_pointer_cast<script_class_definition>(def);
+    if (!script_def) { return true; }   // host classes: the dispatcher stays authoritative
+    for (const auto& ctor_ast : script_def->get_constructor_asts()) {
+        if (ctor_ast->parameters.size() == 1) { return true; }
+    }
+    return false;
+}
+
 // Collect a class declaration's private:/protected: labels into the runtime access map
 // (both backends call this from their class-decl execution — parity by construction).
 // Constructors are exempt: visibility labels govern member access, not construction.

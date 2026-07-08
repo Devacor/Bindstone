@@ -688,8 +688,9 @@ private:
             return engine_class(target_cls) != nullptr;   // registered: lenient
         }
         for (const auto* ctor : it->second.ctors) {
-            auto [min_a, max_a] = arity_range(ctor);
-            if (min_a > 1 || max_a < 1) { continue; }
+            // Dev ruling (2026-07): a defaulted-param ctor is NOT a converting ctor -
+            // only TRUE one-parameter constructors convert (matches the runtime gate)
+            if (ctor->parameters.size() != 1) { continue; }
             const parameter& p = ctor->parameters[0];
             if (assignable(src, ctype_from_type_info(p.type.get()))) {
                 return true;

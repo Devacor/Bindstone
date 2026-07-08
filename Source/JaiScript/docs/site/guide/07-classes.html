@@ -64,6 +64,7 @@ main ctor (3, 3)
 main ctor (1, 2)
 == result: 5</code></pre></div>
 <p><em>(pinned: language/constructor_conversion_tests.cpp, language/method_overload_tests.cpp)</em></p>
+<p><strong>Converting constructors:</strong> a defaulted-parameter constructor is <em>not</em> a converting constructor (deliberate C++ divergence &mdash; conversion requires a true one-parameter constructor; write a delegating overload to opt in). Conversion is opted into with a one-parameter overload (<code>Money(int a) : this(a, 0) {}</code>) and opted out of with a defaulted sentinel parameter (<code>Money(float a, int _ignored = 0)</code>) &mdash; the <code>explicit</code> keyword is unnecessary. <em>(pinned: defaulted_ctor_is_not_a_converting_ctor, delegating_one_param_overload_opts_into_conversion, defaulted_sentinel_param_opts_out_of_conversion)</em></p>
 <h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, explicit <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
     int a = 0;

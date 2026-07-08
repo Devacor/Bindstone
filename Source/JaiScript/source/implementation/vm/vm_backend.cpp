@@ -2525,6 +2525,13 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 			} catch (...) {
 			}
 
+			// Ruling: a defaulted-param ctor is NOT a converting ctor - implicit
+			// conversion needs a TRUE 1-param ctor (delegating overload opts in);
+			// without one, skip the dispatcher (whose explicit path keeps the window).
+			auto conv_class_def = engine_ ? engine_->get_class_definition(target_class_name) : nullptr;
+			if (conv_class_def && !has_true_single_param_conversion_ctor(conv_class_def)) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Incompatible class types", target_type->id);
+			}
 			auto ctor_result = environment_->get(target_class_name);
 			if (ctor_result && ctor_result.value().is_function()) {
 				const script_function& ctor = ctor_result.value().as_function();
@@ -2554,6 +2561,13 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 		                     source_type == script_value_type::jai_bool_type ||
 		                     source_type == script_value_type::jai_char_type);
 		if (is_primitive) {
+			// Ruling: implicit primitive->object conversion needs a TRUE 1-param ctor
+			// (a defaulted-param ctor is not a converting ctor; delegating overload opts
+			// in) - same error text as the incompatible-types tail below
+			auto conv_class_def = engine_ ? engine_->get_class_definition(target_type->type_name) : nullptr;
+			if (conv_class_def && !has_true_single_param_conversion_ctor(conv_class_def)) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Type mismatch in assignment", target_type->id);
+			}
 			auto ctor_result = environment_->get(target_type->type_name);
 			if (ctor_result && ctor_result.value().is_function()) {
 				const script_function& ctor = ctor_result.value().as_function();

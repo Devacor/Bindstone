@@ -737,7 +737,9 @@ Parses a JSON string and returns the corresponding JaiScript value.
 
 Current committed baselines live in [thin_value_rebaseline.md](thin_value_rebaseline.md) (§6,
 interpreter and VM side by side) and [execution_mode_metrics.md](execution_mode_metrics.md)
-(execution-mode and jaibite-cache numbers). `script_value` is 32 bytes (static_assert-gated),
+(execution-mode and jaibite-cache numbers). What passing/holding strategy to use for objects
+(value vs `T&` vs `shared_ptr<T>`) is measured and decided in [aliasing_costs.md](aliasing_costs.md).
+`script_value` is 32 bytes (static_assert-gated),
 heavy types ride in non-atomic `strong_ptr` for O(1) copies, and the benchmark suite includes
 sol2/Lua and Squirrel comparisons (`x64-Release BENCHMARKS` config).
 
@@ -765,6 +767,7 @@ ChaiScript comparison tables predate the VM and the thin-value fold.
 
 ### Performance & Testing
 - [execution_mode_metrics.md](execution_mode_metrics.md) - Execution modes, jaibite, cache metrics
+- [aliasing_costs.md](aliasing_costs.md) - Measured cost of value vs `T&` vs `shared_ptr<T>` + decision guidance
 - [thin_value_spec.md](thin_value_spec.md) / [thin_value_rebaseline.md](thin_value_rebaseline.md) - 32-byte value fold (as-built spec + benchmark baseline)
 - [PERFORMANCE.md](PERFORMANCE.md) - HISTORICAL 2025-12 performance analysis
 - [JaiScriptTesting.md](JaiScriptTesting.md) / [JaiScriptVMTesting.md](JaiScriptVMTesting.md) - Testing guides

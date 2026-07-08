@@ -1110,6 +1110,12 @@ checked_result<type_info_ptr> parser::parse_type() {
 
     if (match(token_type::shared_ptr_keyword)) {
         JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'shared_ptr'"));
+        // Dev ruling (2026-07): a dynamic pointee adds nothing over plain var (which
+        // already holds and rebinds any shared_ptr) - reject with the teaching pair
+        if (check(token_type::var_keyword)) {
+            report_error("shared_ptr<var> is not supported: use var (holds and rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)", peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
         consume_greater_in_generic("Expected '>' after shared_ptr type");
         // Create a shared_ptr type that wraps the pointee type

@@ -1199,27 +1199,53 @@ public:
             }
         });
 
-        test("shared_ptr_var_pointee_stays_follow_up", [this]() {
-            // shared_ptr<var> parses (pointee = any) and initializes leniently, but a
-            // DYNAMIC pointee (re-bindable across classes) is unimplemented: reassign
-            // enforces against 'any' and errors. Pinned as the current behavior;
-            // flagged follow-up (needs a store-path ruling: value-assign copy-fields
-            // vs rebind) - flip these when sp<var> lands.
+        test("shared_ptr_var_is_a_parse_error", [this]() {
+            // Dev ruling (2026-07, option 2): shared_ptr<var> is REJECTED at parse -
+            // plain var already holds and rebinds any shared_ptr across unrelated
+            // classes, so a constrained-but-dynamic pointee has no use case, and var
+            // meaning something different inside angle brackets would muddy the ladder.
+            // The error teaches the two real spellings.
             for (bool use_vm : {false, true}) {
+                for (const char* src : { "class Foo { int x = 1; } shared_ptr<var> p = Foo();",
+                                         "shared_ptr<var> n = null;",
+                                         "function f(shared_ptr<var> a) { return a; }" }) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    bool rejected = false;
+                    std::string msg;
+                    try {
+                        auto r = e->execute(src);
+                        rejected = r.is_null();   // recoverable parse errors synchronize to null
+                    } catch (const std::exception& ex) {
+                        rejected = true;
+                        msg = ex.what();
+                    }
+                    check_true(rejected, std::string(use_vm ? "vm: " : "interp: ") + src);
+                    if (!msg.empty()) {
+                        check_true(msg.find("shared_ptr<var> is not supported") != std::string::npos, msg);
+                        check_true(msg.find("shared_ptr<auto>") != std::string::npos, msg);
+                    }
+                    // the engine stays usable after the rejection
+                    check_eq((int64_t)7, e->execute("3 + 4").as_int());
+                }
+                // and plain var really does hold any class's handle (the why): decls
+                // adopt any handle unconstrained, copies share, and nulling re-points
+                // it across classes; a HELD handle keeps its class marker, so a direct
+                // cross-class reassign enforces exactly like the typed spellings
+                // (c6142450 marker semantics, deliberate)
                 auto e = jai::engine::make();
                 if (use_vm) { e->set_backend(jai::backend_type::vm); }
                 e->execute(R"(
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
-                    shared_ptr<var> p = Foo();
-                    shared_ptr<var> q = p;
+                    var p = new Foo();
+                    var alias = p;
                 )");
-                check_eq((int64_t)1, e->execute("p.x").as_int());
-                e->execute("q.x = 3;");
-                check_eq((int64_t)3, e->execute("p.x").as_int());      // copies share the handle
-                check_throws([&]() { e->execute("p = new Bar();"); }); // re-bind NOT yet supported
-                e->execute("shared_ptr<var> n = null;");               // null init legal (nothing enforced)
-                check_eq(true, e->execute("n == null").as<bool>());
+                e->execute("alias.x = 3;");
+                check_eq((int64_t)3, e->execute("p.x").as_int());    // var copies share the handle
+                check_throws([&]() { e->execute("p = new Bar();"); }); // held marker enforces
+                e->execute("p = null; p = new Bar();");               // null re-opens to any class
+                check_eq((int64_t)2, e->execute("p.y").as_int());
             }
         });
 

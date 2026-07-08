@@ -6296,18 +6296,36 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 					JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member->member_id,
 					                                            environment_->find_access_context()));
 				}
-				if (target && target.class_def && !target.class_def->has_property_getters() &&
-				    !target.has_field(member->member_id)) {
-					script_value method_val = target.method(member->member_id);
-					if (method_val.is_function()) {
-						const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
-						if (dispatch && dispatch->eng == engine_) {
-							auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
-							// Resolution failures (and coroutine methods) fall through to the
-							// native path, which re-resolves and reports the identical error
-							if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
-								return enter_script_method(f, std::move(method_val), *dispatch,
-								                           resolved.value(), std::move(objv), arguments, site);
+				if (target && target.class_def && !target.has_field(member->member_id)) {
+					// Per-member getter probe (stage 5a, method-cost agent handoff): every
+					// field-bearing script class auto-registers _get_/_set_ accessors, so
+					// the old blanket has_property_getters() bail kept essentially every
+					// real class off this in-loop path (full bound-method mint per call,
+					// ~2.4 µs). Only an ACTUAL _get_<member> method forces the native path
+					// now — mirrors member_access_value's getter-before-field precedence
+					// (auto-getters exist only for fields, which has_field already
+					// excluded; the probe covers custom property getters).
+					uint64_t getter_id = member->getter_id;
+					if (getter_id == UINT64_MAX) {
+						auto [id, _] = symbolizer_->get_getter_id_with_view(member->member_id);
+						getter_id = id;
+						member->getter_id = getter_id;
+					}
+					const script_value getter_probe = target.method(getter_id);
+					const bool has_member_getter =
+						!getter_probe.is_null() && !getter_probe.is_invalid() && getter_probe.is_function();
+					if (!has_member_getter) {
+						script_value method_val = target.method(member->member_id);
+						if (method_val.is_function()) {
+							const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
+							if (dispatch && dispatch->eng == engine_) {
+								auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
+								// Resolution failures (and coroutine methods) fall through to the
+								// native path, which re-resolves and reports the identical error
+								if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+									return enter_script_method(f, std::move(method_val), *dispatch,
+									                           resolved.value(), std::move(objv), arguments, site);
+								}
 							}
 						}
 					}

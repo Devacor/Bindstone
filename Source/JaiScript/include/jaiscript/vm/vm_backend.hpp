@@ -106,6 +106,7 @@ namespace jai::vm {
             try_records_.clear();
             iter_states_.clear();
             cfor_states_.clear();
+            pending_callees_.clear();
             current_call_depth_ = 0;
             is_unwinding_ = false;
             current_exception_.reset();
@@ -268,6 +269,7 @@ namespace jai::vm {
             frame f;                                   // frames_ gets &f; f.locals = &locals
             call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
             script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
+            strong_ptr<script_function> direct_pin;    // probe-called frames: pin without a callee value/slot
             type_info_ptr return_type;                 // pop drivers convert the result against this
             uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
             std::shared_ptr<function_decl> ast_pin;    // method frames: resolved overload outlives a mid-call hot reload
@@ -281,6 +283,7 @@ namespace jai::vm {
             size_t try_base = 0;
             size_t iter_base = 0;
             size_t cfor_base = 0;
+            size_t pending_base = 0;
         };
         std::vector<std::unique_ptr<call_record>> call_records_;  // grows, never shrinks mid-run
         size_t call_records_top_ = 0;                  // records [0, top) are live
@@ -327,6 +330,19 @@ namespace jai::vm {
         value_stack stack_;
         std::vector<frame*> frames_;
 
+        // Pending-callee register stack (callee-first ruling, 2026-07-08): identifier
+        // callees resolve at the pre-args observation point WITHOUT materializing on
+        // the value stack. LIFO across nested arg calls; per-FIBER (run_fiber swaps it
+        // with the other execution stacks - `f(yield x)` suspends between probe and
+        // call); truncated on every unwind exactly like the value stack (try records,
+        // record pops, native-entry cleanups).
+        struct pending_callee {
+            script_value value{std::monostate{}, nullptr};   // opaque/default-arg path
+            const script_defined_function* fn = nullptr;     // direct path
+            strong_ptr<script_function> pin;
+        };
+        std::vector<pending_callee> pending_callees_;
+
         std::optional<script_value> return_value_;
         bool has_return_value_ = false;
         std::optional<script_value> implicit_result_;
@@ -352,6 +368,7 @@ namespace jai::vm {
             size_t stack_size = 0;
             size_t iter_size = 0;
             size_t cfor_size = 0;
+            size_t pending_size = 0;
             std::shared_ptr<environment> entry_env;
         };
         std::vector<try_record> try_records_;
@@ -667,6 +684,14 @@ namespace jai::vm {
         checked_result<void> exec_index_compound(frame& f, const vm_instruction& ins);
         checked_result<void> exec_unary(frame& f, const vm_instruction& ins);
         checked_result<void> exec_call(frame& f, const vm_instruction& ins);
+        // Callee-first probe pair (op_probe_callee / op_call_from_scratch)
+        checked_result<void> exec_probe_callee(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_call_from_scratch(frame& f, const vm_instruction& ins);
+        checked_result<void> push_script_frame_pinned(frame& caller,
+                                               const script_defined_function& function,
+                                               strong_ptr<script_function> pin,
+                                               size_t args_base, size_t argc,
+                                               const call_site* site);
         checked_result<void> exec_func_decl(frame& f, const vm_instruction& ins);
         checked_result<void> exec_closure(frame& f, const vm_instruction& ins);
         checked_result<void> exec_destructure(frame& f, const vm_instruction& ins);

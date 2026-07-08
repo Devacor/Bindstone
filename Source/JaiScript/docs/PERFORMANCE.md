@@ -373,12 +373,15 @@ across processes.
   frame cost; opcode counts are at parity. The flat-stack / register-window VM rewrite that
   targeted this **LANDED** (stages 1–6, `b961e251`…`42d63c88`): fib(15) 697 → 454 µs min-of-5
   (1.49× cumulative), which is **short of the 350–430 µs Squirrel-class target** set in the
-  design doc (`2cd03904`). Full Lua parity is now **permanently blocked**: the last big lever,
-  callee-load elimination (`op_call_direct`), needs the callee resolved *after* its args, but
-  interpreter semantics resolve the callee — including `not_a_function` — *before* args, so
-  byte-parity forbids the reorder (`42d63c88`, verified in `visit_call_expr`). Named remaining
-  levers, each smaller: VM environment parking beyond the stage-3 lazy no-closure case, and a
-  zero-arg direct-call fast path.
+  design doc (`2cd03904`). Full Lua parity stays out of reach
+  by RULING: Dev considered flipping both backends to args-first to unlock full callee-load
+  elimination and ruled callee-before-args IS the language (2026-07-08, matching C++17). The
+  retained middle path landed as the callee-first probe pair (`op_probe_callee` /
+  `op_call_from_scratch`): the identifier callee resolves — including `not_a_function`, now
+  aligned across backends — at the pre-args observation point into a pending register, with
+  no value-stack materialization and no callee slot (semantics guards: `callee_first_*`
+  pins). Named remaining levers, each smaller: VM environment parking beyond the stage-3
+  lazy no-closure case, and a zero-arg direct-call fast path.
 - ~~**Single-operand compound fusion** (`sum += i`)~~ **LANDED (2191c59b)**: bare
   identifier/const RHS joined `op_compound_fused`; the comparison-suite hot loop runs
   42 µs (was 88), Lua's loop margin fell 8.8× → 4.2×, and the Squirrel hot-loop row

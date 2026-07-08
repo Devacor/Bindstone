@@ -3158,6 +3158,85 @@ public:
 			)");
 			check_eq(i1, v1, "typed-return mismatch error parity (byte-identical text)");
 		});
+
+		// === Callee-first semantics guards (Dev ruling 2026-07-08: callee-before-args
+		// IS the language, matching C++17; the vm's probe pair keeps the observation
+		// point without materializing the callee on the value stack) ===
+
+		test("callee_first_missing_fn_error_before_args", [this, run_both_backends]() {
+			// An undefined callee errors BEFORE argument side effects run
+			auto [i1, v1] = run_both_backends(R"(
+				var ran = false;
+				function side() -> auto { ran = true; return 1; }
+				var msg = "";
+				try { undefined_callee(side()); } catch (e) { msg = "caught"; }
+				"" + msg + ":" + ran;
+			)");
+			check_eq(std::string("caught:false"), i1, "interp: missing callee beats arg side effects");
+			check_eq(i1, v1, "missing-callee ordering parity");
+		});
+
+		test("callee_first_not_a_function_before_args", [this, run_both_backends]() {
+			// A defined-but-not-callable callee errors BEFORE argument side effects
+			// (the vm's old post-args check was a latent divergence; the probe fixed it)
+			auto [i1, v1] = run_both_backends(R"(
+				var notFn = 42;
+				var ran = false;
+				function side() -> auto { ran = true; return 1; }
+				var msg = "";
+				try { notFn(side()); } catch (e) { msg = "caught"; }
+				"" + msg + ":" + ran;
+			)");
+			check_eq(std::string("caught:false"), i1, "interp: not-a-function beats arg side effects");
+			check_eq(i1, v1, "not-a-function ordering parity");
+		});
+
+		test("callee_first_rebind_in_args_calls_original", [this, run_both_backends]() {
+			// The callee is RESOLVED before args: an argument that rebinds the name
+			// still invokes the original callable
+			auto [i1, v1] = run_both_backends(R"(
+				function orig(auto x) -> auto { return "orig:" + x; }
+				function repl(auto x) -> auto { return "repl:" + x; }
+				var h = orig;
+				function swap_h() -> auto { h = repl; return 7; }
+				var first = h(swap_h());
+				var second = h(1);
+				first + "|" + second;
+			)");
+			check_eq(std::string("orig:7|repl:1"), i1, "interp: rebind-in-args calls the original");
+			check_eq(i1, v1, "rebind-in-args parity");
+		});
+
+		test("callee_first_pending_survives_throw_in_args", [this, run_both_backends]() {
+			// An argument throw unwinding to a catch must drop the parked callee so
+			// later calls stay aligned (pending-register hygiene)
+			auto [i1, v1] = run_both_backends(R"(
+				function boom() -> auto { throw "x"; }
+				function ok(auto v) -> auto { return v + 1; }
+				var r = 0;
+				try { ok(boom()); } catch (e) { r = ok(41); }
+				"" + r + ":" + ok(1);
+			)");
+			check_eq(std::string("42:2"), i1, "interp: post-catch calls aligned");
+			check_eq(i1, v1, "throw-in-args pending hygiene parity");
+		});
+
+		test("callee_first_pending_survives_yield_in_args", [this, run_both_backends]() {
+			// f(yield ...) suspends BETWEEN callee resolution and the call; the parked
+			// callee is per-fiber state and must survive resumer-side calls
+			auto [i1, v1] = run_both_backends(R"(
+				function add(auto a, auto b) -> auto { return a + b; }
+				coroutine gen() -> auto {
+					return add(10, (yield 1) ? 0 : 5);
+				}
+				var h = gen();
+				var first = h.resume();
+				var between = add(2, 3);
+				var final = h.resume();
+				"" + first + ":" + between + ":" + final;
+			)");
+			check_eq(i1, v1, "yield-in-args pending isolation parity");
+		});
 	}
 };
 

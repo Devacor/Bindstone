@@ -17,6 +17,18 @@ at the post-bind erase before any observation point, so the per-backend transien
 audit is STATIONARY (vm `2:1` unchanged; no `transient_k` retune). `call_frame` survives on
 record frames as frame-kind metadata only (this/static/closure_env/name).
 
+**Stage-6 addendum (Dev ruling 2026-07-08): callee-first sequencing IS the language**
+(matching C++17); the full args-first flip that would have unlocked classic call-op fusion
+was considered and REJECTED. The retained middle path landed as the probe pair:
+`op_probe_callee` resolves the identifier callee (and fires `not_a_function`) at the
+pre-args observation point into a pending-callee register stack — no value-stack
+materialization — and `op_call_from_scratch` calls it with the args at the stack top and
+no callee slot. The probe also aligned a latent vm divergence (the old post-args
+not-callable check) to the ruled interpreter order. Semantics guards:
+`callee_first_*` pins in vm_backend_tests.cpp (missing-fn/not-a-function before arg side
+effects, rebind-in-args calls the original, throw/yield pending-register hygiene — the
+pending stack is per-fiber and unwind-truncated like the value stack).
+
 **Status: DESIGN — no implementation.** Roadmap item 3 ("Flat-stack VM"), the committed fix
 for the call-dense recursion gap vs Lua (`PERFORMANCE.md` Known gaps: fib(15) 697 µs VM vs
 75 µs Lua 5.4, ~9×; "Recurse, 10 locals" ~14×). Function calls are already ~0–1 µs compiled

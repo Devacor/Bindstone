@@ -100,6 +100,12 @@ namespace jai::vm {
         op_return_binary,   // a=token_type, b=operand shape: fused `return <a op b>;`
                             // (BINARY+RETURN; pops two, computes like op_binary, returns)
 
+        op_probe_callee,    // a=site index, b=argc: resolve the identifier callee at the
+                            // callee-first observation point (Dev ruling 2026-07-08:
+                            // callee-before-args IS the language, matching C++17) into the
+                            // pending-callee register stack - no value-stack materialization
+        op_call_from_scratch, // a=argc, b=site index: call the pending callee (args at stack top)
+
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
         op_halt,
     };
@@ -217,6 +223,8 @@ namespace jai::vm {
             case opcode::op_ref_return_lvalue: return "REF_RETURN_LVALUE";
             case opcode::op_return_ident: return "RETURN_IDENT";
             case opcode::op_return_binary: return "RETURN_BINARY";
+            case opcode::op_probe_callee: return "PROBE_CALLEE";
+            case opcode::op_call_from_scratch: return "CALL_FROM_SCRATCH";
             case opcode::op_error: return "ERROR";
             case opcode::op_halt: return "HALT";
         }

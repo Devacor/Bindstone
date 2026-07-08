@@ -9,6 +9,7 @@
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <cmath>
 
 namespace jai::foundry::tests {
@@ -66,6 +67,53 @@ struct TplAutoDetectVec {
     T dot() const { return a * b; }
 };
 
+// ---- template-instantiation type-identity audit fixture (2026-07, GLOOM follow-up).
+// The shared_ptr intern bug was a type-identity KEYING failure; this pair pins that
+// no other path keys two distinct C++ instantiations alike. Same method names,
+// per-instantiation distinct behavior - any cross-talk shows immediately.
+struct audit_pt_base {
+    virtual ~audit_pt_base() = default;
+    int base_tag() const { return 99; }
+};
+
+template<typename T>
+struct audit_pt : audit_pt_base {
+    T x{};
+    audit_pt() = default;
+    explicit audit_pt(T v) : x(v) {}
+    int kind() const;                                  // 1 for int, 2 for float
+    T doubled() const { return static_cast<T>(x + x); }
+};
+template<> inline int audit_pt<int>::kind() const { return 1; }
+template<> inline int audit_pt<float>::kind() const { return 2; }
+
+// Never registered anywhere: the opaque-token half of the audit.
+template<typename T>
+struct audit_opaque { T v{}; };
+
+inline void register_audit_points(jai::engine& e) {
+    dynamic_binder<audit_pt_base>(e, "PBase")
+        .constructor<>()
+        .method("base_tag", &audit_pt_base::base_tag)
+        .build();
+    dynamic_binder<audit_pt<int>>(e, "PointI")
+        .constructor<>()
+        .constructor<int>()
+        .property("x", &audit_pt<int>::x)
+        .method("kind", &audit_pt<int>::kind)
+        .method("doubled", &audit_pt<int>::doubled)
+        .base_class<audit_pt_base>()
+        .build();
+    dynamic_binder<audit_pt<float>>(e, "PointF")
+        .constructor<>()
+        .constructor<float>()
+        .property("x", &audit_pt<float>::x)
+        .method("kind", &audit_pt<float>::kind)
+        .method("doubled", &audit_pt<float>::doubled)
+        .base_class<audit_pt_base>()
+        .build();
+}
+
 } // namespace jai::foundry::tests
 
 // JAI_TEMPLATE_BINDER registrations (must be outside namespace)
@@ -107,6 +155,132 @@ public:
     template_binder_tests() : suite("Template Binder") {}
 
     void forge_tests() override {
+
+        // -------------------- template-instantiation type-identity audit (2026-07)
+        // Matrix result at audit time: registration/lookup, construction+dispatch,
+        // shared_ptr paths (incl. the fixed composite intern), container elements,
+        // conversion_registry, base upcasts, opaque tokens - ALL keyed correctly
+        // (std::type_index or pointee-id keys); these pins keep them that way.
+        // type_of() reports "object" for registered instances BY DESIGN (3ca8c06b)
+        // and does not distinguish instantiations; registration_fingerprint does.
+
+        test("audit_instantiations_register_and_dispatch_distinctly", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                register_audit_points(*e);
+                // (a) registration/lookup: distinct definitions by name AND type_index
+                auto def_i = e->get_class_definition("PointI");
+                auto def_f = e->get_class_definition("PointF");
+                check_not_null(def_i.get());
+                check_not_null(def_f.get());
+                check(def_i.get() != def_f.get(), "PointI/PointF share a class_definition");
+                check(e->get_class_definition_by_type(std::type_index(typeid(audit_pt<int>))).get() == def_i.get(), "type_index->PointI");
+                check(e->get_class_definition_by_type(std::type_index(typeid(audit_pt<float>))).get() == def_f.get(), "type_index->PointF");
+                // (b) construction + method dispatch: same names, distinct behavior
+                check_eq((int64_t)1, e->execute("auto i = PointI(21); i.kind()").as_int());
+                check_eq((int64_t)2, e->execute("auto f = PointF(1.5); f.kind()").as_int());
+                check_eq((int64_t)42, e->execute("i.doubled()").as_int());
+                check_near(3.0, e->execute("f.doubled()").as_float(), 0.0001);
+            }
+        });
+
+        test("audit_shared_ptr_paths_key_per_instantiation", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                register_audit_points(*e);
+                // (c) the composite intern path (the fixed one: new/shared_ptr<T>() nodes)
+                // and the factory path must both distinguish instantiations
+                check_eq((int64_t)1, e->execute("var a = new PointI(); a.kind()").as_int());
+                check_eq((int64_t)2, e->execute("var b = new PointF(); b.kind()").as_int());
+                check_eq((int64_t)1, e->execute("auto c = shared_ptr<PointI>(); c.kind()").as_int());
+                check_eq((int64_t)2, e->execute("auto d = shared_ptr<PointF>(); d.kind()").as_int());
+                check_eq((int64_t)1, e->execute("shared_ptr<PointI> g = PointI(); g.kind()").as_int());
+                check_eq((int64_t)2, e->execute("shared_ptr<PointF> h = PointF(); h.kind()").as_int());
+                // wrong-pointee decl errors (typed sp enforcement ruling)
+                check_throws([&]() { e->execute("shared_ptr<PointF> w = PointI();"); });
+                // host-side: the factory returns distinct type_infos
+                auto* ti_i = e->get_type_info_object(e->symbolize("PointI"));
+                auto* ti_f = e->get_type_info_object(e->symbolize("PointF"));
+                check(ti_i != nullptr && ti_f != nullptr && ti_i != ti_f, "object type_infos distinct");
+                check(e->get_type_info_shared_ptr(ti_i) != e->get_type_info_shared_ptr(ti_f),
+                      "shared_ptr type_infos collapsed across instantiations");
+            }
+        });
+
+        test("audit_container_elements_and_upcast_keep_identity", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                register_audit_points(*e);
+                // (d) container elements: each array's elements keep their own class
+                check_eq((int64_t)1, e->execute("array<PointI> ai = [PointI(5)]; ai[0].kind()").as_int());
+                check_eq((int64_t)2, e->execute("array<PointF> af = [PointF(2.5)]; af[0].kind()").as_int());
+                // (f) upcast to the common base from both: each keeps ITS class
+                check_eq((int64_t)1, e->execute("shared_ptr<PBase> u1 = PointI(7); u1.kind()").as_int());
+                check_eq((int64_t)2, e->execute("shared_ptr<PBase> u2 = PointF(7.0); u2.kind()").as_int());
+                check_eq((int64_t)99, e->execute("u1.base_tag()").as_int());
+                check_eq((int64_t)99, e->execute("u2.base_tag()").as_int());
+            }
+        });
+
+        test("audit_conversion_registry_keys_per_instantiation", [this]() {
+            // (e) a conversion registered for ONE instantiation is invisible to the
+            // other. Uses the never-bound audit_opaque pair: dynamic_binder installs
+            // converters for every class it registers (a REGISTERED sibling reporting
+            // has_conversion()==true is the binder working, not key cross-talk).
+            auto e = jai::engine::make();
+            auto reg = e->get_conversion_registry();
+            check_not_null(reg.get());
+            check_false(reg->has_conversion<audit_opaque<int>>());
+            check_false(reg->has_conversion<audit_opaque<float>>());
+            reg->register_conversion<audit_opaque<int>>(
+                [](const script_value& v) { audit_opaque<int> p; p.v = static_cast<int>(v.as_int()); return p; },
+                [eng = e.get()](const audit_opaque<int>& p) { return script_value(static_cast<script_int>(p.v), eng); });
+            check_true(reg->has_conversion<audit_opaque<int>>());
+            check_false(reg->has_conversion<audit_opaque<float>>());   // keyed on std::type_index: no inheritance
+            auto roundtrip = reg->convert_from_script<audit_opaque<int>>(script_value((script_int)11, e.get()));
+            check_eq(11, roundtrip.v);
+        });
+
+        test("audit_opaque_tokens_stay_pointer_identity", [this]() {
+            // (g) unregistered instantiations passed through the host are opaque
+            // tokens: non-null, pointer identity, no cross-instantiation equality
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                register_audit_points(*e);
+                audit_opaque<double> od1; audit_opaque<double> od2; audit_opaque<int> oi;
+                e->add_global("od1", e->make_value(&od1));
+                e->add_global("od1b", e->make_value(&od1));   // same pointer, second token
+                e->add_global("od2", e->make_value(&od2));
+                e->add_global("oi", e->make_value(&oi));
+                check_true(e->execute("od1 != null").as_bool());
+                check_true(e->execute("od1 == od1b").as_bool());   // pointer identity
+                check_false(e->execute("od1 == od2").as_bool());
+                check_false(e->execute("od1 == oi").as_bool());    // no cross-instantiation equality
+            }
+        });
+
+        test("audit_registration_fingerprint_distinguishes_instantiations", [this]() {
+            // (h) type_of reports "object" for registered instances BY DESIGN and does
+            // not distinguish; the registration fingerprint DOES.
+            auto e_i = jai::engine::make();
+            dynamic_binder<audit_pt<int>>(*e_i, "AuditP").constructor<>().method("kind", &audit_pt<int>::kind).build();
+            auto e_f = jai::engine::make();
+            dynamic_binder<audit_pt<float>>(*e_f, "AuditP").constructor<>().method("kind", &audit_pt<float>::kind).build();
+            // same registered NAME + shape, but the instances behave as their own C++ types
+            check_eq((int64_t)1, e_i->execute("AuditP().kind()").as_int());
+            check_eq((int64_t)2, e_f->execute("AuditP().kind()").as_int());
+            jai::stdlib::register_all(*e_i);
+            check_eq(std::string("object"), e_i->execute("type_of(AuditP())").as<std::string>());
+            // and differently-shaped registrations fingerprint differently
+            auto e_two = jai::engine::make();
+            register_audit_points(*e_two);
+            check_ne(e_i->registration_fingerprint(), e_two->registration_fingerprint());
+        });
+
         test("type_name_helper_primitives", [this]() {
             check_eq(type_name_helper<int>::name(), std::string("int32"), "int32 name");
             check_eq(type_name_helper<float>::name(), std::string("float"), "float name");

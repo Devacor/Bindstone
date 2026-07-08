@@ -4692,6 +4692,13 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		}
 		script_value value = std::move(stack_.back());
 		stack_.pop_back();
+		// Element/subscript reads arrive as reference wrappers (rhs-lvalue read
+		// shape); declarations consume the VALUE - normalize like assignment does
+		// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
+		if (value.is_reference()) {
+			script_value derefed = value.deref();
+			value = std::move(derefed);
+		}
 		if (value.is_null()) {
 			return define_decl_value(f, decl->name_id, decl->slot_index,
 				script_value::make_empty_weak_ptr(decl->type, engine_));
@@ -4754,6 +4761,13 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		}
 		script_value value = std::move(stack_.back());
 		stack_.pop_back();
+		// Element/subscript reads arrive as reference wrappers (rhs-lvalue read
+		// shape); `shared_ptr<T> t = arr[i]` must see the element, not 'reference'
+		// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
+		if (value.is_reference()) {
+			script_value derefed = value.deref();
+			value = std::move(derefed);
+		}
 		if (value.is_null()) {
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
@@ -4799,7 +4813,19 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		value = std::move(stack_.back());
 		stack_.pop_back();
 
-		if (lvalue_init &&
+		// Element/subscript reads arrive as reference wrappers (rhs-lvalue read
+		// shape) - and so do ternaries over them, which the compile-time lvalue_init
+		// flag can't see. Normalize to the VALUE and treat the read as an lvalue
+		// read, or the typed enforcement below sees 'reference' and the stored local
+		// silently ALIASES the element (KEEP BYTE-PARALLEL with
+		// interpreter::visit_variable_decl)
+		const bool reference_init = value.is_reference();
+		if (reference_init) {
+			script_value derefed = value.deref();
+			value = std::move(derefed);
+		}
+
+		if ((lvalue_init || reference_init) &&
 		    (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
 			value = value.clone();
 		}

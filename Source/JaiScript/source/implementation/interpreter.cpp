@@ -5519,7 +5519,15 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // Evaluate initializer
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value value = pop_value();
-            
+
+            // Element/subscript reads arrive as reference wrappers (rhs-lvalue read
+            // shape); declarations consume the VALUE - normalize like assignment does
+            // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+            if (value.is_reference()) {
+                script_value derefed = value.deref();
+                value = std::move(derefed);
+            }
+
             // Handle different initialization cases
             if (value.is_null()) {
                 // Initialize with null - create empty weak_ptr
@@ -5593,7 +5601,15 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // Evaluate initializer
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             script_value value = pop_value();
-            
+
+            // Element/subscript reads arrive as reference wrappers (rhs-lvalue read
+            // shape); `shared_ptr<T> t = arr[i]` must see the element, not 'reference'
+            // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+            if (value.is_reference()) {
+                script_value derefed = value.deref();
+                value = std::move(derefed);
+            }
+
             // Handle different initialization cases
             if (value.is_null()) {
                 // Initialize with null - that's fine
@@ -5690,10 +5706,21 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             value = std::move(pop_value());
 
+            // Element/subscript reads arrive as reference wrappers (rhs-lvalue read
+            // shape) - and so do ternaries over them, which is_lvalue_expression can't
+            // see. Normalize to the VALUE and treat the read as an lvalue read, or the
+            // typed enforcement below sees 'reference' and the stored local silently
+            // ALIASES the element (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+            const bool reference_init = value.is_reference();
+            if (reference_init) {
+                script_value derefed = value.deref();
+                value = std::move(derefed);
+            }
+
             // Only clone if initializing from an lvalue (existing object)
             // Temporaries (constructor calls, expressions) should use move semantics
             // EXCEPTION: shared_ptr types should NOT be cloned - they have reference semantics
-            if (is_lvalue_expression(decl->initializer.get()) &&
+            if ((reference_init || is_lvalue_expression(decl->initializer.get())) &&
                 (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
                 // Initializing from an existing object - deep copy (except shared_ptr)
                 value = value.clone();

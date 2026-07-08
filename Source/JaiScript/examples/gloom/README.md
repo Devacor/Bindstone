@@ -10,6 +10,11 @@ comparison ports (ChaiScript/Squirrel/Lua, opt-in CMake targets) reuse the
 exact harness. PORTING.md is the porter's guide. Everything else — the raycaster, the sub-cell renderer, enemy
 brains, weapons, particles, the episode, the autopilot — is script.
 
+**The five-way comparison report** (JaiScript reference vs the Squirrel / Lua /
+ChaiScript / Python ports — perf, conformance, expressiveness, play) is
+[docs/GLOOM_COMPARISON.md](../../docs/GLOOM_COMPARISON.md); the per-port
+primary records are `ports/<lang>/NOTES.md`.
+
 GLOOM is the crawler's bigger sibling and a deliberate dogfood of this month's
 language work: **`parallel_transform`** drives the wall rays and the particle pool,
 **coroutine handles living in fields** drive every enemy brain and the demo pilot,

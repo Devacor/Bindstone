@@ -2252,6 +2252,10 @@ type_info* engine::get_type_info(const type_info& temp) {
         case script_value_type::jai_array_type:
         case script_value_type::jai_weak_ptr_type:
         case script_value_type::jai_reference_type:
+        // shared_ptr MUST key on its pointee: it fell into the parameterless default
+        // before, so every parsed shared_ptr<T> collapsed onto the first-interned T
+        // engine-wide - new Bar() silently constructed Foo (GLOOM bug, 2026-07)
+        case script_value_type::jai_shared_ptr_type:
             // Single type parameter
             param1_id = temp.type_params.empty() ? 0 : (temp.type_params[0] ? temp.type_params[0]->id : 0);
             break;

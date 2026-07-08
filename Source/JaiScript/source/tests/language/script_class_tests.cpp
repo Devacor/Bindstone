@@ -1052,6 +1052,99 @@ public:
             }
         });
 
+        // ------------------------------------- shared_ptr<T> type-intern identity
+        // GLOOM bug (2026-07): engine::get_type_info's composite key had no case for
+        // jai_shared_ptr_type, so every parsed shared_ptr<T> collapsed onto the FIRST
+        // interned T engine-wide - `new Bar()` after `new Foo()` SILENTLY CONSTRUCTED
+        // a Foo (both backends; new desugars to the same shared_ptr<T>(args) node).
+        // The key now includes the pointee. Matrix pinned below; the sibling caches
+        // were audited clean: class_definition::overload_resolution_cache_ is a
+        // per-class member (class identity inherent) and the flat-stack stage-1
+        // callee IC pins script_function identity per call_site.
+
+        test("shared_ptr_construction_distinguishes_classes", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class Foo { int x = 1; }
+                    class Bar { int y = 2; }
+                    var a = new Foo();
+                    var b = new Bar();
+                    auto sf = shared_ptr<Foo>();
+                    auto sb = shared_ptr<Bar>();
+                    auto vf = Foo();
+                    auto vb = Bar();
+                )");
+                check_eq((int64_t)1, e->execute("a.x").as_int());
+                check_eq((int64_t)2, e->execute("b.y").as_int());   // was: b built as a Foo
+                check_eq((int64_t)1, e->execute("sf.x").as_int());
+                check_eq((int64_t)2, e->execute("sb.y").as_int());
+                check_eq((int64_t)1, e->execute("vf.x").as_int());
+                check_eq((int64_t)2, e->execute("vb.y").as_int());
+            }
+        });
+
+        test("shared_ptr_construction_same_arity_args_and_interleaved", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class Foo { int x = 0; Foo(int v) { x = v; } }
+                    class Bar { int y = 0; Bar(int v) { y = v; } }
+                    var b1 = new Bar(20);
+                    var a1 = new Foo(10);
+                    var b2 = new Bar{30};
+                    auto a2 = shared_ptr<Foo>(40);
+                )");
+                check_eq((int64_t)20, e->execute("b1.y").as_int());
+                check_eq((int64_t)10, e->execute("a1.x").as_int());  // was: a1 built as a Bar
+                check_eq((int64_t)30, e->execute("b2.y").as_int());
+                check_eq((int64_t)40, e->execute("a2.x").as_int());
+            }
+        });
+
+        test("shared_ptr_typed_decl_enforces_right_pointee", [this]() {
+            // The stale-pointee variant: shared_ptr<Bar> declarations must enforce
+            // against BAR even when shared_ptr<Foo> was interned first.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class Foo { int x = 1; }
+                    class Bar { int y = 2; }
+                    shared_ptr<Foo> a = Foo();
+                    shared_ptr<Bar> b = Bar();
+                )");
+                check_eq((int64_t)1, e->execute("a.x").as_int());
+                check_eq((int64_t)2, e->execute("b.y").as_int());
+                // PRE-EXISTING leniency (pinned, reported 2026-07): a typed shared_ptr
+                // decl does NOT class-check its initializer - the wrong class aliases
+                // silently (reproduces on a fresh engine; unrelated to the intern bug).
+                // If Dev rules enforcement, flip this to check_throws.
+                e->execute("shared_ptr<Bar> lenient = Foo();");
+                check_eq((int64_t)1, e->execute("lenient.x").as_int());
+            }
+        });
+
+        test("shared_ptr_construction_across_hot_reload", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class Foo { int x = 1; }
+                    class Bar { int y = 2; }
+                    var a = new Foo();
+                )");
+                check_eq((int64_t)1, e->execute("a.x").as_int());
+                // redefine ONE class, then construct both spellings again
+                e->execute("class Foo { int x = 1; int z = 7; }");
+                e->execute("var a2 = new Foo(); var b2 = new Bar();");
+                check_eq((int64_t)7, e->execute("a2.z").as_int());
+                check_eq((int64_t)2, e->execute("b2.y").as_int());
+            }
+        });
+
         test("member_access_hot_reload_and_host_api", [this]() {
             // Hot reload is permissive: enforcement consults the CURRENT class_definition
             // at access time — instances keep working, new accesses follow new labels.

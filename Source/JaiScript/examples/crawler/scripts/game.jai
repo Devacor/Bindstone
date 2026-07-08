@@ -242,7 +242,7 @@ function start_new_game(var species_row, var class_row, string hero_name) -> voi
 	ration.name = POTIONS["mend"]["name"];
 	G.player.inventory.push(ration);
 	log_msg(`${G.player.name} the ${species_name(G.player.species_id)} ${class_name(G.player.class_id)} steps into GRUBWELL.`);
-	log_msg(col("90", "(? for help. m for the map. w walks, a/d turn you.)"));
+	log_msg(col("90", "(? for help. w walks, a/d turn you. m maps - up there, keys walk by compass.)"));
 	enter_floor();
 }
 
@@ -305,6 +305,14 @@ function player_turn(int rot) -> bool {
 	return true;
 }
 
+// map mode: absolute compass movement, the roguelike's hands. Facing follows
+// the step, so dropping back to first person points where you were walking.
+// A blocked step still turns you (free — no turn consumed, like a failed walk).
+function player_move_map(int dx, int dy) -> bool {
+	G.facing = facing_for(dx, dy);
+	return player_forward(1);
+}
+
 function on_step_tile() -> void {
 	var t = tile_at(G.player.x, G.player.y);
 	if (t == TILE_STAIRS) {
@@ -362,6 +370,17 @@ function try_descend() -> bool {
 }
 
 function handle_key(string key) -> bool {
+	// On the overhead map the body drops the FPS pantomime: any movement key is
+	// an absolute compass step (util.jai's DIR_KEYS, same table as the roguelike),
+	// cardinals only — a facing-locked body still cannot step diagonally.
+	if (G.show_map && DIR_KEYS.has(key)) {
+		var d = DIR_KEYS[key];
+		var dx = d[0];
+		var dy = d[1];
+		if (iabs(dx) + iabs(dy) == 1) { return player_move_map(dx, dy); }
+		log_msg("Your facing-locked feet refuse the diagonal.");
+		return false;
+	}
 	switch (key) {
 		case "w": return player_forward(1);
 		case "up": return player_forward(1);

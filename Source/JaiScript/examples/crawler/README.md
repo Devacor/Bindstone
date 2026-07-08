@@ -9,8 +9,11 @@ raycaster, dungeon gen, combat, AI, items, saves, UI — is script.
 
 Same bones as the roguelike, different eyes: movement is **locked to the four
 cardinal facings**. `w` steps a tile, `a`/`d` snap 90 degrees (with a fast 3-frame
-heading sweep so the turn reads as motion), and the view is a real one-ray-per-
-column raycaster — walls shaded by torch distance, faces darkened by orientation,
+heading sweep so the turn reads as motion) — but on the `m` overhead map the
+movement keys go **absolute**: `wasd`/`hjkl`/arrows step by compass direction,
+roguelike-style, with your facing following the step (so dropping back to first
+person points where you were walking; turn-then-walk is FPS-view-only). The view
+is a real one-ray-per-column raycaster — walls shaded by torch distance, faces darkened by orientation,
 materials that change wardrobe every couple of floors, and billboard sprites with
 per-column z-buffer occlusion. A distant Grublin is a small green blob at the end
 of the hall. It does not stay small.
@@ -72,6 +75,7 @@ Needs a Windows 10+ console at least 80x28 (256-color VT processing).
 | `q` / `e` | sidestep left / right |
 | `.` | wait |
 | `m` | minimap toggle (explored tiles + facing arrow) |
+| *(on the map)* `wasd` / `hjkl` / arrows | step by **compass direction** — no turning; facing follows the step |
 | `g` | pick up |
 | `i` | inventory — letter to inspect, then `e` use/equip, `d` drop |
 | `p` | quaff first potion |
@@ -178,6 +182,8 @@ And the `m` minimap — explored tiles only, facing arrow, loot in sight:
 `--smoke` runs the same headless autopilot idea as the roguelike, translated into
 a body that must turn before it can walk: BFS to the goal, rotate until the nose
 lines up, step, bump-attack what blocks, skill down corridors, sip when scared.
+(The pilot never opens the map, so map-mode absolute movement (2026-07) is not on
+this path — all hashes below are unchanged from before that control change.)
 The FNV-fold `STATE_HASH` (now also folding the facing) must match across
 backends for a given seed:
 

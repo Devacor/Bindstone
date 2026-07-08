@@ -191,6 +191,8 @@ function help_screen() -> void {
 	lines.push("  sidestep      q / e");
 	lines.push("  wait          .");
 	lines.push("  minimap       m   (explored tiles + facing arrow)");
+	lines.push("  on the map    wasd / hjkl / arrows step by compass (no turning;");
+	lines.push("                facing follows your step back into first person)");
 	lines.push("  pick up       g");
 	lines.push("  inventory     i   (letter to inspect, then e=use/equip d=drop)");
 	lines.push("  quaff first   p   (first potion in pack)");

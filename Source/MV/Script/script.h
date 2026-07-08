@@ -25,6 +25,21 @@ namespace MV {
 	// (see StandardScriptMethods::loadScript). Off = parse-once shipping behavior.
 	bool scriptHotReloadEnabled();
 
+	// Script debugging (DAP; VS Code "Attach to JaiScript") is ON by default on Windows:
+	// every engine makeScriptEngine creates listens on 127.0.0.1 at the first free port in
+	// {base, base+10, base+20, ...} where base = 52472 + scriptDebugPortOffset(). The offset
+	// is per build target (Client 0, LobbyServer 1, GameServer 2) so each process type has a
+	// stable attach port. Costs nothing on the script hot path until a session attaches;
+	// breakpoints/stepping need the interpreter backend (MV_SCRIPT_INTERPRETER=1). Bind
+	// failure logs one line and the engine runs without the listener. Opt out with
+	// MV_SCRIPT_NO_DEBUG=1 or scriptDebugEnabled(false) before engine creation
+	// (BindstoneClient: --no-script-debug).
+	void scriptDebugEnabled(bool a_enabled);
+	bool scriptDebugEnabled();
+	void scriptDebugPortOffset(int a_offset);
+	int scriptDebugPortOffset();
+	int lastScriptDebugPort();   // port the most recent makeScriptEngine bound; 0 = none
+
 	// Forward declarations only here; the implementation TU (Source/Game/Script/script.cpp) includes the engine.
 	class Script {
 	public:

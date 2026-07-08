@@ -43,6 +43,16 @@ powershell.exe -Command "cd 'C:\git\Bindstone\Source\JaiScript\out\build\x64-Rel
 
 See `Source/JaiScript/CLAUDE.md` for detailed JaiScript development instructions.
 
+## Script Debugging (JaiScript DAP)
+
+Script debugging is **on by default** (localhost only, free until a session attaches). Each
+process listens for VS Code on 127.0.0.1: **Client 52472 / LobbyServer 52473 / GameServer 52474**
+(extra engines in a process take the next free port in +10 steps; the bound port is logged at
+startup). Attach: install `Source/JaiScript/tools/vscode-jaiscript`, F5 → "Attach to JaiScript"
+with that port. Breakpoints/stepping need the interpreter backend — launch with
+`MV_SCRIPT_INTERPRETER=1`. Opt out: `--no-script-debug` (client) or `MV_SCRIPT_NO_DEBUG=1`.
+Wiring: `MV::makeScriptEngine` (`Source/Game/Script/script.cpp`), knobs in `MV/Script/script.h`.
+
 ## Tests & Benchmarks (MV/engine)
 
 The engine has a Foundry-based regression runner separate from JaiScript's:

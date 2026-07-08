@@ -92,6 +92,12 @@ if(JAISCRIPT_BUILD_EXAMPLES)
 endif()
 # --- end jai_crawler ---
 
+# --- jai_gloom (examples/gloom): GLOOM, real-time terminal raycast shooter ---
+if(JAISCRIPT_BUILD_EXAMPLES)
+    add_subdirectory(examples/gloom)
+endif()
+# --- end jai_gloom ---
+
 # --- jaiscript runner (tools/jaiscript): standalone file runner / REPL / --watch live-coding ---
 option(JAISCRIPT_BUILD_RUNNER "Build the standalone jaiscript runner/REPL executable" ON)
 if(JAISCRIPT_BUILD_RUNNER)

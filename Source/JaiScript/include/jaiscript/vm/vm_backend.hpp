@@ -147,6 +147,32 @@ namespace jai::vm {
 
         struct frame_guard;
 
+        // === Stage-2a slot-accessor funnel (docs/flatstack_design.md §4) ===
+        // EVERY read/write of a frame's slot-local storage in this backend goes through
+        // these, so stage 2's value-stack window swap changes only their bodies + the
+        // frame lifecycle. Behavior-identical thin forwards today. Callers keep their
+        // own slot-validity/top_level guards — these assume a live locals home.
+        static script_value* frame_slot(frame& f, size_t slot) noexcept {
+            return f.locals->get_local(slot);
+        }
+        static const script_value* frame_slot(const frame& f, size_t slot) noexcept {
+            return static_cast<const call_frame*>(f.locals)->get_local(slot);
+        }
+        static void frame_slot_set(frame& f, size_t slot, script_value value) {
+            f.locals->set_local(slot, std::move(value));
+        }
+        static size_t frame_slot_count(const frame& f) noexcept {
+            return f.locals->local_count();
+        }
+        // Storage-handle twins for paths that hold the slot home directly (parameter
+        // binding, coroutine fiber state, the caller side of ref-param binds).
+        static script_value* frame_slot(call_frame& locals, size_t slot) noexcept {
+            return locals.get_local(slot);
+        }
+        static void frame_slot_set(call_frame& locals, size_t slot, script_value value) {
+            locals.set_local(slot, std::move(value));
+        }
+
         // Return-epilogue classification, cached per script_defined_function
         // (backend_return_conv) and stamped on the record at push. unclassified routes
         // through the legacy decision (method frames); the prim_* classes pass a

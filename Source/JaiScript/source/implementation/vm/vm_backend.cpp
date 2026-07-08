@@ -567,7 +567,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 	for (const auto& [slot, name] : slot_names) {
 		if (slot == last) { continue; }
 		last = slot;
-		const script_value* v = f->locals->get_local(slot);
+		const script_value* v = frame_slot(*f, slot);
 		if (!v) { continue; }                            // reserved capacity only: not live yet
 		out.emplace_back(std::string(name), *v);
 	}
@@ -812,7 +812,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 					if (stack_.size() > df.stack_base) {
 						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
 					}
-					state.locals.set_local(param.slot_index, make_null());
+					frame_slot_set(state.locals, param.slot_index, make_null());
 					continue;
 				}
 				script_value default_val = std::move(stack_.back());
@@ -820,7 +820,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
 				}
-				state.locals.set_local(param.slot_index, std::move(default_val));
+				frame_slot_set(state.locals, param.slot_index, std::move(default_val));
 				continue;
 			}
 			auto converted_result = try_convert_for_parameter(args[i], param.type);
@@ -837,7 +837,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 			if (param.ref_escaping && !bound.is_reference()) {
 				bound = script_value::make_cell_reference(std::move(bound), engine_);
 			}
-			state.locals.set_local(param.slot_index, std::move(bound));
+			frame_slot_set(state.locals, param.slot_index, std::move(bound));
 		}
 		environment_ = prev_env;
 		state.started = true;
@@ -1346,7 +1346,7 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 
 script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id) {
 	if (slot != k_invalid_u32 && f.locals && !f.top_level) {
-		if (auto* ptr = f.locals->get_local(slot)) {
+		if (auto* ptr = frame_slot(f, slot)) {
 			return ptr;
 		}
 	}
@@ -1357,7 +1357,7 @@ script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t
 // get_value_ptr tail still runs when the storage prefix misses (this/static fallbacks)
 script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id) {
 	if (slot != k_invalid_u32 && f.locals && !f.top_level) {
-		if (auto* ptr = f.locals->get_local(slot)) {
+		if (auto* ptr = frame_slot(f, slot)) {
 			return ptr;
 		}
 	}
@@ -1403,7 +1403,7 @@ checked_result<void> vm_backend::define_decl_value(frame& f, uint64_t name_id, s
 		value = script_value::make_cell_reference(std::move(value), engine_);
 	}
 	if (slot_index != SIZE_MAX && f.locals && !f.top_level) {
-		f.locals->set_local(slot_index, std::move(value));
+		frame_slot_set(f, slot_index, std::move(value));
 	} else {
 		environment_->define(name_id, std::move(value));
 	}
@@ -2815,7 +2815,7 @@ checked_result<void> vm_backend::exec_load(frame& f, const vm_instruction& ins) 
 		return {};
 	}
 	if (ins.a != k_invalid_u32 && f.locals && !f.top_level) {
-		if (auto* local = f.locals->get_local(ins.a)) {
+		if (auto* local = frame_slot(f, ins.a)) {
 			stack_.push_back(local->deref());
 			return {};
 		}
@@ -2884,7 +2884,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 	}
 
 	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
-		if (auto* frameLocal = f.locals->get_local(ins.b)) {
+		if (auto* frameLocal = frame_slot(f, ins.b)) {
 			// A cell in the slot IS the variable's storage when the name is the value
 			// decl itself (escape-boxed local): write the cell with the same typed
 			// enforcement a plain slot gets. Ref-alias names (ref params / auto& decls)
@@ -3840,7 +3840,7 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 		return &scratch.value();
 	}
 	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
-		if (auto* local = f.locals->get_local(operand.slot)) {
+		if (auto* local = frame_slot(f, operand.slot)) {
 			return &local->deref();
 		}
 	}
@@ -3999,7 +3999,7 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 		return nullptr;
 	}
 	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
-		if (auto* local = f.locals->get_local(operand.slot)) {
+		if (auto* local = frame_slot(f, operand.slot)) {
 			return &local->deref();
 		}
 		return nullptr;
@@ -4089,7 +4089,7 @@ checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruct
 	if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0) {
 		script_value* varPtr = nullptr;
 		if (cp.slot != k_invalid_u32 && f.locals && !f.top_level) {
-			varPtr = f.locals->get_local(cp.slot);
+			varPtr = frame_slot(f, cp.slot);
 		}
 		if (!varPtr) {
 			varPtr = env_lookup_cached(f, f.ip * 3 + 2, f.code->symbols[cp.symbol]);
@@ -5030,11 +5030,11 @@ checked_result<void> vm_backend::exec_func_decl(frame& f, const vm_instruction& 
 		// so enclosing-frame slot locals are snapshot by value into a capture env
 		// (closure-style; the chain also pins the declaration env against pool reuse)
 		if (!proto.outer_slot_plan.empty() && f.locals && !f.top_level) {
-			const size_t outer_slot_count = f.locals->local_count();
+			const size_t outer_slot_count = frame_slot_count(f);
 			std::shared_ptr<environment> captureEnv;
 			for (const auto& [sym, slot] : proto.outer_slot_plan) {
 				if (slot < outer_slot_count) {
-					if (script_value* slot_val = f.locals->get_local(slot)) {
+					if (script_value* slot_val = frame_slot(f, slot)) {
 						if (!captureEnv) {
 							// Parent = global (interpreter parity + the lambda-documented
 							// pooled-env recycle hazard for escaping handles)
@@ -5077,7 +5077,7 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 	// Runtime filter over the compile-time plan (parity: only live outer-frame slots capture)
 	std::vector<std::pair<uint64_t, size_t>> outer_refs;
 	if (f.locals && !f.top_level) {
-		const size_t outer_slot_count = f.locals->local_count();
+		const size_t outer_slot_count = frame_slot_count(f);
 		for (const auto& [sym, slot] : proto.outer_slot_plan) {
 			if (slot < outer_slot_count) {
 				outer_refs.emplace_back(sym, slot);
@@ -5129,7 +5129,7 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 				} else if (f.locals && !f.top_level) {
 					for (const auto& [sym, slot] : outer_refs) {
 						if (sym == var_id) {
-							script_value* slot_val = f.locals->get_local(slot);
+							script_value* slot_val = frame_slot(f, slot);
 							if (slot_val) {
 								// By-ref of a stack slot is lifetime-unsafe for escaping closures
 								captureEnv->define(var_id, vm_clone_for_capture(slot_val->deref(), symbolizer_));
@@ -5154,7 +5154,7 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 			if (!can_capture && f.locals && !f.top_level) {
 				for (const auto& [sym, slot] : outer_refs) {
 					if (sym == capture.symbol_id) {
-						slot_val = f.locals->get_local(slot);
+						slot_val = frame_slot(f, slot);
 						if (slot_val) { can_capture = true; capture_from_slot = true; }
 						break;
 					}
@@ -5190,7 +5190,7 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 				if (captureEnv->contains(sym)) {
 					continue;
 				}
-				script_value* slot_val = f.locals->get_local(slot);
+				script_value* slot_val = frame_slot(f, slot);
 				if (slot_val) {
 					captureEnv->define(sym, vm_clone_for_capture(slot_val->deref(), symbolizer_));
 				}
@@ -7700,7 +7700,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 		}
 		script_value value = std::move(resume_result.value());
 		if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
-			f.locals->set_local(proto.slot, std::move(value));
+			frame_slot_set(f, proto.slot, std::move(value));
 		} else {
 			environment_->define(proto.var_symbol, std::move(value));
 		}
@@ -7765,7 +7765,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 	}
 
 	if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
-		f.locals->set_local(proto.slot, std::move(element));
+		frame_slot_set(f, proto.slot, std::move(element));
 	} else {
 		environment_->define(proto.var_symbol, std::move(element));
 	}
@@ -7879,7 +7879,7 @@ checked_result<void> vm_backend::exec_ref_return_bind(frame& f, const vm_instruc
 	const uint64_t symbol_id = f.code->symbols[ins.b];
 	script_value* storage = nullptr;
 	if (ins.a != k_invalid_u32 && f.locals) {
-		storage = f.locals->get_local(ins.a);
+		storage = frame_slot(f, ins.a);
 	}
 	if (!storage && environment_) {
 		storage = environment_->get_value_ptr(symbol_id);
@@ -8977,7 +8977,7 @@ checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage
 	// Share the holder (zero alloc; cells alias the same box, element/field refs keep
 	// their container/instance re-resolution), boxing on demand when the variable
 	// predates its escape mark (cross-execute global, C++ define, dynamic shape)
-	locals.set_local(param_slot, share_env_ref(storage));
+	frame_slot_set(locals, param_slot, share_env_ref(storage));
 	return {};
 }
 
@@ -9015,7 +9015,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 					if (stack_.size() > df.stack_base) {
 						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
 					}
-					locals.set_local(param.slot_index, make_null());
+					frame_slot_set(locals, param.slot_index, make_null());
 					continue;
 				}
 				script_value default_val = std::move(stack_.back());
@@ -9023,7 +9023,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
 				}
-				locals.set_local(param.slot_index, std::move(default_val));
+				frame_slot_set(locals, param.slot_index, std::move(default_val));
 				continue;
 			}
 		}
@@ -9044,7 +9044,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				// Caller frame-slot local (env lookup can't see slot locals and would
 				// walk to an unrelated same-named outer variable)
 				if (symbol_id != UINT64_MAX && slot != k_invalid_u32 && caller_locals) {
-					if (script_value* slotPtr = caller_locals->get_local(slot)) {
+					if (script_value* slotPtr = frame_slot(*caller_locals, slot)) {
 						JAISCRIPT_TRY(bind_reference_to_storage(*slotPtr, locals, param.slot_index));
 						continue;
 					}
@@ -9060,7 +9060,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 					if (!resolved) {
 						return resolved.error_value();
 					}
-					locals.set_local(param.slot_index, std::move(resolved.value()));
+					frame_slot_set(locals, param.slot_index, std::move(resolved.value()));
 					continue;
 				}
 
@@ -9082,7 +9082,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				auto arg_type = arg.current_type();
 				if (arg_type == script_value_type::jai_object_type ||
 				    arg_type == script_value_type::jai_shared_ptr_type) {
-					locals.set_local(param.slot_index, script_value(arg));
+					frame_slot_set(locals, param.slot_index, script_value(arg));
 				} else {
 					return checked_result<void>(
 						make_error_code(runtime_error_code::invalid_reference),
@@ -9112,7 +9112,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			     (param.type->base_type == script_value_type::jai_float_type && ri == script_value::TYPEID_FLOAT) ||
 			     (param.type->base_type == script_value_type::jai_bool_type && ri == script_value::TYPEID_BOOL) ||
 			     (param.type->base_type == script_value_type::jai_char_type && ri == script_value::TYPEID_CHAR))) {
-				locals.set_local(param.slot_index, boxed_param(script_value(arg)));
+				frame_slot_set(locals, param.slot_index, boxed_param(script_value(arg)));
 				continue;
 			}
 
@@ -9130,7 +9130,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				if (param.type && param.type->base_type == script_value_type::jai_object_type &&
 				    derefed.storage_type() == script_value_type::jai_object_type &&
 				    derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
-					locals.set_local(param.slot_index, boxed_param(derefed.clone()));
+					frame_slot_set(locals, param.slot_index, boxed_param(derefed.clone()));
 					continue;
 				}
 			}
@@ -9150,9 +9150,9 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			}
 
 			if (should_share) {
-				locals.set_local(param.slot_index, boxed_param(std::move(converted_arg)));
+				frame_slot_set(locals, param.slot_index, boxed_param(std::move(converted_arg)));
 			} else {
-				locals.set_local(param.slot_index, boxed_param(converted_arg.clone()));
+				frame_slot_set(locals, param.slot_index, boxed_param(converted_arg.clone()));
 			}
 		}
 	}

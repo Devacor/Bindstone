@@ -93,6 +93,13 @@ Inside a template string, `\`` escapes a backtick and `\$` escapes a dollar sign
 also work. Splices take arbitrary expressions, including indexing (e.g. with `var m = {"k": 1};`
 declared, `` `${m["k"]}` `` yields `"1"`), and whitespace inside the splice is fine (`${ x }`).
 
+A backtick string may span multiple source lines: a literal newline in the text becomes a `\n`
+in the value. Line endings in such multi-line string literals are normalized to `\n` (a CRLF or a
+lone CR both fold to a single `\n`), so the same script yields byte-identical strings regardless
+of the file's line-ending style. (An explicit `\r` escape is preserved as-is.) Plain `"..."`
+strings do **not** span lines — a literal newline in one is an "Unterminated string literal"
+error, so they have no line-ending sensitivity.
+
 #### Format specs: `${expr:spec}`
 
 A splice may end in a format spec — a deliberate subset of C++ `std::format`:

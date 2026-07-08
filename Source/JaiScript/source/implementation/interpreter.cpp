@@ -12176,16 +12176,31 @@ std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr
 void interpreter::release_environment(const std::shared_ptr<environment>& env, bool clear_now) {
     if (!env) return;
 
+    // Block scopes clear eagerly (pre-existing; script dtor ORDER is pinned on this
+    // happening before the slot frees, and dtor reentrancy sees the slot as in-use)
+    if (clear_now) {
+        env->reset(nullptr);
+    }
+
     // Only the pool TOP may be released. Decrementing for anything else (a non-pooled
     // make_shared env, or an out-of-order release) hands the caller's still-live scope
     // to the next get_pooled_environment, which reset()s it into a self-parent cycle.
     if (environment_pool_index_ > 0 && environment_pool_[environment_pool_index_ - 1] == env) {
         if (env.use_count() <= 2) {
-            // Reset BEFORE freeing the slot: value destruction can run script
-            // destructors, whose calls re-enter the pool — the slot must still read
-            // as in-use so those frames acquire HIGHER slots, not the one mid-reset
-            // (also keeps script dtor order identical to the old clear_now path).
-            env->reset(nullptr);
+            if (!clear_now) {
+                // Lifetime ruling (2026-07): a freed pool slot must not pin a PARENT
+                // CHAIN until slot reuse — that retention was exactly the dead-lambda
+                // capture leak (the freed frame env's parent was the capture env).
+                // ONLY the parent link (+ its stale pointer cache) drops here: the
+                // env's values/kind/this/bound-method interiors deliberately survive
+                // until reuse-time reset — the call machinery holds transient pointers
+                // into them for a few instructions after release, and clearing values
+                // here detonated as a use-after-reset AV (Debug 0xDD). clear_now
+                // block scopes were already fully reset above, pre-existing behavior
+                // (script dtor order is pinned on it).
+                env->set_parent(nullptr);
+                env->clear_parent_cache();
+            }
             --environment_pool_index_;
         } else {
             // Escaped: the outside holder owns it from now on; re-mint the freed slot

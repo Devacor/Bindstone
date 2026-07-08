@@ -770,6 +770,7 @@ sol2/Lua, Squirrel, and ChaiScript comparisons (`x64-Release BENCHMARKS` config)
 - [aliasing_costs.md](aliasing_costs.md) - Measured cost of value vs `T&` vs `shared_ptr<T>` + decision guidance
 - [thin_value_spec.md](thin_value_spec.md) / [thin_value_rebaseline.md](thin_value_rebaseline.md) - 32-byte value fold (as-built spec + benchmark baseline)
 - [PERFORMANCE.md](PERFORMANCE.md) - The definitive 2026-07 performance report (head-to-head vs Lua/Squirrel/ChaiScript, ladders, scaling)
+- [GLOOM_COMPARISON.md](GLOOM_COMPARISON.md) - The five-way GLOOM report: one full game in JaiScript vs Squirrel/Lua/ChaiScript/Python (perf, conformance, expressiveness, play)
 - [JaiScriptTesting.md](JaiScriptTesting.md) / [JaiScriptVMTesting.md](JaiScriptVMTesting.md) - Testing guides
 
 ### Roadmap & Design History

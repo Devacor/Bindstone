@@ -34,6 +34,11 @@ its optimization-history table survives as Appendix B.
 Standing bonus row: the debugger is free until attached — VM 47/46 µs with the hook compiled
 in (pre-debugger band exactly), ~+10% while a session is armed.
 
+Whole-game complement: [GLOOM_COMPARISON.md](GLOOM_COMPARISON.md) runs one complete game
+(GLOOM) in JaiScript vs Squirrel/Lua/ChaiScript/Python under a bit-exact conformance
+contract — including the microbench inversion (13W/6L vs Squirrel here, ~11× behind it on
+the game) and its element-read / value-traffic diagnosis.
+
 ---
 
 ## The head-to-head: JaiScript vs Lua (sol2) vs Squirrel vs ChaiScript

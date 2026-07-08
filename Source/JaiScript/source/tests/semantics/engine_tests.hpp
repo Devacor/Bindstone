@@ -2,7 +2,11 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <string_view>
+#include <type_traits>
 
 namespace jai::foundry::tests {
 
@@ -51,7 +55,70 @@ public:
             auto result = eng->execute("counter");
             check_eq(result.as<int>(), 2);
         });
-        
+
+        test("script_source_literal_lane", [this]() {
+            auto eng = make_engine();
+            // First execute parses; the re-executes hit the pointer-keyed literal lane.
+            check_eq((int64_t)4, eng->execute(script_source("2 + 2")).as_int());
+            check_eq((int64_t)4, eng->execute(script_source("2 + 2")).as_int());
+            eng->execute(script_source("var ss_counter = 0;"));
+            eng->execute(script_source("ss_counter = ss_counter + 1;"));
+            eng->execute(script_source("ss_counter = ss_counter + 1;"));
+            check_eq((int64_t)2, eng->execute(script_source("ss_counter")).as_int());
+        });
+
+        test("script_source_dynamic_routes_to_content_lane", [this]() {
+            auto eng = make_engine();
+            // A string_view wrap tags as non-literal: content-keyed lane, same semantics.
+            std::string dynamic = "3 * 3";
+            check_eq((int64_t)9, eng->execute(script_source(std::string_view(dynamic))).as_int());
+            dynamic = "4 * 4";   // mutated content must be noticed (hot-reload semantics)
+            check_eq((int64_t)16, eng->execute(script_source(std::string_view(dynamic))).as_int());
+            // std::string still routes to the execute(const std::string&) overload, and a
+            // bare literal cannot implicitly become a script_source (ctor is explicit) —
+            // execute("...") keeps its historical std::string path.
+            static_assert(!std::is_convertible_v<const char(&)[5], jai::script_source>);
+            static_assert(!std::is_convertible_v<std::string, jai::script_source>);
+            static_assert(std::is_convertible_v<std::string_view, jai::script_source>);
+            check_eq((int64_t)25, eng->execute(std::string("5 * 5")).as_int());
+        });
+
+        test("script_source_literal_survives_cache_churn", [this]() {
+            auto eng = make_engine();
+            check_eq((int64_t)11, eng->execute(script_source("6 + 5")).as_int());
+            // Flood the content cache past its LRU bound with unique dynamics; the
+            // literal entry holds its own reference and must still re-execute correctly.
+            for (int i = 0; i < 80; ++i) {
+                eng->execute("1 + " + std::to_string(i));
+            }
+            check_eq((int64_t)11, eng->execute(script_source("6 + 5")).as_int());
+        });
+
+        test("execute_file_stat_gate", [this]() {
+            namespace fs = std::filesystem;
+            auto eng = make_engine();
+            fs::path dir = fs::temp_directory_path() / "jai_engine_tests_file_gate";
+            fs::create_directories(dir);
+            fs::path file = dir / "gate_probe.jai";
+            {
+                std::ofstream out(file, std::ios::binary | std::ios::trunc);
+                out << "var fg_value = 1; fg_value";
+            }
+            std::string pathStr = file.string();
+            check_eq((int64_t)1, eng->execute_file(pathStr).as_int());
+            check_eq((int64_t)1, eng->execute_file(pathStr).as_int());   // verify pass
+            check_eq((int64_t)1, eng->execute_file(pathStr).as_int());   // stat-only reuse
+            // An edited file must be noticed (mtime/size gate -> reparse).
+            {
+                std::ofstream out(file, std::ios::binary | std::ios::trunc);
+                out << "fg_value = 2; fg_value";
+            }
+            check_eq((int64_t)2, eng->execute_file(pathStr).as_int());
+            check_eq((int64_t)2, eng->execute_file(pathStr).as_int());
+            std::error_code cleanupEc;
+            fs::remove_all(dir, cleanupEc);
+        });
+
         test("error_handling", [this]() {
             auto eng = make_engine();
             check_throws([&]() {

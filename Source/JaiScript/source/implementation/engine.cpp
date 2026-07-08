@@ -14,8 +14,20 @@
 #include <unordered_set>
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <filesystem>
+
+// One-syscall (mtime, size) stat for the execute_file fast lane.
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace jai {
 
@@ -414,10 +426,27 @@ struct engine::implementation {
         uint64_t checked_epoch = 0;
         check_report check_result;
     };
-    std::unordered_map<std::string, std::shared_ptr<script_cache_entry>> script_cache;
     uint64_t script_cache_epoch = 0;
     uint64_t script_cache_clock = 0;
     static constexpr size_t script_cache_max = 64;
+
+    // Literal fast lane (engine::execute(script_source)): consteval tagging guarantees
+    // the pointer is immutable static storage, so pointer+length IS content identity —
+    // a hit touches zero source bytes. Entries are shared with (and outlive eviction
+    // from) the content-keyed cache; epoch staleness is re-checked on every hit.
+    struct literal_key {
+        const char* ptr;
+        size_t len;
+        bool operator==(const literal_key&) const = default;
+    };
+    struct literal_key_hash {
+        size_t operator()(const literal_key& k) const noexcept {
+            size_t h = std::hash<const void*>{}(k.ptr);
+            h ^= k.len + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+    std::unordered_map<literal_key, std::shared_ptr<script_cache_entry>, literal_key_hash> literal_script_cache;
 
     // Static type checking (opt-in; off = zero cost beyond one branch at cache entry).
     // check_surface_epoch_ moves on every registration the checker can see
@@ -436,50 +465,150 @@ struct engine::implementation {
         return entry.check_result;
     }
 
-    // Key on (sourcePath, content) so identical text under different paths does not
-    // alias one AST. Length-prefixing the path pins the boundary, so no (path, content)
-    // pair can collide with another via string concatenation. The buffer is a reused
-    // member: a cache-hit execute() does no key allocation (engine::execute hot path).
-    std::string script_cache_key_buf_;
-    const std::string& script_cache_key(const std::string& sourcePath, const std::string& source) {
-        auto& key = script_cache_key_buf_;
-        key.clear();
-        key += std::to_string(sourcePath.size());
-        key += ':';
-        key += sourcePath;
-        key += source;
-        return key;
+    // The one cache-hit execution tail (execute_file fast lane + the literal lane):
+    // mirrors execute_source's hit path — prepare, static-check hook, execute_parsed.
+    script_value execute_cache_hit(engine& self, script_cache_entry& entry,
+                                   const instance_variables& instanceVars, std::string_view source) {
+        has_executed_ = true;
+        self.backend()->prepare_for_execution();
+        entry.last_used = ++script_cache_clock;
+        if (static_check_mode_ != check_mode::off) {
+            if (instanceVars.empty()) {
+                last_check_ = checked_report(self, entry);
+            } else {
+                std::vector<std::string> extra;
+                extra.reserve(instanceVars.size());
+                for (const auto& [name, value] : instanceVars) { extra.push_back(name); }
+                last_check_ = detail::run_static_check(self, entry.declarations, &extra);
+            }
+            if (static_check_mode_ == check_mode::strict && last_check_.has_errors()) {
+                throw static_check_error("static check failed:\n" + last_check_.format(std::string(source)));
+            }
+        }
+        return self.execute_parsed(entry.declarations, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars);
     }
 
+    // Keyed on (sourcePath, content) so identical text under different paths does not
+    // alias one AST (each AST is stamped with its own filename — breakpoints/traces
+    // stay distinct). The INDEX is a constant-time discriminator, not a digest: lengths
+    // + 24 sampled content bytes narrow the ≤64-node flat scan, then ONE memcmp against
+    // the stored source verifies exactly — no content hashing anywhere on the hot path,
+    // and change detection stays byte-exact (hot-reload semantics). A discriminator
+    // collision just keeps scanning; memcmp is the arbiter.
+    static void content_samples(const std::string& source, uint64_t& head, uint64_t& mid, uint64_t& tail) {
+        head = mid = tail = 0;
+        const char* data = source.data();
+        size_t n = source.size();
+        if (n >= 8) {
+            std::memcpy(&head, data, 8);
+            std::memcpy(&mid, data + (n / 2) - 4, 8);
+            std::memcpy(&tail, data + n - 8, 8);
+        } else if (n > 0) {
+            std::memcpy(&head, data, n);
+        }
+    }
+
+    struct script_cache_node {
+        uint64_t path_len = 0;
+        uint64_t content_len = 0;
+        uint64_t head = 0, mid = 0, tail = 0;
+        std::string path;
+        std::string source;
+        std::shared_ptr<script_cache_entry> entry;
+    };
+    std::vector<script_cache_node> script_cache;
+
     std::shared_ptr<script_cache_entry> find_cached_script(const std::string& sourcePath, const std::string& source) {
-        auto it = script_cache.find(script_cache_key(sourcePath, source));
-        if (it == script_cache.end()) {
-            return nullptr;
+        uint64_t head, mid, tail;
+        content_samples(source, head, mid, tail);
+        for (size_t i = 0; i < script_cache.size(); ++i) {
+            auto& node = script_cache[i];
+            if (node.content_len != source.size() || node.path_len != sourcePath.size() ||
+                node.head != head || node.mid != mid || node.tail != tail) {
+                continue;
+            }
+            if (std::memcmp(node.path.data(), sourcePath.data(), sourcePath.size()) != 0 ||
+                std::memcmp(node.source.data(), source.data(), source.size()) != 0) {
+                continue;   // discriminator collision: memcmp is the arbiter, keep scanning
+            }
+            if (node.entry->epoch != script_cache_epoch) {
+                script_cache[i] = std::move(script_cache.back());
+                script_cache.pop_back();
+                return nullptr;
+            }
+            node.entry->last_used = ++script_cache_clock;
+            return node.entry;
         }
-        if (it->second->epoch != script_cache_epoch) {
-            script_cache.erase(it);
-            return nullptr;
-        }
-        it->second->last_used = ++script_cache_clock;
-        return it->second;
+        return nullptr;
     }
 
     std::shared_ptr<script_cache_entry> store_cached_script(const std::string& sourcePath, const std::string& source, std::vector<declaration_ptr> decls) {
         if (script_cache.size() >= script_cache_max) {
-            auto victim = script_cache.begin();
-            for (auto it = script_cache.begin(); it != script_cache.end(); ++it) {
-                if (it->second->last_used < victim->second->last_used) {
-                    victim = it;
+            size_t victim = 0;
+            for (size_t i = 1; i < script_cache.size(); ++i) {
+                if (script_cache[i].entry->last_used < script_cache[victim].entry->last_used) {
+                    victim = i;
                 }
             }
-            script_cache.erase(victim);
+            script_cache[victim] = std::move(script_cache.back());
+            script_cache.pop_back();
         }
         auto entry = std::make_shared<script_cache_entry>();
         entry->declarations = std::move(decls);
         entry->epoch = script_cache_epoch;
         entry->last_used = ++script_cache_clock;
-        script_cache.emplace(script_cache_key(sourcePath, source), entry);
+        script_cache_node node;
+        node.path_len = sourcePath.size();
+        node.content_len = source.size();
+        content_samples(source, node.head, node.mid, node.tail);
+        node.path = sourcePath;
+        node.source = source;
+        node.entry = entry;
+        script_cache.push_back(std::move(node));
         return entry;
+    }
+
+    // File fast lane (engine::execute_file): canonical-path keyed, gated by ONE stat.
+    // Reuse touches zero file bytes; stamp-equal content is verified by a single
+    // read+memcmp after the initial store (same-tick-edit hazard), then trusted while
+    // the (mtime, size) stamp holds. Strictly-newer mtime or a size change = stale.
+    struct file_cache_node {
+        uint64_t mtime = 0;
+        uint64_t size = 0;
+        bool verified = false;        // one-shot equal-stamp re-read confirmed the content
+        std::string attributed_path;  // as-given spelling the cached AST was stamped with
+        std::string source;           // for the verify memcmp + check-report formatting
+        std::shared_ptr<script_cache_entry> entry;
+    };
+    std::unordered_map<std::string, file_cache_node> file_script_cache;
+    std::unordered_map<std::string, std::string> canonical_path_cache;   // as-given -> weakly_canonical
+
+    // mtime (100 ns FILETIME on Windows) + size from a single syscall. false = file
+    // unreachable; callers fall back to the legacy read path (today's error text).
+    static bool stat_mtime_size(const std::string& path, uint64_t& mtime, uint64_t& size) {
+#ifdef _WIN32
+        WIN32_FILE_ATTRIBUTE_DATA fad{};
+        std::filesystem::path widePath(path);
+        if (!GetFileAttributesExW(widePath.c_str(), GetFileExInfoStandard, &fad)) {
+            return false;
+        }
+        if (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            return false;
+        }
+        mtime = (uint64_t(fad.ftLastWriteTime.dwHighDateTime) << 32) | fad.ftLastWriteTime.dwLowDateTime;
+        size = (uint64_t(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+        return true;
+#else
+        std::error_code timeEc, sizeEc;
+        auto writeTime = std::filesystem::last_write_time(path, timeEc);
+        auto byteSize = std::filesystem::file_size(path, sizeEc);
+        if (timeEc || sizeEc) {
+            return false;
+        }
+        mtime = uint64_t(writeTime.time_since_epoch().count());
+        size = uint64_t(byteSize);
+        return true;
+#endif
     }
 
     // Jaibite disk cache (engine.hpp doc): sibling <stem>.jaibite maintained beside every
@@ -1000,6 +1129,32 @@ script_value engine::execute_file_source(const std::string& resolvedPath, const 
     return execute_source(content, instance_variables{}, resolvedPath);
 }
 
+script_value engine::execute(script_source source) {
+    if (source.literal()) {
+        auto it = impl->literal_script_cache.find({source.data(), source.size()});
+        if (it != impl->literal_script_cache.end()) {
+            if (it->second->epoch == impl->script_cache_epoch) {
+                auto entry = it->second;
+                return impl->execute_cache_hit(*this, *entry, instance_variables{},
+                                               std::string_view(source.data(), source.size()));
+            }
+            impl->literal_script_cache.erase(it);
+        }
+    }
+    std::string content(source.data(), source.size());
+    script_value result = execute_source(content, instance_variables{}, "<script>");
+    if (source.literal()) {
+        if (auto entry = impl->find_cached_script("<script>", content)) {
+            if (impl->literal_script_cache.size() >= implementation::script_cache_max) {
+                impl->literal_script_cache.clear();   // simple bound; repopulates on use
+            }
+            impl->literal_script_cache.emplace(
+                implementation::literal_key{source.data(), source.size()}, std::move(entry));
+        }
+    }
+    return result;
+}
+
 script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath) {
     impl->has_executed_ = true;
     try {
@@ -1310,14 +1465,83 @@ script_value engine::execute_file(const std::string& scriptPath) {
 }
 
 script_value engine::execute_file(const std::string& scriptPath, const instance_variables& instanceVars) {
+    // File fast lane (parse-avoidance ladder): canonical-path key + one-stat gate. A
+    // stamp-valid re-execute touches zero file bytes. Any stamp change, epoch bump, a
+    // different path spelling (attribution stays byte-identical to the read path), or a
+    // failed verify falls through to the legacy read below.
+    uint64_t mtime = 0, size = 0;
+    bool statOk = implementation::stat_mtime_size(scriptPath, mtime, size);
+    std::string canon;   // by value: a script can re-enter execute_file and rehash the maps
+    if (statOk) {
+        std::string& canonSlot = impl->canonical_path_cache[scriptPath];
+        if (canonSlot.empty()) {
+            std::error_code canonEc;
+            auto resolved = std::filesystem::weakly_canonical(scriptPath, canonEc);
+            canonSlot = canonEc ? scriptPath : resolved.string();
+        }
+        canon = canonSlot;
+        auto it = impl->file_script_cache.find(canon);
+        if (it != impl->file_script_cache.end()) {
+            auto& node = it->second;
+            bool stampValid = node.entry && node.entry->epoch == impl->script_cache_epoch &&
+                              node.attributed_path == scriptPath &&
+                              node.size == size && mtime <= node.mtime;
+            if (stampValid && !node.verified) {
+                // One-shot equal-stamp verify: an edit in the same filesystem tick as
+                // the original read is invisible to the stat, so compare bytes once.
+                std::ifstream verifyFile(scriptPath);
+                std::stringstream verifyBuffer;
+                if (verifyFile.is_open()) {
+                    verifyBuffer << verifyFile.rdbuf();
+                }
+                if (verifyFile.is_open() && verifyBuffer.view() == node.source) {
+                    node.verified = true;
+                } else {
+                    stampValid = false;
+                }
+            }
+            if (stampValid) {
+                return impl->execute_cache_hit(*this, *node.entry, instanceVars, node.source);
+            }
+            impl->file_script_cache.erase(it);
+        }
+    }
+
     std::ifstream file(scriptPath);
     if (!file.is_open()) {
         throw runtime_error("Failed to open script file: " + scriptPath);
     }
-    
+
     std::stringstream buffer;
     buffer << file.rdbuf();
-    return execute_source(buffer.str(), instanceVars, scriptPath);
+    std::string content = buffer.str();
+    script_value result = execute_source(content, instanceVars, scriptPath);
+
+    // Stamp AFTER a successful execute, with the PRE-read stat: an edit between that
+    // stat and the read shows as strictly newer next time and re-verifies.
+    if (statOk && !canon.empty()) {
+        if (auto entry = impl->find_cached_script(scriptPath, content)) {
+            if (impl->file_script_cache.size() >= implementation::script_cache_max &&
+                impl->file_script_cache.find(canon) == impl->file_script_cache.end()) {
+                auto victim = impl->file_script_cache.begin();
+                for (auto it = impl->file_script_cache.begin(); it != impl->file_script_cache.end(); ++it) {
+                    if (it->second.entry->last_used < victim->second.entry->last_used) {
+                        victim = it;
+                    }
+                }
+                impl->file_script_cache.erase(victim);
+            }
+            implementation::file_cache_node node;
+            node.mtime = mtime;
+            node.size = size;
+            node.verified = false;
+            node.attributed_path = scriptPath;
+            node.source = std::move(content);
+            node.entry = std::move(entry);
+            impl->file_script_cache[canon] = std::move(node);
+        }
+    }
+    return result;
 }
 
 void engine::jaibite_cache(bool enabled) {

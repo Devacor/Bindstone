@@ -105,11 +105,11 @@ to opt out).
 ## The receipts
 
 - **1,500+ tests green on both backends**, every commit. Differential fuzzing in CI.
-- **Performance**: the VM beats Squirrel on most head-to-head benchmarks (12W/6L/1T),
+- **Performance**: the VM beats Squirrel on most head-to-head benchmarks (13W/6L),
   sweeps ChaiScript 29W/0L, and holds its own against Lua 5.4 outside of call-dense
-  recursion (a known gap with a planned fix — the full 2026-07 head-to-head is
-  `docs/PERFORMANCE.md`). Loops fuse into superinstructions; a 1000-iteration hot loop
-  runs ~47µs.
+  recursion (a known gap the flat-stack VM rewrite narrowed but did not close — the full
+  2026-07 head-to-head is `docs/PERFORMANCE.md`). Loops fuse into superinstructions; a
+  1000-iteration hot loop runs ~47µs.
 - **`script_value` is 32 bytes**, static-assert-gated, two per cache line.
 - **A complete first-person dungeon crawler** (`examples/crawler`, ~3,250 lines of
   JaiScript) and a **demoscene reel** (`examples/demoreel`) are written in it — both double
@@ -126,10 +126,12 @@ to opt out).
   The idiom is `&` parameters for anything heavy — cheap by design. If you write
   Python-shaped code expecting reference semantics, your first hour will surprise you;
   read the reference section above and it won't.
-- **Call-dense recursion is slower than Lua** today (~9× on a fib(15) microbenchmark,
-  measured 2026-07). Most game scripts are loop- and method-shaped, where the gap is
-  small to none — but the register-window VM redesign that closes it is on the roadmap,
-  not a hope.
+- **Call-dense recursion is slower than Lua** today (~6.7× on a fib(15) microbenchmark,
+  measured 2026-07-08 — down from ~9× after the register-window VM rewrite landed). Most
+  game scripts are loop- and method-shaped, where the gap is small to none; the rewrite
+  narrowed fib(15) from 697 to 454 µs but stopped short of Lua parity, which is now
+  structurally blocked (the interpreter resolves a callee before its arguments, so the
+  callee-load elimination Lua leans on is off the table).
 - **Two backends cost maintenance.** That's the price of the executable spec, and shared
   semantic kernels (`detail/ref_lvalue.hpp` pattern) are steadily shrinking the duplicated
   surface.

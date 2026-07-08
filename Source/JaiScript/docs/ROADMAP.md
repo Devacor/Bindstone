@@ -30,7 +30,9 @@ sections; the old (2025) pillar ordering is dead.
 3. **Flat-stack VM** — move the VM off environment-backed frames toward a flat value stack for
    the remaining interpreter-vs-VM perf gap.
 4. **QoL bundle** (Dev rulings):
-   - `format()` / template-string hardening
+   - ~~`format()` / template-string hardening~~ DONE 2026-07: `${expr:spec}` format specs
+     (std::format subset, lex-time desugar to the engine-core `format_value` builtin) +
+     `{:spec}`/`{n:spec}` in `format()`/`print()` — grammar.md "Template Strings"
    - `import` hardening: content-hash-based cache invalidation, cycle detection,
      import-as-namespace
    - "did you mean ...?" suggestions on unknown identifiers/members

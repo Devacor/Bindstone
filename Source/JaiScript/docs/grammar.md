@@ -91,8 +91,52 @@ print(`The ${name} has ${hp * 2} hp`);   // The Dragon has 84 hp
 
 Inside a template string, `\`` escapes a backtick and `\$` escapes a dollar sign; `\n \r \t \\`
 also work. Splices take arbitrary expressions, including indexing (e.g. with `var m = {"k": 1};`
-declared, `` `${m["k"]}` `` yields `"1"`). Known limitation (fix in flight): whitespace before a
-`}` inside a splice misparses — write `${m["k"]}`, not `${ m["k"] }`.
+declared, `` `${m["k"]}` `` yields `"1"`), and whitespace inside the splice is fine (`${ x }`).
+
+#### Format specs: `${expr:spec}`
+
+A splice may end in a format spec — a deliberate subset of C++ `std::format`:
+
+```ebnf
+format_spec = [[fill] align] [width] ["." precision] [type]
+align       = "<" | ">" | "^"                  // left / right / center
+fill        = any char except "{" and "}"      // default " "; only valid before an align
+width       = [1-9][0-9]*                      // max 1024; no "0" zero-pad flag (use "0>N")
+precision   = "." [0-9]+                       // numeric values only; max 1024
+type        = "f" | "x" | "X" | "b"            // fixed float; lower/upper hex int; binary int
+```
+
+```cpp
+`${hp:.1f}`      // 73.5      fixed, 1 decimal (bare ".N" also means fixed)
+`${gold:6}`      // "  1234"  numbers right-align by default
+`${name:<12}`    // "Grubwell    "  strings (and char/bool/etc.) left-align by default
+`${gold:*>8}`    // "****1234" fill char + align
+`${n:x}` `${n:X}` `${n:b}`   // hex / HEX / binary (ints only; negatives keep the "-")
+`${hp:>6.1f}`    // "  73.5"  combos: fill+align+width+precision+type
+```
+
+- `:f` with no precision means 6 decimals (like `std::format`); `.N` without a type is also
+  fixed. Precision on an int with `f` works (`${gold:.1f}` → `1234.0`).
+- `^` centering puts the odd fill char on the right (like `std::format`).
+- The desugar produces a call to the engine-core builtin `format_value(value, "spec")`
+  (registered on every engine, no stdlib needed; callable directly). Don't shadow the name.
+- **Errors**: a spec outside this subset (`${x:q}`, `${x:06}`, `${x:}`, …) is rejected **at lex
+  time** — `Unsupported format spec ':q' in template string` with the source position. A spec
+  that doesn't fit the value's type (`${str:.2f}`, `${flt:x}`) is a catchable **runtime** error:
+  `format spec ':.2f' does not apply to string value`. Both backends produce identical text.
+
+**Ambiguity rule (as implemented):** while lexing a splice, a `:` at top level (outside any
+nested `()`/`[]`/`{}`) that does **not** close a pending top-level `?` starts the spec, which
+runs as raw text to the closing `}` (so whitespace inside a spec is significant, and the fill
+char cannot be `:`). Ternaries keep working unchanged: `` `${crit ? "CRIT" : "hit"}` `` is all
+expression; to put a spec after a ternary, parenthesize it: `` `${(crit ? 150 : 100):>5}` ``.
+Map literals (`${ {"k": 1}["k"]:4 }`) and subscripts (`${m["k"]:6}`) are fine — their colons
+are nested. A bare top-level `:` is never a valid expression, so nothing legal is claimed.
+
+The same spec mini-language works in the stdlib `format()`/`print()` placeholders: `{:spec}`
+(sequential) and `{n:spec}` (positional), e.g. `format("{:.2f}", pi)` → `"3.14"`. There an
+invalid spec simply isn't a placeholder (stays literal), matching those functions' lenient
+style; type mismatches raise the same runtime error as above.
 
 ### Comments
 

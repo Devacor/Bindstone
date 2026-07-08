@@ -592,6 +592,15 @@ checked_result<token> parser::consume(token_type type, const std::string& messag
 
 // Primary expressions
 checked_result<expression_ptr> parser::primary() {
+    // Lexer errors travel as error tokens carrying the message in the lexeme
+    // (e.g. template-string format specs rejected at lex time). Surface that
+    // message instead of a generic "Expected expression".
+    if (check(token_type::error)) {
+        report_error(std::string(peek().lexeme), peek());
+        advance();
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+
     // Map literals parse as a PRIMARY so postfix applies ({"k":1}["k"], {..}.size());
     // they used to short-circuit at assignment level, which silently rejected any
     // postfix on a literal (grammar.md's own splice example was unparseable)

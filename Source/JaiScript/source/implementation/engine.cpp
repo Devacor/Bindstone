@@ -6,13 +6,16 @@
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
+#include <jaiscript/detail/format_spec.hpp>       // format_value builtin (template-string specs)
 #include <jaiscript/debug/controller.hpp>         // engine::debugger()
+#include <charconv>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -40,6 +43,84 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
     return backend->execute_callable(payload, args);
+}
+
+namespace {
+
+const char* spec_value_type_name(const script_value& v) {
+    switch (v.type()) {
+        case script_value_type::jai_null_type: return "null";
+        case script_value_type::jai_bool_type: return "bool";
+        case script_value_type::jai_int_type: return "int";
+        case script_value_type::jai_float_type: return "float";
+        case script_value_type::jai_char_type: return "char";
+        case script_value_type::jai_string_type: return "string";
+        case script_value_type::jai_array_type: return "array";
+        case script_value_type::jai_map_type: return "map";
+        case script_value_type::jai_function_type: return "function";
+        case script_value_type::jai_object_type: return "object";
+        case script_value_type::jai_shared_ptr_type: return "object";
+        case script_value_type::jai_reference_type: return "reference";
+        case script_value_type::jai_weak_ptr_type: return "weak_ptr";
+        default: return "unknown";
+    }
+}
+
+std::string spec_format_int(script_int v, char type) {
+    char buf[72];   // 64 binary digits + sign fits easily
+    int base = type == 'b' ? 2 : (type == 'x' || type == 'X') ? 16 : 10;
+    auto res = std::to_chars(buf, buf + sizeof(buf), v, base);
+    std::string s(buf, res.ptr);
+    if (type == 'X') {
+        for (auto& c : s) { c = static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
+    }
+    return s;
+}
+
+std::string spec_format_fixed(script_float v, int precision) {
+    // Worst case: sign + 309 integral digits + '.' + capped precision (1024)
+    char buf[1500];
+    auto res = std::to_chars(buf, buf + sizeof(buf), v, std::chars_format::fixed, precision);
+    return std::string(buf, res.ptr);
+}
+
+} // namespace
+
+// Single runtime formatter behind `${expr:spec}` splices and stdlib {:spec} placeholders
+// (declared in detail/format_spec.hpp). One definition = byte-identical output and error
+// text on both backends.
+std::string detail::format_value_with_spec(const script_value& value, const format_spec& spec, std::string_view raw_spec) {
+    const script_value& v = value.is_reference() ? value.deref() : value;
+    const bool numeric = v.is_int() || v.is_float();
+    std::string body;
+    if (spec.type == 'x' || spec.type == 'X' || spec.type == 'b') {
+        if (!v.is_int()) {
+            throw runtime_error("format spec ':" + std::string(raw_spec) + "' does not apply to " + spec_value_type_name(v) + " value");
+        }
+        body = spec_format_int(v.as_int(), spec.type);
+    } else if (spec.type == 'f' || spec.precision >= 0) {
+        if (!numeric) {
+            throw runtime_error("format spec ':" + std::string(raw_spec) + "' does not apply to " + spec_value_type_name(v) + " value");
+        }
+        const int precision = spec.precision >= 0 ? spec.precision : 6;   // std::format's {:f} default
+        body = spec_format_fixed(v.is_int() ? static_cast<script_float>(v.as_int()) : v.as_float(), precision);
+    } else {
+        body = v.to_string();
+    }
+    if (static_cast<int>(body.size()) < spec.width) {
+        const size_t pad = static_cast<size_t>(spec.width) - body.size();
+        const char align = spec.align ? spec.align : (numeric ? '>' : '<');
+        if (align == '<') {
+            body.append(pad, spec.fill);
+        } else if (align == '>') {
+            body.insert(0, pad, spec.fill);
+        } else {   // '^' — like std::format, the extra fill char goes to the right
+            const size_t left = pad / 2;
+            body.insert(0, left, spec.fill);
+            body.append(pad - left, spec.fill);
+        }
+    }
+    return body;
 }
 
 // Cost of matching args[first_arg .. first_arg+paramTypes.size()) against paramTypes, using the
@@ -1093,6 +1174,21 @@ void engine::initialize_engine_reference() {
         return script_value(std::monostate{}, engine_weak);
     });
     
+    // Template-string format specs (`${hp:.1f}`) desugar to this call at lex time; it is
+    // engine-core (not stdlib) so the language feature works on every engine. Directly
+    // callable too: format_value(3.14159, ".2f") -> "3.14".
+    add_variadic_function("format_value", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 2 || !args[1].is_string()) {
+            throw runtime_error("format_value expects (value, spec_string)");
+        }
+        const std::string& raw = args[1].as_string();
+        detail::format_spec spec;
+        if (!detail::parse_format_spec(raw, spec)) {
+            throw runtime_error("unsupported format spec ':" + raw + "'");
+        }
+        return script_value(detail::format_value_with_spec(args[0], spec, raw), engine_weak);
+    });
+
     // Parallel builtins (parallel_transform v0; docs/parallel_design.md). thread_count()
     // reports the worker count a region uses without constructing the pool.
     add_function("thread_count", [this]() -> script_int {

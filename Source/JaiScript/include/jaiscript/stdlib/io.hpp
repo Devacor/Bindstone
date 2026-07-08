@@ -3,6 +3,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/detail/format_spec.hpp>
 #include <iostream>
 #include <sstream>
 #include <format>
@@ -12,38 +13,51 @@
 namespace jai {
 namespace stdlib {
 
+    inline bool is_all_digits(std::string_view s) {
+        for (char c : s) {
+            if (c < '0' || c > '9') return false;
+        }
+        return !s.empty();
+    }
+
+    // A placeholder is {}, {n}, {:spec}, or {n:spec} — spec is the shared subset
+    // in detail/format_spec.hpp (same mini-language as template-string `${x:spec}`).
     inline bool has_format_placeholders(const std::string& str) {
         size_t pos = 0;
         while (pos < str.length()) {
             size_t brace = str.find('{', pos);
             if (brace == std::string::npos) break;
-            
+
             if (brace + 1 < str.length() && str[brace + 1] == '{') {
                 pos = brace + 2;
                 continue;
             }
-            
+
             size_t close = str.find('}', brace);
             if (close != std::string::npos) {
                 std::string content = str.substr(brace + 1, close - brace - 1);
-                
+
                 if (content.empty()) {
                     return true;
                 }
-                
-                bool is_number = true;
-                for (char c : content) {
-                    if (!std::isdigit(c)) {
-                        is_number = false;
-                        break;
+
+                size_t colon = content.find(':');
+                std::string_view index_part = std::string_view(content).substr(0, colon == std::string::npos ? content.size() : colon);
+                bool index_ok = index_part.empty() || is_all_digits(index_part);
+                if (index_ok) {
+                    if (colon == std::string::npos) {
+                        if (!index_part.empty()) {
+                            return true;
+                        }
+                    } else {
+                        detail::format_spec spec;
+                        if (detail::parse_format_spec(std::string_view(content).substr(colon + 1), spec)) {
+                            return true;
+                        }
                     }
                 }
-                
-                if (is_number) {
-                    return true;
-                }
             }
-            
+
             pos = brace + 1;
         }
         return false;
@@ -98,12 +112,35 @@ namespace stdlib {
             }
             
             std::string spec = format_str.substr(next_open + 1, close_brace - next_open - 1);
-            
+
             if (spec.empty()) {
                 // {} - use next argument
                 if (next_arg < args.size()) {
                     result += args[next_arg].to_string();
                     next_arg++;
+                }
+            } else if (size_t colon = spec.find(':'); colon != std::string::npos) {
+                // {:spec} / {n:spec} - format through the shared spec formatter
+                // (identical to template-string `${x:spec}`). An invalid spec keeps
+                // the braces literal, matching the invalid-index leniency below;
+                // a type-vs-spec mismatch throws (catchable, both backends).
+                std::string index_part = spec.substr(0, colon);
+                std::string fmt_part = spec.substr(colon + 1);
+                detail::format_spec parsed;
+                bool index_ok = index_part.empty() || is_all_digits(index_part);
+                if (index_ok && detail::parse_format_spec(fmt_part, parsed)) {
+                    size_t arg_index;
+                    if (index_part.empty()) {
+                        arg_index = next_arg;
+                        next_arg++;
+                    } else {
+                        arg_index = std::stoull(index_part) + arg_offset;
+                    }
+                    if (arg_index < args.size()) {
+                        result += detail::format_value_with_spec(args[arg_index], parsed, fmt_part);
+                    }
+                } else {
+                    result += "{" + spec + "}";
                 }
             } else {
                 // {n} - use positional argument
@@ -117,7 +154,7 @@ namespace stdlib {
                     result += "{" + spec + "}";
                 }
             }
-            
+
             pos = close_brace + 1;
         }
         

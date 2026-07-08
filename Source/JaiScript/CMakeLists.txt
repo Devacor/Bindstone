@@ -77,11 +77,8 @@ if(JAISCRIPT_BUILD_TESTS)
     add_subdirectory(source/tests)
 endif()
 
-# Examples (jai_rogue: ASCII roguelike written in JaiScript)
+# Examples (JaiScript-authored demo programs)
 option(JAISCRIPT_BUILD_EXAMPLES "Build JaiScript example programs" ON)
-if(JAISCRIPT_BUILD_EXAMPLES)
-    add_subdirectory(examples/roguelike)
-endif()
 
 # --- jai_demoreel (examples/demoreel): demoscene tech-demo reel in JaiScript ---
 if(JAISCRIPT_BUILD_EXAMPLES)

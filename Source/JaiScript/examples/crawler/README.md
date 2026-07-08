@@ -2,12 +2,13 @@
 
 A first-person, step-based dungeon crawler in the spirit of the 1991 shareware
 big-hairies (garish VGA corridors, a compass, monsters that get *bigger* as they
-walk at you) — written **entirely in JaiScript**. The C++ host (`main.cpp`) is the
-same thin shell as `examples/roguelike`: a VT console, a blocking `read_key()`, a
+walk at you) — written **entirely in JaiScript**. The C++ host (`main.cpp`) is a
+deliberately thin shell: a VT console, a blocking `read_key()`, a
 seeded `Rng`, file IO for saves, flags as globals. Everything else — the DDA
 raycaster, dungeon gen, combat, AI, items, saves, UI — is script.
 
-Same bones as the roguelike, different eyes: movement is **locked to the four
+Same bones as JAI'S DESCENT (the retired ASCII roguelike this grew out of),
+different eyes: movement is **locked to the four
 cardinal facings**. `w` steps a tile, `a`/`d` snap 90 degrees (with a fast 3-frame
 heading sweep so the turn reads as motion) — but on the `m` overhead map the
 movement keys go **absolute**: `wasd`/`hjkl`/arrows step by compass direction,
@@ -18,13 +19,14 @@ materials that change wardrobe every couple of floors, and billboard sprites wit
 per-column z-buffer occlusion. A distant Grublin is a small green blob at the end
 of the hall. It does not stay small.
 
-## Shared logic: copied, not forked (on purpose)
+## Shared logic: copied from the roguelike (now the canonical copy)
 
 `combat.jai`, `items.jai`, `entities.jai`, `data.jai`, `ai.jai`, `dungeon.jai`,
-`util.jai`, `state.jai` are **snapshots of the roguelike's committed versions** —
+`util.jai`, `state.jai` were **snapshots of the roguelike's committed versions** —
 the game rules are deliberately identical (one key = one turn; the AI plays the
-same grid and does not care where the camera points). They are copies for now and
-will unify once the upcoming `include` module system lands. Three small deltas,
+same grid and does not care where the camera points). The roguelike is retired
+(2026-07) and these copies are now the canonical versions, along with its
+smoke-seed determinism-instrument role. Three small deltas from the originals,
 each marked with a `CRAWLER DELTA` comment at the site:
 
 - `dungeon.jai` — `bfs_step` searches FOUR_DIRS (a facing-locked body cannot step
@@ -88,8 +90,8 @@ Needs a Windows 10+ console at least 80x28 (256-color VT processing).
 
 Ten floors, permadeath, Vexadrach the Hollow-Flame at the bottom. Same Kin
 species, classes, bestiary, affix loot, identify-by-use potions, and timed
-effects as JAI'S DESCENT — if you can win that, the only new skill here is
-remembering which way you're pointing.
+effects as JAI'S DESCENT had — its whole feature set lives on here; the only
+skill it never asked of you is remembering which way you're pointing.
 
 ## The view
 
@@ -197,14 +199,14 @@ Verified at the time of writing: seeds 99 / 7 / 1337 / 4242 hash-identical acros
 backends (up to 1500 turns; seed 99's pilot dies honestly on floor 4 at turn 341,
 same corpse both backends), and `--god --smoke --turns 3000 --seed 5` reaches
 floor 10 and kills Vexadrach on both (`victory: true`, same hash, turn 1016).
-Scripted interactive input works like the roguelike: `--input "11^dwwwww" --quiet`
+Scripted interactive input is also available: `--input "11^dwwwww" --quiet`
 (`;` = enter, `^` = esc), and a `save -> load` round trip restores turn, facing,
 position, inventory and effects exactly.
 
 ## Files
 
 ```
-main.cpp            thin host: console, keys, Rng, file IO, flags (adapted from roguelike)
+main.cpp            thin host: console, keys, Rng, file IO, flags
 scripts/state.jai   persistent globals (G, RNG, PILOT_CO)            [boss handle moved into G]
 scripts/util.jai    colors, hashing, direction tables                [copied verbatim]
 scripts/data.jai    species/classes/bestiary/items/affixes/flavor    [copied verbatim]
@@ -251,7 +253,7 @@ and coroutine methods landed (3766da09). Both got used naturally:
   returns, comparisons (`==`, `<`) and bool-typed locals all deref correctly, so
   game logic built on `is_visible()` was never affected — but it silently
   defeated the fog of war in any direct `if (G.visible[i])` render path (the
-  roguelike's map render at HEAD has the same shape). Minimal repro:
+  retired roguelike's map render had the same shape). Minimal repro:
   `var a = [false]; if (a[0]) { /* taken! */ }`.
 - Inherited workarounds from the roguelike copies are still honored (save
   padding for `from_json` engine-pointer holes, hoisted unary-minus on element

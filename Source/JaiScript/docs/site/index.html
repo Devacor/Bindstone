@@ -88,7 +88,7 @@ print("hp = {}", h.hp);</code></pre></div>
   <div class="pillar"><h3><span class="pnum">05</span>Hot reload that never bricks</h3>
     <p>Redefine a class mid-session and live instances migrate: fields keep values, changed types convert
     permissively, new fields take their initializers. The reload <em>always succeeds</em>, because iteration
-    speed is the point. The roguelike reloads its own scripts mid-game on a keypress.</p>
+    speed is the point. The dungeon crawler reloads its own scripts mid-game on a keypress.</p>
     <p><a href="embedding/07-hot-reload.html">Hot Reload →</a></p></div>
   <div class="pillar"><h3><span class="pnum">06</span>Safe at the boundary, by construction</h3>
     <p>A script can only touch what the host registered — the binding surface <em>is</em> the allowlist.
@@ -109,7 +109,7 @@ print("hp = {}", h.hp);</code></pre></div>
   <div class="receipt"><span class="big">1,500+</span><span class="what">tests green on both backends, every commit — plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
   <div class="receipt"><span class="big">~45 ns</span><span class="what">per hot-loop iteration on the VM — loops fuse into superinstructions; the VM beats Squirrel on most head-to-head benchmarks (12W/6L/1T)</span></div>
   <div class="receipt"><span class="big">32 bytes</span><span class="what"><code>script_value</code> size, static-assert-gated — two per cache line</span></div>
-  <div class="receipt"><span class="big">~2,700 lines</span><span class="what">of JaiScript in a complete roguelike; plus a dungeon crawler and a 10-scene demoreel — all doubling as cross-backend determinism tests</span></div>
+  <div class="receipt"><span class="big">~3,250 lines</span><span class="what">of JaiScript in a complete first-person dungeon crawler; plus a 10-scene demoreel — all doubling as cross-backend determinism tests</span></div>
   <div class="receipt"><span class="big">strict mode</span><span class="what">optional static checking: compiler-style diagnostics with line/column before a single statement runs</span></div>
   <div class="receipt"><span class="big">0.38 µs</span><span class="what">warm <code>jaibite.execute()</code> on the VM for a tiny script; engine creation ~90 µs, so reuse engines</span></div>
 </div>

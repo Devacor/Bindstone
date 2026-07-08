@@ -73,8 +73,8 @@ this property rather than fighting it.
 Redefine a class mid-session and live instances migrate: fields keep their values,
 changed field types convert permissively, new fields take their initializers — the reload
 *always succeeds*, because iteration speed is the point. Functions on the live call stack
-finish on their old bodies; the next call gets the new one. The roguelike in
-`examples/roguelike` reloads its own scripts mid-game on a keypress.
+finish on their old bodies; the next call gets the new one. The dungeon crawler in
+`examples/crawler` reloads its own scripts mid-game on a keypress.
 
 ### 6. Safe at the boundary, by construction
 
@@ -111,9 +111,11 @@ to opt out).
   `docs/PERFORMANCE.md`). Loops fuse into superinstructions; a 1000-iteration hot loop
   runs ~47µs.
 - **`script_value` is 32 bytes**, static-assert-gated, two per cache line.
-- **A complete roguelike** (`examples/roguelike`, ~2,700 lines of JaiScript) and a
-  **demoscene reel** (`examples/demoreel`) are written in it — both double as
-  cross-backend determinism tests: same seed, byte-identical state hashes on both engines.
+- **A complete first-person dungeon crawler** (`examples/crawler`, ~3,250 lines of
+  JaiScript) and a **demoscene reel** (`examples/demoreel`) are written in it — both double
+  as cross-backend determinism tests: same seed, byte-identical state hashes on both
+  engines. (The original ASCII roguelike the crawler grew out of is retired; the crawler
+  carries its game rules and its smoke-seed instrument role.)
 - **Optional static checking** (`engine->static_checking(strict)`): accumulate-then-throw
   compiler-style diagnostics with line/column and related locations, before a single
   statement runs. `var` code stays free; typed code gets caught at parse time.

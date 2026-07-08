@@ -17,6 +17,7 @@
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <unordered_set>
 #include <typeindex>
 #include <iosfwd>
@@ -71,6 +72,33 @@ namespace jai {
         }
     };
 
+    // Compile-time-tagged script source for engine::execute's literal fast lane.
+    // Constructing from a string literal is consteval (explicit — bare `execute("...")`
+    // keeps its std::string overload), so a literal-tagged instance is GUARANTEED to
+    // point at immutable static storage: the engine may key its parse cache on
+    // pointer+length alone, skipping content keying entirely on re-execute. A runtime
+    // char array is a compile error here (not a constant expression) — wrap dynamic
+    // text in std::string_view instead, which routes to the content-keyed lane.
+    // MSVC /GF string pooling merges identical literals to one address (one cache
+    // entry); without pooling, duplicate text yields harmless duplicate entries.
+    class script_source {
+    public:
+        template<size_t N>
+        consteval explicit script_source(const char (&literal)[N]) noexcept
+            : text_(literal), length_(N - 1), literal_(true) {}
+        constexpr script_source(std::string_view source) noexcept
+            : text_(source.data()), length_(source.size()), literal_(false) {}
+
+        constexpr const char* data() const noexcept { return text_; }
+        constexpr size_t size() const noexcept { return length_; }
+        constexpr bool literal() const noexcept { return literal_; }
+
+    private:
+        const char* text_;
+        size_t length_;
+        bool literal_;
+    };
+
     class engine : public std::enable_shared_from_this<engine> {
     private:
         engine();
@@ -105,6 +133,13 @@ namespace jai {
         // Primary API - execute methods
         virtual script_value execute(const std::string& scriptContent);
         script_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
+
+        // Literal fast lane: execute(script_source("...")) re-executes through a
+        // pointer+length-keyed cache — the content is never re-keyed on a hit. A
+        // string_view-wrapped dynamic falls through to the content-keyed lane, same
+        // semantics as execute(std::string). Only consulted for tagged sources; the
+        // std::string overloads are untouched.
+        script_value execute(script_source source);
 
         // execute_file attributes the script to `scriptPath`: the path is stamped onto
         // every AST node (file:line:col), so stack traces, error messages, and the

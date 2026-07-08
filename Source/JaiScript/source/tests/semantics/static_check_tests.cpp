@@ -644,6 +644,19 @@ public:
                 "class C { string only_field = \"s\"; function probe() -> void { int x = only_field; } }")));
         });
 
+        test("shared_ptr_decl_pointee_checking", [this]() {
+            // Runtime enforces typed shared_ptr decl pointees (Dev ruling 2026-07);
+            // the checker models the same rule through its object-assignability
+            // lattice: wrong class errors, derived->base stays clean.
+            auto e = make_engine();
+            check_eq((size_t)1, error_count(e->check(
+                "class Foo { int x = 1; } class Bar { int y = 2; } shared_ptr<Bar> wrong = Foo();")));
+            check_eq((size_t)0, error_count(e->check(
+                "class Base { int b = 1; } class D : Base { int d = 2; } shared_ptr<Base> ok = D();")));
+            check_eq((size_t)0, error_count(e->check(
+                "class Foo2 { int x = 1; } shared_ptr<Foo2> n = null;")));
+        });
+
         // ------------------------------------------------------------ fuzz corpus FP gate
 
         test("fuzz_corpus_false_positive_gate", [this]() {

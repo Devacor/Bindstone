@@ -5603,6 +5603,31 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_weak_ptr_conversion), "Cannot initialize shared_ptr directly from weak_ptr");
             } else if (value.type() == script_value_type::jai_object_type ||
                       value.type() == script_value_type::jai_shared_ptr_type) {
+                // Dev ruling (2026-07): typed shared_ptr declarations ENFORCE their
+                // pointee class (wrong-class init used to alias silently). Same class
+                // and derived->base (script chains + host upcasts) stay legal;
+                // unresolvable classes stay lenient (opaque host flows).
+                auto expected_type = decl->type->element_type();
+                if (expected_type && !expected_type->type_name.empty() &&
+                    expected_type->base_type != script_value_type::jai_any_type) {
+                    const std::string& expected_class = expected_type->type_name;
+                    std::string actual_class;
+                    if (auto instance = value.get_class_instance()) {
+                        actual_class = instance->get_class_name();
+                    }
+                    if (!actual_class.empty() && actual_class != expected_class) {
+                        bool is_subtype = false;
+                        if (auto eng = engine_) {
+                            auto actual_def = eng->get_class_definition(actual_class);
+                            is_subtype = actual_def && actual_def->is_subtype_of(expected_class);
+                        }
+                        if (!is_subtype) {
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                                "Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
+                                expected_type->id, string_symbolizer_->intern(actual_class));
+                        }
+                    }
+                }
                 // Initialize with object/shared_ptr - that's fine, objects are already shared_ptr
                 // Mark the type as shared_ptr to ensure reference semantics
                 value.set_type_info(decl->type);

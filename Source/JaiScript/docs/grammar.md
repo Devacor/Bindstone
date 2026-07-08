@@ -811,7 +811,14 @@ string healthLevel = health > 75 ? "healthy" :
 13. **Collection Literals**: arrays always use `[...]`; maps use `{...}` with either
     `{key, value}` entries or JSON-style `key: value` pairs.
 14. **Subscript Operations**: Full support for array/map subscripting with both read and write
-    operations; `operator[]` is overloadable on script classes.
+    operations; `operator[]` is overloadable on script classes. Strings support READ-ONLY
+    char subscript: `s[i]` yields a `char` (bounds-checked like arrays: "String index {i}
+    out of bounds for string of size {n}"; negative indices are out of bounds — `at(i)`
+    keeps its negative-index normalization and returns a 1-char string). `s[i] = c` is a
+    clear error ("Strings are read-only through subscript") — strings share storage under
+    copy, so subscript writes would need copy-on-write; possible future work. `char`
+    supports the full comparison set including ordering (`c >= '1' && c <= '9'`);
+    char-vs-int ordering is deliberately an error (no silent promotion).
 15. **Parallel Builtins (v0, no new syntax)**: `parallel_transform(arr, fn)` and
     `parallel_transform(arr, fn, weight_fn)` are ordinary builtin CALLS — the optional
     weight hint is simply the third argument (the `parallel_for` keyword and its hint

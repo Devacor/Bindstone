@@ -1805,6 +1805,9 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() < right.unchecked_as_string(), engine_);
 		}
+		if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
+			return script_value(left.unchecked_as_char() < right.unchecked_as_char(), engine_);
+		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
 	}
 
@@ -1861,6 +1864,9 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 		}
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() <= right.unchecked_as_string(), engine_);
+		}
+		if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
+			return script_value(left.unchecked_as_char() <= right.unchecked_as_char(), engine_);
 		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
 	}
@@ -1919,6 +1925,9 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() > right.unchecked_as_string(), engine_);
 		}
+		if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
+			return script_value(left.unchecked_as_char() > right.unchecked_as_char(), engine_);
+		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
 	}
 
@@ -1975,6 +1984,9 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 		}
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() >= right.unchecked_as_string(), engine_);
+		}
+		if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
+			return script_value(left.unchecked_as_char() >= right.unchecked_as_char(), engine_);
 		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
 	}
@@ -4426,9 +4438,13 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 		const auto& array = left.unchecked_as_array();
 
 		if (index < 0 || index >= static_cast<script_int>(array.size())) {
+			// Numbers intern as symbols: the {0}/{1} machinery resolves symbol ids,
+			// so raw counts printed garbage names (KEEP BYTE-PARALLEL with the
+			// interpreter subscript path)
 			return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
 				"Array index {0} out of bounds for array of size {1}",
-				static_cast<uint64_t>(index), static_cast<uint64_t>(array.size()));
+				symbolizer_->intern(std::to_string(index)),
+				symbolizer_->intern(std::to_string(array.size())));
 		}
 
 		if (lvalue_shape) {
@@ -4510,6 +4526,30 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 				stack_.push_back(make_null());
 			}
 		}
+		return {};
+	}
+
+	if (left.is_string()) {
+		// Read-only char subscript (C++-familiar s[i]). Writes stay an error:
+		// strings share storage under copy, so subscript writes would need
+		// copy-on-write - future work, a clear error instead of a silent trap.
+		// (KEEP BYTE-PARALLEL with the interpreter subscript path)
+		if (!right.is_int()) {
+			return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
+		}
+		if (lvalue_shape && lvalue_write) {
+			return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+				"Strings are read-only through subscript: use substr()/+ to build a new string");
+		}
+		const auto& str = left.unchecked_as_string();
+		script_int index = right.unchecked_as_int();
+		if (index < 0 || index >= static_cast<script_int>(str.size())) {
+			return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
+				"String index {0} out of bounds for string of size {1}",
+				symbolizer_->intern(std::to_string(index)),
+				symbolizer_->intern(std::to_string(str.size())));
+		}
+		stack_.push_back(script_value(static_cast<script_char>(str[static_cast<size_t>(index)]), engine_));
 		return {};
 	}
 

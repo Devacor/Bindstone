@@ -1588,13 +1588,15 @@ public:
 					check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
 						std::string("non-lvalue arg keeps the exact error: ") + c + " got: " + msg);
 				}
-				// String subscript args fail during argument EVALUATION (strings have no
-				// [] operator) - pre-existing error, never reaches ref binding
+				// String subscript args evaluate to a CHAR rvalue (read-only string
+				// subscript, GLOOM item B) - the standard non-lvalue ref-bind error
+				// fires like any other rvalue argument (flipped from the old
+				// "Subscript can only be used on" eval-time error)
 				auto e = jai::engine::make();
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				auto msg = e->execute(std::string(setup) + "try { f(s[0]); } catch (e) { msg = e; } msg;").as<std::string>();
-				check_true(msg.find("Subscript can only be used on") != std::string::npos,
-					std::string("string subscript arg keeps the eval-time error, got: ") + msg);
+				check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
+					std::string("string subscript arg is a char rvalue: non-lvalue ref-bind error, got: ") + msg);
 			}
 		});
 

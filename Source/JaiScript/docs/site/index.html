@@ -107,7 +107,7 @@ print("hp = {}", h.hp);</code></pre></div>
 <h2>The receipts</h2>
 <div class="receipts">
   <div class="receipt"><span class="big">1,500+</span><span class="what">tests green on both backends, every commit — plus differential fuzzing (a 10,000-program campaign, zero crashes)</span></div>
-  <div class="receipt"><span class="big">~45 ns</span><span class="what">per hot-loop iteration on the VM — loops fuse into superinstructions; the VM beats Squirrel on most head-to-head benchmarks (13W/6L)</span></div>
+  <div class="receipt"><span class="big">~45 ns</span><span class="what">per hot-loop iteration on the VM — loops fuse into superinstructions; the VM beats Squirrel on most head-to-head benchmarks (12W/6L/1T)</span></div>
   <div class="receipt"><span class="big">32 bytes</span><span class="what"><code>script_value</code> size, static-assert-gated — two per cache line</span></div>
   <div class="receipt"><span class="big">~2,700 lines</span><span class="what">of JaiScript in a complete roguelike; plus a dungeon crawler and a 10-scene demoreel — all doubling as cross-backend determinism tests</span></div>
   <div class="receipt"><span class="big">strict mode</span><span class="what">optional static checking: compiler-style diagnostics with line/column before a single statement runs</span></div>

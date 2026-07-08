@@ -1,646 +1,423 @@
-# JaiScript Performance Analysis
+# JaiScript Performance Report
 
-> **HISTORICAL — 2025-12, tree-walker era, pre-VM, pre-thin-value-fold.** Every number below
-> predates the bytecode VM and the 32-byte `script_value` fold; the ChaiScript comparisons are
-> unreproducible (the ChaiScript dependency was deleted; the benchmark suite now compares against
-> sol2/Lua and Squirrel). For current committed baselines see `thin_value_rebaseline.md` §6
-> (interpreter and VM side by side) and `execution_mode_metrics.md`. The "Bytecode compilation"
-> future item below SHIPPED as the full-parity VM backend (`--backend=vm`; MV defaults to VM).
+**2026-07, VM-perf branch (HEAD 3528ea86).** The definitive current numbers: both JaiScript
+backends head-to-head against Lua 5.4 (sol2), Squirrel 3.x, and ChaiScript 6.1, plus per-op
+ladders, aliasing costs, parallel scaling, debugger overhead, and jaibite cache numbers.
+Methodology in Appendix A; everything here is min-of-5 (min-of-3 for the long parallel
+suite) integer-µs Foundry rows on a quiet machine, full suite green (88 suites, 1844 tests)
+on both backends at the measured commit. The 2025-12 tree-walker-era analysis this file used
+to hold is preserved in git history (`git show 9c268ffd:Source/JaiScript/docs/PERFORMANCE.md`);
+its optimization-history table survives as Appendix B.
 
-## Historical JaiScript Performance (Release Build, 2025-12)
+## Executive summary
 
-Benchmarks run with `/O2 /GL /LTCG` optimizations on x64-Release configuration (2025-12-28):
+1. **47 ns per VM hot-loop iteration** — the fused 1000-iteration compound loop runs 47 µs,
+   holding the VM's 44–48 µs band at HEAD with the debugger compiled in and idle.
+2. **Clean sweep vs ChaiScript**: JaiScript wins all 29 live head-to-head rows (the 30th,
+   the script BST, stands at ~50× from its historical figure) — typically 8–20× (function
+   calls 13×, method dispatch 13×, fib(6) 20×), and that is *after* retuning the ChaiScript
+   suite's algorithm rows in ChaiScript's favor for fairness.
+3. **12W / 6L / 1T vs Squirrel** (VM backend, 19 head-to-head rows): wins everything
+   statement-, container-, string-, and object-shaped; the losses are deep recursion and the
+   raw-loop family.
+4. **vs Lua 5.4: an honest split, 7W / 10L / 2T.** JaiScript wins or ties statements,
+   containers, and null checks; Lua wins loops (~2–8×) and above all call-dense recursion —
+   **fib(15) is ~9× faster in Lua** (697 vs 76 µs). Structural, diagnosed, and on the
+   roadmap (flat-stack VM rewrite — see Known gaps).
+5. **`parallel_transform` reaches 4.8× over the serial loop at W=8 on a 4C/8T machine**
+   (100k-double map, VM), and the jaibite disk cache makes a 535-line game file load
+   **2.4× faster** than parsing it (5.8 ms → 2.4 ms full run; the parse component itself,
+   ~3.4 ms, is replaced by a sub-ms binary load).
 
-| Benchmark                      | Time (uS) | Notes                                    |
-|--------------------------------|-----------|------------------------------------------|
-| Integer Addition               | <1        | Single arithmetic operation              |
-| Float Multiplication           | <1        | Single floating-point operation          |
-| Variable Operations            | 2         | 3 variable declarations + 1 addition     |
-| Function Calls                 | 4         | Function declaration + invocation        |
-| Array Push/Pop                 | 7         | 3 pushes + 1 pop + size check            |
-| Map Insert/Lookup              | 5         | 2 inserts + 1 lookup                     |
-| Class Creation                 | 11        | Class definition + instantiation         |
-| Method Invocation              | 9         | Class with method + method call          |
-| For Loop (100 iterations)      | 8         | 0.08uS per iteration (~80ns)             |
-| String Concatenation           | 3         | String operations                        |
-| Complex Expression             | 2         | Multi-operator expression evaluation     |
-| Class Inheritance              | 94        | Base + derived class + instantiation     |
-| Variable Lookup Heavy          | 5         | 10 variable lookups in expression        |
-| Hot Loop (1000 iterations)     | 44        | 0.044uS per iteration (~44ns)            |
-| Simple Compound Assignment     | 14        | 100 compound assignments (+=, -=, etc.)  |
-| Engine Creation                | 42        | One-time engine initialization           |
-| Stdlib Registration            | 133       | Standard library function registration   |
-| String Copy (Long String)      | 5         | Copying long strings                     |
-| String Passing to Function     | 7         | Function parameter passing               |
-| String Method Chaining         | 4         | Method call chains on strings            |
-
-## Performance Optimizations
-
-JaiScript has undergone several rounds of optimizations to improve performance:
-
-### 1. String Symbolizer & ID-based Optimizations
-
-The string symbolizer implementation combined with ID-based class operations provides significant performance improvements:
-
-**Key Optimizations:**
-- **O(1) Variable Lookups**: Using interned uint64_t IDs instead of string comparisons
-- **Parse-time Interning**: Names are interned once during parsing, not at runtime
-- **Cached Type IDs**: Common type names pre-interned and cached
-- **Integer-based Maps**: All lookups use integer keys for fast comparison
-- **ID-based Class Operations**: `class_instance` and `class_definition` use uint64_t IDs for field/method lookups
-- **Cached Operator IDs**: Frequently-used operators (e.g., `[]`, `_cpp_object`) cached as member variables
-- **Parser Pre-computed IDs**: AST nodes store `name_id` and `symbol_id` from parser, avoiding redundant interning
-
-**ID-based Class Operations (v0.1.4):**
-
-The most recent optimization converted `class_instance` and `class_definition` to use `uint64_t` IDs internally for all field and method operations:
-
-**Before:**
-```cpp
-instance->set_field("position", value);     // String comparison
-instance->get_method("update");             // String lookup
-```
-
-**After:**
-```cpp
-uint64_t field_id = symbolizer->intern("position");
-instance->set_field(field_id, value);       // Integer comparison (O(1))
-instance->get_method(method_id);            // Integer lookup (O(1))
-```
-
-**Key improvements:**
-- Field and method lookups now use integer hash maps instead of string maps
-- Frequently-used IDs cached (e.g., `cpp_object_field_id_`, `subscript_op_id_`)
-- Pre-computed IDs from parser used directly (e.g., `var_decl->name_id`, `func_decl->name_id`)
-- Only convert IDs back to strings for error messages
-- Public APIs still accept strings for ergonomics, internally converted to IDs once
-
-**Performance gains:**
-- Hot loops: 37% faster (1136uS → 715uS)
-- Recursion: 15-19% faster (Fibonacci: 27uS → 22uS)
-- Class operations: 14-18% faster (Creation: 7uS → 6uS, Inheritance: 133uS → 109uS)
-- Algorithms: 13-19% faster (Bubble sort: 156uS → 127uS)
-
-### 2. Unchecked Accessor Optimizations (v0.1.3)
-
-Added ultra-fast unchecked accessors for direct variant access without type checking when type is already known:
-
-**Unchecked Accessors:**
-```cpp
-// Direct variant access using std::get_if (no exceptions, no type checks)
-inline script_bool unchecked_as_bool() const noexcept {
-    return *std::get_if<static_cast<size_t>(storage_index::jai_bool)>(&storage_);
-}
-
-inline script_int unchecked_as_int() const noexcept {
-    return *std::get_if<static_cast<size_t>(storage_index::jai_int)>(&storage_);
-}
-// ... similar for float, string, etc.
-```
-
-**Optimized `is_truthy()` using unchecked accessors:**
-```cpp
-inline bool is_truthy(const script_value& value) {
-    switch (value.type()) {
-        case jai_bool_type: return value.unchecked_as_bool();
-        case jai_int_type: return value.unchecked_as_int() != 0;
-        case jai_float_type: return value.unchecked_as_float() != 0.0;
-        case jai_string_type: return !value.unchecked_as_string().empty();
-        // ...
-    }
-}
-```
-
-This eliminates exception overhead and reduces branch prediction misses in hot paths.
-
-### 3. Type Check Optimizations (v0.1.2)
-
-Replaced chained `is_int() / is_float() / is_string()` checks with single `type()` call + switch statements:
-
-**Before:**
-```cpp
-if (value.is_int() && other.is_int()) {
-    // int path
-} else if ((value.is_int() || value.is_float()) && (other.is_int() || other.is_float())) {
-    // float path
-}
-// Each is_*() call checks type info internally
-```
-
-**After:**
-```cpp
-auto leftType = value.type();
-auto rightType = other.type();
-if (leftType == jai_int_type && rightType == jai_int_type) {
-    // int path
-} else if ((leftType == jai_int_type || leftType == jai_float_type) &&
-           (rightType == jai_int_type || rightType == jai_float_type)) {
-    // float path
-}
-// Single type() call per value
-```
-
-**Optimized Locations:**
-- Unary operators (-, ~, !)
-- Increment/decrement operators (++, --)
-- Compound assignment operators (+=, -=, *=, /=)
-- Binary arithmetic paths
-- Loop condition evaluation (`is_truthy()`)
-- For-loop structure (native C++ for-loop with lambda helpers)
-
-### Performance Impact:
-- **Recursive algorithms**: ~94% faster (Fibonacci benchmark: 3381uS → 220uS → 22uS)
-- **Loop-heavy operations**: ~37-47% faster (For Loop: 125uS → 79uS → 67uS, Hot Loop: 1345uS → 1136uS → 715uS)
-- **String method calls**: ~27% faster (String Concatenation: 11uS → 8uS)
-- **Array algorithms**: ~61% faster (Bubble Sort: 329uS → 200uS → 156uS → 127uS)
-- **Method invocation**: ~55% faster (Method Invocation: 20uS → 17uS → 9uS)
-- **Function calls**: ~60% faster (Function Calls: 10uS → 5uS → 4uS)
-- **Class operations**: ~75% faster (Class Creation: 24uS → 22uS → 7uS → 6uS, Class Inheritance: 139uS → 133uS → 109uS)
-
-### 4. Slot-Based Local Variable Storage (v0.1.6)
-
-Replaced hash map-based local variable lookup with O(1) array indexing like Squirrel's bytecode VM:
-
-**Before:**
-```cpp
-// Hash map lookup per variable access
-std::unordered_map<uint64_t, script_value> locals;
-auto it = locals.find(symbol_id);  // O(1) amortized, but hash + comparison overhead
-```
-
-**After:**
-```cpp
-// Direct array indexing - parser assigns slot indices at parse time
-std::vector<script_value> locals;
-return &locals[slot_index];  // O(1) guaranteed, single array access
-```
-
-**Key Implementation:**
-- Parser assigns numeric slot indices to parameters and local variables during parsing
-- Each function tracks `local_count` for pre-reserving the locals vector
-- `SIZE_MAX` used as invalid slot sentinel (naturally fails bounds check, no casting)
-- Parameters get slots 0, 1, 2..., then local variables in declaration order
-- Function scope tracking in parser handles nested functions/lambdas correctly
-
-**Performance Impact:**
-- **Fibonacci(15)**: 1051uS → 878uS (**16% faster**)
-- **Recurse with 10 Locals (depth=15)**: 36uS (new benchmark)
-- **vs Squirrel on local-heavy code**: 12x gap (better than 16x on Fibonacci)
-- **vs ChaiScript on local-heavy code**: JaiScript is **67x faster**
-
-The slot-based approach eliminates hash computation and bucket traversal on every local variable access, providing consistent O(1) performance.
-
-### 5. Raw Engine Pointer & Shared String Optimization (v0.1.5)
-
-Two key optimizations to reduce `script_value` overhead:
-
-**Raw Engine Pointer:**
-```cpp
-// Before: weak_ptr has atomic refcount overhead on every copy
-std::weak_ptr<engine> engine_ref_;  // 16 bytes + atomic ops
-
-// After: raw pointer, safely nulled on engine destruction
-engine* engine_;  // 8 bytes, no atomic overhead
-```
-
-**Shared String/Function Storage:**
-```cpp
-// Before: string/function stored directly (copies entire string)
-script_string storage_;  // Expensive to copy
-
-// After: shared_ptr for cheap copies
-std::shared_ptr<script_string> string_ptr_;  // Copy = atomic increment only
-std::shared_ptr<function> function_ptr_;
-```
-
-**Performance Impact (v0.1.5):**
-- **Hot Loops**: 71uS → 49uS (**31% faster**)
-- **For Loops**: 17uS → 15uS (**12% faster**, gap now 1.25x vs ChaiScript)
-- **Bubble Sort**: 115uS → 82uS (**29% faster**)
-- **BST**: 700uS → 596uS (**15% faster**)
-- **Fibonacci**: 20uS → 17uS (**15% faster**)
-- **String concat**: Neutral (shared_ptr indirection hidden by actual string work)
-
-## Architecture: Value Type Implementation
-
-JaiScript uses a type-safe design prioritizing correctness over raw micro-operation speed.
-
-### Memory Layout
-
-**JaiScript's `script_value`** uses **discriminated union (std::variant)**:
-```cpp
-class script_value {
-    type_info_ptr type_info_;         // Shared type metadata (8 bytes)
-    engine* engine_;                   // Raw engine pointer (8 bytes)
-    std::variant<...> storage_;        // 14 alternatives, ~40 bytes
-    // Note: strings/functions use shared_ptr for cheap copies
-    void* cpp_bound_ptr_;              // C++ binding (8 bytes)
-};
-```
-
-### Performance Characteristics
-
-**JaiScript arithmetic** uses type-safe variant access:
-```cpp
-// Type-safe with discriminant check
-script_int leftInt = leftVal.as_int();   // std::get<script_int>(storage_)
-script_int rightInt = rightVal.as_int(); // Checks variant index each time
-return leftInt + rightInt;
-// Cost: 2 variant checks + arithmetic = ~5-8ns
-```
-
-This ensures type safety and prevents undefined behavior at the cost of some micro-operation overhead.
-
-### For Loop Performance Profile
-
-For `for (auto i = 0; i < 100; ++i) { sum += i; }`:
-
-**JaiScript** (~8uS for 100 iterations = **80ns per iteration**):
-```
-Per iteration:
-1. condition (i < 100):     ~1ns (get_type() + static_cast, no RTTI)
-2. body (sum += i):         ~5ns (2 ID lookups + optimized type checks + value construction)
-3. increment (++i):         ~2ns (ID lookup + optimized type check + value construction)
-                           ------
-Total: ~8ns × 100 = 0.8uS + overhead = 8uS
-```
-
-**JaiScript now beats ChaiScript** (8uS vs 12uS = 1.5x faster).
-
-**Optimizations applied:**
-- Native C++ for-loop structure with lambda helpers (compiler-friendly pattern)
-- Unchecked accessors in `is_truthy()` (no exception overhead)
-- Error capture flags instead of throwing from lambdas
-- Improved string interning reduces lookup overhead
-
-### Micro-Overhead Sources
-
-1. **Variant Discriminant Checks**: Every `as_int()` / `as_float()` requires `storage_.index()` check
-   - **Optimization Applied**: Replaced chained `is_int() / is_float()` checks with single `type()` call + switch
-   - **Result**: ~15% reduction in type checking overhead
-2. **Value Stack Operations**: push/pop on every sub-expression evaluation
-3. **Script_value Construction**: Creating new values for intermediate results
-4. **Integer-based ID Lookups**: O(1) environment lookups using interned IDs (optimized from string lookups)
-5. **is_truthy() Conversion**: Optimized with single switch statement on type
-
-**Design Rationale**: JaiScript prioritizes **type safety** and **memory efficiency** (no heap allocation for primitives). Recent optimizations have made JaiScript faster than ChaiScript across all benchmarks:
-- ✅ Function calls dominate performance profile (JaiScript 82x faster)
-- ✅ Even loops are now faster than ChaiScript (1.5x)
-- ✅ Memory efficiency matters for embedded use
-- ✅ Type safety prevents entire classes of bugs
-
-### Loop Optimization Approach
-
-Loop conditions require evaluation each iteration:
-1. The condition value **changes every iteration** (e.g., `i < 100` evaluates differently as `i` changes)
-2. Must evaluate the condition expression each time
-3. `is_truthy()` needed because conditions can be any type (int, bool, object with conversion)
-
-**Optimizations Applied**:
-- `is_truthy()` uses a **single `switch` statement** on `value.type()` instead of multiple type checks
-- Improved string interning eliminates redundant lookups
-- Result: JaiScript for-loop (8uS) now **beats ChaiScript** (12uS) by 1.5x
+Standing bonus row: the debugger is free until attached — VM 47/46 µs with the hook compiled
+in (pre-debugger band exactly), ~+10% while a session is armed.
 
 ---
 
-## Benchmark Results
+## The head-to-head: JaiScript vs Lua (sol2) vs Squirrel vs ChaiScript
 
-Performance measurements running representative workloads:
+Columns: JaiScript interpreter / JaiScript VM / Lua 5.4 / Squirrel / ChaiScript, integer
+µs/iteration, min-of-5. JaiScript rows come from the same in-suite runs as each rival
+(cross-checked across suites: agreement within ±1–2 µs). `—` = no equivalent row in that
+suite. One structural caveat up front: **plain rows re-submit source each iteration.**
+JaiScript's engine caches parses transparently (LRU), Lua/Squirrel recompile — so tiny-script
+plain rows overstate rival cost; `[precompiled]` rows are quoted wherever they change the
+story. ChaiScript has no precompiled path in the suite.
 
-### Summary Table
+### Trivial statements & expressions
 
-| Benchmark                        | JaiScript Time | Notes |
-|----------------------------------|----------------|-------|
-| **Integer Addition**             | <1uS           | Single arithmetic operation |
-| **Float Multiplication**         | <1uS           | Floating-point operation |
-| **Variable Operations**          | 2uS            | Variable declarations + addition |
-| **Function Calls**               | 2uS            | Function declaration + invocation |
-| **Array Push/Pop**               | 7uS            | Array operations |
-| **Map Insert/Lookup**            | 5uS            | Hash map operations |
-| **Class Creation**               | 4uS            | Class instantiation |
-| **Method Invocation**            | 4uS            | Instance method call |
-| **For Loop (100 iterations)**    | 8uS            | ~80ns per iteration |
-| **Variable Lookup Heavy**        | 5uS            | Multiple variable accesses |
-| **Complex Expression**           | 2uS            | Multi-operator expression |
-| **Factorial(10) - Recursion**    | 6uS            | Recursive algorithm |
-| **Fibonacci(6) - Deep Recursion**| 14uS           | Deep recursive calls |
-| **Binary Search**                | 9uS            | Search algorithm |
-| **Bubble Sort (10 elements)**    | 64uS           | Sorting algorithm |
-| **Hot Loop (1000 iterations)**   | 44uS           | ~44ns per iteration |
-| **BST (15 nodes)**               | 489uS          | Binary Search Tree operations |
+| benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
+|---|---|---|---|---|---|
+| Integer addition | 0 | 0 | 1 | 4 | 5 |
+| Float multiplication | 0 | 0 | 2 | 5 | 4 |
+| Variable ops (3 decls + add) | 1 | 0 | 2 | 5 | 14 |
+| Null check | 1 | 0 | 2 | 5 | — |
+| Complex expression | 0 | 0 | — | — | 12 |
+| Constant expression (folded at parse) | 0 | 0 | — | — | 10 |
 
-### Array/Map Literal Benchmarks
+**Winner: JaiScript**, with an honest asterisk: precompiled, Lua and Squirrel also hit 0 µs —
+at statement granularity everyone competent is sub-µs once compiled, and the visible rival
+cost above is per-iteration recompilation that JaiScript's source cache avoids by design.
+ChaiScript is 5–14 µs regardless. The design point that *is* real: JaiScript's plain
+`execute(string)` path costs the same as its precompiled path, so naive embedding code
+doesn't pay a tax.
 
-| Benchmark | auto | var | Notes |
-|-----------|------|-----|-------|
-| Simple Array [10 ints] | 4uS | 3uS | `[1,2,3,4,5,6,7,8,9,10]` |
-| 2D Array [[5x5 ints]] | 11uS | 10uS | Nested array construction |
-| 3D Array [[[2x2x2 ints]]] | 6uS | 5uS | Deep nesting |
-| Homogeneous Map {5 keys} | 4uS | 4uS | `{"a":1, "b":2, ...}` |
-| Heterogeneous Map {5 mixed} | - | 4uS | Mixed value types |
-| Nested Map 2 levels | 6uS | 5uS | `{k: {k: int}}` |
-| Mixed Array+Map 3 levels | 8uS | 8uS | `[[{k: int}]]` |
+### Function calls
 
-**Note:** `var` provides slight performance advantage for complex literals due to deferred type inference.
+| benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
+|---|---|---|---|---|---|
+| Declare + call | 1 | 0 | 1 | 5 | 13 |
+| Call `[precompiled]` | 1 | 0 | 0 | 0 | — |
+| Lambda create+call (capture-free) | 2 | 1 | — | — | — |
+| Lambda create+call (capturing) | 3 | 2 | — | — | — |
+| Pass function as value + call | 3 | 2 | — | — | — |
 
----
+**Winner: floor-level tie** — JaiScript VM, Lua, and Squirrel are all ≤1 µs compiled; the
+integer-µs harness can't separate them (the difference that matters surfaces under recursion
+below). ChaiScript pays 13 µs per declare+call. Function *churn* (creating closures per
+frame) stays in the 1–3 µs band on both JaiScript backends.
 
-## JaiScript vs ChaiScript Comparison
+### Recursion (call-dense) — the honest loss
 
-Direct head-to-head benchmarks comparing JaiScript against ChaiScript (a popular C++ embedded scripting language).
+| benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
+|---|---|---|---|---|---|
+| Factorial(10) | 14 | 4 | 2 | 6 | 67 |
+| Fibonacci(15) | 1877 | 697 | 75 | 165 | — |
+| Fibonacci(15) `[precompiled]` | 1899 | 685 | 72 | 159 | — |
+| Fibonacci(6) | 25 | 8 | — | — | 164 |
+| Recurse, 10 locals, depth 15 | 66 | 41 | 3 | 7 | — |
+| Recurse, 10 locals, depth 10 | 45 | 28 | — | — | 180 |
 
-### Head-to-Head Comparison
+**Winner: Lua, decisively.** Lua runs fib(15) **~9× faster** than the JaiScript VM and the
+locals-heavy recursion **~14× faster**; Squirrel is ~4–5× faster than the VM on the same
+rows. This is the one structural gap: the project's own diagnosis (VM-perf branch) found
+opcode *counts* at parity with Lua (~7 ops per fib call) — the cost is per-call frame setup,
+not dispatch. The committed fix is the **flat-stack / register-window VM rewrite** on the
+roadmap; Squirrel's same-architecture calls demonstrate the headroom. Two mitigations are
+already real: the VM cut the interpreter's fib time 2.7× (1877 → 697), and it beats
+ChaiScript by **~20×** on the same shape (fib(6): 8 vs 164). Practical guidance unchanged:
+game scripts that are loop- and method-shaped don't feel this; avoid deep naive recursion in
+per-frame hot paths until the rewrite lands.
 
-**JaiScript wins every benchmark.** Results sorted by speedup:
+### Loops
 
-| Benchmark | JaiScript | ChaiScript | JaiScript Speedup |
-|-----------|-----------|------------|-------------------|
-| **Factorial(10)** | 6uS | 1308uS | **218x faster** |
-| **Fibonacci(6)** | 12uS | 3142uS | **262x faster** |
-| **Recurse 10 Locals (depth=10)** | 21uS | 1417uS | **67x faster** |
-| **BST (15 nodes)** | 489uS | 52,698uS | **108x faster** |
-| **Function Calls** | 2uS | 164uS | **82x faster** |
-| **Method Invocation** | 4uS | 137uS | **34x faster** |
-| **Binary Search** | 9uS | 272uS | **30x faster** |
-| **Range-For (100 elem)** | 19uS | 153uS | **8x faster** |
-| **Class Creation** | 4uS | 16uS | **4x faster** |
-| **Bubble Sort (10 elem)** | 64uS | 203uS | **3.2x faster** |
-| **String Copy (5 copies)** | 5uS | 14uS | **2.8x faster** |
-| **Variable Operations** | 2uS | 5uS | **2.5x faster** |
-| **Array Push/Pop** | 7uS | 17uS | **2.4x faster** |
-| **String Concat (20 iter)** | 8uS | 19uS | **2.4x faster** |
-| **String Methods** | 6uS | 14uS | **2.3x faster** |
-| **Map Insert/Lookup** | 5uS | 11uS | **2.2x faster** |
-| **Variable Lookup Heavy** | 5uS | 10uS | **2x faster** |
-| **Complex Expression** | 2uS | 4uS | **2x faster** |
-| **C++ Bound BST** | 44uS | 72uS | **1.6x faster** |
-| **For Loop (100 iter)** | 8uS | 12uS | **1.5x faster** |
-| **Integer Addition** | <1uS | 1uS | **>1x faster** |
-| **Float Multiplication** | 1uS | 1uS | **Equal** |
+| benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
+|---|---|---|---|---|---|
+| For loop, 100 iters | 14 | 9 | 4 | 9 | 30 |
+| Hot loop 1000 (`sum += i`) | 133 | 88 | 10 | 36 | — |
+| Hot loop 1000 `[precompiled]` | 132 | 88 | 7 | 29 | — |
+| Hot loop 1000, fused shape (`sum += i * 2`)* | 150 | **47** | — | — | — |
+| Range-for, 10 elements | 5 | 2 | 4 | 7 | — |
+| Range-for by copy, 100 elements | 28 | 18 | — | — | 31 |
 
-### Loop Performance Deep Dive
+\* perf-suite row; the comparison suites' hot loop uses a single-operand RHS that
+`op_compound_fused` doesn't cover yet — that one fusion gap is the whole 88-vs-47 difference.
 
-| Loop Pattern | JaiScript | ChaiScript | Notes |
-|--------------|-----------|------------|-------|
-| For Loop (literal condition) | 8uS | 12uS | **JaiScript 1.5x faster** |
-| For Loop (expression condition) | 9uS | - | Dynamic end: `i < n` |
-| Range-For (copy, 100 elem) | 19uS | 153uS | **JaiScript 8x faster** |
-| Range-For (reference, 100 elem) | 24uS | - | `for(auto& x : arr)` |
-| Range-For (copy, 10 elem) | 3uS | - | Small array optimization |
-| Range-For (reference, 10 elem) | 4uS | - | Small array reference |
-| Hot Loop (10x100 nested) | 46uS | - | Nested iteration scaling |
-| Hot Loop (1000 iter, auto) | 43uS | - | Declaration type: auto |
-| Hot Loop (1000 iter, int) | 43uS | - | Declaration type: int |
-| Hot Loop (1000 iter, var) | 42uS | - | Declaration type: var |
+**Winner: Lua** (2.4–8×, and none of it is recompile artifact — the precompiled rows agree).
+Against Squirrel the VM splits the class: tie on the counted for-loop, win on range-for
+(2 vs 7), loss on the unfused hot loop (88 vs 36). **Roadmap item with the payoff already
+measured: extending compound fusion to single-operand RHS moves 88 toward 47**, which flips
+the Squirrel row and halves Lua's edge on the most-quoted loop benchmark. Per-iteration
+reality check: the fused VM loop runs **47 ns/iteration**, and range-for is where JaiScript's
+loop machinery is already the best of the four.
 
-**Loop Optimization Notes:**
-- **JaiScript now beats ChaiScript on for loops** (8uS vs 12uS = 1.5x faster)
-- Literal condition fast path saves ~11% (8uS vs 9uS)
-- Range-for with copy is faster than reference (no reference wrapper overhead)
-- JaiScript range-for is **8x faster** than ChaiScript's equivalent
-- All declaration types (auto/int/var) use unified fast path with equal performance (~42-43uS)
+### Containers
 
-### Value Type Comparison (script_value vs BoxedValue)
+| benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
+|---|---|---|---|---|---|
+| Array push/pop | 5 | 5 | 5 | 9 | 47 |
+| Map/table insert + lookup | 3 | 2 | 3 | 7 | 29 |
 
-| Operation | JaiScript | ChaiScript | Notes |
-|-----------|-----------|------------|-------|
-| Integer Construction | <1uS | 1uS | JaiScript faster |
-| String Construction | <1uS | 1uS | JaiScript faster |
-| Boolean Construction | <1uS | 1uS | JaiScript faster |
-| Float Construction | <1uS | 1uS | JaiScript faster |
-| Type Checking | 1uS | 3uS | **JaiScript 3x faster** |
-| Array Construction | 2uS | 5uS | **JaiScript 2.5x faster** |
-| Mixed Type Operations | 3uS | 6uS | **JaiScript 2x faster** |
+**Winner: JaiScript VM and Lua, tied at the floor** (the VM edges the map row 2 vs 3).
+Squirrel pays 2–4×, ChaiScript ~10–15×. Container micro-ops are a JaiScript strength on both
+backends — the interpreter already matches Lua here.
 
-### Key Insights
+### Strings
 
-1. **JaiScript Dominates Across All Categories**
-   - ID-based lookups and optimized call stack give JaiScript **82-218x advantage** in function-heavy code
-   - Recursive algorithms (factorial, fibonacci) show the biggest wins (~218x faster)
-   - Method invocation is **34x faster** than ChaiScript
-   - Native script BST is **108x faster** (489uS vs 52.7ms)
-   - **For loops now faster**: JaiScript 8uS vs ChaiScript 12uS (1.5x faster)
+| benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
+|---|---|---|---|---|---|
+| Concat, 20 iterations | 13 | 7 | 5 | 10 | 51 |
+| Copy long string ×5 | 2 | 2 | — | — | 36 |
+| find / substr / size chain | 2 | 2 | — | — | 37 |
 
-2. **String Operations Now JaiScript's Strength**
-   - String copy is **2.8x faster** (5uS vs 14uS)
-   - String concat is **2.4x faster** (8uS vs 19uS)
-   - Improved string interning provides consistent advantages
+**Winner: Lua by ~1.4×** on the concat loop; the VM beats Squirrel by the same margin and
+ChaiScript by 7×. JaiScript strings are O(1)-copy (shared), which is why the copy and
+method-chain rows sit at 2 µs where ChaiScript pays 36+.
 
-3. **Language Features**
-   - JaiScript supports proper `null` for object fields (tree structures work natively)
-   - ChaiScript requires workarounds with `is_var_null()` for undefined checks
-   - JaiScript's native class system handles complex data structures better
-   - C++ bound BST now **1.6x faster** than ChaiScript (44uS vs 72uS)
+### Method dispatch & object creation
 
-4. **Real-World Implications**
-   - **Game scripting**: JaiScript wins decisively across all workloads
-   - **Tight computation loops**: JaiScript now competitive (8uS vs 12uS for-loop)
-   - **Complex data structures**: JaiScript's null support + performance is ideal
+| benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
+|---|---|---|---|---|---|
+| Class creation | 5 | 5 | 3 | 6 | 47 |
+| Method invocation | 5 | 3 | 3 | 6 | 39 |
+| Method invocation `[precompiled]` | 5 | 3 | 0 | 0 | — |
+| Class inheritance (define + instantiate)* | 175 | 174 | — | — | — |
 
-*Benchmarks run on x64-Release build with MSVC 2022, /O2 /GL /LTCG optimizations (2025-12-26)*
+\* perf-suite row, both backends equal — the cost is class (re)definition bookkeeping, not
+dispatch; batch class definitions once, don't re-execute them per frame.
 
----
+**Winner: Lua by a hair on plain rows — and the precompiled rows show its real method-call
+cost is below the harness floor** (that cheapness is what compounds into the recursion gap).
+The VM matches Lua's plain method row (3 vs 3) and halves Squirrel's; ChaiScript is 8–13×
+behind. The idiom ladder below adds the honest per-call figure: a JaiScript method call in a
+tight loop costs ~2.4 µs of real work on either backend — method dispatch is the natural
+next target after call frames.
 
-## JaiScript vs Squirrel Comparison
+### Object-graph algorithms & C++ interop
 
-Squirrel is a bytecode-compiled VM used in games like Left 4 Dead 2, Portal 2, and GTA IV. This comparison shows JaiScript (tree-walking interpreter) against a production bytecode VM.
+| benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
+|---|---|---|---|---|---|
+| BST 15 nodes, idiomatic `&` (in-place) | 295 | 263 | 22 | 33 | — |
+| BST idiomatic `[precompiled]` | 300 | 261 | 11 | 12 | — |
+| BST 15 nodes `[naive by-value]`* | 1087 | 1010 | 28 | 43 | 52698† |
+| Binary search (recursive, `array<int>&`) | 7 | 4 | — | — | 52 |
+| Bubble sort, 10 elements | 135 | 110 | — | — | 215 |
+| C++-bound BST (native nodes) | 55 | 49 | 18 | 31 | 196 |
 
-### Head-to-Head Comparison
+\* deliberately naive value-semantics spelling, kept and labeled as the feature-cost row —
+Lua/Squirrel/ChaiScript objects are reference-semantic, so their "same" program never copies.
+† historical measurement (ChaiScript's script BST is too slow to run live in the suite).
 
-| Benchmark | JaiScript | Squirrel | Notes |
-|-----------|-----------|----------|-------|
-| **Integer Addition** | <1uS | 1uS | JaiScript faster |
-| **Float Multiplication** | 1uS | 1uS | Equal |
-| **Variable Operations** | 2uS | 2uS | Equal |
-| **Function Calls** | 2uS | 1uS | Squirrel 2x faster |
-| **Array Push/Pop** | 7uS | 3uS | Squirrel 2.3x faster |
-| **Map/Table Operations** | 5uS | 3uS | Squirrel 1.7x faster |
-| **Class Creation** | 4uS | 2uS | Squirrel 2x faster |
-| **Method Invocation** | 4uS | 2uS | Squirrel 2x faster |
-| **For Loop (100 iter)** | 8uS | 4uS | Squirrel 2x faster |
-| **Factorial(10)** | 6uS | 2uS | Squirrel 3x faster |
-| **Fibonacci(15)** | 878uS | 54uS | Squirrel 16x faster |
-| **Recurse 10 Locals (depth=15)** | 36uS | 3uS | Squirrel 12x faster |
-| **Foreach (10 elem)** | 4uS | 2uS | Squirrel 2x faster |
-| **String Concat** | 8uS | 3uS | Squirrel 2.7x faster |
-| **Null Check** | 3uS | 2uS | Squirrel 1.5x faster |
-| **Hot Loop (1000 iter)** | 42uS | 10uS | Squirrel 4x faster |
-| **BST (15 nodes)** | 406uS | 15uS | Squirrel 27x faster |
-| **C++ BST (15 nodes)** | 45uS | 11uS | Squirrel 4x faster |
+**Winner: Lua** (recursion cost and reference-shape cost stacking: 12–24× on precompiled BST
+rows; Squirrel similar at 8–22×). This class is the recursion gap wearing a costume — the
+same flat-stack roadmap item pays here. What JaiScript controls today it does well: the
+idiomatic `&` spelling is **3.7–3.9× faster than naive by-value** (full three-way study
+condensed below), and the retuned binary-search/bubble-sort rows beat ChaiScript 2–13×. On
+C++ interop, sol2's usertype dispatch is genuinely lean (18 vs the VM's 49); JaiScript pays
+`dynamic_binder` property dispatch and still beats ChaiScript 4×.
 
-### Analysis
+### Value-type micro-costs (vs ChaiScript's BoxedValue)
 
-Squirrel's bytecode VM provides consistent 2-4x performance advantage over JaiScript's tree-walking interpreter for most operations. Deep recursion shows larger gaps (16x for Fibonacci), but slot-based locals help close the gap on local-heavy code (12x vs 16x).
+`script_value` constructs int/string/bool/float in **0 µs** where BoxedValue takes 3; type
+check 0 vs 8; array construction 0–1 vs 14–15; mixed types 1 vs 18. The 32-byte thin value
+is free where BoxedValue is a malloc.
 
-**Key Takeaways:**
-- Squirrel's bytecode compilation pays off for tight loops and recursion
-- JaiScript's slot-based locals approach Squirrel's efficiency (12x gap vs 16x on Fibonacci)
-- JaiScript remains competitive on simple operations (<1-2uS difference)
-- C++ binding reduces gap significantly: 4x (C++ BST) vs 27x (pure script BST)
-- For typical game scripting (event handlers, UI), the 2-4x difference is negligible
+### Scorecard
 
-**Future Consideration:** Bytecode compilation would close the remaining gap with Squirrel.
+| vs | verdict (VM backend) | where they win | where JaiScript wins |
+|---|---|---|---|
+| **Lua 5.4** | 7W / 10L / 2T | recursion (9–14×), loops (2–8×), BST, C++ interop, concat | statements, containers, range-for, null checks — and every Lua win except recursion/BST is ≤8 µs absolute |
+| **Squirrel** | **12W / 6L / 1T** | fib (4×), locals recursion (5×), hot loop (2.4×), both BSTs, C++ BST | everything else: statements 4–5×, containers 2–4×, methods 2×, strings 1.4×, range-for 2.3× |
+| **ChaiScript** | **29W / 0L** (all live rows) | nothing measured | everything, 1.6× (C++-adjacent) to ~20× (recursion), typically 8–20× |
+
+(The previously published Squirrel line was 13W/6L; at HEAD the counted for-loop reads
+10 vs 10 — a tie at harness resolution, so the honest count is 12W/6L/1T.)
 
 ---
 
-### Performance Profile
+## Per-op ladders (Performance Benchmarks suite, interp / VM)
 
-**Excellent Performance:**
-- ✅ **Function/Method Calls**: 2-4uS - ID-based lookups + string interning eliminate overhead
-- ✅ **Recursion**: 6-14uS - Efficient stack frame management + cached symbol IDs + unchecked accessors
-- ✅ **Algorithms**: Fast execution for search (9uS), sort (64uS), and computational tasks
-- ✅ **Class Operations**: 4uS instantiation - ID-based field/method access
-- ✅ **For Loops**: ~80ns per iteration - **now faster than ChaiScript**
-- ✅ **Hot Loops**: 44uS for 1000 iterations (~44ns per iteration)
-- ✅ **String Operations**: 5-8uS - 2-3x faster than ChaiScript
-- ✅ **Container Operations**: 5-7uS - 2x faster than ChaiScript
+| row | interp µs | VM µs |
+|---|---|---|
+| Integer addition / float mul / complex expr | 0 | 0 |
+| Variable operations | 1 | 0 |
+| Function calls | 2 | 1 |
+| Simple compound assignment ×100 | 3 | 2 |
+| Variable lookup heavy (10 lookups) | 3 | 1 |
+| String concatenation | 2 | 1 |
+| String copy (long) / method chaining | 2 / 3 | 1 / 2 |
+| String passing to function | 6 | 5 |
+| Array push/pop | 5 | 5 |
+| Map insert/lookup | 3 | 2 |
+| For loop (100 iterations) | 14 | 10 |
+| Hot loop (1000 iterations, fused) | 150 | **47** |
+| Class creation | 15 | 14 |
+| Method invocation | 12 | 9 |
+| Class inheritance | 175 | 174 |
+| Fibonacci(15) | 1861 | 701 |
+| Recurse 10 locals (depth 15) | 66 | 42 |
+| BST `[naive by-value]` / shared_ptr / by-ref | 976 / 389 / 292 | 915 / 346 / 251 |
+| Ref-param pass-through relay ×100 | 142 | 66 |
+| Engine creation | 77 | 73 |
+| Stdlib registration | 311 | 312 |
 
-**Recommendations:**
-- Use JaiScript for all game scripting workloads - it now beats ChaiScript everywhere
-- Function-heavy code sees the biggest wins (82-218x faster)
-- Even tight loops are now competitive with ChaiScript
+jaibite variants of the hot rows match their plain counterparts (the source cache already
+removed parse cost from plain rows): hot loop 150/46, method invocation 11/8, for-loop 13/9.
 
-### Loop Implementation Details
+Array/map literals (auto vs var, 10-int array through 3-level nesting): everything is 1–5 µs
+on both backends; `var` runs 0–1 µs cheaper than `auto` per row (deferred element typing) —
+an observation, not a recommendation; the type ladder is `static_checking.md`'s story.
 
-JaiScript's for loop implementation:
-```cpp
-auto loop_env = get_pooled_environment(environment_);  // ONCE per loop
-environment_ = loop_env;
-for (init; ; update) {
-    dispatch_expr(stmt->condition.get());  // Switch dispatch (no virtual call)
-    script_value conditionValue = pop_value();  // Stack operation
-    if (!is_truthy(conditionValue)) break;
-    dispatch_stmt(stmt->body.get());
-    dispatch_expr(stmt->update.get());  // Switch dispatch
-    pop_value();  // Pop update result
-}
-```
+Warm embedding costs (from `execution_mode_metrics.md`, ns-resolution methodology): warm
+`bite.execute()` of a tiny script is **0.38 µs on the VM** (0.85 interp); engine creation
+~90 µs all-in. Compile is ~⅓ of parse cost and amortizes by the 3rd–4th execution — the
+basis for "VM as default backend, no tiered mode".
 
-**Optimizations in place:**
-✅ Switch-based AST dispatch (eliminates virtual call overhead)
-✅ Native C++ for-loop structure with lambda helpers (Phase 1 & 2 optimizations)
-✅ Unchecked accessors for zero-overhead type access (using std::get_if)
-✅ Error capture flags instead of exception throwing from lambdas
-✅ Environment pooling - reuses environments, not creating per-loop
-✅ Single scope for entire loop (not per-iteration)
-✅ Efficient checked_result with inlining
-✅ String symbolizer for fast variable lookup
-✅ Optimized type checking with single type() call
-✅ Optimized is_truthy() using unchecked accessors after type switch
+## Script-idiom cost ladder (what a line of your script costs)
 
-**Per iteration costs:**
-- 3 AST node evaluations (condition, body, update)
-- 2 value stack operations
-- Truthiness conversion on condition
-- Switch-based dispatch for AST traversal (~2-4% faster than virtual calls)
+Dedicated ns-resolution bench (25-rep medians over 20k-op jaibite loops, min-of-5 runs):
 
-**Result**: 8uS for 100 iterations = ~80ns per iteration. **JaiScript now beats ChaiScript** on for-loops.
+| idiom | interp ns/op | VM ns/op |
+|---|---|---|
+| empty counted-loop iteration | 32 | 15 |
+| local float compound (`x += 1.5`) | 174 | 80 |
+| field via `this` inside a method (`t += 1.5`) | 170 | 89 |
+| array element read (`s += a[i & 1023]`) | 575 | 370 |
+| compound element store (`a[i] += 1`) | 1469 | 560 |
+| read+write element store (`a[i] = a[i] + 1`) | 1076 | 872 |
+| free function call in loop | 920 | 440 |
+| method call in loop | 2470 | 2366 |
+| template-string build (small) | 1019 | 802 |
 
-## Why JaiScript is Fast
+Readings (this refreshes the previously circulated idiom advice):
 
-### 1. **Modern C++ Implementation (C++20)**
-   - Zero-cost abstractions
-   - Move semantics throughout
-   - Optimized memory allocations
+- **The compound-store advice is backend-dependent** (new finding): on the VM, `a[i] += 1` is
+  1.6× *cheaper* than the read-then-write spelling (560 vs 872 ns). On the interpreter it is
+  1.4× *dearer* (1469 vs 1076). The VM is the default backend — prefer compound stores, and
+  know the interpreter inverts the advice.
+- **Method calls cost ~2.4 µs on both backends** — dispatch machinery, not loop overhead.
+  In per-element hot loops prefer a free function (0.4–0.9 µs) or inline field work
+  (~90–170 ns); or move the loop *inside* the method (the `this`-field row).
+- Element access through a local `var&` alias vs. the global chain directly is a wash at this
+  size, and a one-time 1024-element array *copy* amortized over 20k reads disappears
+  entirely. Copies cost per-call, not per-read — see the aliasing section.
 
-### 2. **ID-based Lookups Throughout**
-   - All identifier/field/method lookups use uint64_t instead of std::string
-   - Hash computed once, reused everywhere
-   - O(1) integer comparisons instead of O(n) string comparisons
-   - Class instance fields stored in `unordered_map<uint64_t, script_value>`
-   - Method dispatch uses integer keys
+## Aliasing costs (condensed from `aliasing_costs.md` — the pre-study joins this report)
 
-### 3. **Parse-time Optimizations**
-   - Names interned during parsing
-   - Type IDs cached at class registration
-   - AST nodes store pre-computed IDs (`name_id`, `symbol_id`)
-   - No redundant string interning at runtime
+Value vs `T&` vs `shared_ptr<T>`, measured on both backends, 200-call rows, meaty `Creature`
+(string + 8-int array + 4 scalars):
 
-### 4. **Smart Memory Management**
-   - Object pooling for environments
-   - Efficient shared_ptr usage
-   - Minimal allocations in hot paths
+- **Pass-by-value's premium is the deep copy: ~1.8 µs/call for that object**, both backends
+  (read-only aggregate: 1605/1324 µs by value vs 1245/956 by `&`). It scales with payload.
+- **`&` and `shared_ptr` are call-boundary ties** (≤4%, under noise) — no per-access deref,
+  refcount, or upcast tax materializes. Method calls don't care how the receiver is held.
+- **Structure shape is the real shared_ptr cost**: a BST written handle-style
+  (`root.left = insert(...)`, store-and-return per level) runs ~1.35× the in-place `&`
+  shape; both crush naive by-value ~3.5×.
+- Rule of thumb: **values by default; `&` when a call needs the real thing; `new`/shared_ptr
+  when the alias must outlive the call.** Full tables and the no-surprise verdict:
+  [aliasing_costs.md](aliasing_costs.md).
 
-### 5. **Compiler Optimizations**
-   - Link-time code generation (LTCG)
-   - Whole program optimization (WPO)
-   - Inline function expansion
-   - Intrinsic function usage
+This session's perf-suite aliasing rows reproduced the study within noise (e.g. VM read
+cluster 1350/996/1028; heal pair 287/290).
 
-## Building for Performance
+## Parallel scaling (`parallel_transform`, post worker-reuse)
 
-### Visual Studio:
-1. Select **Release** configuration in dropdown
-2. Build the solution
-3. Enable benchmarks: Add CMake variable `JAISCRIPT_ENABLE_BENCHMARKS=ON`
+i7-6920HQ, 4 cores / 8 threads. min-of-3, ms. The serial baseline is the equivalent script
+`for`+`push` loop.
 
-### Command Line:
-```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DJAISCRIPT_ENABLE_BENCHMARKS=ON ..
-cmake --build . --config Release
-```
+| workload (VM backend) | serial | W=1 | W=2 | W=4 | W=8 | W=8 speedup |
+|---|---|---|---|---|---|---|
+| Math, 100k doubles | 323 | 242 | 140 | 90 | 67 | **4.8×** (3.6× vs W=1) |
+| Strings, 10k | 68 | 61 | 36 | 21 | 18 | 3.7× |
+| Math, 1k (small-array) | 3.2 | 2.3 | — | 0.90 | 0.80 | 4.0× |
 
-### Run Benchmarks:
-```bash
-./bin/jaiscript_tests
-```
+| workload (interp backend) | serial | W=1 | W=2 | W=4 | W=8 | W=8 speedup |
+|---|---|---|---|---|---|---|
+| Math, 100k doubles | 438 | 262 | 150 | 94 | 74 | **5.9×** |
+| Strings, 10k | 88 | 66 | 39 | 24 | 20 | 4.3× |
+| Math, 1k | 4.3 | 2.5 | — | 0.96 | 0.86 | 5.0× |
 
-## Profiling
+- Scaling against W=1 is ~2.6–2.9× at W=4 (physical cores) and ~2.9–3.6× at W=8
+  (hyperthreads add ~10–25%) — healthy for a 4C machine on script-bound work.
+- **W=1 beats the serial loop on every row**: the serial baseline pays a script-level
+  `out.push(x)` per element while `parallel_transform` runs a chunked builtin loop — the
+  builtin is worth ~25–40% before any parallelism at all.
+- Small arrays stay profitable post worker-reuse: the 1k row is ahead of serial even at W=1
+  and reaches 4–5× at W=8 (context *acquisition* used to dominate; slot reuse fixed it).
+- Debugger interaction: parallel regions are atomic to the debugger (structural — worker
+  contexts never consult it); see `DEBUGGER_DESIGN.md`.
 
-To enable profiling support:
-```bash
-cmake -DJAISCRIPT_ENABLE_PROFILING=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
-```
+## Debugger cost (confirmation pass at HEAD — matches the recorded tables)
 
-This enables `/Zi` debug info with optimizations for tools like Visual Studio Profiler.
+Hot Loop 1000-iteration script, min-of-3:
 
-## Performance Tips
+| configuration | interp µs | VM µs |
+|---|---|---|
+| no debugger constructed | 149 | 47 |
+| controller constructed, no session | 148 | 46 |
+| session enabled, no breakpoints | 148 | 50 |
+| session enabled, bp in a cold file | 146 | 51 |
+| session enabled, bp line collides | 165 | 64 |
 
-### For Library Users:
-1. **Reuse engine instances** - Engine creation is ~42uS (stdlib registration adds ~133uS)
-2. **Pre-register types** - C++ class registration is one-time cost
-3. **Use typed parameters** - Avoid runtime type conversions
-4. **Batch script execution** - Parse once, execute many times
-5. **Cache function references** - Avoid repeated lookups
+Confirms `DEBUGGER_DESIGN.md`'s recorded 142–160 (interp) and 46/46/50/52/63 (VM) within
+harness noise. The disabled rows sit exactly on the pre-debugger bands — the debugger is
+free until a session arms; an armed session costs ~10% on the VM (statement-edge detection
+per dispatch iteration), and the only expensive configuration is the deliberate worst case
+(a breakpoint in another file whose line number collides with the hot statement: one bounded
+string compare per collision).
 
-### For Script Writers:
-1. **Minimize variable lookups in loops** - Cache frequently used values
-2. **Use local variables** - Faster than global lookups
-3. **Prefer static methods** - No 'this' resolution overhead
-4. **Inline small functions** - Reduce call overhead
-5. **Use primitive types** - int/float faster than objects
+## jaibite disk cache (parse once, load thereafter)
 
-## Future Optimizations
+Representative 535-line game file (the crawler's `data.jai` + `combat.jai`: 10 classes, data
+tables, combat logic), fresh engine per sample, 30-sample medians, 3 runs:
 
-Potential improvements under consideration:
-- [x] ~~JIT compilation for hot loops~~ (obviated by the bytecode VM + epoch-keyed lookup caches)
-- [x] Constant folding in parser (implemented - 1uS vs ChaiScript's 3uS)
-- [ ] Dead code elimination
-- [x] Type inference for faster dispatch (shipped as opt-in static checking — `static_checking.md`)
-- [ ] SIMD operations for arrays
-- [x] Bytecode compilation — SHIPPED as the full-parity VM backend (`--backend=vm`; VM Fibonacci(15) 840uS vs Squirrel's class-era 878uS)
+| backend | parse path (full run) | cache hit (full run) | first cached run (parse + write) | speedup |
+|---|---|---|---|---|
+| interp | 5.82 ms | 2.43 ms | 7.7 ms | **2.4×** |
+| VM | 5.32 ms | 2.22 ms | 6.7 ms | **2.4×** |
 
-## Benchmark History
+The `.jaibite` for this file is 31,334 bytes. Both timed columns include *executing* the file
+(class registration etc.), so the parse component itself (~3.4 ms of the 5.8) is replaced by
+a sub-ms binary load; the write-through cost is paid once, on the first run after a change.
+This is the automatic `execute_file`/include path — unchanged scripts never parse again,
+across processes.
 
-Track performance improvements over time (git-verified):
+## Known gaps & roadmap
 
-| Date       | Commit   | For Loop (100) | Hot Loop (1000) | vs ChaiScript | Notes                           |
-|------------|----------|----------------|-----------------|---------------|---------------------------------|
-| 2025-12-28 | HEAD     | 8uS            | 42uS            | **1.5x faster** | Slot-based local variables (Fib: 1051→878uS) |
-| 2025-12-26 | cfc7720c | 8uS            | 44uS            | **1.5x faster** | String interning improvements |
-| 2025-12-24 | 13d54d35 | 15uS           | 49uS            | 1.25x slower  | strong_ptr + shared string storage |
-| 2025-12-18 | 9878fe2d | 17uS           | 76uS            | 1.4x slower   | + dynamic_cast removal (90 calls) + throw cleanup |
-| 2025-12-15 | 9310a48f | 28uS           | 197uS           | 2.3x slower   | Switch-based AST dispatch |
-| 2025-12-04 | bb2b900a | 42uS           | ~400uS          | 3.5x slower   | "only 2x loop perf of ChaiScript" |
-| 2025-11-07 | bf50a1a6 | 67-79uS        | 715uS           | ~6x slower    | Aggressive string interning |
-| 2025-11-04 | 47b8a6aa | 101uS          | 1136uS          | 8.4x slower   | Initial PERFORMANCE.md |
+- **Call-dense recursion vs Lua (~9× on fib(15), ~14× locals-heavy)** — structural per-call
+  frame cost; opcode counts are already at parity. Fix: the flat-stack / register-window VM
+  rewrite (a roadmap commitment, not a hope; Squirrel's same-architecture calls at 4×
+  demonstrate the headroom).
+- **Single-operand compound fusion** (`sum += i`): the comparison-suite hot loop misses
+  `op_compound_fused` and runs 88 µs where the fused shape runs 47. Extending fusion flips a
+  Squirrel loss and halves the visible Lua loop gap — the cheapest win on this page.
+- **Method-call dispatch (~2.4 µs/call both backends)**: the idiom ladder shows it dwarfing
+  free calls (0.4–0.9 µs); flattened dispatch already landed, the binder/lookup path is next.
+- **C++ interop dispatch**: sol2 usertypes at 18 µs vs `dynamic_binder` at 49 µs on the
+  bound-BST row — property-dispatch cost, worth a targeted pass.
+- **Band-edge verdict (this session's open question): NOT a regression.** At HEAD the VM runs
+  hot loop 47 µs (band 44–48) and fib(15) 701 µs (band 687–741), min-of-5 on a verified-quiet
+  machine; the earlier 50–56/756 spot-check was taken under load and did not reproduce (one
+  56 µs outlier in 5 runs — the ±50% single-run variance the methodology warns about). No
+  bisect warranted; the post-stage-C changes (vm debug hook et al.) carry no measurable cost.
+- **Class redefinition bookkeeping** (~175 µs inheritance row, identical on both backends):
+  per-execute class re-registration — batch definitions once, don't re-execute per frame.
 
-**Progress: 8.4x slower → 1.5x FASTER = JaiScript now wins on loops**
+## Appendix A — methodology
 
-ChaiScript For Loop baseline: 12uS
+- **Machine**: i7-6920HQ (4C/8T), Windows 10 19045. **Toolchain**: MSVC (VS 18 Community)
+  x64, `x64-Release BENCHMARKS` config (`/O2 /GL /LTCG`, benchmarks ON,
+  `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` on for the tests target — both backends pay equally).
+- **Harness**: Foundry benchmark rows report **integer µs/iteration with ±50% single-run
+  variance** (`invariants.md` §7). Everything quoted is **min-of-5** full-suite runs per
+  backend (min-of-3 for the parallel suite and the debugger confirmation), on a quiet machine
+  verified free of competing processes. Sub-µs deltas are never claimed from this harness;
+  the ns-resolution numbers (idiom ladder, warm dispatch) come from dedicated `steady_clock`
+  micro-benches with 25–30-rep medians.
+- **Rivals**: Lua 5.4 via sol2 (`source/tests/performance/sol2_comparison.cpp`), Squirrel 3.x
+  (`squirrel_comparison.cpp`), ChaiScript 6.1.0 (`chaiscript_comparison.cpp`; headers restored
+  to `External/ChaiScript-6.1.0` for live measurement). Suites reviewed for idiomatic
+  fairness; the ChaiScript algorithm rows were retuned in 2be96668 (JaiScript params changed
+  to `array<int>&` so both sides pass arrays by reference — the old spelling measured
+  JaiScript deep-clones against ChaiScript's reference-semantic arrays). Rival
+  `[precompiled]` rows use each engine's native precompilation, JaiScript's use
+  `engine::jaibite`.
+- **Backends**: every JaiScript number is reported for both the tree-walking interpreter and
+  the bytecode VM (`--backend=vm`). Full regression suite (88 suites / 1844 tests) green on
+  both backends at HEAD 3528ea86 as part of this measurement session.
+- Each table is reproducible via
+  `jaiscript_tests.exe "<suite name>" --verbose [--backend=vm]` — suite names: "Performance
+  Benchmarks", "Lua (sol2) Performance Comparison", "Squirrel Performance Comparison",
+  "ChaiScript Performance Comparison", "Function Churn Bench", "Parallel Transform Bench",
+  "Debugger".
 
----
+## Appendix B — optimization history (git-verified, tree-walker era → VM)
 
-*Benchmarks run on: Windows x64*
-*Compiler: MSVC 2022 with /O2 /GL /LTCG*
-*Build: x64-Release*
+| Date | Commit | For Loop (100) | Hot Loop (1000) | Notes |
+|------------|----------|----------------|-----------------|---------------------------------|
+| 2026-07-07 | 3528ea86 | 14 (VM 10) | 150 (**VM 47**) | this report; VM default, fused superinstructions |
+| 2025-12-28 | — | 8 | 42 | slot-based locals (fib 1051→878) |
+| 2025-12-26 | cfc7720c | 8 | 44 | string interning improvements |
+| 2025-12-24 | 13d54d35 | 15 | 49 | strong_ptr + shared string storage |
+| 2025-12-18 | 9878fe2d | 17 | 76 | dynamic_cast removal + throw cleanup |
+| 2025-12-15 | 9310a48f | 28 | 197 | switch-based AST dispatch |
+| 2025-12-04 | bb2b900a | 42 | ~400 | "only 2x loop perf of ChaiScript" |
+| 2025-11-07 | bf50a1a6 | 67–79 | 715 | aggressive string interning |
+| 2025-11-04 | 47b8a6aa | 101 | 1136 | initial PERFORMANCE.md |
+
+(The 2025-12 interpreter rows were measured on a different machine/config than this report's;
+the trend is the point, not a same-basis comparison. The 2026-07 interpreter loop numbers
+sitting above 2025-12's reflects config/machine differences plus added always-on semantics —
+checked overflow, budget clock, debugger hook — not a regression: the VM band is the tracked
+baseline and it holds.)

@@ -735,16 +735,16 @@ Parses a JSON string and returns the corresponding JaiScript value.
 
 ## Performance
 
-Current committed baselines live in [thin_value_rebaseline.md](thin_value_rebaseline.md) (§6,
+The definitive report is [PERFORMANCE.md](PERFORMANCE.md) (2026-07 capstone: both backends
+head-to-head against Lua 5.4/sol2, Squirrel, and ChaiScript by workload class, plus per-op
+and idiom ladders, aliasing, parallel scaling, debugger cost, and jaibite cache numbers).
+Committed baselines live in [thin_value_rebaseline.md](thin_value_rebaseline.md) (§6,
 interpreter and VM side by side) and [execution_mode_metrics.md](execution_mode_metrics.md)
 (execution-mode and jaibite-cache numbers). What passing/holding strategy to use for objects
 (value vs `T&` vs `shared_ptr<T>`) is measured and decided in [aliasing_costs.md](aliasing_costs.md).
 `script_value` is 32 bytes (static_assert-gated),
 heavy types ride in non-atomic `strong_ptr` for O(1) copies, and the benchmark suite includes
-sol2/Lua and Squirrel comparisons (`x64-Release BENCHMARKS` config).
-
-[PERFORMANCE.md](PERFORMANCE.md) is a HISTORICAL (2025-12, tree-walker era) analysis — its
-ChaiScript comparison tables predate the VM and the thin-value fold.
+sol2/Lua, Squirrel, and ChaiScript comparisons (`x64-Release BENCHMARKS` config).
 
 ## Documentation
 
@@ -769,7 +769,7 @@ ChaiScript comparison tables predate the VM and the thin-value fold.
 - [execution_mode_metrics.md](execution_mode_metrics.md) - Execution modes, jaibite, cache metrics
 - [aliasing_costs.md](aliasing_costs.md) - Measured cost of value vs `T&` vs `shared_ptr<T>` + decision guidance
 - [thin_value_spec.md](thin_value_spec.md) / [thin_value_rebaseline.md](thin_value_rebaseline.md) - 32-byte value fold (as-built spec + benchmark baseline)
-- [PERFORMANCE.md](PERFORMANCE.md) - HISTORICAL 2025-12 performance analysis
+- [PERFORMANCE.md](PERFORMANCE.md) - The definitive 2026-07 performance report (head-to-head vs Lua/Squirrel/ChaiScript, ladders, scaling)
 - [JaiScriptTesting.md](JaiScriptTesting.md) / [JaiScriptVMTesting.md](JaiScriptVMTesting.md) - Testing guides
 
 ### Roadmap & Design History

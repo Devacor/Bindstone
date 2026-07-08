@@ -759,7 +759,7 @@ public:
 			// Object creation, field access, recursion, pointer chasing.
 			// 15 nodes; validated: inorder sum 120 pre+post rotate, height 4.
 
-			benchmark("JaiScript - BST (15 nodes)", [this]() {
+			benchmark("JaiScript - BST (15 nodes) [naive by-value]", [this]() {
 				jai_engine->execute(R"(
 					auto tree_root = TreeNode(8);
 					tree_root = insertNode(tree_root, 4);

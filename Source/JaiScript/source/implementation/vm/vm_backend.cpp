@@ -588,6 +588,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 		}
 	};
 	for (const auto& p : f->code->fused_binary_protos) { note_operand(p.left); note_operand(p.right); }
+	for (const auto& cs : f->code->call_sites) { note_operand(cs.callee); }
 	for (const auto& p : f->code->counted_for_protos) { note_operand(p.var); note_operand(p.end); note_operand(p.step); }
 	for (const auto& p : f->code->compound_fused_protos) {
 		if (p.slot != k_invalid_u32 && p.symbol < f->code->symbols.size()) {
@@ -759,6 +760,7 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	std::vector<try_record> try_storage;
 	std::vector<iter_state> iter_storage;
 	std::vector<counted_for_state> cfor_storage;
+	std::vector<pending_callee> pending_storage;   // f(yield x) suspends between probe and call
 	bool started = false;
 };
 
@@ -870,6 +872,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			std::swap(vm->try_records_, st->try_storage);
 			std::swap(vm->iter_states_, st->iter_storage);
 			std::swap(vm->cfor_states_, st->cfor_storage);
+			std::swap(vm->pending_callees_, st->pending_storage);
 		}
 	} stacks_guard(this, &state);
 
@@ -1004,6 +1007,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	try_records_.clear();
 	iter_states_.clear();
 	cfor_states_.clear();
+	pending_callees_.clear();
 	stack_.clear();
 
 	const bool completed_has_return = has_return_value_;
@@ -4907,6 +4911,202 @@ checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction
 	return {};
 }
 
+// Callee-first probe (Dev ruling 2026-07-08: callee-before-args IS the language,
+// matching C++17): resolve the identifier callee exactly where op_load did (same
+// resolution ladder via fused_ident_value, same errors) and park it in the pending
+// register stack - no value-stack copy. The not-callable check ALSO fires here, at
+// the ruled observation point (the interpreter always checked before args; the vm's
+// old post-args check was a latent divergence, pinned by callee_first_* tests).
+checked_result<void> vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
+	const call_site& site = f.code->call_sites[ins.a];
+	const size_t argc = ins.b;
+	std::optional<script_value> scratch;
+	auto resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3);
+	if (!resolved) {
+		return resolved.error_value();
+	}
+	const script_value& calleeVal = *resolved.value();
+	if (!calleeVal.is_function()) {
+		return checked_result<void>(make_error_code(runtime_error_code::not_a_function));
+	}
+	pending_callee pc;
+	if (cached_global_env_ &&
+	    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION &&
+	    &calleeVal.unchecked_as_function() == site.ic_identity &&
+	    argc == site.ic_argc) {
+		pc.fn = site.ic_fn;
+		pc.pin = site.ic_pin;
+	} else {
+		bool parked_direct = false;
+		if (calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
+			const auto* thunk = calleeVal.unchecked_as_function().target<script_callable_thunk>();
+			if (thunk && thunk->eng == engine_ &&
+			    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn &&
+			    argc == thunk->payload.fn->parameters().size()) {
+				pc.fn = thunk->payload.fn.get();
+				pc.pin = *std::get_if<script_value::TYPEID_FUNCTION>(&calleeVal.get_storage());
+				parked_direct = true;
+				if (cached_global_env_ && !thunk->payload.fn->closure_env) {
+					site.ic_pin = pc.pin;
+					site.ic_identity = &calleeVal.unchecked_as_function();
+					site.ic_fn = pc.fn;
+					site.ic_argc = static_cast<uint32_t>(argc);
+				}
+			}
+		}
+		if (!parked_direct) {
+			// Opaque callables, refs-to-function, arity-window (default-arg) calls:
+			// park the materialized value - the same single copy op_load made
+			pc.value = calleeVal;
+		}
+	}
+	pending_callees_.push_back(std::move(pc));
+	return {};
+}
+
+checked_result<void> vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
+	const size_t argc = ins.a;
+	const call_site& site = f.code->call_sites[ins.b];
+	pending_callee pc = std::move(pending_callees_.back());
+	pending_callees_.pop_back();
+
+	if (pc.fn) {
+		const size_t args_base = stack_.size() - argc;
+		try {
+			return push_script_frame_pinned(f, *pc.fn, std::move(pc.pin), args_base, argc, &site);
+		} catch (const script_exception& e) {
+			// pre-record throws leave the args on the stack; drop them like exec_call
+			stack_.erase(stack_.begin() + args_base, stack_.end());
+			active_exception_value_ = script_value(std::string(e.what()), engine_);
+			current_exception_ = e;
+			is_unwinding_ = true;
+			stack_.push_back(make_null());
+			return {};
+		} catch (const std::exception& e) {
+			stack_.erase(stack_.begin() + args_base, stack_.end());
+			active_exception_value_ = script_value(std::string(e.what()), engine_);
+			current_exception_ = script_exception(e.what());
+			is_unwinding_ = true;
+			stack_.push_back(make_null());
+			return {};
+		}
+	}
+
+	// Opaque / arity-window path: today's pooled invoke with the parked value
+	auto arguments = acquire_arg_vector(argc);
+	arg_vector_return arg_return{this, &arguments};
+	const size_t base = stack_.size() - argc;
+	for (size_t i = 0; i < argc; ++i) {
+		arguments.push_back(std::move(stack_[base + i]));
+	}
+	stack_.erase(stack_.begin() + base, stack_.end());
+	return invoke_callee(f, std::move(pc.value), arguments, site);
+}
+
+// Zero-copy frame push for probe-called frames: no callee value below the window,
+// the record's direct_pin holds the callable (hot reload cannot kill the executing
+// function; the pin releases at pop exactly where the callee slot died).
+checked_result<void> vm_backend::push_script_frame_pinned(frame& caller,
+                                                          const script_defined_function& function,
+                                                          strong_ptr<script_function> pin,
+                                                          size_t args_base, size_t argc,
+                                                          const call_site* site) {
+	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
+		return checked_result<void>(
+			make_error_code(runtime_error_code::max_recursion_depth),
+			JAI_MAX_CALL_DEPTH_MESSAGE);
+	}
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return execution_limit_failure();
+	}
+	assert(!has_return_value_);
+
+	chunk* body_chunk;
+	{
+		body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
+		if (!body_chunk) {
+			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count);
+			function.backend_body_cache = compiled;
+			body_chunk = compiled.get();
+		}
+		if (call_records_top_ == call_records_.size()) {
+			call_records_.push_back(std::make_unique<call_record>());
+		}
+	}
+
+	call_record& rec = *call_records_[call_records_top_];
+	++call_records_top_;
+	rec.caller = &caller;
+	rec.return_type = function.return_type;
+	if (function.backend_return_conv == 0) {
+		function.backend_return_conv = static_cast<uint8_t>(classify_return_conv(function.return_type));
+	}
+	rec.return_conv_class = function.backend_return_conv;
+	rec.direct_pin = std::move(pin);
+	rec.try_base = try_records_.size();
+	rec.iter_base = iter_states_.size();
+	rec.cfor_base = cfor_states_.size();
+	rec.pending_base = pending_callees_.size();
+	rec.locals.function_name = function.name;
+	rec.env_lazy = !body_chunk->needs_frame_env &&
+	               (!function.closure_env ||
+	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
+	if (rec.env_lazy && !function.closure_env) {
+		rec.env_untouched = true;
+	} else {
+		rec.env_untouched = false;
+		rec.prev_env = std::move(environment_);
+		try {
+			if (rec.env_lazy) {
+				environment_ = function.closure_env;
+			} else {
+				setup_callee_env(function, rec.locals, rec.prev_env);
+			}
+		} catch (...) {
+			rec.direct_pin = {};
+			rec.return_type = nullptr;
+			environment_ = std::move(rec.prev_env);
+			--call_records_top_;
+			throw;
+		}
+	}
+	++current_call_depth_;
+	rec.f.code = body_chunk;
+	rec.f.ip = 0;
+	rec.f.locals = &rec.locals;
+	if (rec.env_lazy) {
+		rec.f.entry_env = nullptr;
+	} else {
+		rec.f.entry_env = environment_;
+	}
+	rec.f.window_backed = true;
+	rec.f.window_base = args_base;
+	rec.f.window_live = static_cast<uint32_t>(argc);
+	rec.f.stack_base = args_base;   // no callee slot below the window
+	rec.f.top_level = false;
+	frames_.push_back(&rec.f);
+
+	checked_result<void> bound;
+	try {
+		bound = bind_parameters(function.parameters(), stack_.vec(), args_base, argc, rec.f, *rec.f.code,
+		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
+	} catch (...) {
+		pop_script_frame_core(rec);
+		throw;
+	}
+	if (!bound) {
+		pop_script_frame_core(rec);
+		return bound;
+	}
+	assert(stack_.size() == args_base + argc);
+	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
+	for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
+		stack_.push_back(make_null());
+	}
+	switch_to_ = &rec.f;
+	return {};
+}
+
 checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
@@ -7578,6 +7778,7 @@ checked_result<void> vm_backend::exec_try_push(frame& f, const vm_instruction& i
 	rec.stack_size = stack_.size();
 	rec.iter_size = iter_states_.size();
 	rec.cfor_size = cfor_states_.size();
+	rec.pending_size = pending_callees_.size();
 	rec.entry_env = environment_;
 
 	// Inside a catch block the exception state survives so a bare rethrow works
@@ -7668,6 +7869,9 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		}
 		if (cfor_states_.size() > rec.cfor_size) {
 			cfor_states_.erase(cfor_states_.begin() + rec.cfor_size, cfor_states_.end());
+		}
+		if (pending_callees_.size() > rec.pending_size) {
+			pending_callees_.erase(pending_callees_.begin() + rec.pending_size, pending_callees_.end());
 		}
 		environment_ = rec.entry_env;
 		f.ip = rec.handler_ip;
@@ -8194,6 +8398,19 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			case opcode::op_index_assign: VM_TRY_OP(exec_index_assign(f, ins)); break;
 			case opcode::op_index_compound: VM_TRY_OP(exec_index_compound(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
+			case opcode::op_probe_callee:
+				VM_TRY_OP_SHARED(exec_probe_callee(f, ins));
+				break;
+			case opcode::op_call_from_scratch:
+				VM_TRY_OP_SHARED(exec_call_from_scratch(f, ins));
+				if (switch_to_) {
+					// Enter the pushed callee; the suspended caller's ip parks on the
+					// call op (stack-trace parity with op_call)
+					fp = switch_to_;
+					switch_to_ = nullptr;
+					continue;
+				}
+				break;
 			case opcode::op_call:
 				VM_TRY_OP(exec_call(f, ins));
 				if (switch_to_) {
@@ -8605,6 +8822,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
+	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	// Compile-time lazy elision: plain callees whose bodies provably never touch the
 	// per-call scope env skip creating it (methods/statics never elide — env kind
@@ -8752,6 +8970,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
+	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.env_lazy = false;   // method envs never elide (env-kind fallbacks gate precedence)
 	rec.env_untouched = false;
@@ -8852,6 +9071,9 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	if (cfor_states_.size() > rec.cfor_base) {
 		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
 	}
+	if (pending_callees_.size() > rec.pending_base) {
+		pending_callees_.erase(pending_callees_.begin() + rec.pending_base, pending_callees_.end());
+	}
 	if (!rec.env_lazy) {
 		// Moved out first so the pool's use_count()==1 guard sees today's count
 		release_scope_env(std::move(rec.f.entry_env));
@@ -8870,6 +9092,9 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	}
 	if (rec.callee_pin.raw_storage_index() != script_value::TYPEID_NULL) {
 		rec.callee_pin = make_null();
+	}
+	if (rec.direct_pin) {
+		rec.direct_pin = {};
 	}
 	rec.return_type = nullptr;
 	if (rec.ast_pin) {
@@ -9532,8 +9757,12 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	frame_guard guard(this, &f);
 
+	const size_t entry_pending = pending_callees_.size();
 	auto cleanup = [&]() {
 		if (is_unwinding_ && !trace_captured_) capture_stack_trace();
+		if (pending_callees_.size() > entry_pending) {
+			pending_callees_.erase(pending_callees_.begin() + entry_pending, pending_callees_.end());
+		}
 		clear_this_on_frame_exit(f.entry_env);
 		environment_ = previousEnv;
 		has_return_value_ = previousHasReturn;

@@ -93,6 +93,8 @@ namespace {
 			case opcode::op_compound_fused:
 			case opcode::op_loop_back:
 			case opcode::op_call:
+			case opcode::op_probe_callee:
+			case opcode::op_call_from_scratch:
 			case opcode::op_return:
 			case opcode::op_return_ident:
 			case opcode::op_return_binary:
@@ -1455,8 +1457,21 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		}
 	}
 
-	compile_expression(expr->callee);
+	// Callee-first probe (Dev ruling 2026-07-08): identifier callees resolve via
+	// op_probe_callee at the pre-args observation point into the pending register -
+	// no value-stack materialization, byte-identical semantics. Other callee shapes
+	// keep the verbatim load+op_call pair.
+	const bool probe_callee = expr->callee->get_type() == node_type::identifier_expr;
+	size_t probe_ip = SIZE_MAX;
+	if (probe_callee) {
+		probe_ip = emit(opcode::op_probe_callee, 0, static_cast<uint32_t>(expr->arguments.size()));
+	} else {
+		compile_expression(expr->callee);
+	}
 	call_site site;
+	if (probe_callee) {
+		site.callee = make_fused_operand(expr->callee.get());
+	}
 	site.arg_symbols.reserve(expr->arguments.size());
 	site.arg_slots.reserve(expr->arguments.size());
 	const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
@@ -1479,8 +1494,14 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
 	}
 	chunk_->call_sites.push_back(std::move(site));
-	emit(opcode::op_call, static_cast<uint32_t>(expr->arguments.size()),
-	     static_cast<uint32_t>(chunk_->call_sites.size() - 1));
+	if (probe_callee) {
+		chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
+		emit(opcode::op_call_from_scratch, static_cast<uint32_t>(expr->arguments.size()),
+		     static_cast<uint32_t>(chunk_->call_sites.size() - 1));
+	} else {
+		emit(opcode::op_call, static_cast<uint32_t>(expr->arguments.size()),
+		     static_cast<uint32_t>(chunk_->call_sites.size() - 1));
+	}
 }
 
 void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {

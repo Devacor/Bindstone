@@ -16,6 +16,15 @@ namespace jai::vm {
 
     struct chunk;
 
+    // One side of a fused binary/compound operand: identifier (slot + symbol index)
+    // or literal (constant index). Mirrors what op_load/op_const would resolve.
+    struct fused_operand {
+        uint32_t slot = k_invalid_u32;        // function-frame slot (k_invalid_u32 = env)
+        uint32_t symbol = k_invalid_u32;      // index into chunk::symbols; invalid = literal
+        uint32_t const_index = k_invalid_u32; // index into chunk::constants; invalid = identifier
+        uint32_t load_flags = 0;              // load_flag_* (type-ctor names)
+    };
+
     // Per-call-site argument metadata: symbol id per argument (UINT64_MAX = not an identifier)
     struct call_site {
         std::vector<uint64_t> arg_symbols;
@@ -32,6 +41,8 @@ namespace jai::vm {
         // superseded function stays pinned per site until the refill). Never WRITTEN on
         // parallel workers (chunks are shared across worker function copies; same
         // cached_global_env_ gate as the env-lookup caches).
+        // Identifier callee operand (op_probe_callee sites): resolved like op_load
+        fused_operand callee;
         mutable const script_function* ic_identity = nullptr;
         mutable const script_defined_function* ic_fn = nullptr;
         mutable strong_ptr<script_function> ic_pin;
@@ -72,15 +83,6 @@ namespace jai::vm {
         uint64_t var_symbol = UINT64_MAX;
         size_t slot = SIZE_MAX;                            // SIZE_MAX = define through the environment
         bool is_reference = false;
-    };
-
-    // One side of a fused binary/compound operand: identifier (slot + symbol index)
-    // or literal (constant index). Mirrors what op_load/op_const would resolve.
-    struct fused_operand {
-        uint32_t slot = k_invalid_u32;        // function-frame slot (k_invalid_u32 = env)
-        uint32_t symbol = k_invalid_u32;      // index into chunk::symbols; invalid = literal
-        uint32_t const_index = k_invalid_u32; // index into chunk::constants; invalid = identifier
-        uint32_t load_flags = 0;              // load_flag_* (type-ctor names)
     };
 
     // op_binary_fused: evaluates `left op right` without materializing operand loads

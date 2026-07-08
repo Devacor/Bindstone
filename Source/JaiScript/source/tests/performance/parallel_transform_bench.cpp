@@ -24,6 +24,10 @@ public:
 
 	void pre_test() override {
 		test_engine = make_engine();
+		// The 100k serial row runs 323-460ms honest; the default 1s wall-clock budget
+		// leaves <3x headroom, so machine contention aborts the row (either backend,
+		// any commit). Measurement suites disable the budget like the perf twins do.
+		test_engine->execution_budget(0);
 		jai::stdlib::register_all(test_engine);
 		bites.clear();
 		// Inputs + bodies once; the benchmark iterations re-run only the call itself.

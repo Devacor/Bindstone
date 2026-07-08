@@ -1,11 +1,12 @@
 # JaiScript Performance Report
 
-**2026-07, VM-perf branch (HEAD 3528ea86).** The definitive current numbers: both JaiScript
+**2026-07, VM-perf branch (HEAD 08933539).** The definitive current numbers: both JaiScript
 backends head-to-head against Lua 5.4 (sol2), Squirrel 3.x, and ChaiScript 6.1, plus per-op
 ladders, aliasing costs, parallel scaling, debugger overhead, and jaibite cache numbers.
 Methodology in Appendix A; everything here is min-of-5 (min-of-3 for the long parallel
-suite) integer-µs Foundry rows on a quiet machine, full suite green (88 suites, 1844 tests)
-on both backends at the measured commit. The 2025-12 tree-walker-era analysis this file used
+suite) integer-µs Foundry rows on a quiet machine, full suite green (88 suites, 1948 tests)
+on both backends at the measured commit. The recursion, loop, and method rows were
+**refreshed 2026-07-08** after the flat-stack and method-cost campaigns landed (Appendix A). The 2025-12 tree-walker-era analysis this file used
 to hold is preserved in git history (`git show 9c268ffd:Source/JaiScript/docs/PERFORMANCE.md`);
 its optimization-history table survives as Appendix B.
 
@@ -17,13 +18,14 @@ its optimization-history table survives as Appendix B.
    the script BST, stands at ~50× from its historical figure) — typically 8–20× (function
    calls 13×, method dispatch 13×, fib(6) 20×), and that is *after* retuning the ChaiScript
    suite's algorithm rows in ChaiScript's favor for fairness.
-3. **12W / 6L / 1T vs Squirrel** (VM backend, 19 head-to-head rows): wins everything
-   statement-, container-, string-, and object-shaped; the losses are deep recursion and the
-   raw-loop family.
+3. **13W / 6L vs Squirrel** (VM backend, 19 head-to-head rows): wins everything
+   statement-, container-, string-, and object-shaped; the losses are deep recursion, the
+   object-graph BSTs, and the hot loop. The counted for-loop was a tie at the capstone; the
+   flat-stack campaign flipped it to a win (5 vs 9 µs).
 4. **vs Lua 5.4: an honest split, 7W / 10L / 2T.** JaiScript wins or ties statements,
    containers, and null checks; Lua wins loops (~2–4× post-fusion) and above all call-dense recursion —
-   **fib(15) is ~9× faster in Lua** (697 vs 76 µs). Structural, diagnosed, and on the
-   roadmap (flat-stack VM rewrite — see Known gaps).
+   **fib(15) is ~6.7× faster in Lua** (454 vs 68 µs), narrowed from ~9× (697 µs) by the
+   flat-stack VM rewrite. Still structural; full parity is blocked — see Known gaps.
 5. **`parallel_transform` reaches 4.8× over the serial loop at W=8 on a 4C/8T machine**
    (100k-double map, VM), and the jaibite disk cache makes a 535-line game file load
    **2.4× faster** than parsing it (5.8 ms → 2.4 ms full run; the parse component itself,
@@ -81,21 +83,22 @@ frame) stays in the 1–3 µs band on both JaiScript backends.
 
 | benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
 |---|---|---|---|---|---|
-| Factorial(10) | 14 | 4 | 2 | 6 | 67 |
-| Fibonacci(15) | 1877 | 697 | 75 | 165 | — |
-| Fibonacci(15) `[precompiled]` | 1899 | 685 | 72 | 159 | — |
-| Fibonacci(6) | 25 | 8 | — | — | 164 |
-| Recurse, 10 locals, depth 15 | 66 | 41 | 3 | 7 | — |
-| Recurse, 10 locals, depth 10 | 45 | 28 | — | — | 180 |
+| Factorial(10) | 10 | 2 | 2 | 5 | 62 |
+| Fibonacci(15) | 1775 | 454 | 68 | 156 | — |
+| Fibonacci(15) `[precompiled]` | 1760 | 452 | 67 | 150 | — |
+| Fibonacci(6) | 23 | 6 | — | — | 155 |
+| Recurse, 10 locals, depth 15 | 57 | 40 | 3 | 7 | — |
+| Recurse, 10 locals, depth 10 | 39 | 27 | — | — | 172 |
 
-**Winner: Lua, decisively.** Lua runs fib(15) **~9× faster** than the JaiScript VM and the
-locals-heavy recursion **~14× faster**; Squirrel is ~4–5× faster than the VM on the same
-rows. This is the one structural gap: the project's own diagnosis (VM-perf branch) found
-opcode *counts* at parity with Lua (~7 ops per fib call) — the cost is per-call frame setup,
-not dispatch. The committed fix is the **flat-stack / register-window VM rewrite** on the
-roadmap; Squirrel's same-architecture calls demonstrate the headroom. Two mitigations are
-already real: the VM cut the interpreter's fib time 2.7× (1877 → 697), and it beats
-ChaiScript by **~20×** on the same shape (fib(6): 8 vs 164). Practical guidance unchanged:
+**Winner: Lua, but the gap narrowed.** Lua runs fib(15) **~6.7× faster** than the JaiScript VM
+(was ~9× at the capstone) and the locals-heavy recursion **~13× faster**; Squirrel is now
+~2.9× faster than the VM on fib (was ~4×). This is the one structural gap: the project's own
+diagnosis (VM-perf branch) found opcode *counts* at parity with Lua (~7 ops per fib call) —
+the cost is per-call frame setup, not dispatch. The **flat-stack / register-window VM rewrite**
+that was on the roadmap **landed** (stages 1–6, `b961e251`…`42d63c88`): fib(15) went 697 → 454
+min-of-5, a 1.49× cumulative cut. Full Lua parity is now structurally blocked — see Known gaps.
+Two mitigations remain real: the VM cut the interpreter's fib time ~3.9× (1775 → 454), and it
+beats ChaiScript by **~26×** on the same shape (fib(6): 6 vs 155). Practical guidance unchanged:
 game scripts that are loop- and method-shaped don't feel this; avoid deep naive recursion in
 per-frame hot paths until the rewrite lands.
 
@@ -103,23 +106,25 @@ per-frame hot paths until the rewrite lands.
 
 | benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
 |---|---|---|---|---|---|
-| For loop, 100 iters | 14 | 9 | 4 | 9 | 30 |
-| Hot loop 1000 (`sum += i`)* | 133 | **42** | 10 | 36 | — |
-| Hot loop 1000 `[precompiled]`* | 132 | **42** | 7 | 29 | — |
-| Hot loop 1000, fused shape (`sum += i * 2`) | 150 | **47** | — | — | — |
+| For loop, 100 iters | 15 | **5** | 4 | 9 | 28 |
+| Hot loop 1000 (`sum += i`)* | 129 | **42** | 10 | 34 | — |
+| Hot loop 1000 `[precompiled]`* | 128 | **42** | 7 | 27 | — |
+| Hot loop 1000, fused shape (`sum += i * 2`) | 146 | **47** | — | — | — |
 | Range-for, 10 elements | 5 | 2 | 4 | 7 | — |
-| Range-for by copy, 100 elements | 28 | 18 | — | — | 31 |
+| Range-for by copy, 100 elements | 27 | 12 | — | — | 30 |
 
-\* re-measured at 2191c59b (single-operand compound fusion landed: bare identifier/const
-RHS joins `op_compound_fused`, min-of-5): the comparison-suite hot loop dropped 88 → 42 µs.
-The other cells in this table are the 3528ea86 measurement session's.
+\* the single-operand compound fusion landed at 2191c59b (bare identifier/const RHS joins
+`op_compound_fused`): the comparison-suite hot loop dropped 88 → 42 µs. The whole table was
+re-measured 2026-07-08 at HEAD 08933539; the counted for-loop fell to 5 µs (fusion reaches
+its `sum += i` body too), which is the flip noted below.
 
-**Winner: Lua, by 4.2×** (down from 8.8× pre-fusion; none of it is recompile artifact — the
-precompiled rows agree). Against Squirrel the VM now splits the class three ways: tie on the
-counted for-loop, win on range-for (2 vs 7), and the hot loop narrowed from a clear loss to
-42 vs 36 (~1.2×, harness noise territory but not yet a flip). Per-iteration reality check:
-the fused VM loop runs **42–47 ns/iteration**, and range-for is where JaiScript's loop
-machinery is already the best of the four.
+**Winner: Lua, by 4.2×** on the hot loop (down from 8.8× pre-fusion; none of it is recompile
+artifact — the precompiled rows agree), though the for-loop is now near-parity (5 vs 4).
+Against Squirrel the VM sweeps the class except the hot loop: it now **wins the counted
+for-loop** (5 vs 9, a flip from the capstone's 10-vs-10 tie), wins range-for (2 vs 7), and
+loses the hot loop 42 vs 34 (~1.2×, still not a flip). Per-iteration reality check: the fused
+VM loop runs **42–47 ns/iteration**, and range-for is where JaiScript's loop machinery is
+already the best of the four.
 
 ### Containers
 
@@ -148,9 +153,9 @@ method-chain rows sit at 2 µs where ChaiScript pays 36+.
 
 | benchmark | Jai interp | Jai VM | Lua | Squirrel | ChaiScript |
 |---|---|---|---|---|---|
-| Class creation | 5 | 5 | 3 | 6 | 47 |
-| Method invocation | 5 | 3 | 3 | 6 | 39 |
-| Method invocation `[precompiled]` | 5 | 3 | 0 | 0 | — |
+| Class creation | 5 | 5 | 3 | 5 | 45 |
+| Method invocation | 4 | 3 | 3 | 6 | 38 |
+| Method invocation `[precompiled]` | 3 | 3 | 0 | 0 | — |
 | Class inheritance (define + instantiate)* | 175 | 174 | — | — | — |
 
 \* perf-suite row, both backends equal — the cost is class (re)definition bookkeeping, not
@@ -159,9 +164,11 @@ dispatch; batch class definitions once, don't re-execute them per frame.
 **Winner: Lua by a hair on plain rows — and the precompiled rows show its real method-call
 cost is below the harness floor** (that cheapness is what compounds into the recursion gap).
 The VM matches Lua's plain method row (3 vs 3) and halves Squirrel's; ChaiScript is 8–13×
-behind. The idiom ladder below adds the honest per-call figure: a JaiScript method call in a
-tight loop costs ~2.4 µs of real work on either backend — method dispatch is the natural
-next target after call frames.
+behind; the interpreter's plain row dropped 5 → 4 with the method-cost campaign. The idiom
+ladder below carries the honest per-call figure: the method-cost campaign (VM stage 5a
+`17851b70`, interp `08933539`) took a JaiScript method call from ~2.5 µs to **~1 µs of real
+work** on either backend (ns-probe) — the integer-µs suite can't resolve that sub-µs win, so
+the plain row barely moves. The next dispatch target is the binder/property-getter path.
 
 ### Object-graph algorithms & C++ interop
 
@@ -196,12 +203,13 @@ is free where BoxedValue is a malloc.
 
 | vs | verdict (VM backend) | where they win | where JaiScript wins |
 |---|---|---|---|
-| **Lua 5.4** | 7W / 10L / 2T | recursion (9–14×), loops (2–4× post-fusion), BST, C++ interop, concat | statements, containers, range-for, null checks — and every Lua win except recursion/BST is ≤8 µs absolute |
-| **Squirrel** | **12W / 6L / 1T** | fib (4×), locals recursion (5×), hot loop (42 vs 36 post-fusion — a near-tie), both BSTs, C++ BST | everything else: statements 4–5×, containers 2–4×, methods 2×, strings 1.4×, range-for 2.3× |
-| **ChaiScript** | **29W / 0L** (all live rows) | nothing measured | everything, 1.6× (C++-adjacent) to ~20× (recursion), typically 8–20× |
+| **Lua 5.4** | 7W / 10L / 2T | recursion (6.7–13×), loops (2–4× on the hot loop), BST, C++ interop, concat | statements, containers, range-for, null checks — and every Lua win except recursion/BST is ≤8 µs absolute |
+| **Squirrel** | **13W / 6L** | fib (2.9×), locals recursion (5.7×), hot loop (42 vs 34 post-fusion), both BSTs, C++ BST | everything else: statements 4–5×, containers 2–4×, methods 2×, strings 1.4×, range-for 2.3×, and now the counted for-loop (5 vs 9) |
+| **ChaiScript** | **29W / 0L** (all live rows) | nothing measured | everything, 1.6× (C++-adjacent) to ~26× (recursion), typically 8–20× |
 
-(The previously published Squirrel line was 13W/6L; at HEAD the counted for-loop reads
-10 vs 10 — a tie at harness resolution, so the honest count is 12W/6L/1T.)
+(The Squirrel line was 12W/6L/1T at the capstone, the 1T being the counted for-loop at 10 vs
+10; the flat-stack campaign's fusion reach dropped JaiScript's for-loop to 5 vs Squirrel's 9,
+flipping that tie to a win — back to 13W/6L.)
 
 ---
 
@@ -219,20 +227,20 @@ is free where BoxedValue is a malloc.
 | String passing to function | 6 | 5 |
 | Array push/pop | 5 | 5 |
 | Map insert/lookup | 3 | 2 |
-| For loop (100 iterations) | 14 | 10 |
-| Hot loop (1000 iterations, fused) | 150 | **47** |
+| For loop (100 iterations) | 15 | 5 |
+| Hot loop (1000 iterations, fused) | 146 | **47** |
 | Class creation | 15 | 14 |
 | Method invocation | 12 | 9 |
 | Class inheritance | 175 | 174 |
-| Fibonacci(15) | 1861 | 701 |
-| Recurse 10 locals (depth 15) | 66 | 42 |
+| Fibonacci(15) | 1775 | 454 |
+| Recurse 10 locals (depth 15) | 57 | 40 |
 | BST `[naive by-value]` / shared_ptr / by-ref | 976 / 389 / 292 | 915 / 346 / 251 |
 | Ref-param pass-through relay ×100 | 142 | 66 |
 | Engine creation | 77 | 73 |
 | Stdlib registration | 311 | 312 |
 
 jaibite variants of the hot rows match their plain counterparts (the source cache already
-removed parse cost from plain rows): hot loop 150/46, method invocation 11/8, for-loop 13/9.
+removed parse cost from plain rows): hot loop 145/47, method invocation 11/8, for-loop 14/4.
 
 Array/map literals (auto vs var, 10-int array through 3-level nesting): everything is 1–5 µs
 on both backends; `var` runs 0–1 µs cheaper than `auto` per row (deferred element typing) —
@@ -256,8 +264,13 @@ Dedicated ns-resolution bench (25-rep medians over 20k-op jaibite loops, min-of-
 | compound element store (`a[i] += 1`) | 1469 | 560 |
 | read+write element store (`a[i] = a[i] + 1`) | 1076 | 872 |
 | free function call in loop | 920 | 440 |
-| method call in loop | 2470 | 2366 |
+| method call in loop | 1060† | 980† |
 | template-string build (small) | 1019 | 802 |
+
+† method-cost campaign ns-probe (isolated 2-int-arg call): interp `08933539` 2.46 → 1.06 µs,
+VM stage 5a `17851b70` 2.54 → 0.98 µs. The capstone's 25-rep-median reading in this table was
+2470/2366 ns, taken before the flattened dispatch landed; the row now carries the ns-probe
+figure. This bench proper was not re-run in the 2026-07-08 refresh.
 
 Readings (this refreshes the previously circulated idiom advice):
 
@@ -265,9 +278,10 @@ Readings (this refreshes the previously circulated idiom advice):
   1.6× *cheaper* than the read-then-write spelling (560 vs 872 ns). On the interpreter it is
   1.4× *dearer* (1469 vs 1076). The VM is the default backend — prefer compound stores, and
   know the interpreter inverts the advice.
-- **Method calls cost ~2.4 µs on both backends** — dispatch machinery, not loop overhead.
-  In per-element hot loops prefer a free function (0.4–0.9 µs) or inline field work
-  (~90–170 ns); or move the loop *inside* the method (the `this`-field row).
+- **Method calls cost ~1 µs on both backends** after the method-cost campaign (was ~2.4 µs) —
+  still dispatch machinery, not loop overhead. In per-element hot loops a free function
+  (0.4–0.9 µs) or inline field work (~90–170 ns) is still cheaper; or move the loop *inside*
+  the method (the `this`-field row).
 - Element access through a local `var&` alias vs. the global chain directly is a wash at this
   size, and a one-time 1024-element array *copy* amortized over 20k reads disappears
   entirely. Copies cost per-call, not per-read — see the aliasing section.
@@ -355,16 +369,25 @@ across processes.
 
 ## Known gaps & roadmap
 
-- **Call-dense recursion vs Lua (~9× on fib(15), ~14× locals-heavy)** — structural per-call
-  frame cost; opcode counts are already at parity. Fix: the flat-stack / register-window VM
-  rewrite (a roadmap commitment, not a hope; Squirrel's same-architecture calls at 4×
-  demonstrate the headroom).
+- **Call-dense recursion vs Lua (~6.7× on fib(15), ~13× locals-heavy)** — structural per-call
+  frame cost; opcode counts are at parity. The flat-stack / register-window VM rewrite that
+  targeted this **LANDED** (stages 1–6, `b961e251`…`42d63c88`): fib(15) 697 → 454 µs min-of-5
+  (1.49× cumulative), which is **short of the 350–430 µs Squirrel-class target** set in the
+  design doc (`2cd03904`). Full Lua parity is now **permanently blocked**: the last big lever,
+  callee-load elimination (`op_call_direct`), needs the callee resolved *after* its args, but
+  interpreter semantics resolve the callee — including `not_a_function` — *before* args, so
+  byte-parity forbids the reorder (`42d63c88`, verified in `visit_call_expr`). Named remaining
+  levers, each smaller: VM environment parking beyond the stage-3 lazy no-closure case, and a
+  zero-arg direct-call fast path.
 - ~~**Single-operand compound fusion** (`sum += i`)~~ **LANDED (2191c59b)**: bare
   identifier/const RHS joined `op_compound_fused`; the comparison-suite hot loop runs
   42 µs (was 88), Lua's loop margin fell 8.8× → 4.2×, and the Squirrel hot-loop row
   narrowed to 42 vs 36 (a near-tie, not the predicted flip).
-- **Method-call dispatch (~2.4 µs/call both backends)**: the idiom ladder shows it dwarfing
-  free calls (0.4–0.9 µs); flattened dispatch already landed, the binder/lookup path is next.
+- **Method-call dispatch**: the method-cost campaign **landed** (VM stage 5a `17851b70`,
+  interp `08933539`), cutting per-call cost ~2.5 → ~1 µs (ns-probe); the integer-µs plain row
+  moved 5 → 4 on the interpreter, VM stayed 3 (both below the sub-µs win the harness can't
+  resolve). Free calls are still cheaper (0.4–0.9 µs); the binder/property-getter path is the
+  next dispatch target.
 - **C++ interop dispatch**: sol2 usertypes at 18 µs vs `dynamic_binder` at 49 µs on the
   bound-BST row — property-dispatch cost, worth a targeted pass.
 - **Band-edge verdict (this session's open question): NOT a regression.** At HEAD the VM runs
@@ -372,6 +395,8 @@ across processes.
   machine; the earlier 50–56/756 spot-check was taken under load and did not reproduce (one
   56 µs outlier in 5 runs — the ±50% single-run variance the methodology warns about). No
   bisect warranted; the post-stage-C changes (vm debug hook et al.) carry no measurable cost.
+  (Historical: the flat-stack campaign has since moved the fib band to ~454 µs — see the
+  recursion gap above.)
 - **Class redefinition bookkeeping** (~175 µs inheritance row, identical on both backends):
   per-execute class re-registration — batch definitions once, don't re-execute per frame.
 
@@ -400,8 +425,18 @@ across processes.
   genuinely precompile (e.g. Lua's loadbuffer-then-call embedding shape), symmetrically.
   Don't read a dropped `[precompiled]` row in a future table as a measurement change.
 - **Backends**: every JaiScript number is reported for both the tree-walking interpreter and
-  the bytecode VM (`--backend=vm`). Full regression suite (88 suites / 1844 tests) green on
-  both backends at HEAD 3528ea86 as part of this measurement session.
+  the bytecode VM (`--backend=vm`). Full regression suite green on both backends at HEAD
+  08933539 (1948 Release BENCHMARKS tests per that commit; the capstone body was measured at
+  3528ea86 / 1844 tests).
+- **2026-07-08 targeted refresh**: the recursion, loop, and method-dispatch rows (and the
+  executive-summary / scorecard claims that depend on them) were re-measured min-of-5 at HEAD
+  08933539 after the flat-stack VM campaign (stages 1–6: `b961e251`, `2238f9a2`, `76bb3d3c`,
+  `c99338d5`, `17851b70`, `42d63c88`) and the interpreter method-cost landing (`08933539`);
+  compound fusion (`2191c59b`) was already reflected mid-doc and was re-confirmed. Headline
+  moves: fib(15) VM 697 → 454 µs (Lua gap ~9× → ~6.7×), the counted for-loop VM 9 → 5 µs
+  (flipping the Squirrel tie to a win, 12W/6L/1T → 13W/6L), interpreter method invocation
+  5 → 4 µs. All other tables (trivial statements, containers, strings, BSTs, aliasing,
+  parallel, debugger, jaibite) are unchanged capstone numbers and were **not** re-run.
 - Each table is reproducible via
   `jaiscript_tests.exe "<suite name>" --verbose [--backend=vm]` — suite names: "Performance
   Benchmarks", "Lua (sol2) Performance Comparison", "Squirrel Performance Comparison",
@@ -412,7 +447,8 @@ across processes.
 
 | Date | Commit | For Loop (100) | Hot Loop (1000) | Notes |
 |------------|----------|----------------|-----------------|---------------------------------|
-| 2026-07-07 | 3528ea86 | 14 (VM 10) | 150 (**VM 47**) | this report; VM default, fused superinstructions |
+| 2026-07-08 | 08933539 | 15 (**VM 5**) | 146 (**VM 47**) | flat-stack campaign: fib(15) 697→454, for-loop VM 9→5, method-cost ~1µs |
+| 2026-07-07 | 3528ea86 | 14 (VM 10) | 150 (**VM 47**) | capstone report; VM default, fused superinstructions |
 | 2025-12-28 | — | 8 | 42 | slot-based locals (fib 1051→878) |
 | 2025-12-26 | cfc7720c | 8 | 44 | string interning improvements |
 | 2025-12-24 | 13d54d35 | 15 | 49 | strong_ptr + shared string storage |

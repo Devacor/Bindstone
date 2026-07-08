@@ -95,6 +95,11 @@ namespace jai::vm {
         op_ref_return_lvalue, // a=node index (lvalue expr); pushes an owner-pinned reference
                               // via detail::resolve_ref_lvalue (ref-return producer)
 
+        op_return_ident,    // a=slot, b=symbol index, c=load flags: fused `return <ident>;`
+                            // (LOAD+RETURN; resolution mirrors op_load via fused_ident_value)
+        op_return_binary,   // a=token_type, b=operand shape: fused `return <a op b>;`
+                            // (BINARY+RETURN; pops two, computes like op_binary, returns)
+
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
         op_halt,
     };
@@ -210,6 +215,8 @@ namespace jai::vm {
             case opcode::op_compound_fused: return "COMPOUND_FUSED";
             case opcode::op_ref_return_bind: return "REF_RETURN_BIND";
             case opcode::op_ref_return_lvalue: return "REF_RETURN_LVALUE";
+            case opcode::op_return_ident: return "RETURN_IDENT";
+            case opcode::op_return_binary: return "RETURN_BINARY";
             case opcode::op_error: return "ERROR";
             case opcode::op_halt: return "HALT";
         }

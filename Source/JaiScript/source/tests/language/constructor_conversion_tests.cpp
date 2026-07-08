@@ -1017,6 +1017,68 @@ public:
             auto f_temp = eng->execute("f_temp");
             check(std::abs(f_temp.as<script_float>() - 212.0) < 0.1);
         });
+
+        // ---------------------------------------------- converting-ctor ruling pins
+        // Dev ruling (2026-07): a defaulted-parameter constructor is NOT a converting
+        // constructor - deliberate C++ divergence ("this gives us more control").
+        // The idiom pair replaces C++'s explicit keyword: conversion is opted INTO
+        // with a true one-parameter (delegating) overload, and opted OUT OF with a
+        // defaulted sentinel parameter.
+
+        test("defaulted_ctor_is_not_a_converting_ctor", [&]() {
+            auto eng = make_engine();
+            eng->execute(R"(
+                class Money {
+                    int amount = 0;
+                    int cents = 0;
+                    Money(int amount, int cents = 0) { this.amount = amount; this.cents = cents; }
+                }
+                function pay(Money m) -> int { return m.amount; }
+            )");
+            // explicit construction through the arity window always works
+            check_eq(eng->execute("Money(5).amount").as<int>(), 5);
+            check_eq(eng->execute("Money(5, 25).cents").as<int>(), 25);
+            // implicit conversion shapes: ERROR (typed param + typed decl)
+            check_throws([&]() { eng->execute("pay(5);"); });
+            check_throws([&]() { eng->execute("Money m = 5;"); });
+        });
+
+        test("delegating_one_param_overload_opts_into_conversion", [&]() {
+            auto eng = make_engine();
+            eng->execute(R"(
+                class Money {
+                    int amount = 0;
+                    int cents = 0;
+                    Money(int amount, int cents = 0) { this.amount = amount; this.cents = cents; }
+                    Money(int _amount) : this(_amount, 0) {}
+                }
+                function pay(Money m) -> int { return m.amount; }
+            )");
+            check_eq(eng->execute("pay(5)").as<int>(), 5);                    // param converts
+            check_eq(eng->execute("Money m = 7; m.amount").as<int>(), 7);     // decl converts
+            check_eq(eng->execute("Money(9, 50).cents").as<int>(), 50);       // explicit intact
+            // direct Money(5): the true 1-param ctor wins the fewest-defaults tie,
+            // delegates this(5, 0) - cents filled explicitly by the delegation
+            check_eq(eng->execute("Money(5).cents").as<int>(), 0);
+        });
+
+        test("defaulted_sentinel_param_opts_out_of_conversion", [&]() {
+            // The opt-OUT direction: an explicitly-1-arg-callable ctor that must NOT
+            // convert gains a dummy defaulted param (Dev's example) - callable as
+            // Money(3.5) via the defaults machinery, invisible to conversion.
+            auto eng = make_engine();
+            eng->execute(R"(
+                class Money {
+                    float amount = 0.0;
+                    Money(float _amount, int _ignored = 0) { amount = _amount; }
+                }
+                function pay(Money m) -> float { return m.amount; }
+            )");
+            auto explicit_ok = eng->execute("Money(3.5).amount");
+            check(std::abs(explicit_ok.as<script_float>() - 3.5) < 0.0001);
+            check_throws([&]() { eng->execute("pay(3.5);"); });      // no implicit float->Money
+            check_throws([&]() { eng->execute("Money m = 3.5;"); });
+        });
     }
 };
 

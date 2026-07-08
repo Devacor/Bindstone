@@ -158,9 +158,10 @@ parameterList = parameter ("," parameter)*
 
 // Four accepted parameter shapes; a default value may follow any of them.
 // Once a parameter has a default, all later parameters must too.
-// NOTE: defaults are honored by free functions, lambdas, and static methods;
-// instance methods, constructors, and namespace overloads currently resolve on
-// exact arity and ignore them (pending).
+// NOTE: defaults are honored by EVERY callable kind - free functions, lambdas,
+// static and instance methods, constructors (incl. this()/super() delegation),
+// and namespace overloads (a callable with N params, K defaulted, accepts N-K..N
+// arguments; within a resolution tier the candidate using fewest defaults wins).
 parameter = type "&"? IDENTIFIER ("=" expression)?     // classic:  int x, Creature& c
           | IDENTIFIER ("=" expression)?               // untyped -> auto: foo(x), foo(x = 3)
           | type ":" IDENTIFIER ("=" expression)?      // typed shorthand: int: n (no '&' form)
@@ -471,8 +472,11 @@ function greet(name, string greeting = "Hello") {   // untyped param -> auto
     print("{} {}", greeting, name);
 }
 function f(x = 3) { return x; }             // untyped params take defaults too
-// Defaults are honored by free functions, lambdas, and static methods; instance
-// methods, constructors, and namespace overloads currently need exact arity (pending).
+// Defaults are honored by EVERY callable kind: free functions, lambdas, static and
+// instance methods, constructors (incl. this()/super() delegation), namespace
+// overloads. NOTE: a defaulted-parameter constructor is NOT a converting constructor
+// (deliberate C++ divergence - conversion requires a true one-parameter constructor;
+// write a delegating overload to opt in).
 
 int square(int: n) { return n * n; }        // type: name — alternative typed spelling
 auto id = [](:x) -> { return x; };          // :x — auto-like parameter (same as `auto x`)
@@ -511,7 +515,12 @@ one textual parse unit reports a checker WARNING (never an error — strict mode
 executes). Composition through `include`/`import` stays silent: included files parse and
 check as their own units. In namespaces, same name + same arity requires `override`
 (placed AFTER the parameter list: `int f() override { ... }`); different arities coexist
-as overloads. Class methods and constructors overload by arity.
+as overloads. Class methods and constructors overload by arity (trailing defaults
+widen each overload's accepted range; fewest defaults used wins ties). A
+defaulted-parameter constructor is NOT a converting constructor (deliberate C++
+divergence): conversion is opted into with a one-parameter overload
+(`Money(int a) : this(a, 0) {}`) and opted out of with a defaulted sentinel
+parameter (`Money(float a, int _ignored = 0)`) - the explicit keyword is unnecessary.
 
 ### Coroutines
 ```cpp

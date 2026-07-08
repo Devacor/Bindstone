@@ -1,5 +1,22 @@
 # Flat-stack VM design (phase 1: design only)
 
+**As-built deltas (stages 1–2 landed, 2026-07-08).** Stage 1 = b961e251 (callee IC +
+return-conversion classes + the interpreter pool-release lifetime fix per the Dev ruling),
+stage 2a = 91b004aa (accessor funnel), stage 2 core landed with three deliberate deviations
+from §2 as designed, reflected in `invariants.md` §2b: (1) **flat vector + growth-chokepoint
+rebasing instead of chunked segments** — segment indexing would tax every operand push/pop
+(the hot-loop 44–48 band), while the sanctioned raw-pointer set into frames is exactly
+enumerable (counted-for fast states; cells make everything else owner-pinned), so
+`value_stack::grow_push` + `rebase_window_pointers` (byte-offset; covers payload-interior
+int pointers) is strictly cheaper; (2) **frame metadata flattening deferred** —
+`call_record`/`frames_` stay as-is (that win folds into stage 3's scrub pass); (3) **fiber
+frames stay `call_frame`-backed** (the accessors' `window_backed == false` branch) until
+stage 4's per-fiber stacks — mixed-mode frames coexist on one stack. In-place binding's
+Ruling-2 elision proof: the elided copy is the old stack→locals transfer whose source died
+at the post-bind erase before any observation point, so the per-backend transient-count
+audit is STATIONARY (vm `2:1` unchanged; no `transient_k` retune). `call_frame` survives on
+record frames as frame-kind metadata only (this/static/closure_env/name).
+
 **Status: DESIGN — no implementation.** Roadmap item 3 ("Flat-stack VM"), the committed fix
 for the call-dense recursion gap vs Lua (`PERFORMANCE.md` Known gaps: fib(15) 697 µs VM vs
 75 µs Lua 5.4, ~9×; "Recurse, 10 locals" ~14×). Function calls are already ~0–1 µs compiled

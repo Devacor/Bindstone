@@ -396,7 +396,8 @@ struct vm_backend::frame_guard {
 vm_backend::vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env)
 	: symbolizer_(symbolizer), env_symbolizer_(symbolizer), environment_(std::move(global_env)), compiler_(symbolizer) {
 	cached_global_env_ = environment_.get();
-	stack_.reserve(64);
+	stack_.owner = this;
+	stack_.reserve(256);
 	frames_.reserve(64);
 }
 
@@ -450,6 +451,49 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 
 script_value vm_backend::make_null() const {
 	return script_value(std::monostate{}, engine_);
+}
+
+// Growth chokepoint (stage 2): the ONE sanctioned cross-op raw-pointer cache into
+// frame windows is the counted-for fast state (invariants 2b); reallocation rebases
+// exactly that. The pushed value detours through the temp param so self-referential
+// pushes (op_dup pushing back()) survive the move.
+void vm_backend::value_stack::grow_push(script_value x) {
+	const script_value* old_begin = v.data();
+	const script_value* old_end = old_begin + v.size();
+	v.reserve(v.capacity() < 2048 ? 4096 : v.capacity() * 2);
+	if (owner && old_begin) {
+		owner->rebase_window_pointers(old_begin, old_end, v.data());
+	}
+	v.push_back(std::move(x));
+}
+
+void vm_backend::rebase_window_pointers(const script_value* old_begin, const script_value* old_end,
+                                        script_value* new_begin) {
+	// Byte-offset rebase: var points at a whole slot, end/step point INSIDE a slot's
+	// int payload - both preserve their offset from the buffer head.
+	const char* ob = reinterpret_cast<const char*>(old_begin);
+	const char* oe = reinterpret_cast<const char*>(old_end);
+	char* nb = reinterpret_cast<char*>(new_begin);
+	auto rebase = [&](auto*& ptr) {
+		const char* pc = reinterpret_cast<const char*>(ptr);
+		if (pc >= ob && pc < oe) {
+			ptr = reinterpret_cast<std::remove_reference_t<decltype(ptr)>>(nb + (pc - ob));
+		}
+	};
+	for (auto& cs : cfor_states_) {
+		rebase(cs.var);
+		rebase(cs.end_ptr);
+		rebase(cs.step_ptr);
+	}
+}
+
+detail::caller_frame_view vm_backend::caller_view(frame* f) const {
+	if (!f) { return {}; }
+	if (f->window_backed && f->window_live > 0) {
+		return detail::caller_frame_view{f->locals, &stack_[f->window_base],
+		                                 static_cast<size_t>(f->window_live)};
+	}
+	return detail::caller_frame_view{f->locals};
 }
 
 void vm_backend::arm_execution_deadline() {
@@ -4869,7 +4913,7 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 			// resolves ref args against the caller frame/env directly (no metadata channel)
 			try {
 				return push_script_frame(f, std::move(stack_[args_base - 1]), *direct_fn,
-				                         stack_, args_base, argc, &site);
+				                         stack_.vec(), args_base, argc, &site);
 			} catch (const script_exception& e) {
 				// pre-record throws leave callee+args on the stack; drop them like the
 				// pooled path already had (bind-time throws pop-core'd them already)
@@ -4914,12 +4958,12 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
-			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, f.locals, f.code));
+			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, &f, f.code));
 		} else {
 			// Opaque invoke: arm the pending call-site context for the callee's bind
 			pending_call_site saved_pending = pending_site_ctx_;
 			pending_site_ctx_ = arguments.empty() ? saved_pending
-			                                      : pending_call_site{&site, f.locals, f.code};
+			                                      : pending_call_site{&site, &f, f.code};
 			struct pending_restore {
 				vm_backend* vm; pending_call_site saved;
 				~pending_restore() { vm->pending_site_ctx_ = saved; }
@@ -4982,12 +5026,12 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
-			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, f.locals, f.code));
+			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, &f, f.code));
 		} else {
 			// Opaque invoke: arm the pending call-site context for the callee's bind
 			pending_call_site saved_pending = pending_site_ctx_;
 			pending_site_ctx_ = arguments.empty() ? saved_pending
-			                                      : pending_call_site{&site, f.locals, f.code};
+			                                      : pending_call_site{&site, &f, f.code};
 			struct pending_restore {
 				vm_backend* vm; pending_call_site saved;
 				~pending_restore() { vm->pending_site_ctx_ = saved; }
@@ -7895,7 +7939,7 @@ checked_result<void> vm_backend::exec_ref_return_bind(frame& f, const vm_instruc
 checked_result<void> vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins) {
 	auto resolved = detail::resolve_ref_lvalue(
 		static_cast<const expression*>(f.code->nodes[ins.a].get()),
-		f.locals, environment_.get(), engine_, symbolizer_);
+		caller_view(&f), environment_.get(), engine_, symbolizer_);
 	if (!resolved) {
 		return resolved.error_value();
 	}
@@ -8470,7 +8514,13 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 		function.backend_return_conv = static_cast<uint8_t>(classify_return_conv(function.return_type));
 	}
 	rec.return_conv_class = function.backend_return_conv;
-	rec.callee_pin = std::move(callee);
+	// Stage 2: stack callees stay in their slot below the window — the slot IS the pin
+	// (hot reload can't kill the executing function; pop truncation releases it).
+	// Pooled-vector callees still pin through the record.
+	const bool args_on_stack = &args == &stack_.vec();
+	if (!args_on_stack) {
+		rec.callee_pin = std::move(callee);
+	}
 	// Moved, not copied: every branch below either overwrites environment_ or copies
 	// rec.prev_env back (lazy no-closure); the catch restores it on setup failure
 	rec.prev_env = std::move(environment_);
@@ -8478,7 +8528,6 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
 	rec.locals.function_name = function.name;
-	rec.locals.reserve_locals(std::max(function.local_count, body_chunk->local_count));
 	// Compile-time lazy elision: plain callees whose bodies provably never touch the
 	// per-call scope env skip creating it (methods/statics never elide — env kind
 	// fallbacks gate field-vs-shadowing precedence)
@@ -8507,24 +8556,27 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	++current_call_depth_;
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;
+	rec.f.locals = &rec.locals;   // frame-kind metadata (closure_env/this); slots live in the window
 	if (rec.env_lazy) {
 		rec.f.entry_env = nullptr;
 	} else {
 		rec.f.entry_env = environment_;
 	}
-	// Zero-copy callers leave callee+args on the stack through binding; stack_base is the
-	// callee slot so every pop/unwind truncation cleans them (any try_record live at the
-	// call op snapshotted a stack size <= the callee slot at try entry)
-	const bool args_on_stack = &args == &stack_;
+	// Frame window (stage 2): zero-copy callers' args ARE slots 0..argc-1 in place;
+	// pooled-vector callers build the window at the stack top during binding. stack_base
+	// is the callee slot (zero-copy) / the window base (pooled), so every pop/unwind
+	// truncation destroys the window (+pin) exactly where the old locals clear did.
+	rec.f.window_backed = true;
+	rec.f.window_base = args_on_stack ? args_base : stack_.size();
+	rec.f.window_live = args_on_stack ? static_cast<uint32_t>(argc) : 0;
 	rec.f.stack_base = args_on_stack ? args_base - 1 : stack_.size();
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.locals, *rec.f.code,
-		                        rec.prev_env, site, caller.locals, caller.code);
+		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
+		                        rec.prev_env, site, &caller, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -8536,7 +8588,12 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	if (args_on_stack) {
 		// Conversions during binding push and pop above the args, so the slice is intact
 		assert(stack_.size() == args_base + argc);
-		stack_.erase(stack_.begin() + rec.f.stack_base, stack_.end());
+	}
+	// Body slots up to local_count exist behind window_live (null placeholders), so
+	// operand temps start above the full window
+	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
+	for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
+		stack_.push_back(make_null());
 	}
 	switch_to_ = &rec.f;
 	return {};
@@ -8614,9 +8671,6 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
 	rec.locals.function_name = ast->name;
-	// Full-slot reserve: frame slot storage must NEVER reallocate mid-frame (counted-for
-	// state and references cache raw pointers into it)
-	rec.locals.reserve_locals(std::max(ast->local_count, body_chunk->local_count));
 	rec.env_lazy = false;   // method envs never elide (env-kind fallbacks gate precedence)
 	try {
 		// Net effect of the native wrapper-env round trip: a method scope parented on
@@ -8640,16 +8694,20 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	++current_call_depth_;
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;
+	rec.f.locals = &rec.locals;   // frame-kind metadata (this/closure_env); slots live in the window
 	rec.f.entry_env = environment_;
+	// Frame window built at the stack top during binding (pooled-vector args)
+	rec.f.window_backed = true;
+	rec.f.window_base = stack_.size();
+	rec.f.window_live = 0;
 	rec.f.stack_base = stack_.size();
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
 	checked_result<void> bound;
 	try {
-		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.locals, *rec.f.code,
-		                        rec.prev_env, site, caller.locals, caller.code);
+		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
+		                        rec.prev_env, site, &caller, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -8657,6 +8715,13 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	if (!bound) {
 		pop_script_frame_core(rec);
 		return bound;
+	}
+	// Body slots exist behind window_live so operand temps start above the full window
+	{
+		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
+		for (size_t filled = stack_.size() - rec.f.window_base; filled < window_slots; ++filled) {
+			stack_.push_back(make_null());
+		}
 	}
 	switch_to_ = &rec.f;
 	return {};
@@ -8968,7 +9033,7 @@ script_value vm_backend::share_env_ref(script_value& storage) {
 	return script_value(storage);
 }
 
-checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage, call_frame& locals, size_t param_slot) {
+checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage, frame& callee, size_t param_slot) {
 	if (storage.is_reference() && !storage.get_reference_holder()) {
 		return checked_result<void>(
 			make_error_code(runtime_error_code::invalid_reference),
@@ -8977,17 +9042,26 @@ checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage
 	// Share the holder (zero alloc; cells alias the same box, element/field refs keep
 	// their container/instance re-resolution), boxing on demand when the variable
 	// predates its escape mark (cross-execute global, C++ define, dynamic shape)
-	frame_slot_set(locals, param_slot, share_env_ref(storage));
+	frame_slot_set(callee, param_slot, share_env_ref(storage));
 	return {};
 }
 
 checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const std::vector<script_value>& args,
                                                  size_t args_base, size_t argc,
-                                                 call_frame& locals, chunk& body_chunk,
+                                                 frame& callee, chunk& body_chunk,
                                                  const std::shared_ptr<environment>& caller_env,
-                                                 const call_site* site, call_frame* caller_locals,
+                                                 const call_site* site, frame* caller_frame,
                                                  chunk* caller_code) {
+	// Stage-2 in-place binding: for zero-copy callers the args slice IS the window
+	// (window_base == args_base and param i sits in slot i), so a matching-type
+	// primitive argument is ALREADY its own slot - the bind copy is elided outright
+	// (Ruling 2 elision proof: the copy removed is the stack->locals transfer whose
+	// source died at the old post-bind erase before any script could observe it;
+	// the transient-count audit is stationary). All other branches write their
+	// converted/cloned/boxed value INTO the slot, replacing the raw argument.
+	const bool in_place = callee.window_backed && &args == &stack_.vec() &&
+	                      callee.window_base == args_base;
 	for (size_t i = 0; i < parameters.size(); ++i) {
 		const auto& param = parameters[i];
 
@@ -9001,7 +9075,12 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				df.code = default_chunk.get();
 				df.pin = default_chunk;
 				df.ip = 0;
-				df.locals = &locals;
+				// The default expression reads earlier params: share the callee frame's
+				// slot home (window fields for window frames, call_frame for fiber frames)
+				df.locals = callee.locals;
+				df.window_backed = callee.window_backed;
+				df.window_base = callee.window_base;
+				df.window_live = callee.window_live;
 				df.entry_env = environment_;
 				df.stack_base = stack_.size();
 				df.top_level = false;
@@ -9015,7 +9094,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 					if (stack_.size() > df.stack_base) {
 						stack_.erase(stack_.begin() + df.stack_base, stack_.end());
 					}
-					frame_slot_set(locals, param.slot_index, make_null());
+					frame_slot_set(callee, param.slot_index, make_null());
 					continue;
 				}
 				script_value default_val = std::move(stack_.back());
@@ -9023,7 +9102,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
 				}
-				frame_slot_set(locals, param.slot_index, std::move(default_val));
+				frame_slot_set(callee, param.slot_index, std::move(default_val));
 				continue;
 			}
 		}
@@ -9043,9 +9122,9 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 
 				// Caller frame-slot local (env lookup can't see slot locals and would
 				// walk to an unrelated same-named outer variable)
-				if (symbol_id != UINT64_MAX && slot != k_invalid_u32 && caller_locals) {
-					if (script_value* slotPtr = frame_slot(*caller_locals, slot)) {
-						JAISCRIPT_TRY(bind_reference_to_storage(*slotPtr, locals, param.slot_index));
+				if (symbol_id != UINT64_MAX && slot != k_invalid_u32 && caller_frame) {
+					if (script_value* slotPtr = frame_slot(*caller_frame, slot)) {
+						JAISCRIPT_TRY(bind_reference_to_storage(*slotPtr, callee, param.slot_index));
 						continue;
 					}
 				}
@@ -9056,11 +9135,11 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				if (lvalue_node != k_invalid_u32 && caller_code) {
 					auto resolved = detail::resolve_ref_lvalue(
 						static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
-						caller_locals, caller_env.get(), engine_, symbolizer_);
+						caller_view(caller_frame), caller_env.get(), engine_, symbolizer_);
 					if (!resolved) {
 						return resolved.error_value();
 					}
-					frame_slot_set(locals, param.slot_index, std::move(resolved.value()));
+					frame_slot_set(callee, param.slot_index, std::move(resolved.value()));
 					continue;
 				}
 
@@ -9071,7 +9150,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 							make_error_code(runtime_error_code::undefined_variable),
 							"Cannot take reference of undefined variable");
 					}
-					JAISCRIPT_TRY(bind_reference_to_storage(*argPtr, locals, param.slot_index));
+					JAISCRIPT_TRY(bind_reference_to_storage(*argPtr, callee, param.slot_index));
 				} else {
 					return checked_result<void>(
 						make_error_code(runtime_error_code::invalid_reference),
@@ -9082,7 +9161,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				auto arg_type = arg.current_type();
 				if (arg_type == script_value_type::jai_object_type ||
 				    arg_type == script_value_type::jai_shared_ptr_type) {
-					frame_slot_set(locals, param.slot_index, script_value(arg));
+					frame_slot_set(callee, param.slot_index, script_value(arg));
 				} else {
 					return checked_result<void>(
 						make_error_code(runtime_error_code::invalid_reference),
@@ -9112,7 +9191,17 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			     (param.type->base_type == script_value_type::jai_float_type && ri == script_value::TYPEID_FLOAT) ||
 			     (param.type->base_type == script_value_type::jai_bool_type && ri == script_value::TYPEID_BOOL) ||
 			     (param.type->base_type == script_value_type::jai_char_type && ri == script_value::TYPEID_CHAR))) {
-				frame_slot_set(locals, param.slot_index, boxed_param(script_value(arg)));
+				// In-place window arg: the pushed copy already IS the slot value with
+				// the arg's type_info verbatim (copy IS clone for primitives) - nothing
+				// to do unless the escape mark boxes it
+				if (in_place && param.slot_index == i) {
+					if (param.ref_escaping) {
+						script_value inner = std::move(stack_[args_base + i]);
+						stack_[args_base + i] = script_value::make_cell_reference(std::move(inner), engine_);
+					}
+					continue;
+				}
+				frame_slot_set(callee, param.slot_index, boxed_param(script_value(arg)));
 				continue;
 			}
 
@@ -9130,7 +9219,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				if (param.type && param.type->base_type == script_value_type::jai_object_type &&
 				    derefed.storage_type() == script_value_type::jai_object_type &&
 				    derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
-					frame_slot_set(locals, param.slot_index, boxed_param(derefed.clone()));
+					frame_slot_set(callee, param.slot_index, boxed_param(derefed.clone()));
 					continue;
 				}
 			}
@@ -9150,9 +9239,9 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			}
 
 			if (should_share) {
-				frame_slot_set(locals, param.slot_index, boxed_param(std::move(converted_arg)));
+				frame_slot_set(callee, param.slot_index, boxed_param(std::move(converted_arg)));
 			} else {
-				frame_slot_set(locals, param.slot_index, boxed_param(converted_arg.clone()));
+				frame_slot_set(callee, param.slot_index, boxed_param(converted_arg.clone()));
 			}
 		}
 	}
@@ -9160,12 +9249,12 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 }
 
 checked_result<script_value> vm_backend::call_script_function(const script_defined_function& function, const std::vector<script_value>& args,
-                                                              const call_site* site, call_frame* caller_locals, chunk* caller_code) {
+                                                              const call_site* site, frame* caller_frame, chunk* caller_code) {
 	// Opaque entry (bound methods, constructors, function values): the arming invoke
 	// left the call-site context pending - consume it exactly once
 	if (!site) {
 		site = pending_site_ctx_.site;
-		caller_locals = pending_site_ctx_.caller_locals;
+		caller_frame = pending_site_ctx_.caller_frame;
 		caller_code = pending_site_ctx_.caller_code;
 	}
 	pending_site_ctx_ = {};
@@ -9218,9 +9307,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		function.backend_body_cache = body_chunk;
 	}
 
-	call_frame locals;
+	call_frame locals;   // frame-kind metadata only (this/static/closure_env/name); slots live in the window
 	locals.function_name = function.name;
-	locals.locals = acquire_arg_vector(std::max(function.local_count, body_chunk->local_count));
 
 	auto previousEnv = environment_;
 
@@ -9236,6 +9324,10 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	f.ip = 0;
 	f.locals = &locals;
 	f.entry_env = environment_;
+	// Native-entry frame window built at the current stack top during binding
+	f.window_backed = true;
+	f.window_base = stack_.size();
+	f.window_live = 0;
 	f.stack_base = stack_.size();
 	f.top_level = false;
 
@@ -9251,15 +9343,21 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 			stack_.erase(stack_.begin() + f.stack_base, stack_.end());
 		}
 		release_scope_env(std::move(f.entry_env));
-		release_arg_vector(std::move(locals.locals));
 	};
 
 	{
-		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), locals, *body_chunk,
-	                                   previousEnv, site, caller_locals, caller_code);
+		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), f, *body_chunk,
+	                                   previousEnv, site, caller_frame, caller_code);
 		if (!bind_result) {
 			cleanup();
 			return bind_result.error_value();
+		}
+	}
+	// Body slots exist behind window_live so operand temps start above the full window
+	{
+		const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
+		for (size_t filled = stack_.size() - f.window_base; filled < window_slots; ++filled) {
+			stack_.push_back(make_null());
 		}
 	}
 

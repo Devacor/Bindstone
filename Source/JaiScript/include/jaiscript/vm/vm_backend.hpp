@@ -18,6 +18,7 @@
 
 namespace jai {
     class script_class_definition;
+    namespace detail { struct caller_frame_view; }
 }
 
 namespace jai::vm {
@@ -138,6 +139,14 @@ namespace jai::vm {
             std::shared_ptr<environment> entry_env;
             size_t stack_base = 0;
             bool top_level = false;
+            // Stage-2 frame window: slot k lives at stack_[window_base + k] when
+            // window_backed (record frames + native entries). window_live replicates
+            // call_frame's grow-on-declare semantics: reads at/above it answer nullptr
+            // ("reserved capacity only: not live yet"). Fiber frames stay call_frame-
+            // backed (window_backed false) until per-fiber stacks land (stage 4).
+            size_t window_base = 0;
+            uint32_t window_live = 0;
+            bool window_backed = false;
             // Debug statement-boundary edge state (touched only while a session is armed).
             // Stale values across record reuse are harmless: a fresh frame enters at ip 0,
             // and ip <= debug_stmt_ip re-fires the boundary (also the loop back-edge case).
@@ -147,25 +156,85 @@ namespace jai::vm {
 
         struct frame_guard;
 
-        // === Stage-2a slot-accessor funnel (docs/flatstack_design.md §4) ===
+        // Flat value stack with a growth CHOKEPOINT (stage 2): the vm caches raw
+        // script_value* into frame windows across dispatch iterations (counted-for fast
+        // states — the ONE sanctioned cross-op raw-pointer cache, invariants §2b), so
+        // every reallocation rebases them (rebase_window_pointers). Deliberately flat,
+        // NOT segmented: operand push/pop is the hot-loop path and must stay pure index
+        // arithmetic. push_back self-alias (op_dup pushing back()) is grow-safe: the
+        // value detours through a temp on the grow branch only.
+        struct value_stack {
+            std::vector<script_value> v;
+            vm_backend* owner = nullptr;
+            void push_back(const script_value& x) {
+                if (v.size() == v.capacity()) [[unlikely]] { grow_push(script_value(x)); return; }
+                v.push_back(x);
+            }
+            void push_back(script_value&& x) {
+                if (v.size() == v.capacity()) [[unlikely]] { grow_push(std::move(x)); return; }
+                v.push_back(std::move(x));
+            }
+            void grow_push(script_value x);   // out of line: reserve + rebase + push
+            script_value& back() noexcept { return v.back(); }
+            const script_value& back() const noexcept { return v.back(); }
+            void pop_back() noexcept { v.pop_back(); }
+            size_t size() const noexcept { return v.size(); }
+            bool empty() const noexcept { return v.empty(); }
+            void clear() noexcept { v.clear(); }
+            void reserve(size_t n) { v.reserve(n); }   // startup only (no rebase: nothing live)
+            script_value& operator[](size_t i) noexcept { return v[i]; }
+            const script_value& operator[](size_t i) const noexcept { return v[i]; }
+            std::vector<script_value>::iterator begin() noexcept { return v.begin(); }
+            std::vector<script_value>::iterator end() noexcept { return v.end(); }
+            void erase(std::vector<script_value>::iterator first, std::vector<script_value>::iterator last) {
+                v.erase(first, last);   // truncations only; never grows
+            }
+            std::vector<script_value>& vec() noexcept { return v; }
+            const std::vector<script_value>& vec() const noexcept { return v; }
+        };
+        // Rebase every sanctioned raw pointer into the old stack buffer (counted-for
+        // fast states) onto the new one; called only from value_stack::grow_push.
+        void rebase_window_pointers(const script_value* old_begin, const script_value* old_end,
+                                    script_value* new_begin);
+
+        // === Slot-accessor funnel (stage 2a) — stage-2 window implementation ===
         // EVERY read/write of a frame's slot-local storage in this backend goes through
-        // these, so stage 2's value-stack window swap changes only their bodies + the
-        // frame lifecycle. Behavior-identical thin forwards today. Callers keep their
-        // own slot-validity/top_level guards — these assume a live locals home.
-        static script_value* frame_slot(frame& f, size_t slot) noexcept {
+        // these. Window-backed frames address stack_[window_base + slot]; legacy frames
+        // (fibers) forward to call_frame. Callers keep their own slot-validity/top_level
+        // guards — these assume a live locals home.
+        script_value* frame_slot(frame& f, size_t slot) noexcept {
+            if (f.window_backed) {
+                return slot < f.window_live ? &stack_[f.window_base + slot] : nullptr;
+            }
             return f.locals->get_local(slot);
         }
-        static const script_value* frame_slot(const frame& f, size_t slot) noexcept {
+        const script_value* frame_slot(const frame& f, size_t slot) const noexcept {
+            if (f.window_backed) {
+                return slot < f.window_live ? &stack_[f.window_base + slot] : nullptr;
+            }
             return static_cast<const call_frame*>(f.locals)->get_local(slot);
         }
-        static void frame_slot_set(frame& f, size_t slot, script_value value) {
+        void frame_slot_set(frame& f, size_t slot, script_value value) {
+            if (f.window_backed) {
+                const size_t idx = f.window_base + slot;
+                if (idx < stack_.size()) {
+                    stack_[idx] = std::move(value);
+                } else {
+                    // Build-up writes (pooled-arg binding, defaults): fill the gap with
+                    // live nulls exactly like call_frame::set_local's slot>size path
+                    while (stack_.size() < idx) { stack_.push_back(script_value(std::monostate{}, value.get_engine())); }
+                    stack_.push_back(std::move(value));
+                }
+                if (slot >= f.window_live) { f.window_live = static_cast<uint32_t>(slot + 1); }
+                return;
+            }
             f.locals->set_local(slot, std::move(value));
         }
-        static size_t frame_slot_count(const frame& f) noexcept {
-            return f.locals->local_count();
+        size_t frame_slot_count(const frame& f) const noexcept {
+            return f.window_backed ? f.window_live : f.locals->local_count();
         }
-        // Storage-handle twins for paths that hold the slot home directly (parameter
-        // binding, coroutine fiber state, the caller side of ref-param binds).
+        // Storage-handle twins for paths that hold a call_frame slot home directly
+        // (coroutine fiber state, the caller side of ref-param binds on fiber frames).
         static script_value* frame_slot(call_frame& locals, size_t slot) noexcept {
             return locals.get_local(slot);
         }
@@ -221,7 +290,7 @@ namespace jai::vm {
         // across external (C++) invocations by the external_call_guard overrides.
         struct pending_call_site {
             const call_site* site = nullptr;
-            call_frame* caller_locals = nullptr;
+            frame* caller_frame = nullptr;
             chunk* caller_code = nullptr;
         };
         pending_call_site pending_site_ctx_{};
@@ -252,7 +321,7 @@ namespace jai::vm {
         };
         std::unordered_map<const block_stmt*, chunk_cache_entry> chunk_cache_;
 
-        std::vector<script_value> stack_;
+        value_stack stack_;
         std::vector<frame*> frames_;
 
         std::optional<script_value> return_value_;
@@ -416,7 +485,7 @@ namespace jai::vm {
         checked_result<script_value> call_script_function(const script_defined_function& function,
                                                           const std::vector<script_value>& args,
                                                           const call_site* site = nullptr,
-                                                          call_frame* caller_locals = nullptr,
+                                                          frame* caller_frame = nullptr,
                                                           chunk* caller_code = nullptr);
         // Shared between call_script_function and the in-loop call path (single source of truth)
         void setup_callee_env(const script_defined_function& function, call_frame& locals,
@@ -424,14 +493,19 @@ namespace jai::vm {
         checked_result<void> bind_parameters(const std::vector<parameter>& parameters,
                                              const std::vector<script_value>& args,
                                              size_t args_base, size_t argc,
-                                             call_frame& locals, chunk& body_chunk,
+                                             frame& callee, chunk& body_chunk,
                                              const std::shared_ptr<environment>& caller_env,
-                                             const call_site* site, call_frame* caller_locals,
+                                             const call_site* site, frame* caller_frame,
                                              chunk* caller_code);
         // Ref-param bind against the caller's variable storage: shares an existing
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark
-        checked_result<void> bind_reference_to_storage(script_value& storage, call_frame& locals, size_t param_slot);
+        checked_result<void> bind_reference_to_storage(script_value& storage, frame& callee, size_t param_slot);
+        // Kernel caller-view over a frame: window frames hand the resolver their raw
+        // window span (lawful: resolve_ref_lvalue never runs script, so the stack
+        // cannot grow mid-resolve); fiber/legacy frames keep the call_frame read.
+        // Defined in vm_backend.cpp (ref_lvalue.hpp stays out of this header).
+        detail::caller_frame_view caller_view(frame* f) const;
         // Box-in-place + share for env-variable storage (decl refs, [&] captures, ref
         // returns); boxing demotes active counted-for fast states
         script_value share_env_ref(script_value& storage);

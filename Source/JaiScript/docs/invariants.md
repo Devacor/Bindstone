@@ -28,18 +28,23 @@ Enforced: negative `is_constructible` static_asserts (strong_ptr_tests.cpp:224-2
 `0x0DEADCB0` on dealloc — a canary assert means a dead/foreign block, i.e. someone minted a
 handle outside make_strong or used it after free.
 
-## 2b. Frame slot storage never reallocates mid-frame
+## 2b. Frame slot pointers survive stack growth via the ONE chokepoint
 
-`call_frame::locals` is a plain vector, and the VM caches raw `script_value*` into it across
-loop iterations (`counted_for_state.var/end_ptr/step_ptr`, vm_backend.cpp `exec_cfor_prep`);
-references can also target it. Sound only because EVERY path that creates a frame reserves the
-parser's full `local_count` up front (`reserve_locals(std::max(function.local_count,
-body_chunk->local_count))` — push_script_frame, push_method_frame, call_script_function,
-coroutine states; both backends' `execute_method_ast` must pass `ast->local_count` through).
-The 2026-07 failure mode: method frames compiled/reserved with local_count 0, so a loop-body
-`DECL_VAR` push_back reallocated the vector and the cached counted-for pointers read freed
-memory (demoreel finding 2 — silent wrong loop counts, Release; delayed detonation shapes).
-Never add a frame-creation path that skips the full-slot reserve.
+Flat-stack era (stage 2): vm frame slots live in value-stack WINDOWS
+(`frame::window_base/window_live`, slot k at `stack_[window_base + k]`), and the stack is a
+flat vector that reallocates on growth. The VM caches raw pointers into slots across
+dispatch iterations (`counted_for_state.var/end_ptr/step_ptr`, `exec_cfor_prep` — end/step
+may point INSIDE a slot's int payload). Sound only because ALL growth funnels through
+`value_stack::grow_push` (vm_backend.hpp), which calls `rebase_window_pointers` — a
+byte-offset rebase of exactly that enumerated pointer set — before the push. THE RULE:
+never cache a raw pointer into stack/window storage across anything that can push, unless
+you add it to `rebase_window_pointers` in the same commit; references never qualify
+(owner-pinned holders, §3). Windows are created FULL (null placeholders up to `local_count`
+behind `window_live`), so operand temps always start above the whole window. Fiber frames
+(`vm_coroutine_state::locals`) still use `call_frame` vectors and keep the pre-stage-2 rule:
+reserve the full `local_count` up front, never reallocate mid-frame (the 2026-07 demoreel
+finding-2 failure mode was silent wrong loop counts in Release). The interpreter's
+`call_stack_` frames keep the old rule unchanged.
 
 ## 3. Reference cells (mode 1 is DELETED, 2026-07 stage C)
 

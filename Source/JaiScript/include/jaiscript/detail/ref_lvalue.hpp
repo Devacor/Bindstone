@@ -120,6 +120,26 @@ namespace jai::detail {
 		return script_value(*cur);
 	}
 
+	// Caller-frame view for the kernel's base-identifier / this resolution. The
+	// interpreter's frames keep slot storage in call_frame; the vm's stage-2 frames keep
+	// it in value-stack windows — the view abstracts ONLY the slot read (window_data +
+	// window_live set by the vm; resolution never runs script, so the raw window pointer
+	// cannot be invalidated by stack growth mid-resolve). Method metadata (is_method /
+	// this) stays on call_frame either way.
+	struct caller_frame_view {
+		call_frame* metadata = nullptr;
+		const script_value* window_data = nullptr;
+		size_t window_live = 0;
+
+		const script_value* slot(size_t idx) const {
+			if (window_data) { return idx < window_live ? window_data + idx : nullptr; }
+			return metadata ? metadata->get_local(idx) : nullptr;
+		}
+		const script_value* this_ptr() const {
+			return (metadata && metadata->is_method) ? &metadata->get_this() : nullptr;
+		}
+	};
+
 	// Binds a field/subscript/chain lvalue argument to a reference parameter. Resolution
 	// is pure pointer/value chasing over already-evaluated state - it never runs script,
 	// never throws, and never mutates the instance. Bindability = an INSTANCE fields_
@@ -131,7 +151,7 @@ namespace jai::detail {
 	// .property() members keep the non-lvalue error. Field refs pin the instance,
 	// element refs pin the vector; typed fields/elements carry their current tag as the
 	// assign-through constraint.
-	inline checked_result<script_value> resolve_ref_lvalue(const expression* arg, call_frame* caller_locals,
+	inline checked_result<script_value> resolve_ref_lvalue(const expression* arg, const caller_frame_view& caller,
 	                                                       environment* caller_env,
 	                                                       engine* eng, string_symbolizer* symbolizer) {
 		// Collect steps outermost-first; applied base-first (reverse)
@@ -161,8 +181,8 @@ namespace jai::detail {
 		};
 
 		auto resolve_identifier_ptr = [&](const identifier_expr* ident) -> const script_value* {
-			if (caller_locals && ident->slot_index != SIZE_MAX) {
-				if (const script_value* slot_ptr = caller_locals->get_local(ident->slot_index)) {
+			if (ident->slot_index != SIZE_MAX) {
+				if (const script_value* slot_ptr = caller.slot(ident->slot_index)) {
 					return slot_ptr;
 				}
 			}
@@ -187,10 +207,8 @@ namespace jai::detail {
 			if (!derefed) { return derefed; }
 			cur = std::move(derefed.value());
 		} else {   // this_expr
-			const script_value* this_ptr = nullptr;
-			if (caller_locals && caller_locals->is_method) {
-				this_ptr = &caller_locals->get_this();
-			} else if (caller_env) {
+			const script_value* this_ptr = caller.this_ptr();
+			if (!this_ptr && caller_env) {
 				this_ptr = caller_env->get_value_ptr(symbolizer->get_this_id());
 			}
 			if (!this_ptr) {

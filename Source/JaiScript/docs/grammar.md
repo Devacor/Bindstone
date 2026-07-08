@@ -864,6 +864,10 @@ string healthLevel = health > 75 ? "healthy" :
     the initializer's exact class, then enforces it exactly like the explicit spelling
     (construct-and-share `shared_ptr<auto> v = T();` included) — a missing, null, or
     non-class initializer has nothing to infer and errors (use `var`, or an explicit
-    `shared_ptr<T>`). `shared_ptr<var>` (a DYNAMIC pointee, re-bindable across classes)
-    is future work: it parses and initializes leniently today, but cross-class
-    reassignment errors against the `any` pointee.
+    `shared_ptr<T>`). Inference is a DECLARATION feature: `shared_ptr<auto>` fields infer
+    from their default (field writes keep the pre-existing lenient field-store semantics,
+    same as explicit `shared_ptr<T>` fields); `shared_ptr<auto>` parameters are not
+    supported (they error at call time — a plain `auto`/untyped parameter already binds
+    anything, or use an explicit `shared_ptr<T>`). `shared_ptr<var>` (a DYNAMIC pointee,
+    re-bindable across classes) is future work: it parses and initializes leniently
+    today, but cross-class reassignment errors against the `any` pointee.

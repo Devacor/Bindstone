@@ -478,6 +478,17 @@ namespace jai::vm {
         void anchor_method_result(script_value& result, script_value& receiver);
         void pop_script_frame_core(call_record& rec);
         checked_result<void> return_from_script_frame(frame*& fp, const vm_instruction& ins);
+        // Shared return epilogue (classification switch + pop + result push); the
+        // return superinstructions feed it a result they resolved without the stack
+        // round trip. KEEP the exact order: convert while the callee frame is live.
+        checked_result<void> return_with_result(frame*& fp, script_value result);
+        // Fused `return <ident>;` / `return <a op b>;` (stage 6): record-frame and
+        // native-entry variants (the entry twins set return_value_ like op_return's
+        // entry branch)
+        checked_result<void> exec_return_ident(frame*& fp, const vm_instruction& ins);
+        checked_result<void> exec_return_ident_entry(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_return_binary(frame*& fp, const vm_instruction& ins);
+        checked_result<void> exec_return_binary_entry(frame& f, const vm_instruction& ins);
         checked_result<void> fall_off_script_frame(frame*& fp);
         void convert_cpp_exception_at_frame(frame*& fp, const script_exception& e);
         // Interpreter parity: arg-eval throws convert at the frame MAKING the call

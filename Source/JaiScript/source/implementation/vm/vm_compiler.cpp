@@ -94,6 +94,8 @@ namespace {
 			case opcode::op_loop_back:
 			case opcode::op_call:
 			case opcode::op_return:
+			case opcode::op_return_ident:
+			case opcode::op_return_binary:
 			case opcode::op_call_method:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -507,6 +509,16 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 		return;
 	case node_type::return_stmt: {
 		auto* rs = static_cast<return_stmt*>(stmt.get());
+		// Return-site fusion is legal only when the region exits emit NOTHING for a
+		// return (try/catch regions emit op_try_pop/op_catch_end between value and
+		// return; loops/switches emit nothing on the return path)
+		bool clean_exit = true;
+		for (const auto& region : loops_) {
+			if (region.kind == region_kind::try_block || region.kind == region_kind::catch_block) {
+				clean_exit = false;
+				break;
+			}
+		}
 		if (rs->value) {
 			if (rs->binds_reference && rs->value->get_type() == node_type::identifier_expr) {
 				// Ref-return producer: bind the named storage as a reference (share the
@@ -519,10 +531,37 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 			} else if (rs->binds_reference && detail::is_ref_bindable_lvalue(rs->value.get())) {
 				// Field/subscript/chain operand: owner-pinned reference via the shared kernel
 				emit(opcode::op_ref_return_lvalue, add_node(rs->value));
+			} else if (clean_exit && rs->value->get_type() == node_type::identifier_expr) {
+				// Structural LOAD+RETURN fusion (`return n;` - half of fib's dynamic
+				// returns): whole-node gate, resolution mirrors op_load exactly at runtime
+				auto* ident = static_cast<identifier_expr*>(rs->value.get());
+				if (ident->symbol_id == UINT64_MAX) {
+					ident->symbol_id = symbolizer_->intern(ident->name);
+				}
+				uint32_t flags = 0;
+				if (!ident->name.empty() && (ident->name.front() == 'w' || ident->name.front() == 's') &&
+				    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
+					flags |= load_flag_type_ctor;
+				}
+				emit(opcode::op_return_ident, identifier_slot_operand(ident), add_symbol(ident->symbol_id), flags);
+				return;
 			} else {
 				// Calls that already yield a reference pass through; anything else
 				// rejects at convert_return_value's ref-return epilogue
 				compile_expression(rs->value);
+				// BINARY+RETURN tail fusion (2191c59b double gate: the return VALUE
+				// node's own shape AND the tail opcode must both agree - a logical
+				// && / || root ends in an arm's op, never rewrite those). Non-logical
+				// binary roots always emit their own op_binary LAST.
+				if (clean_exit && rs->value->get_type() == node_type::binary_expr && !chunk_->code.empty()) {
+					const auto* bin = static_cast<const binary_expr*>(rs->value.get());
+					const token_type bop = bin->op.type;
+					const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe);
+					if (!logical && chunk_->code.back().op == opcode::op_binary) {
+						chunk_->code.back().op = opcode::op_return_binary;
+						return;
+					}
+				}
 			}
 		} else {
 			emit(opcode::op_null);

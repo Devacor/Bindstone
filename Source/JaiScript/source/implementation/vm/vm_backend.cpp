@@ -8302,7 +8302,7 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 				f.ip = ins.a;
 				continue;
 
-			case opcode::op_return: {
+		case opcode::op_return: {
 				if (call_records_top_ == records_base) {
 					if (ins.a) {
 						return_value_ = std::move(stack_.back());
@@ -8314,6 +8314,28 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 					return {};
 				}
 				VM_TRY_OP_SHARED(return_from_script_frame(fp, ins));
+				continue;
+			}
+
+			// Return superinstructions (stage 6): entry frames mirror op_return's entry
+			// branch; record frames return without the stack round trip. A compute that
+			// set script unwinding falls to the loop bottom exactly like op_binary would.
+			case opcode::op_return_ident: {
+				if (call_records_top_ == records_base) {
+					VM_TRY_OP_SHARED(exec_return_ident_entry(f, ins));
+					return {};
+				}
+				VM_TRY_OP_SHARED(exec_return_ident(fp, ins));
+				continue;
+			}
+			case opcode::op_return_binary: {
+				if (call_records_top_ == records_base) {
+					VM_TRY_OP_SHARED(exec_return_binary_entry(f, ins));
+					if (is_unwinding_) [[unlikely]] { break; }
+					return {};
+				}
+				VM_TRY_OP_SHARED(exec_return_binary(fp, ins));
+				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 			}
 
@@ -8861,11 +8883,15 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 }
 
 checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {
-	call_record& rec = *call_records_[call_records_top_ - 1];
 	script_value result = ins.a ? std::move(stack_.back()) : make_null();
 	if (ins.a) {
 		stack_.pop_back();
 	}
+	return return_with_result(fp, std::move(result));
+}
+
+checked_result<void> vm_backend::return_with_result(frame*& fp, script_value result) {
+	call_record& rec = *call_records_[call_records_top_ - 1];
 	// The record's cached classification picks the epilogue without re-deriving it from
 	// type_info per return. none = convert_return_value's no-op route inline (deref only);
 	// prim_* pass a storage-matching plain result through verbatim — the identical value
@@ -8926,6 +8952,110 @@ checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_i
 	fp = rec.caller;
 	stack_.push_back(std::move(conv.value()));
 	++fp->ip;
+	return {};
+}
+
+// Fused `return <ident>;` (stage 6): resolution mirrors op_load byte-for-byte via
+// fused_ident_value (same errors, same order - the fusion is adjacent, nothing is
+// reordered); the value takes ONE copy exactly like op_load's push did.
+checked_result<void> vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
+	frame& f = *fp;
+	fused_operand operand;
+	operand.slot = ins.a;
+	operand.symbol = ins.b;
+	operand.load_flags = ins.c;
+	std::optional<script_value> scratch;
+	auto resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
+	if (!resolved) {
+		return resolved.error_value();
+	}
+	return return_with_result(fp, script_value(*resolved.value()));
+}
+
+checked_result<void> vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& ins) {
+	fused_operand operand;
+	operand.slot = ins.a;
+	operand.symbol = ins.b;
+	operand.load_flags = ins.c;
+	std::optional<script_value> scratch;
+	auto resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
+	if (!resolved) {
+		return resolved.error_value();
+	}
+	return_value_ = script_value(*resolved.value());
+	has_return_value_ = true;
+	return {};
+}
+
+// Fused `return <a op b>;` (stage 6): computes exactly like exec_binary (same fast
+// shapes, same general tail incl. custom operator dispatch), then returns without the
+// push+pop round trip. A custom operator that THROWS leaves the result pushed and the
+// ip parked here so the dispatch loop's unwind handling sees the same state op_binary
+// would have produced one op earlier (same statement, same trace line).
+checked_result<void> vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) {
+	frame& f = *fp;
+	script_value right_raw = std::move(stack_.back());
+	stack_.pop_back();
+	script_value left_raw = std::move(stack_.back());
+	stack_.pop_back();
+	const script_value& left = left_raw.deref();
+	const script_value& right = right_raw.deref();
+	const token_type op = static_cast<token_type>(ins.a);
+
+	if (ins.b != binary_shape_none && !has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
+		std::optional<checked_result<script_value>> fast;
+		if (binary_fast_shape(op, ins.b, left, right, fast)) {
+			if (!*fast) {
+				return fast->error_value();
+			}
+			return return_with_result(fp, std::move(fast->value()));
+		}
+	}
+
+	auto result = binary_general(op, left, right);
+	if (!result) {
+		return result.error_value();
+	}
+	if (is_unwinding_) [[unlikely]] {
+		// Custom-op script throw mid-compute: reproduce op_binary's post-op state
+		// (result pushed, frame NOT popped) and let the loop bottom unwind
+		stack_.push_back(std::move(result.value()));
+		return {};
+	}
+	return return_with_result(fp, std::move(result.value()));
+}
+
+checked_result<void> vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& ins) {
+	script_value right_raw = std::move(stack_.back());
+	stack_.pop_back();
+	script_value left_raw = std::move(stack_.back());
+	stack_.pop_back();
+	const script_value& left = left_raw.deref();
+	const script_value& right = right_raw.deref();
+	const token_type op = static_cast<token_type>(ins.a);
+
+	if (ins.b != binary_shape_none && !has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
+		std::optional<checked_result<script_value>> fast;
+		if (binary_fast_shape(op, ins.b, left, right, fast)) {
+			if (!*fast) {
+				return fast->error_value();
+			}
+			return_value_ = std::move(fast->value());
+			has_return_value_ = true;
+			return {};
+		}
+	}
+
+	auto result = binary_general(op, left, right);
+	if (!result) {
+		return result.error_value();
+	}
+	if (is_unwinding_) [[unlikely]] {
+		stack_.push_back(std::move(result.value()));
+		return {};
+	}
+	return_value_ = std::move(result.value());
+	has_return_value_ = true;
 	return {};
 }
 

@@ -247,14 +247,24 @@ namespace jai {
     // Create a bound method - binds 'this' as the first argument
     script_value make_bound_method(const script_value& this_obj, const script_value& method);
 
-    // Clone a value for field assignment - respects shared_ptr reference semantics
+    // The ONE implicit-copy kernel for assignment-shaped store boundaries (decl from
+    // lvalue, identifier/field/element assign, range-for bindings, destructuring,
+    // by-value parameter binding), shared by both backends: plain values deep-copy
+    // (script value semantics), shared_ptr<T>-marked values copy the HANDLE (guide
+    // ch03: "assignment shares instead of deep-copying" - clone() stays the explicit
+    // deep copy). A store site calling clone() directly is the GLOOM bug class:
+    // `var e = arr[i]; e.hurt()` silently mutated a deep copy.
     inline script_value clone_for_assignment(const script_value& value) {
-        // shared_ptr types should NOT be cloned - they have reference semantics
-        auto type_info = value.get_type_info();
+        // Element/map-entry/field reads arrive as reference wrappers - deref() reads
+        // through them (and returns *this for plain values), so the shared_ptr marker
+        // check sees the referent, not 'reference'. Copy-only consumption: safe to
+        // use the bare-deref idiom (no move of the deref result back into value).
+        const script_value& target = value.deref();
+        auto type_info = target.get_type_info();
         if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
-            return value;  // Share reference, don't clone
+            return target;  // Share the handle, don't clone
         }
-        return value.clone();
+        return target.clone();
     }
 
     /// Stack-based call frame for fast function parameter access - avoids hash map

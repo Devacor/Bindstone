@@ -3866,7 +3866,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     script_value setter = target.method(setter_id);
     if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
         const script_function& func = setter.as_function();
-        std::vector<script_value> args = {objectValue, value.clone()};
+        std::vector<script_value> args = {objectValue, clone_for_assignment(value)};
         auto result = func(args);
         if (!result) {
             return result.error_value();
@@ -4797,12 +4797,17 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                 return enforced.error_value();
                             }
                             value = std::move(enforced.value());
-                            if (slot_type->base_type == script_value_type::jai_any_type) {
+                            // var slots keep a shared_ptr-tagged rhs's marker (decl
+                            // parity; flattening to 'any' would detach at the copy)
+                            if (slot_type->base_type == script_value_type::jai_any_type &&
+                                (!value.get_type_info() ||
+                                 value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
                                 value.set_type_info(slot_type);
                             }
                         }
-                        // Direct assignment to call frame local (or its cell)
-                        *storage = std::move(value.clone());
+                        // Direct assignment to call frame local (or its cell); the
+                        // kernel deep-copies values and shares shared_ptr handles
+                        *storage = clone_for_assignment(value);
                     }
                     push_value(value);
                     return {};
@@ -5060,8 +5065,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // Lock the variable's type to the assigned value's type
                         // The value keeps its own type_info
                     }
-                    // For any_type (var), keep the any_type on the variable
-                    else if (target_type->base_type == script_value_type::jai_any_type) {
+                    // For any_type (var), keep the any_type on the variable. Exception
+                    // (mirrors the decl path, Dev ruling 2026-07): a shared_ptr-tagged
+                    // rhs keeps its marker - flattening to 'any' would silently detach
+                    // the handle at the copy below
+                    else if (target_type->base_type == script_value_type::jai_any_type &&
+                             (!value.get_type_info() ||
+                              value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
                         value.set_type_info(target_type);  // Keep any_type marker
                     }
                     // For locked types, the value already has correct type from enforce_type_compatibility
@@ -5080,8 +5090,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
 
                     if (is_lvalue_read) {
-                        // Reading from storage location - clone for value semantics
-                        script_value assignValue = value.clone();
+                        // Reading from a storage location - the kernel deep-copies
+                        // values and shares shared_ptr handles
+                        script_value assignValue = clone_for_assignment(value);
                         JAISCRIPT_TRY(store_back(std::move(assignValue)));
                         // value is still valid for push_value below
                         push_value(std::move(value));
@@ -5182,7 +5193,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                                         value = value.detached_for_store();
                                     }
                                     if (is_lvalue_read) {
-                                        if (class_def->set_static_field(identifier->symbol_id, value.clone())) {
+                                        if (class_def->set_static_field(identifier->symbol_id, clone_for_assignment(value))) {
                                             assigned_to_member = true;
                                         }
                                     } else {
@@ -5203,7 +5214,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // - For method_environment: check 'this' fields, then define locally if not found
                     // - For regular environment: return error if variable doesn't exist
                     if (is_lvalue_read) {
-                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, value.clone()));
+                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, clone_for_assignment(value)));
                     } else {
                         JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
                         // Get back the stored value for the return (shallow copy)
@@ -5258,7 +5269,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 script_value value = pop_value();
 
                 // Set the static field
-                if (!class_def->set_static_field(memberExpr->member_id, value.clone())) {
+                if (!class_def->set_static_field(memberExpr->member_id, clone_for_assignment(value))) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                         "Cannot assign to static member: field '{0}' not found", memberExpr->member_id);
                 }
@@ -5340,8 +5351,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         script_value converted = convert_array_element(engine_, value, element_type);
                         *target_ptr = std::move(converted);
                     } else {
-                        // No element type constraint - allow anything
-                        *target_ptr = std::move(value.clone());
+                        // No element type constraint - values deep-copy, shared_ptr
+                        // handles share
+                        *target_ptr = clone_for_assignment(value);
                     }
                     push_value(std::move(value));  // Assignment expressions return the assigned value
                 } else {
@@ -5717,15 +5729,12 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 value = std::move(derefed);
             }
 
-            // Only clone if initializing from an lvalue (existing object)
-            // Temporaries (constructor calls, expressions) should use move semantics
-            // EXCEPTION: shared_ptr types should NOT be cloned - they have reference semantics
-            if ((reference_init || is_lvalue_expression(decl->initializer.get())) &&
-                (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-                // Initializing from an existing object - deep copy (except shared_ptr)
-                value = value.clone();
+            // Only copy if initializing from an lvalue (existing object); temporaries
+            // move. The kernel deep-copies values and shares shared_ptr handles.
+            if (reference_init || is_lvalue_expression(decl->initializer.get())) {
+                value = clone_for_assignment(value);
             }
-            // else: Initializing from a temporary or shared_ptr - use move/share semantics (no clone)
+            // else: Initializing from a temporary - use move semantics (no copy)
 
             // === HOMOGENEOUS CONTAINER VALIDATION ===
             // For auto x = [...] and array<auto> x = [...], all elements must be the same type
@@ -9146,8 +9155,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     }
                     *loop_var_ptr = script_value::make_element_reference(array_storage, i, engine_, element_constraint);
                 } else {
-                    // Make a copy of the element - assign directly to pointer
-                    *loop_var_ptr = (*array_storage)[i].clone();
+                    // Copy binding: values deep-copy per iteration, shared_ptr
+                    // elements share (for (auto e : registry) e.hurt() mutates)
+                    *loop_var_ptr = clone_for_assignment((*array_storage)[i]);
                 }
 
                 // Execute loop body
@@ -9250,9 +9260,11 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                         args.push_back(it->first);  // Don't clone - just pass the key
                         args.push_back(script_value::make_map_entry_reference(map_storage, it->first, engine_, nullptr));
                     } else {
-                        // For copies, clone key and value
+                        // Copy binding: keys stay detached snapshots (a shared key
+                        // handle would let mutation break map ordering); values
+                        // deep-copy, shared_ptr values share
                         args.push_back(it->first.clone());
-                        args.push_back(it->second.clone());
+                        args.push_back(clone_for_assignment(it->second));
                     }
 
                     auto result = pair_func(args);
@@ -11388,7 +11400,7 @@ script_value interpreter::bind_parameter(
     const script_value& arg) const
 {
     auto semantics = get_parameter_semantics(param, arg);
-    return (semantics == parameter_semantics::value) ? arg.clone() : arg;
+    return (semantics == parameter_semantics::value) ? clone_for_assignment(arg) : arg;
 }
 
 // Ref-param bind against the caller's variable storage: shares an existing reference
@@ -11788,8 +11800,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 converted_arg = std::move(convert_result.value());
             }
 
-            // Decide between value semantics (clone) or reference semantics (share)
+            // Decide between value semantics (clone) or reference semantics (share).
+            // Element-read args arrive as reference wrappers - probe the referent
+            // (deref() returns *this for plain values) so the shared_ptr marker is
+            // visible (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
             bool should_share = false;
+            const script_value& shared_probe = converted_arg.deref();
 
             // Check if parameter type is shared_ptr<T>
             if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
@@ -11797,7 +11813,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
 
             // Check if argument is shared_ptr<T> (preserve reference semantics)
-            if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+            if (shared_probe.get_type_info() && shared_probe.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
                 should_share = true;
             }
 
@@ -11805,7 +11821,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             // IMPORTANT: Use call_stack_[frame_index] not a cached reference (vector may have reallocated)
             if (should_share) {
                 // Shallow copy - share ownership (reference semantics)
-                call_stack_[frame_index].set_local(param.slot_index, boxed_param(script_value(converted_arg)));
+                call_stack_[frame_index].set_local(param.slot_index, boxed_param(script_value(shared_probe)));
             } else {
                 // Deep copy - value semantics (C++-like default)
                 call_stack_[frame_index].set_local(param.slot_index, boxed_param(converted_arg.clone()));
@@ -12595,7 +12611,7 @@ checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* d
     auto& arr = *get_array_storage(source);
 
     for (size_t i = 0; i < decl->names.size(); ++i) {
-        script_value val = (i < arr.size()) ? arr[i].clone() : make_value();
+        script_value val = (i < arr.size()) ? clone_for_assignment(arr[i]) : make_value();
 
         if (decl->slot_indices[i] != SIZE_MAX && !call_stack_.empty()) {
             call_stack_.back().set_local(decl->slot_indices[i], std::move(val));

@@ -151,6 +151,137 @@ public:
 			}
 		});
 
+		// ============================================================
+		// Item C: implicit copies of shared_ptr values must SHARE the handle
+		// (guide ch03: "assignment shares instead of deep-copying"; clone() stays
+		// the explicit deep copy). GLOOM: `var e = arr[i]; e.hurt()` silently
+		// mutated a deep copy. The full store-boundary matrix is pinned here;
+		// value-semantic elements must keep deep-copying.
+		// ============================================================
+
+		test("shared_ptr_element_reads_share", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
+					var arr = [];
+					arr.push(new Mob());
+					var m = {};
+					m["k"] = new Mob();
+					var e1 = arr[0];   e1.hurt(1);      // element decl
+					auto e2 = arr[0];  e2.hurt(1);      // auto element decl
+					var e3 = null;     e3 = arr[0];  e3.hurt(1);   // element assign
+					var mv = m["k"];   mv.hurt(1);      // map-value decl
+					var mv2 = null;    mv2 = m["k"]; mv2.hurt(1);  // map-value assign
+					arr[0].hp * 100 + m["k"].hp;
+				)");
+				check_eq((int64_t)708, r.as_int(), backend_tag(use_vm) + "element/map reads share shared_ptr handles (decl + assign)");
+			}
+		});
+
+		test("shared_ptr_ident_assign_shares", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
+					auto p = new Mob();
+					var q = null;
+					q = p;                    // assign into an any/null-typed var keeps the handle marker
+					q.hurt(1);
+					function f() {
+						auto p2 = new Mob();
+						var q2 = null;
+						q2 = p2;              // slot path twin
+						q2.hurt(1);
+						return p2.hp;
+					}
+					p.hp * 100 + f();
+				)");
+				check_eq((int64_t)909, r.as_int(), backend_tag(use_vm) + "ident assign shares shared_ptr handles (env + slot)");
+			}
+		});
+
+		test("shared_ptr_field_and_element_stores_share", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
+					class Holder { var fx = null; }
+					auto h = new Holder();
+					var arr = [];
+					arr.push(new Mob());
+					h.fx = arr[0];            // field assign from element
+					h.fx.hurt(1);
+					var arr2 = [null];
+					auto p = new Mob();
+					arr2[0] = p;              // element store of a handle
+					arr2[0].hurt(1);
+					arr[0].hp * 100 + p.hp;
+				)");
+				check_eq((int64_t)909, r.as_int(), backend_tag(use_vm) + "field assign and element store share shared_ptr handles");
+			}
+		});
+
+		test("shared_ptr_loop_destructure_args_share", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
+					var arr = [];
+					arr.push(new Mob());
+					arr.push(new Mob());
+					for (auto en : arr) { en.hurt(1); }          // copy range-for binding shares handles
+					var [x, y] = arr;                             // destructuring shares handles
+					x.hurt(1);
+					function take(en) { en.hurt(1); }
+					take(arr[1]);                                 // element read as by-value arg
+					var m = {};
+					m["a"] = new Mob();
+					for (auto kv : m) { kv.second.hurt(1); }      // map iteration value shares
+					arr[0].hp * 1000 + arr[1].hp * 100 + m["a"].hp;
+				)");
+				check_eq((int64_t)8809, r.as_int(), backend_tag(use_vm) + "range-for/destructure/args/map-iter share shared_ptr handles");
+			}
+		});
+
+		test("value_semantics_still_deep_copy_at_stores", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					class Pt { int v = 1; }
+					var arr = [];
+					arr.push(Pt());                               // VALUE instance element
+					var c = arr[0];  c.v = 9;                     // element decl copies
+					var c2 = null;   c2 = arr[0]; c2.v = 8;       // element assign copies
+					for (auto p : arr) { p.v = 7; }               // copy loop binding copies
+					var rows = [[1], [2]];
+					var [r0, r1] = rows;                          // destructuring copies containers
+					r0.push(99);
+					arr[0].v * 10 + rows[0].size();
+				)");
+				check_eq((int64_t)11, r.as_int(), backend_tag(use_vm) + "value instances and containers keep deep-copy store semantics");
+			}
+		});
+
+		test("assigned_shared_ptr_keeps_reference_semantics_downstream", [this]() {
+			for (bool use_vm : {false, true}) {
+				auto e = gloom_engine(use_vm);
+				auto r = e->execute(R"(
+					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
+					auto p = new Mob();
+					var q = null;
+					q = p;
+					var q2 = q;               // handle copied on through a second decl
+					q2.hurt(1);
+					weak_ptr<Mob> w = q;      // and stays weak_ptr-compatible
+					auto locked = w.lock();
+					locked.hurt(1);
+					p.hp;
+				)");
+				check_eq((int64_t)8, r.as_int(), backend_tag(use_vm) + "assigned handle keeps shared_ptr marker downstream");
+			}
+		});
+
 		// Plain value decls from reference-producing initializers COPY (C++'s
 		// `int x = f();` for `int& f()`); alias binding stays the auto&/ref-decl
 		// spelling (pinned in vm_backend_tests ref_return_*).

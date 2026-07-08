@@ -608,13 +608,13 @@ namespace jai::detail {
 	                                              engine* eng, string_symbolizer* symbolizer) {
 		const auto* holder = refLocal.get_reference_holder();
 		if (!holder || !holder->container_element_type) {
-			refLocal.deref() = std::move(value.deref().clone());
+			refLocal.deref() = clone_for_assignment(value);
 			return {};
 		}
 		type_info_ptr constraint = holder->container_element_type;
 		const bool is_field = holder->owner_instance != nullptr;
 		if (is_field && ref_field_accepts_null(value, constraint)) {
-			refLocal.deref() = std::move(value.deref().clone());
+			refLocal.deref() = clone_for_assignment(value);
 			return {};
 		}
 		if (!ref_constraint_compatible(value, constraint, eng, is_field)) {

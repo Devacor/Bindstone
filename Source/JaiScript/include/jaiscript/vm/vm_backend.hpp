@@ -275,6 +275,9 @@ namespace jai::vm {
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             bool env_lazy = false;
+            // Stage 3: lazy no-closure frames never touch environment_ (nothing saved,
+            // nothing restored) — the biggest per-call env cost on the fib path gone
+            bool env_untouched = false;
             size_t try_base = 0;
             size_t iter_base = 0;
             size_t cfor_base = 0;

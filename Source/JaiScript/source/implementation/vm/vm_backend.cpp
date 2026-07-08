@@ -4743,6 +4743,31 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		}
 		if (value.type() == script_value_type::jai_object_type ||
 		    value.type() == script_value_type::jai_shared_ptr_type) {
+			// Dev ruling (2026-07): typed shared_ptr declarations ENFORCE their
+			// pointee class (wrong-class init used to alias silently). Same class
+			// and derived->base (script chains + host upcasts) stay legal;
+			// unresolvable classes stay lenient (opaque host flows).
+			auto expected_type = decl->type->element_type();
+			if (expected_type && !expected_type->type_name.empty() &&
+			    expected_type->base_type != script_value_type::jai_any_type) {
+				const std::string& expected_class = expected_type->type_name;
+				std::string actual_class;
+				if (auto instance = value.get_class_instance()) {
+					actual_class = instance->get_class_name();
+				}
+				if (!actual_class.empty() && actual_class != expected_class) {
+					bool is_subtype = false;
+					if (auto eng = engine_) {
+						auto actual_def = eng->get_class_definition(actual_class);
+						is_subtype = actual_def && actual_def->is_subtype_of(expected_class);
+					}
+					if (!is_subtype) {
+						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+							"Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
+							expected_type->id, symbolizer_->intern(actual_class));
+					}
+				}
+			}
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 		}
@@ -8521,9 +8546,6 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	if (!args_on_stack) {
 		rec.callee_pin = std::move(callee);
 	}
-	// Moved, not copied: every branch below either overwrites environment_ or copies
-	// rec.prev_env back (lazy no-closure); the catch restores it on setup failure
-	rec.prev_env = std::move(environment_);
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
@@ -8534,24 +8556,28 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
 	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
-	try {
-		if (rec.env_lazy) {
-			if (function.closure_env) {
-				rec.locals.closure_env = function.closure_env;
+	if (rec.env_lazy && !function.closure_env) {
+		// Stage 3: the callee runs in the caller's env and the env stack does not move
+		// AT ALL — nothing saved (prev_env stays null), nothing restored at pop
+		rec.env_untouched = true;
+	} else {
+		rec.env_untouched = false;
+		// Moved, not copied: both branches below overwrite environment_; the catch
+		// restores it on setup failure
+		rec.prev_env = std::move(environment_);
+		try {
+			if (rec.env_lazy) {
 				environment_ = function.closure_env;
 			} else {
-				rec.locals.closure_env = rec.prev_env;   // ref-param frames_ scan needs it
-				environment_ = rec.prev_env;   // callee runs in the caller's env
+				setup_callee_env(function, rec.locals, rec.prev_env);
 			}
-		} else {
-			setup_callee_env(function, rec.locals, rec.prev_env);
+		} catch (...) {
+			rec.callee_pin = make_null();
+			rec.return_type = nullptr;
+			environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
+			--call_records_top_;
+			throw;
 		}
-	} catch (...) {
-		rec.callee_pin = make_null();
-		rec.return_type = nullptr;
-		environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
-		--call_records_top_;
-		throw;
 	}
 	++current_call_depth_;
 	rec.f.code = body_chunk;
@@ -8576,7 +8602,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	checked_result<void> bound;
 	try {
 		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
-		                        rec.prev_env, site, &caller, caller.code);
+		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -8672,12 +8698,12 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	rec.cfor_base = cfor_states_.size();
 	rec.locals.function_name = ast->name;
 	rec.env_lazy = false;   // method envs never elide (env-kind fallbacks gate precedence)
+	rec.env_untouched = false;
 	try {
 		// Net effect of the native wrapper-env round trip: a method scope parented on
 		// definition_env with the receiver bound; the wrapper env and its define(this)
 		// are bypassed dead weight
 		rec.locals.set_this(receiver);
-		rec.locals.closure_env = dispatch.definition_env;
 		environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
 	} catch (...) {
 		rec.callee_pin = make_null();
@@ -8686,7 +8712,6 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		rec.method_result_anchor = false;
 		rec.locals.this_object_ptr.reset();
 		rec.locals.is_method = false;
-		rec.locals.closure_env = nullptr;
 		environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
 		--call_records_top_;
 		throw;
@@ -8752,8 +8777,14 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		// nothing to clear; clearing it poisoned a method caller's this-binding.
 		clear_this_on_frame_exit(rec.f.entry_env);
 	}
-	environment_ = std::move(rec.prev_env);
+	if (!rec.env_untouched) {
+		// env-untouched frames never moved environment_ (prev_env is null — assigning
+		// it would CLOBBER the live caller env)
+		environment_ = std::move(rec.prev_env);
+	}
 	if (stack_.size() > rec.f.stack_base) {
+		// Window + operand temps + (zero-copy) the callee pin die HERE — the same
+		// boundary the old locals clear destroyed callee state at
 		stack_.erase(stack_.begin() + rec.f.stack_base, stack_.end());
 	}
 	if (try_records_.size() > rec.try_base) {
@@ -8768,18 +8799,26 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	if (!rec.env_lazy) {
 		// Moved out first so the pool's use_count()==1 guard sees today's count
 		release_scope_env(std::move(rec.f.entry_env));
-	} else {
+	} else if (rec.f.entry_env) {
 		rec.f.entry_env = nullptr;
 	}
-	rec.locals.locals.clear();   // destroy callee locals now, keep capacity
-	rec.locals.closure_env = nullptr;
-	rec.locals.this_object_ptr.reset();
-	rec.locals.is_method = false;
-	rec.locals.static_class_def = nullptr;
-	rec.locals.is_static_method = false;
-	rec.callee_pin = make_null();
+	// Scrub only what this frame actually dirtied (function frames leave method/static
+	// metadata untouched, and their callee pin lives on the stack, not the record)
+	if (rec.locals.this_object_ptr) {
+		rec.locals.this_object_ptr.reset();
+		rec.locals.is_method = false;
+	}
+	if (rec.locals.static_class_def) {
+		rec.locals.static_class_def = nullptr;
+		rec.locals.is_static_method = false;
+	}
+	if (rec.callee_pin.raw_storage_index() != script_value::TYPEID_NULL) {
+		rec.callee_pin = make_null();
+	}
 	rec.return_type = nullptr;
-	rec.ast_pin.reset();
+	if (rec.ast_pin) {
+		rec.ast_pin.reset();
+	}
 	rec.method_result_anchor = false;
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
 	--current_call_depth_;
@@ -8911,21 +8950,17 @@ void vm_backend::setup_callee_env(const script_defined_function& function, call_
 		if (function.closure_env->is_method_env()) {
 			auto this_obj = function.closure_env->get_this_object();
 			locals.set_this(this_obj);
-			locals.closure_env = function.closure_env->get_parent();
 			environment_ = acquire_method_scope_env(function.closure_env->get_parent(), std::move(this_obj),
 			                                        function.closure_env->get_access_context());
 		} else if (function.closure_env->is_static_method_env()) {
 			locals.static_class_def = function.closure_env->get_class_definition();
 			locals.is_static_method = true;
-			locals.closure_env = function.closure_env->get_parent();
 			environment_ = acquire_static_scope_env(
 				function.closure_env->get_parent(), function.closure_env->get_class_definition());
 		} else {
-			locals.closure_env = function.closure_env;
 			environment_ = acquire_scope_env(function.closure_env);
 		}
 	} else {
-		locals.closure_env = prev_env;
 		environment_ = acquire_scope_env(prev_env);
 	}
 }

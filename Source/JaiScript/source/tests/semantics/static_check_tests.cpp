@@ -657,6 +657,39 @@ public:
                 "class Foo2 { int x = 1; } shared_ptr<Foo2> n = null;")));
         });
 
+        test("shared_ptr_auto_decl_infer_then_enforce", [this]() {
+            // shared_ptr<auto> models runtime's infer-then-enforce (Dev ruling 2026-07):
+            // the pointee comes from the initializer's class and behaves like the
+            // explicit spelling thereafter. Nothing to infer (missing/null/non-class
+            // initializer) errors, matching runtime.
+            auto e = make_engine();
+            check_eq((size_t)1, error_count(e->check(
+                "class Foo { int x = 1; } shared_ptr<auto> p;")), "no init");
+            check_eq((size_t)1, error_count(e->check(
+                "class Foo { int x = 1; } shared_ptr<auto> p = null;")), "null init");
+            check_eq((size_t)1, error_count(e->check(
+                "class Foo { int x = 1; } shared_ptr<auto> p = 5;")), "int init");
+            // infer-then-enforce: wrong-class reassign errors, upcast + null stay clean
+            check_eq((size_t)1, error_count(e->check(
+                "class Foo { int x = 1; } class Bar { int y = 2; } shared_ptr<auto> p = Foo(); p = Bar();")), "wrong-class reassign");
+            check_eq((size_t)0, error_count(e->check(
+                "class Base { int b = 1; } class D : Base { int d = 2; } shared_ptr<auto> p = Base(); p = new D();")), "upcast reassign");
+            check_eq((size_t)0, error_count(e->check(
+                "class Foo { int x = 1; } shared_ptr<auto> p = Foo(); p = null; int x = p.x;")), "null reassign + member");
+            // inferred tag models member usage exactly like the explicit spelling
+            // (parity-equality: whatever the explicit twin reports, inferred matches)
+            for (const char* tail : { "shared_ptr<%s> p = new Foo(); string s = p.x;",
+                                      "shared_ptr<%s> p = new Foo(); p.nope();" }) {
+                char explicit_src[256], inferred_src[256];
+                std::snprintf(explicit_src, sizeof(explicit_src),
+                    (std::string("class Foo { int x = 1; } ") + tail).c_str(), "Foo");
+                std::snprintf(inferred_src, sizeof(inferred_src),
+                    (std::string("class Foo { int x = 1; } ") + tail).c_str(), "auto");
+                check_eq(error_count(e->check(explicit_src)), error_count(e->check(inferred_src)),
+                         std::string("explicit/inferred parity: ") + tail);
+            }
+        });
+
         // ------------------------------------------------------------ fuzz corpus FP gate
 
         test("fuzz_corpus_false_positive_gate", [this]() {

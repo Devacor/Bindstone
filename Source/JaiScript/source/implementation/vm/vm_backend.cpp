@@ -4818,7 +4818,15 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 	}
 
 	if (is_shared_ptr) {
+		// shared_ptr<auto> (element_type null) INFERS the pointee from the initializer's
+		// exact class, then enforces it exactly like the explicit spelling (Dev ruling
+		// 2026-07); a null/missing initializer has nothing to infer.
+		const bool infer_pointee = decl->type && !decl->type->element_type();
 		if (!has_init) {
+			if (infer_pointee) {
+				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+					"Cannot infer shared_ptr<auto> pointee without an initializer - use var, or an explicit shared_ptr<T>");
+			}
 			script_value null_ptr = make_null();
 			null_ptr.set_type_info(decl->type);
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(null_ptr), decl->ref_escaping);
@@ -4833,6 +4841,10 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 			value = std::move(derefed);
 		}
 		if (value.is_null()) {
+			if (infer_pointee) {
+				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+					"Cannot infer shared_ptr<auto> pointee from null - use var, or an explicit shared_ptr<T>");
+			}
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 		}
@@ -4841,6 +4853,27 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		}
 		if (value.type() == script_value_type::jai_object_type ||
 		    value.type() == script_value_type::jai_shared_ptr_type) {
+			if (infer_pointee) {
+				// Take the initializer's exact class; thereafter the tag behaves
+				// exactly like the explicit spelling (reassignment enforcement
+				// reads it) - construct-and-share included.
+				std::string actual_class;
+				if (auto instance = value.get_class_instance()) {
+					actual_class = instance->get_class_name();
+				}
+				type_info* inferred = nullptr;
+				if (!actual_class.empty() && engine_) {
+					if (auto* pointee_ti = engine_->get_type_info_object(symbolizer_->intern(actual_class))) {
+						inferred = engine_->get_type_info_shared_ptr(pointee_ti);
+					}
+				}
+				if (!inferred) {
+					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+						"Cannot infer shared_ptr<auto> pointee from this initializer - use var, or an explicit shared_ptr<T>");
+				}
+				value.set_type_info(inferred);
+				return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
+			}
 			// Dev ruling (2026-07): typed shared_ptr declarations ENFORCE their
 			// pointee class (wrong-class init used to alias silently). Same class
 			// and derived->base (script chains + host upcasts) stay legal;

@@ -1137,6 +1137,92 @@ public:
             }
         });
 
+        test("shared_ptr_auto_decl_infers_then_enforces", [this]() {
+            // shared_ptr<auto> (Dev ruling 2026-07): the pointee is INFERRED from the
+            // initializer's exact class, then enforced exactly like the explicit
+            // spelling - construct-and-share, handle sharing, upcast-on-reassign,
+            // wrong-class errors, and null-after-establishment all mirror shared_ptr<T>.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class Foo { int x = 1; }
+                    class Bar { int y = 2; }
+                    shared_ptr<auto> a = new Foo();      // infer from new
+                    shared_ptr<auto> b = Foo();          // construct-and-share (mirrors shared_ptr<Foo> b = Foo())
+                    shared_ptr<auto> c = a;              // infer from a shared_ptr variable
+                    var arr = [new Foo()];
+                    shared_ptr<auto> d = arr[0];         // infer from an element read
+                )");
+                e->execute("c.x = 7;");
+                check_eq((int64_t)7, e->execute("a.x").as_int());      // c shares a's handle
+                e->execute("auto b2 = b; b2.x = 42;");
+                check_eq((int64_t)42, e->execute("b.x").as_int());     // sp copies share
+                e->execute("d.x = 9;");
+                check_eq((int64_t)9, e->execute("arr[0].x").as_int()); // d shares the element
+                // enforce-after: the inferred tag drives the explicit spelling's
+                // reassignment checks and its init enforcement when aliased onward
+                check_throws([&]() { e->execute("a = Bar();"); });
+                check_throws([&]() { e->execute("a = new Bar();"); });
+                check_throws([&]() { e->execute("shared_ptr<Bar> wrong = a;"); });
+                e->execute("shared_ptr<Foo> fine = a;");               // tag says Foo
+                e->execute("a = null;");                               // null legal AFTER establishment
+                check_eq(true, e->execute("a == null").as<bool>());
+                // upcast-on-reassign mirrors the explicit spelling; downcast errors
+                e->execute(R"(
+                    class Base { int bv = 5; }
+                    class Derived : Base { int dv = 6; }
+                    shared_ptr<auto> up = Base();
+                    up = new Derived();
+                    shared_ptr<auto> down = Derived();
+                )");
+                check_eq((int64_t)5, e->execute("up.bv").as_int());
+                check_throws([&]() { e->execute("down = Base();"); });
+                // nothing to infer: missing/null/non-class initializers error
+                check_throws([&]() { e->execute("shared_ptr<auto> n0;"); });
+                check_throws([&]() { e->execute("shared_ptr<auto> n1 = null;"); });
+                check_throws([&]() { e->execute("shared_ptr<auto> n2 = 5;"); });
+            }
+            // nothing-to-infer error text: byte-identical across backends, and points
+            // at the escape hatches (var, or an explicit shared_ptr<T>)
+            auto run_catch = [](bool use_vm, const char* src) -> std::string {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
+                return "<no throw>";
+            };
+            for (const char* src : { "shared_ptr<auto> n = null;", "class F {} shared_ptr<auto> n;" }) {
+                std::string interp_msg = run_catch(false, src);
+                std::string vm_msg = run_catch(true, src);
+                check_eq(interp_msg, vm_msg, std::string("parity: ") + src);
+                check(interp_msg.find("use var, or an explicit shared_ptr<T>") != std::string::npos, interp_msg);
+            }
+        });
+
+        test("shared_ptr_var_pointee_stays_follow_up", [this]() {
+            // shared_ptr<var> parses (pointee = any) and initializes leniently, but a
+            // DYNAMIC pointee (re-bindable across classes) is unimplemented: reassign
+            // enforces against 'any' and errors. Pinned as the current behavior;
+            // flagged follow-up (needs a store-path ruling: value-assign copy-fields
+            // vs rebind) - flip these when sp<var> lands.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class Foo { int x = 1; }
+                    class Bar { int y = 2; }
+                    shared_ptr<var> p = Foo();
+                    shared_ptr<var> q = p;
+                )");
+                check_eq((int64_t)1, e->execute("p.x").as_int());
+                e->execute("q.x = 3;");
+                check_eq((int64_t)3, e->execute("p.x").as_int());      // copies share the handle
+                check_throws([&]() { e->execute("p = new Bar();"); }); // re-bind NOT yet supported
+                e->execute("shared_ptr<var> n = null;");               // null init legal (nothing enforced)
+                check_eq(true, e->execute("n == null").as<bool>());
+            }
+        });
+
         test("shared_ptr_construction_across_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

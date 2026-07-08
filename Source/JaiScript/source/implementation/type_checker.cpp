@@ -1437,6 +1437,29 @@ private:
         var_entry entry;
         entry.line = decl->location.line;
         entry.column = decl->location.column;
+        // shared_ptr<auto>: pointee INFERRED from the initializer's class then enforced
+        // like the explicit spelling; null/missing initializer has nothing to infer
+        // (runtime errors identically - Dev ruling 2026-07)
+        if (decl->type && decl->type->base_type == script_value_type::jai_shared_ptr_type &&
+            !decl->type->element_type()) {
+            if (!has_init || init.kind == ctype::null_k) {
+                diag(diag_level::error, decl->location, "cannot infer shared_ptr<auto> pointee for '" +
+                     std::string(decl->name) + "' without a non-null initializer (use var, or an explicit shared_ptr<T>)");
+                entry.dynamic = true;   // recovery: no cascades
+            } else if (!init.is_unknown() && init.kind != ctype::object_k) {
+                // runtime: "Cannot initialize shared_ptr with this type"
+                diag(diag_level::error, decl->location, "cannot initialize '" + std::string(decl->name) +
+                     "' declared 'shared_ptr<auto>' with '" + ctype_name(init) + "'");
+                entry.dynamic = true;   // recovery: no cascades
+            } else {
+                entry.type = init;      // object(cls), or unknown -> lenient
+                entry.dynamic = init.is_unknown();
+                entry.display = "shared_ptr<" + ctype_name(init) + ">";
+            }
+            warn_shadow("local", decl->name, decl->location);
+            scopes_.back().emplace(decl->name, std::move(entry));
+            return;
+        }
         if (decl->type) {
             entry.declared = decl->type.get();
             entry.display = decl->type->canonical_name();

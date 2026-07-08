@@ -868,6 +868,12 @@ string healthLevel = health > 75 ? "healthy" :
     from their default (field writes keep the pre-existing lenient field-store semantics,
     same as explicit `shared_ptr<T>` fields); `shared_ptr<auto>` parameters are not
     supported (they error at call time — a plain `auto`/untyped parameter already binds
-    anything, or use an explicit `shared_ptr<T>`). `shared_ptr<var>` (a DYNAMIC pointee,
-    re-bindable across classes) is future work: it parses and initializes leniently
-    today, but cross-class reassignment errors against the `any` pointee.
+    anything, or use an explicit `shared_ptr<T>`). The ladder has exactly three handle
+    spellings: `shared_ptr<T>` (enforced pointee), `shared_ptr<auto>` (infer then
+    enforce), and plain `var` (dynamic — it holds any class's handle, copies share, and
+    nulling re-points it across classes; while HELD, the handle keeps its class marker,
+    so direct cross-class reassignment enforces like the typed spellings). `shared_ptr<var>`
+    is DELIBERATELY a parse error ("shared_ptr<var> is not supported: use var (holds and
+    rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)") —
+    the constrained-but-dynamic middle ground has no use case, and `var` meaning
+    something different inside angle brackets would muddy the ladder (Dev ruling 2026-07).

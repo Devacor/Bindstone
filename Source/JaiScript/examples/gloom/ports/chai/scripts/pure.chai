@@ -1,0 +1,47 @@
+// The wall-ray DDA (REFERENCE.md 1.8 / 4.2). The reference runs this as a
+// pure parallel body over column chunks; ports run the serial-equivalent form
+// (identical math, identical outputs). One shared implementation serves both
+// the renderer (per cell column) and hitscan/tracers (single rays): results
+// land in the RAY_* scalars (ChaiScript has no multiple returns, and a result
+// vector per ray would be an allocation in the hottest loop of the game).
+
+global RAY_D = 0.0   // perpendicular distance (min 0.02)
+global RAY_S = 0     // side: 0 = x-face, 1 = y-face
+global RAY_K = 1     // wall render kind
+global RAY_T = 0     // texture column 0..63
+
+def cast_wall_ray(posx, posy, rdx, rdy) {
+	var mw = G.mw;
+	var mx = itrunc(posx);
+	var my = itrunc(posy);
+	var adx = rdx < 0.0 ? -rdx : rdx;
+	var ady = rdy < 0.0 ? -rdy : rdy;
+	var ddx = adx < 0.00000001 ? 100000000.0 : 1.0 / adx;
+	var ddy = ady < 0.00000001 ? 100000000.0 : 1.0 / ady;
+	var stepx = rdx < 0.0 ? -1 : 1;
+	var stepy = rdy < 0.0 ? -1 : 1;
+	var sdx = rdx < 0.0 ? (posx - mx) * ddx : (mx + 1.0 - posx) * ddx;
+	var sdy = rdy < 0.0 ? (posy - my) * ddy : (my + 1.0 - posy) * ddy;
+	var side = 0;
+	var kind = 1;
+	var guard = 0;
+	var hit = false;
+	while (!hit && guard < 128) {
+		if (sdx < sdy) { sdx += ddx; mx += stepx; side = 0; }
+		else { sdy += ddy; my += stepy; side = 1; }
+		var c = RKIND[my * mw + mx];
+		if (c != 0) {
+			hit = true;
+			kind = c;
+		}
+		guard += 1;
+	}
+	var pdist = side == 0 ? sdx - ddx : sdy - ddy;
+	pdist = pdist < 0.02 ? 0.02 : pdist;
+	var wallx = side == 0 ? posy + pdist * rdy : posx + pdist * rdx;
+	wallx = wallx - floor(wallx);
+	RAY_D = pdist;
+	RAY_S = side;
+	RAY_K = kind;
+	RAY_T = itrunc(wallx * 64.0);
+}

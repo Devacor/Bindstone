@@ -941,10 +941,13 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 				return converted_result.error_value();
 			}
 			script_value converted_arg = std::move(converted_result.value());
+			// Probe through reference wrappers for the shared_ptr marker (KEEP
+			// BYTE-PARALLEL with bind_parameters / interpreter::call_function)
 			bool should_share = false;
+			const script_value& shared_probe = converted_arg.deref();
 			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
-			if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
-			script_value bound = should_share ? std::move(converted_arg) : converted_arg.clone();
+			if (shared_probe.get_type_info() && shared_probe.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
+			script_value bound = should_share ? script_value(shared_probe) : converted_arg.clone();
 			if (param.ref_escaping && !bound.is_reference()) {
 				bound = script_value::make_cell_reference(std::move(bound), engine_);
 			}
@@ -2974,11 +2977,15 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 					return enforced.error_value();
 				}
 				value = std::move(enforced.value());
-				if (slot_type->base_type == script_value_type::jai_any_type) {
+				// var slots keep a shared_ptr-tagged rhs's marker (decl parity;
+				// flattening to 'any' would detach at the copy)
+				if (slot_type->base_type == script_value_type::jai_any_type &&
+				    (!value.get_type_info() ||
+				     value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
 					value.set_type_info(slot_type);
 				}
 			}
-			*storage = std::move(value.clone());
+			*storage = clone_for_assignment(value);
 			stack_.push_back(std::move(value));
 			return {};
 		}
@@ -3196,12 +3203,16 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 		}
 		value = std::move(enforced.value());
 
-		if (target_type && target_type->base_type == script_value_type::jai_any_type) {
+		// var targets keep a shared_ptr-tagged rhs's marker (decl parity, Dev ruling
+		// 2026-07; flattening to 'any' would silently detach the handle at the copy)
+		if (target_type && target_type->base_type == script_value_type::jai_any_type &&
+		    (!value.get_type_info() ||
+		     value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
 			value.set_type_info(target_type);
 		}
 
 		if (rhs_lvalue) {
-			script_value assignValue = value.clone();
+			script_value assignValue = clone_for_assignment(value);
 			JAISCRIPT_TRY(store_back(std::move(assignValue)));
 			stack_.push_back(std::move(value));
 		} else if (boxed_cell) {
@@ -3274,7 +3285,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 							value = value.detached_for_store();
 						}
 						if (rhs_lvalue) {
-							if (class_def->set_static_field(sym, value.clone())) {
+							if (class_def->set_static_field(sym, clone_for_assignment(value))) {
 								assigned_to_member = true;
 							}
 						} else {
@@ -3291,7 +3302,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 
 	if (!assigned_to_member) {
 		if (rhs_lvalue) {
-			JAISCRIPT_TRY(environment_->assign(sym, value.clone()));
+			JAISCRIPT_TRY(environment_->assign(sym, clone_for_assignment(value)));
 		} else {
 			JAISCRIPT_TRY(environment_->assign(sym, std::move(value)));
 			script_value* stored = environment_->get_value_ptr(sym);
@@ -4568,7 +4579,8 @@ checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instructio
 		script_value converted = vm_convert_array_element(engine_, value, element_type);
 		*target_ptr = std::move(converted);
 	} else {
-		*target_ptr = std::move(value.clone());
+		// No element type constraint - values deep-copy, shared_ptr handles share
+		*target_ptr = clone_for_assignment(value);
 	}
 	stack_.push_back(std::move(value));
 	return {};
@@ -4825,9 +4837,10 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 			value = std::move(derefed);
 		}
 
-		if ((lvalue_init || reference_init) &&
-		    (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-			value = value.clone();
+		// Lvalue-read initializers copy through the kernel (values deep-copy,
+		// shared_ptr handles share); temporaries move
+		if (lvalue_init || reference_init) {
+			value = clone_for_assignment(value);
 		}
 
 		if (value.is_array() || value.is_map()) {
@@ -4931,7 +4944,7 @@ checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction
 	const destructure_proto& proto = f.code->destructure_protos[ins.a];
 
 	for (size_t i = 0; i < proto.names.size(); ++i) {
-		script_value val = (i < arr.size()) ? arr[i].clone() : make_null();
+		script_value val = (i < arr.size()) ? clone_for_assignment(arr[i]) : make_null();
 		JAISCRIPT_TRY(define_decl_value(f, proto.names[i].first, proto.names[i].second, std::move(val)));
 	}
 	return {};
@@ -6226,7 +6239,7 @@ checked_result<void> vm_backend::assign_member(const script_value& object_value,
 	script_value setter = target.method(setter_id);
 	if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
 		const script_function& func = setter.as_function();
-		std::vector<script_value> args = {object_value, value.clone()};
+		std::vector<script_value> args = {object_value, clone_for_assignment(value)};
 		auto result = func(args);
 		if (!result) {
 			return result.error_value();
@@ -8067,7 +8080,8 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 			}
 			element = script_value::make_element_reference(array_storage, state.index, engine_, element_constraint);
 		} else {
-			element = (*array_storage)[state.index].clone();
+			// Copy binding: values deep-copy per iteration, shared_ptr elements share
+			element = clone_for_assignment((*array_storage)[state.index]);
 		}
 		++state.index;
 	} else {
@@ -8085,8 +8099,10 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 			args.push_back(script_value::make_map_entry_reference(state.container->get_map_storage(),
 			                                                      state.map_it->first, engine_, nullptr));
 		} else {
+			// Keys stay detached snapshots (a shared key handle would let mutation
+			// break map ordering); values deep-copy, shared_ptr values share
 			args.push_back(state.map_it->first.clone());
-			args.push_back(state.map_it->second.clone());
+			args.push_back(clone_for_assignment(state.map_it->second));
 		}
 		const script_function& pair_func = state.pair_ctor->as_function();
 		auto pair_result = pair_func(args);
@@ -9680,16 +9696,20 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			}
 			script_value converted_arg = std::move(converted_result.value());
 
+			// Element-read args arrive as reference wrappers - probe the referent
+			// (deref() returns *this for plain values) so the shared_ptr marker is
+			// visible (KEEP BYTE-PARALLEL with interpreter::call_function)
 			bool should_share = false;
+			const script_value& shared_probe = converted_arg.deref();
 			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
 				should_share = true;
 			}
-			if (converted_arg.get_type_info() && converted_arg.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+			if (shared_probe.get_type_info() && shared_probe.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
 				should_share = true;
 			}
 
 			if (should_share) {
-				frame_slot_set(callee, param.slot_index, boxed_param(std::move(converted_arg)));
+				frame_slot_set(callee, param.slot_index, boxed_param(script_value(shared_probe)));
 			} else {
 				frame_slot_set(callee, param.slot_index, boxed_param(converted_arg.clone()));
 			}

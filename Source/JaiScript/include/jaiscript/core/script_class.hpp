@@ -242,6 +242,7 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
 
     methods_.insert_or_assign(name_id, script_value::make_function(
         script_method_dispatch{eng, class_def, name_id, definition_env}, eng));
+    bump_method_epoch();
 }
 
 // Implementation of add_static_script_method. Same engine*+payload pattern; overloads

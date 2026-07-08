@@ -210,6 +210,22 @@ public:
 
     bool has_property_getters() const { return has_property_getters_; }
 
+    // Method-dispatch epoch: bumps on any change that can alter method resolution for
+    // this class (method add/replace, hot reload rebuild, access labels, parent wiring)
+    // and propagates through derived_classes_. Per-call-site inline caches validate
+    // (class identity, epoch) against it; sound because script class_definitions are
+    // pinned for the engine's lifetime (methods_ -> dispatcher -> class cycle), so a
+    // cached identity can never be a recycled address with a coincidental epoch.
+    uint64_t method_epoch() const { return method_epoch_; }
+    void bump_method_epoch() {
+        ++method_epoch_;
+        for (auto& weak_derived : derived_classes_) {
+            if (auto derived = weak_derived.lock()) {
+                derived->bump_method_epoch();
+            }
+        }
+    }
+
     type_info_ptr get_type_info() const { return type_info_; }
 
     void set_type_info(type_info_ptr type_info) { type_info_ = type_info; }
@@ -223,6 +239,7 @@ public:
         }
 
         methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
+        bump_method_epoch();
     }
 
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
@@ -297,6 +314,7 @@ public:
         } else {
             methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
         }
+        bump_method_epoch();
     }
 
     void add_static_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
@@ -329,6 +347,13 @@ public:
 
     // Shared cache-aware overload resolution for script methods (defined in overload_resolution.hpp)
     checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const std::vector<script_value>& args) const;
+
+    // Single-overload probe for inline-cache fill: the lone overload for name_id, or
+    // nullptr when the name has zero or multiple overloads.
+    function_decl* single_method_overload(uint64_t name_id) const {
+        auto it = method_overloads_.find(name_id);
+        return (it != method_overloads_.end() && it->second.size() == 1) ? it->second[0].get() : nullptr;
+    }
 
     void add_field(std::string_view name, const script_value& default_value) {
         auto eng = engine_;
@@ -420,6 +445,7 @@ public:
     void clear_instance_method_overloads() {
         method_overloads_.clear();
         overload_resolution_cache_.clear();
+        bump_method_epoch();
     }
 
     // Hot reload: same for script static-method overload sets (C++ static arities untouched).
@@ -716,6 +742,7 @@ public:
         }
         field_defaults_cache_valid_ = false;
         refresh_access_chain_flag();
+        bump_method_epoch();   // resolution chain changed
     }
 
     [[nodiscard]] bool add_parent(std::shared_ptr<class_definition> parent) {
@@ -740,6 +767,7 @@ public:
             has_property_getters_ = true;
         }
         refresh_access_chain_flag();
+        bump_method_epoch();   // resolution chain changed
 
         return true;
     }
@@ -762,6 +790,7 @@ public:
             }
         }
         refresh_access_chain_flag();
+        bump_method_epoch();   // resolution chain changed
 
         return true;
     }
@@ -822,6 +851,7 @@ public:
         if (cpp_base && cpp_base->has_property_getters()) {
             has_property_getters_ = true;
         }
+        bump_method_epoch();   // resolution chain changed
     }
 
     std::shared_ptr<class_definition> get_cpp_base_class() const { return cpp_base_class_; }
@@ -936,6 +966,7 @@ public:
     void set_nonpublic_members(std::unordered_map<uint64_t, access_level> members) {
         nonpublic_members_ = std::move(members);
         refresh_access_chain_flag();
+        bump_method_epoch();   // inline caches stamp a needs-access-check flag at fill
     }
 
     bool chain_has_nonpublic() const { return chain_has_nonpublic_; }
@@ -1089,6 +1120,7 @@ public:
             // set_class_definition would re-point instances at this same object).
             methods_ = new_methods;
             static_methods_ = new_static_methods;
+            bump_method_epoch();   // dispatchers re-minted: per-site inline caches must refill
             recompute_property_getters(new_methods, engine_ref);
             store_field_defaults(new_field_defaults, engine_ref);
             method_metadata_.clear();
@@ -1159,6 +1191,7 @@ public:
 
         methods_ = new_methods;
         static_methods_ = new_static_methods;
+        bump_method_epoch();   // dispatchers replaced: per-site inline caches must refill
 
         recompute_property_getters(new_methods, engine_ref);
 
@@ -1320,6 +1353,9 @@ private:
     std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
 
     bool has_property_getters_ = false;
+
+    // See method_epoch(): per-call-site inline-cache validity stamp
+    uint64_t method_epoch_ = 1;
 
     bool is_transparent_wrapper_ = false;
     std::function<script_value(script_value&, engine*)> unwrap_function_;

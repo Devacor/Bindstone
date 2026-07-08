@@ -347,6 +347,138 @@ public:
                 eng->execute("var got = \"none\"; try { swallow(); } catch (e) { got = \"\" + e; } got;").as<std::string>());
             check_eq((int64_t)7, eng->execute("3 + 4").as_int());
         });
+
+        // ===== Method-dispatch cache invalidation pins (per-site inline cache era) =====
+        // The engine's source cache reuses the SAME AST across identical execute()
+        // strings, so a repeated call string exercises one call site's cache across
+        // reloads - every invalidation edge below must resolve fresh.
+
+        // Redefining a class between calls: the same call site must use the new body.
+        test("method_cache_reload_between_calls", [&]() {
+            auto eng = make_engine();
+            eng->execute("class MC { int v = 0; int f() { return 1; } } auto mc = MC();");
+            check_eq((int64_t)1, eng->execute("mc.f();").as_int());
+            check_eq((int64_t)1, eng->execute("mc.f();").as_int());   // cache filled + hit
+            eng->execute("class MC { int v = 0; int f() { return 2; } }");
+            check_eq((int64_t)2, eng->execute("mc.f();").as_int());   // same AST site, new method
+        });
+
+        // Redefinition INSIDE a loop: the loop-body call site flips mid-loop.
+        test("method_cache_reload_mid_loop", [&]() {
+            auto eng = make_engine();
+            auto result = eng->execute(R"(
+                class ML { int f() { return 1; } }
+                auto m = ML();
+                auto acc = 0;
+                for (auto i = 0; i < 4; i += 1) {
+                    acc = acc * 10 + m.f();
+                    if (i == 1) {
+                        class ML { int f() { return 2; } }
+                    }
+                }
+                acc;
+            )");
+            check_eq((int64_t)1122, result.as_int());
+        });
+
+        // A derived override arriving on reload beats the cached base resolution.
+        test("method_cache_derived_override_arrives_later", [&]() {
+            auto eng = make_engine();
+            eng->execute(R"(
+                class OvBase { int f() { return 1; } }
+                class OvDer : OvBase { }
+                auto od = OvDer();
+            )");
+            check_eq((int64_t)1, eng->execute("od.f();").as_int());
+            check_eq((int64_t)1, eng->execute("od.f();").as_int());   // cache hot on base's f
+            eng->execute("class OvDer : OvBase { int f() { return 5; } }");
+            check_eq((int64_t)5, eng->execute("od.f();").as_int());   // override wins now
+        });
+
+        // A method added to the BASE after the derived site is hot resolves fresh.
+        test("method_cache_base_gains_method_later", [&]() {
+            auto eng = make_engine();
+            eng->execute(R"(
+                class GBase { int f() { return 1; } }
+                class GDer : GBase { }
+                auto gd = GDer();
+            )");
+            check_eq((int64_t)1, eng->execute("gd.f();").as_int());
+            check_eq((int64_t)1, eng->execute("gd.f();").as_int());
+            eng->execute("class GBase { int f() { return 1; } int g() { return 9; } }");
+            check_eq((int64_t)9, eng->execute("gd.g();").as_int());
+        });
+
+        // Method removed on reload: the hot call site must error, not run the old body.
+        test("method_cache_method_removed", [&]() {
+            auto eng = make_engine();
+            eng->execute("class RM { int f() { return 1; } int g() { return 2; } } auto rm = RM();");
+            check_eq((int64_t)2, eng->execute("rm.g();").as_int());
+            check_eq((int64_t)2, eng->execute("rm.g();").as_int());
+            eng->execute("class RM { int f() { return 1; } }");
+            check_throws([&]() { auto r = eng->execute("rm.g();"); if (r.is_null()) throw std::runtime_error("member gone"); },
+                         "removed method must not dispatch from a stale cache");
+        });
+
+        // A field with the method's name arriving on reload shadows the method
+        // (field precedence) - a cached method dispatch must not bypass it.
+        test("method_cache_field_shadows_method_after_reload", [&]() {
+            auto eng = make_engine();
+            eng->execute("class FS { int f() { return 1; } } auto fs = FS();");
+            check_eq((int64_t)1, eng->execute("fs.f();").as_int());
+            check_eq((int64_t)1, eng->execute("fs.f();").as_int());
+            eng->execute("class FS { int f = 3; }");   // reload: f becomes a FIELD
+            check_throws([&]() { auto r = eng->execute("fs.f();"); if (r.is_null()) throw std::runtime_error("not callable"); },
+                         "field must shadow the stale cached method");
+            check_eq((int64_t)3, eng->execute("fs.f;").as_int());
+        });
+
+        // Private methods stay denied even after the class's public methods have made
+        // the class hot in dispatch caches.
+        test("method_cache_private_stays_denied", [&]() {
+            auto eng = make_engine();
+            eng->execute(R"(
+                class PV {
+                    int pub() { return secret() + 1; }
+                private:
+                    int secret() { return 10; }
+                }
+                auto pv = PV();
+            )");
+            check_eq((int64_t)11, eng->execute("auto s = 0; for (auto i = 0; i < 50; i += 1) { s = pv.pub(); } s;").as_int());
+            check_throws([&]() { auto r = eng->execute("pv.secret();"); if (r.is_null()) throw std::runtime_error("denied"); },
+                         "private method must stay denied through hot dispatch caches");
+        });
+
+        // Same call site serving two receiver classes (polymorphic site): each receiver
+        // resolves its own method.
+        test("method_cache_polymorphic_site", [&]() {
+            auto eng = make_engine();
+            auto result = eng->execute(R"(
+                class PA { int f() { return 1; } }
+                class PB { int f() { return 2; } }
+                function callf(var o) -> int { return o.f(); }
+                auto pa = PA();
+                auto pb = PB();
+                auto acc = 0;
+                for (auto i = 0; i < 3; i += 1) {
+                    acc = acc * 10 + callf(pa);
+                    acc = acc * 10 + callf(pb);
+                }
+                acc;
+            )");
+            check_eq((int64_t)121212, result.as_int());
+        });
+
+        // Typed single-overload method called with a convertible (not exact) argument
+        // after the site is hot on exact arguments: conversion semantics unchanged.
+        test("method_cache_arg_type_switch", [&]() {
+            auto eng = make_engine();
+            eng->execute("class AT { int g(int x) { return x * 2; } } auto at = AT();");
+            check_eq((int64_t)4, eng->execute("at.g(2);").as_int());
+            check_eq((int64_t)4, eng->execute("at.g(2);").as_int());     // hot on int
+            check_eq((int64_t)4, eng->execute("at.g(2.4);").as_int());   // float converts, same site
+        });
     }
 };
 

@@ -6220,6 +6220,282 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
         }
     }
 
+    // Direct script-method dispatch: callee is obj.method on a pure receiver expression
+    // (identifier/this - re-evaluable without side effects, so a gate miss can fall to
+    // the generic path below). Mirrors vm exec_call_method's fast-entry precedence gate
+    // (same_as/super/coroutine/sp-builtin/access/getter-probe/field), skipping the
+    // bound-method mint, its this+args re-copies, and the carrier method env. A per-site
+    // monomorphic inline cache (member_expr::mcache_*, validated by class identity +
+    // method_epoch) skips lookup + overload resolution for the hot monomorphic shape.
+    if (expr->callee->get_type() == node_type::member_expr) {
+        auto* member = static_cast<member_expr*>(expr->callee.get());
+        const auto recv_type = member->object->get_type();
+        if (!member->is_static && member->member_id != same_as_id_ &&
+            (recv_type == node_type::identifier_expr || recv_type == node_type::this_expr)) {
+            JAISCRIPT_TRY(dispatch_expr(member->object.get()));
+            script_value objectValue = pop_value();
+            if (is_unwinding_) {
+                push_value(make_value());
+                return {};
+            }
+            objectValue = objectValue.deref();
+
+            const script_method_dispatch* dispatch = nullptr;
+            std::shared_ptr<environment> def_env;
+            std::shared_ptr<class_definition> cls_pin;
+            class_definition* cls_raw = nullptr;
+            bool ic_route = false;
+
+            if (objectValue.is_object()) {
+                auto holder = objectValue.get_object_holder();
+                if (holder && holder->type_id != coroutine_handle_type_id_) {
+                    class_instance* inst_raw = nullptr;
+                    if (holder->is_class_instance_wrapper && holder->data) {
+                        inst_raw = static_cast<class_instance*>(holder->data.get());
+                        cls_raw = inst_raw->get_class_definition();
+                    }
+                    if (cls_raw && member->mcache_cls == cls_raw &&
+                        member->mcache_epoch == cls_raw->method_epoch() &&
+                        !((member->mcache_flags & 2) && objectValue.get_type_info() &&
+                          objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) &&
+                        !inst_raw->has_field(member->member_id)) {
+                        // IC hit: the per-call precedence checks that stay dynamic ran
+                        // (sp-builtin shadowing, field); access enforcement stays per call
+                        if (member->mcache_flags & 1) [[unlikely]] {
+                            JAISCRIPT_TRY(detail::enforce_member_access(cls_raw, member->member_id,
+                                                                        environment_->find_access_context()));
+                        }
+                        dispatch = static_cast<const script_method_dispatch*>(member->mcache_dispatch);
+                        // Owning copies BEFORE argument evaluation: an argument expression
+                        // can hot reload the class and replace the dispatcher under us
+                        def_env = dispatch->definition_env;
+                        cls_pin = dispatch->cls;
+                        ic_route = true;
+                    } else {
+                        // Full gate (fills the IC on success)
+                        const bool sp_builtin = objectValue.get_type_info() &&
+                            objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
+                            shared_ptr_methods_.find(member->member_id) != shared_ptr_methods_.end();
+                        if (!sp_builtin) {
+                            auto target = resolve_member_target(objectValue);
+                            if (target && target.class_def) {
+                                if (target.class_def->chain_has_nonpublic()) [[unlikely]] {
+                                    JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member->member_id,
+                                                                                environment_->find_access_context()));
+                                }
+                                bool getter_shadows = false;
+                                if (target.class_def->has_property_getters()) {
+                                    uint64_t getter_id = member->getter_id;
+                                    if (getter_id == UINT64_MAX) {
+                                        auto [id, _] = string_symbolizer_->get_getter_id_with_view(member->member_id);
+                                        getter_id = id;
+                                        member->getter_id = getter_id;
+                                    }
+                                    script_value getter_probe = target.method(getter_id);
+                                    getter_shadows = !getter_probe.is_null() && !getter_probe.is_invalid() && getter_probe.is_function();
+                                }
+                                if (!getter_shadows && !target.has_field(member->member_id)) {
+                                    script_value method_val = target.method(member->member_id);
+                                    if (method_val.is_function()) {
+                                        const auto* d = method_val.as_function().target<script_method_dispatch>();
+                                        if (d && d->eng == engine_) {
+                                            dispatch = d;
+                                            def_env = d->definition_env;
+                                            cls_pin = d->cls;
+                                            // Fill the IC: single-overload methods with an
+                                            // all-primitive/any exact-argc signature
+                                            if (cls_raw && target.class_def == cls_raw) {
+                                                if (function_decl* lone = cls_pin->single_method_overload(d->name_id)) {
+                                                    const auto& params = lone->parameters;
+                                                    bool eligible = params.size() <= 8 && params.size() == expr->arguments.size() &&
+                                                                    lone->body && !lone->is_coroutine;
+                                                    uint8_t sig[8] = {};
+                                                    for (size_t i = 0; eligible && i < params.size(); ++i) {
+                                                        const auto& p = params[i];
+                                                        if (p.is_reference || p.ref_escaping) { eligible = false; break; }
+                                                        const bool untyped = !p.type || p.type->type_name.empty() ||
+                                                                             p.type->type_name == "any" ||
+                                                                             p.type->base_type == script_value_type::jai_any_type;
+                                                        if (untyped) { sig[i] = 0xFF; continue; }
+                                                        switch (p.type->base_type) {
+                                                            case script_value_type::jai_int_type:    sig[i] = script_value::TYPEID_INT; break;
+                                                            case script_value_type::jai_float_type:  sig[i] = script_value::TYPEID_FLOAT; break;
+                                                            case script_value_type::jai_bool_type:   sig[i] = script_value::TYPEID_BOOL; break;
+                                                            case script_value_type::jai_string_type: sig[i] = script_value::TYPEID_STRING; break;
+                                                            case script_value_type::jai_char_type:   sig[i] = script_value::TYPEID_CHAR; break;
+                                                            default: eligible = false; break;
+                                                        }
+                                                    }
+                                                    if (eligible) {
+                                                        member->mcache_cls = cls_raw;
+                                                        member->mcache_epoch = cls_raw->method_epoch();
+                                                        member->mcache_dispatch = d;
+                                                        member->mcache_decl = lone;
+                                                        for (size_t i = 0; i < 8; ++i) member->mcache_sig[i] = sig[i];
+                                                        member->mcache_argc = static_cast<uint8_t>(params.size());
+                                                        member->mcache_flags = static_cast<uint8_t>(
+                                                            (cls_raw->chain_has_nonpublic() ? 1 : 0) |
+                                                            (shared_ptr_methods_.find(member->member_id) != shared_ptr_methods_.end() ? 2 : 0));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (dispatch) {
+                // Evaluate arguments (same order/unwind semantics as the generic loop)
+                std::vector<script_value> arguments;
+                arguments.reserve(expr->arguments.size());
+                for (const auto& argExpr : expr->arguments) {
+                    try {
+                        JAISCRIPT_TRY(dispatch_expr(argExpr.get()));
+                        arguments.emplace_back(std::move(pop_value()));
+                        if (is_unwinding_) {
+                            push_value(make_value());
+                            return {};
+                        }
+                    } catch (const script_exception& e) {
+                        active_exception_value_ = make_value(std::string(e.what()));
+                        current_exception_ = e;
+                        is_unwinding_ = true;
+                        push_value(make_value());
+                        return {};
+                    } catch (const std::runtime_error& e) {
+                        active_exception_value_ = make_value(std::string(e.what()));
+                        current_exception_ = script_exception(e.what());
+                        is_unwinding_ = true;
+                        push_value(make_value());
+                        return {};
+                    }
+                }
+
+                function_decl* direct_ast = nullptr;
+                std::shared_ptr<function_decl> resolved_pin;
+                if (ic_route && cls_raw && member->mcache_epoch == cls_raw->method_epoch()) {
+                    // Post-args revalidation passed (an argument expression could have hot
+                    // reloaded the class). The signature check replaces overload resolution:
+                    // exact primitive/any match on a lone overload is what the scorer picks.
+                    bool sig_ok = arguments.size() == member->mcache_argc;
+                    for (size_t i = 0; sig_ok && i < arguments.size(); ++i) {
+                        const uint8_t want = member->mcache_sig[i];
+                        if (want != 0xFF && arguments[i].raw_storage_index() != want) {
+                            sig_ok = false;
+                        }
+                    }
+                    if (sig_ok) {
+                        direct_ast = static_cast<function_decl*>(member->mcache_decl);
+                    }
+                }
+                if (!direct_ast) {
+                    if (ic_route && cls_raw && member->mcache_epoch != cls_raw->method_epoch()) {
+                        // Class changed under the arguments: refetch the live dispatcher
+                        auto target = resolve_member_target(objectValue);
+                        script_value method_val = target ? target.method(member->member_id)
+                                                         : script_value::make_invalid(engine_);
+                        const script_method_dispatch* d = method_val.is_function()
+                            ? method_val.as_function().target<script_method_dispatch>() : nullptr;
+                        if (!d || d->eng != engine_) {
+                            std::string member_str(member->member);
+                            active_exception_value_ = make_value("Object has no member '" + member_str + "'");
+                            current_exception_ = script_exception("Object has no member '" + member_str + "'", member->location);
+                            is_unwinding_ = true;
+                            push_value(make_value());
+                            return {};
+                        }
+                        dispatch = d;
+                        def_env = d->definition_env;
+                        cls_pin = d->cls;
+                    }
+                    // Slow resolution: exactly what the dispatcher would do, with the
+                    // dispatcher's identical error object on failure (and no second
+                    // evaluation of side-effecting arguments)
+                    auto resolved = cls_pin->resolve_method_overload(dispatch->name_id, arguments);
+                    if (!resolved) {
+                        return resolved.error_value();
+                    }
+                    resolved_pin = resolved.value();
+                    if (resolved_pin->body && resolved_pin->is_coroutine) {
+                        // Coroutine method: mint the handle through the same callable
+                        // seam the dispatcher uses (args already evaluated once)
+                        script_callable payload;
+                        payload.kind = script_callable::kind_type::method;
+                        payload.ast = resolved_pin;
+                        payload.cls = cls_pin;
+                        payload.definition_env = def_env;
+                        payload.this_obj = objectValue;
+                        auto coro_result = execute_callable(payload, arguments);
+                        if (!coro_result) {
+                            return coro_result.error_value();
+                        }
+                        push_value(std::move(coro_result.value()));
+                        return {};
+                    }
+                    if (resolved_pin->body) {
+                        direct_ast = resolved_pin.get();
+                    }
+                }
+                if (direct_ast) {
+                    script_defined_function script_func(
+                        direct_ast->name,
+                        shared_parameters_for(direct_ast),
+                        direct_ast->return_type,
+                        direct_ast->body,
+                        nullptr,
+                        direct_ast->local_count);
+                    method_call_override mctx{&def_env, &objectValue, cls_pin.get()};
+                    detail::call_site_context ctx{&expr->arguments};
+                    const detail::call_site_context* saved_ctx = pending_call_ctx_;
+                    pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
+                    std::optional<checked_result<script_value>> callOutcome;
+                    try {
+                        callOutcome.emplace(call_function(script_func, arguments, &mctx));
+                    } catch (const script_exception& e) {
+                        pending_call_ctx_ = saved_ctx;
+                        active_exception_value_ = make_value(std::string(e.what()));
+                        current_exception_ = e;
+                        is_unwinding_ = true;
+                        push_value(make_value());
+                        return {};
+                    } catch (const std::exception& e) {
+                        pending_call_ctx_ = saved_ctx;
+                        active_exception_value_ = make_value(std::string(e.what()));
+                        current_exception_ = script_exception(e.what());
+                        is_unwinding_ = true;
+                        push_value(make_value());
+                        return {};
+                    }
+                    pending_call_ctx_ = saved_ctx;
+                    checked_result<script_value>& result_checked = *callOutcome;
+                    if (!result_checked) {
+                        return result_checked.error_value();
+                    }
+                    // Non-owning method results (C++ chaining surfacing through a script
+                    // method) pin the receiver, as make_bound_method does
+                    script_value& rv = result_checked.value();
+                    if (objectValue.is_object() && rv.is_non_owning_object()) {
+                        auto rv_holder = rv.get_object_holder();
+                        auto recv_holder = objectValue.get_object_holder();
+                        if (rv_holder && recv_holder) {
+                            rv_holder->keep_alive = recv_holder->data ? recv_holder->data
+                                                                      : recv_holder->keep_alive;
+                        }
+                    }
+                    push_value(std::move(result_checked.value()));
+                    return {};
+                }
+                // body-less resolution: fall through to the generic path
+            }
+            // Gate miss: fall through to the generic path (receiver expression is pure,
+            // so re-evaluating the full callee is side-effect-free)
+        }
+    }
+
     // Evaluate the callee expression
     JAISCRIPT_TRY(dispatch_expr(expr->callee.get()));
     script_value callee = pop_value();
@@ -11245,7 +11521,8 @@ std::vector<std::pair<std::string, script_value>> interpreter::get_current_frame
     return out;
 }
 
-checked_result<script_value> interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args) {
+checked_result<script_value> interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args,
+                                                        const method_call_override* method_ctx) {
     // Check recursion depth limit FIRST
     if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
         return checked_result<script_value>(
@@ -11325,7 +11602,15 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
     // Determine closure environment and method context
     // NOTE: Re-access call_stack_[frame_index] each time instead of caching reference
-    if (function.closure_env) {
+    if (method_ctx) {
+        // Direct method dispatch: same net effect as the closure_env->is_method_env()
+        // branch below (this in the frame, method scope env on definition_env), minus
+        // the carrier method env and its per-call define("this")
+        call_stack_[frame_index].set_this(*method_ctx->this_obj);
+        call_stack_[frame_index].closure_env = *method_ctx->definition_env;
+        environment_ = get_pooled_method_environment(*method_ctx->definition_env, *method_ctx->this_obj,
+                                                     method_ctx->access_ctx);
+    } else if (function.closure_env) {
         if (function.closure_env->is_method_env()) {
             // Method call - store 'this' in the call frame
             auto this_obj = function.closure_env->get_this_object();

@@ -275,6 +275,23 @@ namespace jai {
         bool is_static; // true for ::, false for . or ->
         bool null_safe = false;  // true for ?. null-safe member access
 
+        // Monomorphic method-dispatch inline cache (interpreter obj.method() call sites).
+        // Valid iff mcache_cls matches the receiver's class identity AND mcache_epoch
+        // matches the class's method_epoch() (bumped on any method/access/parent change,
+        // incl. hot reload, propagated to derived). mcache_dispatch/mcache_decl point
+        // into storage the class pins (methods_ payload / method_overloads_ entry); every
+        // replacement of either bumps the epoch first, and script class_definitions are
+        // engine-lifetime (dispatcher cycle), so a matching identity is never a recycled
+        // address. Raw pointers on purpose: a shared_ptr<function_decl> here would cycle
+        // (method body AST -> this node -> method decl).
+        mutable const void* mcache_cls = nullptr;
+        mutable uint64_t mcache_epoch = 0;
+        mutable const void* mcache_dispatch = nullptr;   // script_method_dispatch* into methods_ payload
+        mutable void* mcache_decl = nullptr;             // function_decl* (the lone overload)
+        mutable uint8_t mcache_sig[8] = {};              // expected raw storage index per arg; 0xFF = any
+        mutable uint8_t mcache_argc = 0xFF;
+        mutable uint8_t mcache_flags = 0;                // 1 = access check needed, 2 = member is an sp-builtin name
+
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
 

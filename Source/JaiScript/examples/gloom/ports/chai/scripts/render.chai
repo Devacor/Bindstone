@@ -1,0 +1,670 @@
+// The renderer. The view is a flat truecolor palette-index pixel grid, blitted
+// to the terminal through sub-cell block glyphs:
+//   half (--pix half): 1x2 px/cell, upper-half-block, fg=top bg=bottom
+//   quad (--pix quad): 2x2 px/cell, quadrant glyphs, 2 colors by luminosity
+//   sext (--pix sext): 2x3 px/cell, sextant glyphs (needs a Unicode-13 font)
+// The reference computes wall columns through parallel_transform; ports run
+// the serial-equivalent loop (REFERENCE.md 4.2) — one cast_wall_ray per cell
+// column, identical DDA math, identical bytes.
+
+global PIXW = 2        // pixels per cell horizontally (set by gloom_boot)
+global PIXH = 2        // pixels per cell vertically
+global RESET = ""
+global QUADG = []      // quadrant glyphs by TL|TR<<1|BL<<2|BR<<3
+global SEXTG = []      // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
+global HALFG = ""      // upper half block
+global AM_COLS = []    // automap tile colors (built at boot)
+global AM_FLOOR = 0
+global AM_BLINK = 0
+global AM_ITEM = 0
+global AM_ENEMY = 0
+global AM_SELF = 0
+global AM_HEAD = 0
+global HURT_RED = 0
+global STRIPS = []      // lazy 33-tall wall texture strips by (kind,side,shade,tx)
+global STRIP_SET = []
+
+def init_render() {
+	RESET = ESC + "[0m";
+	rgb_idx(0, 0, 0);                 // palette index 0 is black (grid clear value)
+	HALFG = utf8(0x2580);
+	QUADG = [" "];
+	var quad_cps = [0x2598, 0x259D, 0x2580, 0x2596, 0x258C, 0x259E, 0x259B,
+		0x2597, 0x259A, 0x2590, 0x259C, 0x2584, 0x2599, 0x259F, 0x2588];
+	for (cp : quad_cps) { QUADG.push_back(utf8(cp)); }
+	SEXTG = [];
+	for (var b = 0; b < 64; ++b) {
+		if (b == 0) { SEXTG.push_back(" "); }
+		else if (b == 21) { SEXTG.push_back(utf8(0x258C)); }        // left half
+		else if (b == 42) { SEXTG.push_back(utf8(0x2590)); }        // right half
+		else if (b == 63) { SEXTG.push_back(utf8(0x2588)); }        // full
+		else {
+			var cp = 0x1FB00 + b - 1;
+			if (b > 21) { cp -= 1; }
+			if (b > 42) { cp -= 1; }
+			SEXTG.push_back(utf8(cp));
+		}
+	}
+	AM_COLS = [0, rgb_idx(150, 140, 120), rgb_idx(110, 150, 110), rgb_idx(110, 120, 160), rgb_idx(160, 110, 96),
+		rgb_idx(200, 170, 110), rgb_idx(90, 230, 110), rgb_idx(150, 140, 120), rgb_idx(230, 70, 60), rgb_idx(90, 120, 240)];
+	AM_FLOOR = rgb_idx(40, 40, 46);
+	AM_BLINK = rgb_idx(240, 255, 160);
+	AM_ITEM = rgb_idx(255, 220, 80);
+	AM_ENEMY = rgb_idx(255, 60, 50);
+	AM_SELF = rgb_idx(255, 255, 255);
+	AM_HEAD = rgb_idx(255, 250, 140);
+	HURT_RED = rgb_idx(200, 30, 24);
+	build_particle_colors();
+}
+
+// wall tone table: [kind 0..9][side 0..1][shade 0..15][tone 0..2] flattened;
+// tones: 0 base, 1 accent, 2 mortar/frame. Truecolor, 16 shades.
+global WALLT = []
+global CEILP = []     // per pixel-row ceiling color
+global FLOORP = []    // per pixel-row floor color
+
+def push_wall_tones(base, accent) {
+	for (var side = 0; side < 2; ++side) {
+		var facing = side == 1 ? 0.70 : 1.0;
+		for (var s = 0; s < 16; ++s) {
+			var lum = (0.13 + 0.87 * s / 15.0) * facing;
+			WALLT.push_back(rgb_idx(itrunc(base[0] * lum), itrunc(base[1] * lum), itrunc(base[2] * lum)));
+			var alum = lum * 1.35;
+			alum = alum > 1.0 ? 1.0 : alum;
+			WALLT.push_back(rgb_idx(itrunc(accent[0] * alum), itrunc(accent[1] * alum), itrunc(accent[2] * alum)));
+			var mlum = lum * 0.42;
+			WALLT.push_back(rgb_idx(itrunc(base[0] * mlum), itrunc(base[1] * mlum), itrunc(base[2] * mlum)));
+		}
+	}
+}
+
+def build_render_tables(mi) {
+	var theme := MAPS[mi]["theme"];
+	WALLT = [];
+	// kind 0 (never rendered): flat dark
+	var zero = [10.0, 10.0, 12.0];
+	push_wall_tones(zero, zero);
+	// kinds 1..4 from the theme
+	for (var k = 0; k < 4; ++k) {
+		push_wall_tones(theme["walls"][k], theme["walls"][k]);
+	}
+	// kind 5 door, 6 exit, 7 red door, 8 blue door (episode constants)
+	push_wall_tones([138.0, 116.0, 94.0], [188.0, 164.0, 132.0]);
+	push_wall_tones([64.0, 160.0, 84.0], [220.0, 235.0, 120.0]);
+	push_wall_tones([176.0, 50.0, 42.0], [245.0, 130.0, 96.0]);
+	push_wall_tones([62.0, 94.0, 198.0], [136.0, 176.0, 255.0]);
+
+	// ceiling / floor gradients (dark at the horizon), quantized to CELL rows
+	// so flat regions hit the row builder's uniform-cell fast path
+	CEILP = [];
+	FLOORP = [];
+	var crgb := theme["ceil"];
+	var frgb := theme["floor"];
+	var half = G.vh / 2;
+	for (var y = 0; y < G.vh; ++y) {
+		var yq = (y / PIXH) * PIXH;
+		if (y < half) {
+			var t = half > 1 ? 1.0 * yq / (half - 1) : 1.0;
+			var lum = 1.0 - 0.72 * t;
+			CEILP.push_back(rgb_idx(itrunc(crgb[0] * lum), itrunc(crgb[1] * lum), itrunc(crgb[2] * lum)));
+			FLOORP.push_back(0);
+		} else {
+			var t2 = 1.0 * (yq - half) / imax(1, G.vh - 1 - half);
+			t2 = t2 > 1.0 ? 1.0 : (t2 < 0.0 ? 0.0 : t2);
+			var lum2 = 0.26 + 0.74 * t2;
+			CEILP.push_back(0);
+			FLOORP.push_back(rgb_idx(itrunc(frgb[0] * lum2), itrunc(frgb[1] * lum2), itrunc(frgb[2] * lum2)));
+		}
+	}
+	// NO prebaked background grid: ChaiScript vector assignment copies element
+	// HANDLES (probed), so a per-frame `pix = bg` aliases the buffers and every
+	// pixel write leaks into the "background" — the column loop paints the
+	// ceiling/floor gradient per pixel instead (output-identical).
+	// wall tone strips (32-tall texture columns) build lazily per combination
+	// (slots pre-seeded as empty vectors: ChaiScript `=` can't retype a slot)
+	STRIPS = [];
+	STRIP_SET = [];
+	var nstrips = 10 * 2 * 16 * 32;
+	for (var i2 = 0; i2 < nstrips; ++i2) {
+		STRIPS.push_back([]);
+		STRIP_SET.push_back(0);
+	}
+}
+
+// texture tone at (tx, ty) in 0..31 for a wall kind: 0 base, 1 accent, 2 mortar
+def tex_tone(kind, tx, ty) {
+	if (kind == 1) {
+		var tone = ((tx >> 2) + (ty >> 2)) & 1;
+		if ((ty & 7) == 7) { tone = 2; }
+		return tone;
+	}
+	if (kind == 2) {
+		var tone = ((tx + ((ty >> 3 & 1) << 2)) >> 3) & 1;
+		if ((ty & 7) == 0) { tone = 2; }
+		return tone;
+	}
+	if (kind == 3) {
+		var tone = (tx >> 3) & 1;
+		if ((tx & 7) == 0) { tone = 2; }
+		return tone;
+	}
+	if (kind == 4) {
+		var tone = ((tx >> 4) + (ty >> 4)) & 1;
+		if ((tx & 15) == 0 || (ty & 15) == 0) { tone = 2; }
+		return tone;
+	}
+	if (kind == 6) {
+		var tone = ((tx + ty) >> 2) & 1;               // hazard stripes
+		if (ty > 26) { tone = 2; }
+		return tone;
+	}
+	// doors (plain / red / blue): frame, seam, lock studs
+	if (tx < 3 || tx > 28 || ty < 2 || ty > 29) { return 2; }
+	if (tx == 15 || tx == 16) { return 2; }
+	if (ty >= 14 && ty <= 17 && (tx & 3) == 1) { return 1; }
+	return 0;
+}
+
+def build_strip(kind, side, shade, tx) {
+	var tbase = ((kind * 2 + side) * 16 + shade) * 3;
+	var s = [];
+	for (var ty = 0; ty < 32; ++ty) {
+		s.push_back(WALLT[tbase + tex_tone(kind, tx, ty)]);
+	}
+	s.push_back(s[31]);        // fixed-point overshoot guard
+	return s;
+}
+
+// ---------------------------------------------------------- sprite LUTs -----
+// per (art, shade band 0..7, flash) palette-code -> palette-index table,
+// cached in G.lutc. LUTs depend only on art/band/flash (never the map theme),
+// so the cache lives for the whole session.
+global BAND_LUM = [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24]
+
+def sprite_lut(name, band, flash) {
+	var key = "${name}:${band}:${flash}";
+	if (G.lutc.count(key) != 0) { return G.lutc[key]; }
+	var art := ARTS[name];
+	var rgb := art["rgb"];
+	var lum = BAND_LUM[band];
+	var lut = [0];
+	var nc = vlen(rgb);
+	for (var c = 1; c < nc; ++c) {
+		var r = rgb[c][0];
+		var g = rgb[c][1];
+		var b = rgb[c][2];
+		if (flash == 1) {
+			r = imin(255, r + 170);
+			g = imin(255, g + 150);
+			b = imin(255, b + 140);
+		}
+		lut.push_back(rgb_idx(itrunc(r * lum), itrunc(g * lum), itrunc(b * lum)));
+	}
+	G.lutc[key] = lut;
+	return lut;
+}
+
+// -------------------------------------------------------------- the view ----
+def render_view() {
+	var vw = G.vw;
+	var vh = G.vh;
+	var dirx = cos(G.pang);
+	var diry = sin(G.pang);
+	var planex = 0.0 - diry * 0.78;
+	var planey = dirx * 0.78;
+	var px = G.px;
+	var py = G.py;
+
+	// --- 1+2. rays + columns: one ray per CELL column painting ceiling,
+	// textured wall slice, floor top-to-bottom (serial-equivalent of the
+	// reference's chunked parallel_transform + prebaked background; cy0 is
+	// always above the horizon and cy1 below it, so above = CEILP, below =
+	// FLOORP, exactly the reference's bg grid)
+	var pix := G.pix;
+	var zbuf := G.zbuf;
+	var ceilp := CEILP;
+	var floorp := FLOORP;
+	var pxw = PIXW;
+	var ncols = vw / pxw;
+	var xstep = 2.0 / (ncols - 1.0);
+	var boost = G.muzzle > 0 ? 2 : 0;
+	for (var x = 0; x < ncols; ++x) {
+		var camx = x * xstep - 1.0;
+		cast_wall_ray(px, py, dirx + planex * camx, diry + planey * camx);
+		var dist = RAY_D;
+		var side = RAY_S;
+		var kind = RAY_K;
+		var tx = RAY_T >> 1;                  // 0..31
+		var px0 = x * pxw;
+		zbuf[px0] = dist;
+		if (pxw == 2) { zbuf[px0 + 1] = dist; }
+		var lineh = itrunc(1.0 * vh / dist);
+		lineh = lineh < 1 ? 1 : lineh;
+		var y0 = (vh - lineh) / 2;
+		var y1 = y0 + lineh;
+		var cy0 = y0 < 0 ? 0 : y0;
+		var cy1 = y1 > vh ? vh : y1;
+		var shade = 15 - itrunc(dist * 1.55) + boost;
+		shade = shade < 0 ? 0 : (shade > 15 ? 15 : shade);
+		var sidx = ((kind * 2 + side) * 16 + shade) * 32 + tx;
+		if (STRIP_SET[sidx] == 0) {
+			STRIPS[sidx] = build_strip(kind, side, shade, tx);
+			STRIP_SET[sidx] = 1;
+		}
+		var strip := STRIPS[sidx];
+		var tstep = 65536 / lineh;            // (32 << 11) / lineh
+		var tacc = (cy0 - y0) * tstep;
+		var gi = px0;
+		var y = 0;
+		if (pxw == 2) {
+			while (y < cy0) {
+				var c = ceilp[y];
+				pix[gi] = c;
+				pix[gi + 1] = c;
+				gi += vw;
+				y += 1;
+			}
+			while (y < cy1) {
+				var c = strip[tacc >> 11];
+				pix[gi] = c;
+				pix[gi + 1] = c;
+				tacc += tstep;
+				gi += vw;
+				y += 1;
+			}
+			while (y < vh) {
+				var c = floorp[y];
+				pix[gi] = c;
+				pix[gi + 1] = c;
+				gi += vw;
+				y += 1;
+			}
+		} else {
+			while (y < cy0) {
+				pix[gi] = ceilp[y];
+				gi += vw;
+				y += 1;
+			}
+			while (y < cy1) {
+				pix[gi] = strip[tacc >> 11];
+				tacc += tstep;
+				gi += vw;
+				y += 1;
+			}
+			while (y < vh) {
+				pix[gi] = floorp[y];
+				gi += vw;
+				y += 1;
+			}
+		}
+	}
+
+	// --- 3. billboards: enemies, pickups, projectiles (far to near) ---
+	var det = planex * diry - dirx * planey;
+	if (det < 0.0001 && det > -0.0001) { det = 0.0001; }
+	var inv = 1.0 / det;
+	var sp = [];
+	for (e : G.enemies) {
+		collect_billboard(sp, e.x, e.y, enemy_art(e), ENEMY_DEFS[e.kind]["size"], 0.0,
+			e.flash > 0 ? 1 : 0, inv, dirx, diry, planex, planey);
+	}
+	var nitems = vlen(G.items);
+	for (var i = 0; i < nitems; ++i) {
+		var it := G.items[i];
+		if (it[3] == 1) { continue; }
+		var ik = it[0];
+		collect_billboard(sp, it[1], it[2], ITEM_DEFS[ik]["art"],
+			ITEM_DEFS[ik]["size"], 0.0, 0, inv, dirx, diry, planex, planey);
+	}
+	var shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
+	var nshots = vlen(G.shots);
+	for (var i2 = 0; i2 < nshots; ++i2) {
+		var s := G.shots[i2];
+		collect_billboard(sp, s[1], s[2], shot_art[s[0]], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
+	}
+	// insertion sort, far first (records: [depth, scx, name, size, zlift, flash])
+	var nsp = vlen(sp);
+	for (var i3 = 1; i3 < nsp; ++i3) {
+		var rec = sp[i3];
+		var j = i3 - 1;
+		while (j >= 0) {
+			if (sp[j][0] >= rec[0]) { break; }
+			sp[j + 1] = sp[j];
+			j -= 1;
+		}
+		sp[j + 1] = rec;
+	}
+	for (rec2 : sp) { draw_billboard(rec2, pix, zbuf); }
+
+	// --- 4. particles: pixel confetti with z-buffer clipping ---
+	var pcols := PART_COLS;
+	var half2 = vh / 2;
+	var pxh = PIXH;
+	for (prt : G.fx.pool) {
+		var pk = prt[0];
+		if (pk == 0) { continue; }
+		var rx = prt[1] - px;
+		var ry = prt[2] - py;
+		var depth = inv * (planex * ry - planey * rx);
+		if (depth < 0.15 || depth > 14.0) { continue; }
+		var ttx = inv * (diry * rx - dirx * ry);
+		var scx = itrunc((vw / 2.0) * (1.0 + ttx / depth));
+		if (scx < 0 || scx >= vw) { continue; }
+		if (depth >= zbuf[scx]) { continue; }
+		var span = 1.0 * vh / depth;
+		var pyx = itrunc(half2 + span * 0.5 - prt[3] * span);
+		var life = prt[7];
+		var phase = 3 - imin(3, life / 5);
+		var color = pcols[pk * 4 + phase];
+		var psz = itrunc(0.07 * span) + 1;
+		psz = psz > 3 ? 3 : psz;
+		var psx = (psz * 2 * pxw) / pxh;           // square-ish regardless of mode
+		psx = psx < 1 ? 1 : psx;
+		for (var oy = 0; oy < psz; ++oy) {
+			var yy = pyx + oy;
+			if (yy < 0 || yy >= vh) { continue; }
+			for (var ox = 0; ox < psx; ++ox) {
+				var xx = scx + ox;
+				if (xx >= vw) { continue; }
+				if (depth < zbuf[xx]) { pix[yy * vw + xx] = color; }
+			}
+		}
+	}
+
+	// --- 5. overlays: automap, hurt flash ---
+	if (G.automap) { draw_automap(pix); }
+	if (G.hurt_flash > 0) {
+		var red = HURT_RED;
+		var thick = pxw * 2;
+		for (var x4 = 0; x4 < vw; ++x4) {
+			pix[x4] = red;
+			pix[vw + x4] = red;
+			pix[(vh - 2) * vw + x4] = red;
+			pix[(vh - 1) * vw + x4] = red;
+		}
+		for (var y4 = 0; y4 < vh; ++y4) {
+			var rb = y4 * vw;
+			for (var t4 = 0; t4 < thick; ++t4) {
+				pix[rb + t4] = red;
+				pix[rb + vw - 1 - t4] = red;
+			}
+		}
+	}
+
+	// --- 6. pixel grid -> sub-cell glyph rows ---
+	if (PIXH == 3) { return rows_sext(pix); }
+	if (PIXW == 2) { return rows_quad(pix); }
+	return rows_half(pix);
+}
+
+// half mode: fg = top pixel, bg = bottom pixel, upper-half-block glyph
+def rows_half(pix) {
+	var vw = G.vw;
+	var fgs := PAL_FG;
+	var bgs := PAL_BG;
+	var hb = HALFG;
+	var reset = RESET;
+	var rows = [];
+	var vrows = G.vh / 2;
+	for (var ry = 0; ry < vrows; ++ry) {
+		var row = "";
+		var ptop = -1;
+		var pbot = -1;
+		var itop = ry * 2 * vw;
+		var ibot = itop + vw;
+		for (var x = 0; x < vw; ++x) {
+			var tc = pix[itop + x];
+			var bc = pix[ibot + x];
+			if (tc != ptop) { row += fgs[tc]; ptop = tc; }
+			if (bc != pbot) { row += bgs[bc]; pbot = bc; }
+			row += hb;
+		}
+		row += reset;
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+// quad mode: 2x2 pixels per cell, two colors by luminosity partition
+def rows_quad(pix) {
+	var vw = G.vw;
+	var fgs := PAL_FG;
+	var bgs := PAL_BG;
+	var lums := PAL_LUM;
+	var qg := QUADG;
+	var reset = RESET;
+	var rows = [];
+	var vrows = G.vh / 2;
+	var cells = vw / 2;
+	for (var ry = 0; ry < vrows; ++ry) {
+		var row = "";
+		var pfg = -1;
+		var pbg = -1;
+		var itop = ry * 2 * vw;
+		var ibot = itop + vw;
+		for (var cx = 0; cx < cells; ++cx) {
+			var xx = cx * 2;
+			var p0 = pix[itop + xx];
+			var p1 = pix[itop + xx + 1];
+			var p2 = pix[ibot + xx];
+			var p3 = pix[ibot + xx + 1];
+			if (p0 == p1 && p0 == p2 && p0 == p3) {
+				if (p0 != pbg) { row += bgs[p0]; pbg = p0; }
+				row += " ";
+				continue;
+			}
+			// wall slices split cells into vertical or horizontal halves far
+			// more often than not — cheap two-color paths before the full
+			// luminosity partition
+			if (p0 == p2 && p1 == p3) {
+				if (p0 != pfg) { row += fgs[p0]; pfg = p0; }
+				if (p1 != pbg) { row += bgs[p1]; pbg = p1; }
+				row += qg[5];                 // left half
+				continue;
+			}
+			if (p0 == p1 && p2 == p3) {
+				if (p0 != pfg) { row += fgs[p0]; pfg = p0; }
+				if (p2 != pbg) { row += bgs[p2]; pbg = p2; }
+				row += qg[3];                 // upper half
+				continue;
+			}
+			var l0 = lums[p0];
+			var l1 = lums[p1];
+			var l2 = lums[p2];
+			var l3 = lums[p3];
+			var lmin = l0;
+			var lmax = l0;
+			var fgp = p0;
+			var bgp = p0;
+			if (l1 < lmin) { lmin = l1; bgp = p1; }
+			if (l1 > lmax) { lmax = l1; fgp = p1; }
+			if (l2 < lmin) { lmin = l2; bgp = p2; }
+			if (l2 > lmax) { lmax = l2; fgp = p2; }
+			if (l3 < lmin) { lmin = l3; bgp = p3; }
+			if (l3 > lmax) { lmax = l3; fgp = p3; }
+			var thr = (lmin + lmax + 1) / 2;
+			var bits = 0;
+			if (l0 >= thr) { bits = 1; }
+			if (l1 >= thr) { bits += 2; }
+			if (l2 >= thr) { bits += 4; }
+			if (l3 >= thr) { bits += 8; }
+			if (fgp != pfg) { row += fgs[fgp]; pfg = fgp; }
+			if (bits != 15 && bgp != pbg) { row += bgs[bgp]; pbg = bgp; }
+			row += qg[bits];
+		}
+		row += reset;
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+// sext mode: 2x3 pixels per cell (Unicode 13 "Symbols for Legacy Computing")
+def rows_sext(pix) {
+	var vw = G.vw;
+	var fgs := PAL_FG;
+	var bgs := PAL_BG;
+	var lums := PAL_LUM;
+	var sg := SEXTG;
+	var reset = RESET;
+	var rows = [];
+	var vrows = G.vh / 3;
+	var cells = vw / 2;
+	for (var ry = 0; ry < vrows; ++ry) {
+		var row = "";
+		var pfg = -1;
+		var pbg = -1;
+		var r0 = ry * 3 * vw;
+		var r1 = r0 + vw;
+		var r2 = r1 + vw;
+		for (var cx = 0; cx < cells; ++cx) {
+			var xx = cx * 2;
+			var p0 = pix[r0 + xx];
+			var p1 = pix[r0 + xx + 1];
+			var p2 = pix[r1 + xx];
+			var p3 = pix[r1 + xx + 1];
+			var p4 = pix[r2 + xx];
+			var p5 = pix[r2 + xx + 1];
+			if (p0 == p1 && p0 == p2 && p0 == p3 && p0 == p4 && p0 == p5) {
+				if (p0 != pbg) { row += bgs[p0]; pbg = p0; }
+				row += " ";
+				continue;
+			}
+			var l0 = lums[p0];
+			var l1 = lums[p1];
+			var l2 = lums[p2];
+			var l3 = lums[p3];
+			var l4 = lums[p4];
+			var l5 = lums[p5];
+			var lmin = l0;
+			var lmax = l0;
+			var fgp = p0;
+			var bgp = p0;
+			if (l1 < lmin) { lmin = l1; bgp = p1; }
+			if (l1 > lmax) { lmax = l1; fgp = p1; }
+			if (l2 < lmin) { lmin = l2; bgp = p2; }
+			if (l2 > lmax) { lmax = l2; fgp = p2; }
+			if (l3 < lmin) { lmin = l3; bgp = p3; }
+			if (l3 > lmax) { lmax = l3; fgp = p3; }
+			if (l4 < lmin) { lmin = l4; bgp = p4; }
+			if (l4 > lmax) { lmax = l4; fgp = p4; }
+			if (l5 < lmin) { lmin = l5; bgp = p5; }
+			if (l5 > lmax) { lmax = l5; fgp = p5; }
+			var thr = (lmin + lmax + 1) / 2;
+			var bits = 0;
+			if (l0 >= thr) { bits = 1; }
+			if (l1 >= thr) { bits += 2; }
+			if (l2 >= thr) { bits += 4; }
+			if (l3 >= thr) { bits += 8; }
+			if (l4 >= thr) { bits += 16; }
+			if (l5 >= thr) { bits += 32; }
+			if (fgp != pfg) { row += fgs[fgp]; pfg = fgp; }
+			if (bits != 63 && bgp != pbg) { row += bgs[bgp]; pbg = bgp; }
+			row += sg[bits];
+		}
+		row += reset;
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+// world -> camera -> screen; appends [depth, scx, art, size, zlift, flash]
+def collect_billboard(sp, wx, wy, art, size, zlift, flash, inv, dirx, diry, planex, planey) {
+	var rx = wx - G.px;
+	var ry = wy - G.py;
+	var depth = inv * (planex * ry - planey * rx);
+	if (depth < 0.18 || depth > 15.0) { return; }
+	var ttx = inv * (diry * rx - dirx * ry);
+	var scx = itrunc((G.vw / 2.0) * (1.0 + ttx / depth));
+	if (scx < -G.vw || scx > G.vw * 2) { return; }
+	sp.push_back([depth, scx, art, size, zlift, flash]);
+}
+
+def draw_billboard(rec, pix, zbuf) {
+	var depth = rec[0];
+	var scx = rec[1];
+	var name = rec[2];
+	var size = rec[3];
+	var zlift = rec[4];
+	var flash = rec[5];
+	var art := ARTS[name];
+	var aw = art["w"];
+	var ah = art["h"];
+	var apix := art["pix"];
+	var vw = G.vw;
+	var vh = G.vh;
+	var span = 1.0 * vh / depth;
+	var ph = itrunc(span * size);
+	if (ph < 2) { ph = 2; }
+	// pixel aspect: a cell is ~1:2 (w:h) split into PIXW x PIXH
+	var pw = ph * aw * 2 * PIXW / (ah * PIXH);
+	if (pw < 2) { pw = 2; }
+	var band = itrunc(depth * 0.85) - (G.muzzle > 0 ? 1 : 0);
+	band = band < 0 ? 0 : (band > 7 ? 7 : band);
+	var lut := sprite_lut(name, band, flash);
+	var bottom = itrunc(vh / 2 + span * 0.5 - zlift * span);
+	var top = bottom - ph;
+	var x0 = scx - pw / 2;
+	var x1 = x0 + pw;
+	var cx0 = x0 < 0 ? 0 : x0;
+	var cx1 = x1 > vw ? vw : x1;
+	var cy0 = top < 0 ? 0 : top;
+	var cy1 = bottom > vh ? vh : bottom;
+	for (var x = cx0; x < cx1; ++x) {
+		if (depth >= zbuf[x]) { continue; }
+		var ax = (x - x0) * aw / pw;
+		for (var y = cy0; y < cy1; ++y) {
+			var ay = (y - top) * ah / ph;
+			var code = apix[ay * aw + ax];
+			if (code > 0) { pix[y * vw + x] = lut[code]; }
+		}
+	}
+}
+
+// arcade automap: square tiles, walls in kind colors, live blips
+def draw_automap(pix) {
+	var vw = G.vw;
+	var mw = G.mw;
+	var mh = G.mh;
+	var sx = PIXW * 2;
+	var sy = PIXH;
+	var ox = sx * 2;
+	var oy = sy * 2;
+	var kc := AM_COLS;
+	var tiles := G.tiles;
+	for (var ty = 0; ty < mh; ++ty) {
+		for (var tx = 0; tx < mw; ++tx) {
+			var t = tiles[ty * mw + tx];
+			var c = t == 0 ? AM_FLOOR : kc[t];
+			if (t == 6 && (G.tick & 8) == 0) { c = AM_BLINK; }
+			var bx = ox + tx * sx;
+			var by = oy + ty * sy;
+			for (var yy = 0; yy < sy; ++yy) {
+				var rb = (by + yy) * vw + bx;
+				for (var xx = 0; xx < sx; ++xx) { pix[rb + xx] = c; }
+			}
+		}
+	}
+	// blips: items gold, live enemies red, you white (+ heading pixel)
+	var nitems = vlen(G.items);
+	for (var i = 0; i < nitems; ++i) {
+		var it := G.items[i];
+		if (it[3] == 1) { continue; }
+		blip(pix, ox + itrunc(it[1]) * sx, oy + itrunc(it[2]) * sy, AM_ITEM);
+	}
+	for (e : G.enemies) {
+		if (!e.alive) { continue; }
+		blip(pix, ox + itrunc(e.x) * sx, oy + itrunc(e.y) * sy, AM_ENEMY);
+	}
+	blip(pix, ox + itrunc(G.px) * sx, oy + itrunc(G.py) * sy, AM_SELF);
+	blip(pix, ox + itrunc(G.px + cos(G.pang) * 1.4) * sx, oy + itrunc(G.py + sin(G.pang) * 1.4) * sy, AM_HEAD);
+}
+
+def blip(pix, bx, by, c) {
+	var vw = G.vw;
+	var vh = G.vh;
+	if (bx < 0 || by < 0 || bx + 1 >= vw || by + 1 >= vh) { return; }
+	pix[by * vw + bx] = c;
+	pix[by * vw + bx + 1] = c;
+	pix[(by + 1) * vw + bx] = c;
+	pix[(by + 1) * vw + bx + 1] = c;
+}

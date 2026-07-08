@@ -1,0 +1,248 @@
+// HUD: status strip, vitals with bars, ammo rack, the face, the bobbing
+// weapon art — plus the full-screen states (title, tally, death, victory).
+
+global FACES = [
+	"ok": [
+		" .-----. ",
+		" | o.o | ",
+		" |  L  | ",
+		" | --- | ",
+		" '-----' "],
+	"hurt": [
+		" .-----. ",
+		" | o.o | ",
+		" | ,L  | ",
+		" | ~~~ | ",
+		" '-----' "],
+	"bad": [
+		" .-----. ",
+		" | x.o |,",
+		" | ,L. |,",
+		" | www | ",
+		" '-----' "],
+	"crit": [
+		" .-----. ",
+		" |,x.x,|,",
+		" |,,L,,|,",
+		" | mmm |,",
+		" '-----' "],
+	"pain": [
+		" .-----. ",
+		" | >.< | ",
+		" | ,L, | ",
+		" | OOO | ",
+		" '-----' "],
+	"grin": [
+		" .-----. ",
+		" | ^.^ | ",
+		" |  L  | ",
+		" | \\_/ | ",
+		" '-----' "],
+	"dead": [
+		" .-----. ",
+		" | x.x | ",
+		" |  L  | ",
+		" | ___ | ",
+		" '-----' "]
+]
+
+def face_name() {
+	if (G.mode == 3) { return "dead"; }
+	if (G.face_pain > 0) { return "pain"; }
+	if (G.face_grin > 0) { return "grin"; }
+	if (G.hp > 70) { return "ok"; }
+	if (G.hp > 40) { return "hurt"; }
+	if (G.hp > 18) { return "bad"; }
+	return "crit";
+}
+
+def meter(val, cap, slots) {
+	var fill = iclamp(val * slots / imax(1, cap), 0, slots);
+	return str_rep("#", fill) + str_rep("-", slots - fill);
+}
+
+def show_msg(text, color) {
+	G.msg = text;
+	G.msg_color = color;
+	G.msg_t = 75;
+}
+
+// the status strip above the panel: map, tallies, message
+def hud_status_row() {
+	var left = " ${G.map_name}  KILLS ${G.kills}/${G.kill_total}  SCRT ${G.secrets}/${G.secret_total}";
+	var m = G.msg_t > 0 ? G.msg : "";
+	var room = G.w - slen(left) - 2;
+	if (slen(m) > room) { m = m.substr(0, imax(0, room)); }
+	var body = pad_to(left + str_rep(" ", imax(1, G.w - slen(left) - slen(m) - 1)) + m, G.w);
+	var strip = ESC + "[48;5;235m" + ESC + "[38;5;250m";
+	if (G.msg_t > 0) {
+		strip = ESC + "[48;5;235m" + ESC + "[" + G.msg_color + "m";
+	}
+	return strip + body + RESET;
+}
+
+// five panel rows: vitals | ammo | face | weapon art
+def hud_panel_rows(fps, ms_sim, ms_draw) {
+	var w := WEAPONS[G.weapon];
+	var ammo_now = G.ammo[w["ammo"]];
+	var face := FACES[face_name()];
+
+	// weapon art with walk-bob shift and fire frame
+	var art := WGFX_IDLE[G.weapon];
+	if (G.cooldown > WEAPONS[G.weapon]["cd"] - 4 || G.gun_kick > 0) { art := WGFX_FIRE[G.weapon]; }
+	var bob_shift = 1 + itrunc((sin(G.bob) + 1.0) * 1.4);
+
+	var wname = w["name"];
+	var hp_bar = meter(G.hp, 100, 12);
+	var arm_bar = meter(G.armor, 100, 12);
+	var kr = G.key_r ? "[R]" : " . ";
+	var kb = G.key_b ? "[B]" : " . ";
+	var pilot_tag = G.autopilot ? "AUTOPILOT" : "";
+	var left = [
+		" HP  [${hp_bar}] ${G.hp}",
+		" ARM [${arm_bar}] ${G.armor}",
+		" ",
+		" ${kr} ${kb}  ${wname}",
+		" ${pilot_tag}"
+	];
+	// perf readout: fps rounded, total ms with one decimal (blank when idle)
+	var perf = "";
+	if (fps > 0.0) {
+		var fpsr = itrunc(fps + 0.5);
+		var ms10 = itrunc((ms_sim + ms_draw) * 10.0 + 0.5);
+		perf = "${fpsr}fps ${ms10 / 10}.${ms10 % 10}ms";
+	}
+	var owned = (G.have[1] == 1 ? "2:SCAT " : "       ") + (G.have[2] == 1 ? "3:HEX" : "");
+	var mid = [
+		"BUL ${G.ammo[0]}/${AMMO_MAX[0]}",
+		"SHL ${G.ammo[1]}/${AMMO_MAX[1]}",
+		"CEL ${G.ammo[2]}/${AMMO_MAX[2]}",
+		owned,
+		perf
+	];
+
+	var rows = [];
+	var left_w = 34;
+	var mid_w = 18;
+	var face_w = 11;
+	var art_w = 14;
+	for (var r = 0; r < 5; ++r) {
+		var lseg = pad_to(left[r], left_w);
+		var mseg = pad_to(mid[r], mid_w);
+		var fseg = pad_to(face[r], face_w);
+		var used = left_w + mid_w + face_w + art_w;
+		var fill = imax(0, G.w - used);
+		var aseg = pad_to(str_rep(" ", imin(fill > 0 ? bob_shift : 0, 2)) + art[r], art_w + fill);
+		var hp_col = G.hp > 40 ? "97" : "91";
+		rows.push_back(ESC + "[48;5;236m" + ESC + "[" + hp_col + "m" + lseg +
+			ESC + "[38;5;179m" + mseg +
+			ESC + "[38;5;114m" + fseg +
+			ESC + "[38;5;250m" + aseg.substr(0, imax(0, G.w - left_w - mid_w - face_w)) + RESET);
+	}
+	return rows;
+}
+
+// ------------------------------------------------------- full-screen modes --
+global LOGO = [
+	"  ..|'''.|  '||'       ..|''||    ..|''||   '||    ||' ",
+	" .|'     '   ||       .|'    ||  .|'    ||   |||  |||  ",
+	" ||    ....  ||       ||      || ||      ||  |'|..'||  ",
+	" '|.    ||   ||       '|.     || '|.     ||  | '|' ||  ",
+	"  ''|...'|  .||.....|  ''|...|'   ''|...|'  .|. | .||. "
+]
+
+def screen_rows(lines, tint) {
+	// center the payload block on a dark field, pad every row to full width
+	var rows = [];
+	var total = G.h;
+	var nlines = vlen(lines);
+	var top = imax(0, (total - nlines) / 2);
+	for (var y = 0; y < total; ++y) {
+		var li = y - top;
+		var body = "";
+		if (li >= 0 && li < nlines) { body = lines[li]; }
+		var padl = imax(0, (G.w - slen(body)) / 2);
+		rows.push_back(ESC + "[48;5;233m" + tint + pad_to(str_rep(" ", padl) + body, G.w) + RESET);
+	}
+	return rows;
+}
+
+def render_title() {
+	var lines = [];
+	for (l : LOGO) { lines.push_back(l); }
+	lines.push_back("");
+	lines.push_back("a  t e r m i n a l  r a y c a s t e r ,  a l l  J a i S c r i p t");
+	lines.push_back("");
+	lines.push_back("");
+	var blink = (G.tick / 12) % 2;
+	lines.push_back(blink == 0 ? ">>> press FIRE to descend <<<" : "");
+	lines.push_back("");
+	lines.push_back("w/s move  a/d strafe  arrows turn  SPACE fire  E use  1/2/3 weapons  m map");
+	var tint = (G.tick / 4) % 3 == 0 ? ESC + "[38;5;203m" : ESC + "[38;5;209m";
+	return join_all(screen_rows(lines, tint), "\n");
+}
+
+def render_tally() {
+	var kp = G.kill_total > 0 ? G.kills * 100 / G.kill_total : 100;
+	var sp = G.secret_total > 0 ? G.secrets * 100 / G.secret_total : 100;
+	var secs = G.map_ticks / 30;
+	var par_secs = G.par / 30;
+	var lines = [
+		G.map_name,
+		"",
+		"=== FLOOR CLEARED ===",
+		"",
+		"KILLS    ${G.kills} / ${G.kill_total}   (${kp}%)",
+		"SECRETS  ${G.secrets} / ${G.secret_total}   (${sp}%)",
+		"TIME     ${secs}s   par ${par_secs}s",
+		"",
+		G.map_i + 1 < MAPS.size() ? "press FIRE for the next floor" : "press FIRE to face the dark"
+	];
+	return join_all(screen_rows(lines, ESC + "[38;5;114m"), "\n");
+}
+
+def render_dead() {
+	var lines = [
+		"Y O U   D I E D",
+		"",
+		"slain by ${G.death_cause}",
+		"on ${G.map_name}",
+		"",
+		"kills ${G.kills}/${G.kill_total}   deaths ${G.deaths}",
+		"",
+		"press FIRE to rise again"
+	];
+	return join_all(screen_rows(lines, ESC + "[38;5;196m"), "\n");
+}
+
+def render_victory() {
+	var mins = G.ep_ticks / 1800;
+	var secs = (G.ep_ticks / 30) % 60;
+	var lines = [];
+	for (l : LOGO) { lines.push_back(l); }
+	lines.push_back("");
+	lines.push_back("T H E   W A R D E N   I S   D O W N");
+	lines.push_back("");
+	lines.push_back("episode kills    ${G.ep_kills} / ${G.ep_kill_total}");
+	lines.push_back("episode secrets  ${G.ep_secrets} / ${G.ep_secret_total}");
+	lines.push_back("episode time     ${mins}m ${secs}s   deaths ${G.deaths}");
+	lines.push_back("");
+	lines.push_back("the gloom lifts. for now.        (ESC quits)");
+	return join_all(screen_rows(lines, ESC + "[38;5;220m"), "\n");
+}
+
+// the play-mode frame: world rows + status strip + panel
+def render_play(fps, ms_sim, ms_draw) {
+	var rows = render_view();
+	rows.push_back(hud_status_row());
+	for (r : hud_panel_rows(fps, ms_sim, ms_draw)) { rows.push_back(r); }
+	return join_all(rows, "\n");
+}
+
+def render_frame(fps, ms_sim, ms_draw) {
+	if (G.mode == 0) { return render_title(); }
+	if (G.mode == 2) { return render_tally(); }
+	if (G.mode == 3) { return render_dead(); }
+	if (G.mode == 4) { return render_victory(); }
+	return render_play(fps, ms_sim, ms_draw);
+}

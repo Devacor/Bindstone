@@ -1,0 +1,84 @@
+// GLOOM (ChaiScript port) — helpers: math, hashing, the truecolor palette
+// intern, text padding. ChaiScript ints are C++-width: 32-bit literals by
+// default, so hash lanes canonicalize through 0ll+ before shifting, and
+// .size() (size_t) is converted through slen/vlen before signed arithmetic.
+
+global TICK = 1.0 / 30.0   // fixed sim timestep; --smoke feeds exactly this dt
+
+def iabs(v) { return v < 0 ? -v : v; }
+def imax(a, b) { return a > b ? a : b; }
+def imin(a, b) { return a < b ? a : b; }
+def iclamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+def fclamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+// signed 64-bit view of size() results (size_t arithmetic is an unsigned trap)
+def slen(s) { return itrunc(0.0 + s.size()); }
+def vlen(v) { return itrunc(0.0 + v.size()); }
+
+def str_rep(s, n) {
+	var out = "";
+	for (var i = 0; i < n; ++i) { out += s; }
+	return out;
+}
+
+def join_all(parts, sep) {
+	var out = "";
+	var n = parts.size();
+	for (var i = 0; i < n; ++i) {
+		if (i > 0) { out += sep; }
+		out += parts[i];
+	}
+	return out;
+}
+
+// FNV-1a, 32-bit lane inside an int64
+def mix32(h, v) {
+	var vv = 0ll + v;
+	var x = (0ll + h) ^ (vv & 0xFFFFFFFF);
+	x = x ^ ((vv >> 32) & 0xFFFFFFFF);
+	return ((x & 0xFFFFFFFF) * 16777619) & 0xFFFFFFFF;
+}
+
+// ------------------------------------------------ truecolor palette intern --
+// Interns exact 24-bit colors: pixel grids store small palette indices, the
+// row builder emits prebuilt truecolor escapes, PAL_LUM feeds the sub-cell
+// bright/dark partition. Keyed by string (ChaiScript maps are string-keyed).
+global PAL_KEYS = Map()   // "r:g:b" -> index
+global PAL_FG = []        // ESC[38;2;r;g;bm per index
+global PAL_BG = []        // ESC[48;2;r;g;bm per index
+global PAL_LUM = []       // 2r+3g+b per index
+
+def rgb_idx(r_, g_, b_) {
+	var r = iclamp(r_, 0, 255);
+	var g = iclamp(g_, 0, 255);
+	var b = iclamp(b_, 0, 255);
+	var key = "${r}:${g}:${b}";
+	if (PAL_KEYS.count(key) != 0) { return PAL_KEYS[key]; }
+	var idx = vlen(PAL_FG);
+	PAL_KEYS[key] = idx;
+	PAL_FG.push_back("${ESC}[38;2;${r};${g};${b}m");
+	PAL_BG.push_back("${ESC}[48;2;${r};${g};${b}m");
+	PAL_LUM.push_back(r * 2 + g * 3 + b);
+	return idx;
+}
+
+// pad/truncate plain text to n columns
+def pad_to(s, n) {
+	var l = slen(s);
+	if (l > n) { return s.substr(0, n); }
+	return s + str_rep(" ", n - l);
+}
+
+// smallest signed angle from a to b, in (-pi, pi]
+def ang_diff(a, b) {
+	var d = b - a;
+	while (d > 3.14159265) { d -= 6.2831853; }
+	while (d < -3.14159265) { d += 6.2831853; }
+	return d;
+}
+
+def dist2(ax, ay, bx, by) {
+	var dx = ax - bx;
+	var dy = ay - by;
+	return dx * dx + dy * dy;
+}

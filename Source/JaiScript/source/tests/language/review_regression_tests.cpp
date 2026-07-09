@@ -8,6 +8,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
+#include <optional>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -839,7 +840,162 @@ public:
     }
 };
 
+// Element-read mint elision (docs/element_read_overhead_design.md Stage 1): subscript
+// reads consumed as transient values push a shallow copy instead of a reference_holder.
+// These pin the semantics the elision must preserve on BOTH backends.
+class element_read_elision_tests : public suite {
+public:
+    element_read_elision_tests() : suite("Element Read Elision") {}
+
+    void forge_tests() override {
+        test("subscript_operands_value_ops", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                array<int> a = [10, 20, 30, 40];
+                auto s = a[0] + a[1] * a[2] - a[3];
+                auto c = a[1] < a[2];
+                auto b = (a[0] & a[1]) | (a[2] >> 1);
+                to_string(s) + "|" + to_string(c) + "|" + to_string(b);
+            )");
+            check_eq(std::string("570|true|15"), r.as_string());
+        });
+
+        test("subscript_chain_2d_operand", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                var grid = [[1, 2], [3, 4]];
+                grid[1][0] * 10 + grid[0][1];
+            )");
+            check_eq((int64_t)32, r.as_int());
+        });
+
+        test("subscript_in_conditions", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                array<int> a = [0, 5, 7];
+                auto n = 0;
+                if (a[1]) { n = n + 1; }
+                while (a[2] > n) { n = n + 1; }
+                auto t = a[0] ? 100 : (a[1] && a[2] ? 50 : 0);
+                n + t;
+            )");
+            check_eq((int64_t)57, r.as_int());
+        });
+
+        test("subscript_assignment_rhs", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                array<int> src = [7, 8, 9];
+                array<int> dst = [0, 0, 0];
+                dst[0] = src[2];
+                auto x = src[1];
+                x += src[0];
+                dst[0] * 100 + x;
+            )");
+            check_eq((int64_t)915, r.as_int());
+        });
+
+        test("map_transient_read_never_inserts", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                var m = {"a": 3};
+                auto hit = m["a"] + 1;
+                auto missing = m["nope"] == null;
+                to_string(m.size()) + "|" + to_string(hit) + "|" + to_string(missing);
+            )");
+            check_eq(std::string("1|4|true"), r.as_string());
+        });
+
+        // Impure sibling (a call that reallocates the array) keeps the LEFT operand on
+        // the reference path - the classifier's callout_free rule. Values must be
+        // correct and Debug's 0xDD fill must not trip (no dangling element pointer).
+        test("impure_sibling_keeps_mint", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                var a = [1, 2, 3];
+                auto grow(var& arr) -> auto { auto i = 0; while (i < 64) { arr.push(0); i = i + 1; } return 5; }
+                a[0] + grow(a);
+            )");
+            check_eq((int64_t)6, r.as_int());
+        });
+
+        // Compound element store still writes through (its target op_index/read stays
+        // on the reference path) while its subscript RHS is elided.
+        test("compound_element_store_with_subscript_rhs", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                array<int> a = [1, 2, 3];
+                a[0] += a[2];
+                a[1] = a[1] + a[0];
+                a[0] * 10 + a[1];
+            )");
+            check_eq((int64_t)46, r.as_int());
+        });
+
+        // Reference decls / ref returns over subscripts are lvalue consumers - the
+        // classifier must leave them minting (red-team regression from the memo).
+        test("ref_decl_and_write_through_still_bind", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                var arr = [1, 2, 3];
+                var& second = arr[1];
+                second = 20;
+                arr[1] + arr[0];
+            )");
+            check_eq((int64_t)21, r.as_int());
+        });
+
+        // A registered binary-operator override flips the runtime gate: subscript
+        // operands must reach the override (via the mint path) and produce its result.
+        test("operator_override_disables_elision", [this]() {
+            auto e = make_engine();
+            e->add_function("<", [](script_int a, script_int b) { return a > b; });   // deliberately inverted
+            auto r = e->execute(R"(
+                array<int> a = [1, 9];
+                a[1] < a[0];
+            )");
+            check(r.as_bool());   // inverted override: 9 "<" 1 is true
+        });
+
+        // Element reference holders are pool-recycled: heavy mint/release churn in a
+        // loop (ref-decl binds in a function called repeatedly) must stay correct.
+        test("reference_holder_pool_churn", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                var data = [0, 0, 0, 0];
+                auto bump(var& arr, int i) -> auto { var& cell = arr[i]; cell = cell + 1; return cell; }
+                auto total = 0;
+                auto n = 0;
+                while (n < 400) { total = total + bump(data, n % 4); n = n + 1; }
+                to_string(total) + "|" + to_string(data[0]) + "|" + to_string(data[3]);
+            )");
+            check_eq(std::string("20200|100|100"), r.as_string());
+        });
+
+        // A pooled holder escaping the engine must stay destructible after engine death
+        // (orphaned pool: the last release frees it, no crash / no touch of freed engine).
+        // A by-ref lambda capture boxes x into a CELL reference_holder held by the
+        // closure env, so copying the function value out keeps a pooled block alive.
+        test("pool_orphan_reference_outlives_engine", [this]() {
+            std::optional<script_value> escaped;
+            {
+                auto e = make_engine();
+                e->execute("var x = 5; auto f = [&]() { return x + 1; };");
+                escaped.emplace(e->get_variable("f"));
+                check(escaped->is_function());
+            }
+            escaped.reset();   // release after the engine is gone
+            check_true(true);
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 using review_regression_tests = jai::foundry::tests::review_regression_tests;
 FOUNDRY_REGISTER(review_regression_tests)
+using element_read_elision_tests = jai::foundry::tests::element_read_elision_tests;
+FOUNDRY_REGISTER(element_read_elision_tests)

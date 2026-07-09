@@ -4472,6 +4472,10 @@ checked_result<void> vm_backend::exec_cfor_back(frame& f, const vm_instruction& 
 checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins) {
 	const bool lvalue_shape = (ins.a & index_flag_lvalue_shape) != 0;
 	const bool lvalue_write = (ins.a & index_flag_lvalue_write) != 0;
+	// Transient read (transient_read.hpp): the consumer provably discards identity, so
+	// skip the reference mint and push a shallow element copy. Overrides re-enable the
+	// mint at runtime - operand copies would be observable via use_count inside them.
+	const bool transient_read = (ins.a & index_flag_transient_read) != 0 && !lvalue_write && !has_custom_binary_ops_;
 
 	script_value right = std::move(stack_.back());
 	stack_.pop_back();
@@ -4508,7 +4512,7 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 				symbolizer_->intern(std::to_string(array.size())));
 		}
 
-		if (lvalue_shape) {
+		if (lvalue_shape && !transient_read) {
 			auto array_type_info = left.get_type_info();
 			type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 			script_value ref_value = script_value::make_element_reference(
@@ -4548,7 +4552,7 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 				// Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
 				script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, engine_, value_type);
 				stack_.push_back(std::move(ref_value));
-			} else if (lvalue_shape) {
+			} else if (lvalue_shape && !transient_read) {
 				// Read: reference the existing entry, never insert
 				auto it = map.find(right);
 				if (it != map.end()) {

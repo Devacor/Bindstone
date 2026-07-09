@@ -737,6 +737,15 @@ namespace jai {
         // Reference support for function parameters
         script_value try_create_reference(size_t arg_index, const script_value& fallback);
 
+        // INTERNAL (value.cpp): per-engine reference_holder block pool, held type-erased so
+        // the private holder type never crosses this header. value.cpp lazily creates the
+        // pool into the slot and registers the teardown; the engine dtor invokes it.
+        void*& reference_holder_pool_slot();
+        void set_reference_holder_pool_teardown(void (*teardown)(void*));
+        // True while a parallel region's workers run (main thread parked). Worker-side
+        // mints must not touch the single-threaded pool.
+        bool parallel_region_active() const;
+
         // Script errors surfacing at the C++ boundary (converted callbacks, signal
         // receivers) have no error-value channel and must not throw into arbitrary game
         // callsites; they route here instead. Default sink is std::cerr; the host app

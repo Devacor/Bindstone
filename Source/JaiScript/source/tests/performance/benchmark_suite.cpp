@@ -2,6 +2,11 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <optional>
+#include <chrono>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <string>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -904,7 +909,99 @@ public:
     }
 };
 
+// ============================================================================
+// Element-traffic ns micro-harness (dedicated steady_clock resolution, NOT the
+// integer-uS Foundry benchmark harness). Isolates array element read/store cost
+// per the value-traffic campaign (GLOOM_COMPARISON.md 2.4). Run with:
+//   jaiscript_tests.exe "Element Traffic NS" --verbose            (interpreter)
+//   jaiscript_tests.exe "Element Traffic NS" --verbose --backend=vm
+// Prints ns/op (body loop minus a same-shape overhead loop, divided by op count).
+// ============================================================================
+class element_traffic_ns_bench : public suite {
+public:
+    element_traffic_ns_bench() : suite("Element Traffic NS") {}
+
+    std::shared_ptr<jai::engine> eng;
+    void pre_test() override { eng = make_engine(); jai::stdlib::register_all(eng); }
+
+    // Median warm bite.execute() wall time in nanoseconds.
+    double warm_ns(const char* src, int reps = 9, int warmup = 3) {
+        auto bite = eng->jaibite(src);
+        for (int i = 0; i < warmup; ++i) bite.execute();
+        std::vector<double> samples;
+        samples.reserve(reps);
+        for (int i = 0; i < reps; ++i) {
+            auto t0 = std::chrono::steady_clock::now();
+            bite.execute();
+            auto t1 = std::chrono::steady_clock::now();
+            samples.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count());
+        }
+        std::sort(samples.begin(), samples.end());
+        return samples[samples.size() / 2];
+    }
+
+    // Report per-op ns as (body - overhead) / ops, both scripts identical in shape
+    // save the measured op, so array-build + loop overhead cancel.
+    void row(const char* label, const char* body, const char* overhead, double ops) {
+        const double b = warm_ns(body);
+        const double o = warm_ns(overhead);
+        const double per = (b - o) / ops;
+        std::cout << "  [ns-harness] " << label << ": " << per << " ns/op"
+                  << "  (body " << b / 1e3 << " us, overhead " << o / 1e3 << " us)\n";
+    }
+
+    void forge_tests() override {
+        // 200k-iteration inner loops over a 1024-int array; index masked to stay in
+        // range and defeat const-fold. Build the array the same way in both scripts.
+        const char* build = "array<int> a = []; int j = 0; while (j < 1024) { a.push(j); j = j + 1; } ";
+
+        test("element_read", [this, build]() {
+            std::string body = std::string(build) +
+                "int s = 0; int i = 0; while (i < 200000) { s = s + a[i & 1023]; i = i + 1; } s;";
+            std::string ovh = std::string(build) +
+                "int s = 0; int i = 0; while (i < 200000) { s = s + (i & 1023); i = i + 1; } s;";
+            row("array element read  s += a[i&1023]", body.c_str(), ovh.c_str(), 200000.0);
+            check_true(true);
+        });
+
+        test("element_compound_store", [this, build]() {
+            std::string body = std::string(build) +
+                "int i = 0; while (i < 200000) { a[i & 1023] += 1; i = i + 1; } a[0];";
+            std::string ovh = std::string(build) +
+                "int i = 0; int t = 0; while (i < 200000) { t += 1; i = i + 1; } t;";
+            row("compound element store  a[i&1023] += 1", body.c_str(), ovh.c_str(), 200000.0);
+            check_true(true);
+        });
+
+        test("element_read_write_store", [this, build]() {
+            std::string body = std::string(build) +
+                "int i = 0; while (i < 200000) { a[i & 1023] = a[i & 1023] + 1; i = i + 1; } a[0];";
+            std::string ovh = std::string(build) +
+                "int i = 0; int t = 0; while (i < 200000) { t = t + 1; i = i + 1; } t;";
+            row("read+write element store  a[i]=a[i]+1", body.c_str(), ovh.c_str(), 200000.0);
+            check_true(true);
+        });
+
+        test("render_inner_loop", [this, build]() {
+            // Mirror the GLOOM wall-slice paint shape: element store + element read +
+            // shift + 3 compound-adds + compare, over int arrays.
+            const char* strips = "array<int> strip = []; int k = 0; while (k < 2048) { strip.push(k & 255); k = k + 1; } "
+                                 "array<int> pix = []; int p = 0; while (p < 4096) { pix.push(0); p = p + 1; } ";
+            std::string body = std::string(strips) +
+                "int tacc = 0; int tstep = 137; int gi = 0; int vw = 1; int y = 0; "
+                "while (y < 200000) { pix[gi & 4095] = strip[(tacc >> 11) & 2047]; tacc = tacc + tstep; gi = gi + vw; y = y + 1; } pix[0];";
+            std::string ovh = std::string(strips) +
+                "int tacc = 0; int tstep = 137; int gi = 0; int vw = 1; int y = 0; int t = 0; "
+                "while (y < 200000) { t = (tacc >> 11) & 2047; tacc = tacc + tstep; gi = gi + vw; y = y + 1; } t;";
+            row("render inner loop (per iter)", body.c_str(), ovh.c_str(), 200000.0);
+            check_true(true);
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 // Auto-register this test suite with Foundry
 FOUNDRY_REGISTER(jai::foundry::tests::performance_benchmarks)
+using element_traffic_ns_bench = jai::foundry::tests::element_traffic_ns_bench;
+FOUNDRY_REGISTER(element_traffic_ns_bench)

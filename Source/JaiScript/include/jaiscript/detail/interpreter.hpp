@@ -413,6 +413,7 @@ namespace jai {
         // Performance optimization flags
         void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }
         bool has_custom_numeric_ops() const { return has_custom_numeric_ops_; }
+        void set_has_custom_binary_ops(bool value) { has_custom_binary_ops_ = value; }
         
         // Accessors for script class support
         std::shared_ptr<environment> get_current_environment() const { return environment_; }
@@ -516,6 +517,8 @@ namespace jai {
         
         // Performance optimization: Skip custom operator checks for numeric types
         bool has_custom_numeric_ops_ = false;
+        // ANY binary-operator / "[]" override: transient subscript reads keep minting
+        bool has_custom_binary_ops_ = false;
         
         // Helper to check if we should use fast path
         bool can_use_fast_path(token_type op) const {

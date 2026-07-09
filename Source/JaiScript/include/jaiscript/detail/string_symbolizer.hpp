@@ -88,6 +88,11 @@ namespace jai {
 		// env-lookup caches (keyed on {environment*, epoch}).
 		[[nodiscard]] inline std::uint64_t env_epoch() const noexcept { return env_epoch_; }
 		inline void bump_env_epoch() noexcept { ++env_epoch_; }
+		// Monotonic per-engine serial source for environment generation stamps
+		// (environment::local_epoch): never repeats within an engine, so a cache entry
+		// keyed {env address, serial} cannot false-hit across env lifetimes even when
+		// the allocator recycles the address. Starts past 0 (0 = never-cacheable).
+		[[nodiscard]] inline std::uint64_t next_env_serial() noexcept { return ++env_epoch_; }
 
 		// Debug tripwire for parallel regions: while frozen, an intern MISS asserts (the
 		// pre-warm pass at the region barrier must make every worker intern a HIT). Reads

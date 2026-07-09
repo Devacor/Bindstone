@@ -94,9 +94,13 @@ void environment::define(uint64_t id, script_value&& value) {
 }
 
 void environment::bump_env_epoch() noexcept {
-    if (symbolizer_) {
-        symbolizer_->bump_env_epoch();
-    }
+    // Re-serialize from the per-engine monotonic counter (see local_epoch() in the
+    // header): invalidates only the vm lookup-cache entries resolved against THIS env,
+    // instead of the old global bump that poisoned every cache in the engine on every
+    // scope/method env reset. A monotonic SERIAL (not a per-env counter) on purpose:
+    // two env lifetimes at the same recycled heap address would both count 1,2,3... and
+    // a stale entry could false-hit dead storage; serials never repeat within an engine.
+    local_epoch_ = symbolizer_ ? symbolizer_->next_env_serial() : 0;
 }
 
 script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {

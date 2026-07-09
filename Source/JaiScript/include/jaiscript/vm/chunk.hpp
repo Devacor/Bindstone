@@ -131,9 +131,11 @@ namespace jai::vm {
     };
 
     // Per-instruction env-lookup inline cache: valid while the same environment is in
-    // effect and no environment anywhere was constructed/reset/cleared, gained a new
-    // define, or changed parent (string_symbolizer::env_epoch). Only pointers into an
-    // environment's own local_storage_ (stable deque) are ever stored.
+    // effect and THAT env's own epoch is unchanged (environment::local_epoch - bumped by
+    // its construction/reset/clear/define/parent change; unrelated env churn elsewhere
+    // no longer invalidates). Stored pointers target stable deque storage in the entry's
+    // env or an ancestor (a parent cannot be pool-recycled while its child chain lives;
+    // the global env is engine-lifetime with in-place redefinition).
     struct env_lookup_cache_entry {
         const environment* env = nullptr;
         uint64_t epoch = 0;

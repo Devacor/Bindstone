@@ -150,6 +150,20 @@ namespace jai {
         // Static method environment accessors (only valid when kind == static_method)
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
 
+        // Generation SERIAL for the vm's env-lookup inline caches (chunk.hpp
+        // env_lookup_cache_entry): re-drawn from the per-engine monotonic counter on
+        // construction, reset (pool reuse), clear, parent change, and define - the
+        // events that can invalidate a cached pointer RESOLVED AGAINST THIS ENV.
+        // Per-env (not the old global bump) on purpose: a method scope resetting
+        // ~900x/tick must not invalidate entries cached against the global env
+        // (measured cache poisoning; see the b377b5ac scope-elision commit). A serial
+        // rather than a per-env counter because the allocator recycles env addresses:
+        // {address, count} can repeat across lifetimes, {address, serial} cannot.
+        // Cached pointers target storage in the entry's env or an ANCESTOR (a parent
+        // can't be pool-recycled while its child chain is live; the global env is
+        // engine-lifetime with in-place redefinition into stable deque storage).
+        uint64_t local_epoch() const noexcept { return local_epoch_; }
+
         // Access-enforcement context: the class whose method/ctor body this scope env
         // executes (stamped by the backend at method-scope creation; nullptr elsewhere).
         // Lambdas inherit through the parent chain — the walk only runs on the
@@ -234,6 +248,7 @@ namespace jai {
         // Access-enforcement context (see set_access_context above). NOT owning: the
         // pooled-env reset paths null it so a recycled env never leaks a stale context.
         class_definition* access_context_ = nullptr;
+        uint64_t local_epoch_ = 0;   // generation serial; 0 = never cache (see local_epoch())
 
         // Storage for bound methods (used by method and static_method kinds)
         mutable script_value bound_method_storage_;

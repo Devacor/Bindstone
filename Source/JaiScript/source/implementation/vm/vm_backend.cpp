@@ -1461,13 +1461,15 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 		cache.resize(f.code->code.size() * 3);
 	}
 	env_lookup_cache_entry& entry = cache[cache_slot];
-	const uint64_t epoch = symbolizer_->env_epoch();
+	// Per-env epoch (environment::local_epoch): unrelated scope/method env churn no
+	// longer invalidates entries cached against the stable global/top-level envs
+	const uint64_t epoch = environment_->local_epoch();
 	if (entry.env == environment_.get() && entry.epoch == epoch) {
 		return entry.ptr;
 	}
 	bool cacheable = false;
 	script_value* ptr = environment_->vm_storage_lookup(symbol_id, cacheable);
-	if (ptr && cacheable) {
+	if (ptr && cacheable && epoch != 0) {
 		entry.env = environment_.get();
 		entry.epoch = epoch;
 		entry.ptr = ptr;

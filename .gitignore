@@ -79,3 +79,12 @@ Source/JaiScript/lua/
 
 # JaiScript sibling parse caches (auto-written next to .jai script files)
 *.jaibite
+
+# Python bytecode cache (gloom python port + any tooling)
+__pycache__/
+
+# Vendored third-party comparison runtime (not committed here)
+External/ChaiScript-6.1.0/
+
+# Visual Studio upgrade log artifact
+UpgradeLog.htm

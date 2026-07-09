@@ -162,6 +162,34 @@ silently diverged from it); use_count inside class operator methods shifts by th
 transient-copy calibration, not semantics. Global operator/`"[]"` registration still gates
 (no false-positive cost there).
 
+## Stage 2 status (landed, 2026-07-09) — the store side
+
+Dev ruling redirected Stage 2 to the highest-value target: the VM store path (`pix[gi] += x`
+barely moved in Stage 1) and the operator-dispatch machinery itself ("always interned ids,
+never strings; operators are a finite set — flat array keyed by an operator enum; invest in
+the non-fast-path operator machinery; op[] and += get true fast paths").
+
+- **Flat operator table** (`detail/operator_table.hpp` — THE operator enumeration, single
+  source of truth): per-engine `engine_operator_table` holds the current global dispatcher
+  per operator (overload/arity/type matching stays inside that value); refreshed at the
+  registration chokepoints; backends hold a wired const pointer. Replaced every operator
+  probe in both backends — the interpreter's per-binary-op global-env hash probe, the
+  string-keyed whole-env-chain walks in both compound-store paths (one ran on EVERY
+  VM compound store), both object-"[]" env probes, and the shared constrained-compound
+  kernel's probe (`ref_lvalue.hpp` now takes the table). The interpreter's builtin
+  binary-handler unordered_map became a flat array indexed by the same enum.
+- **Fused subscript stores** (VM): `op_index_store` (a[i] = v) and `op_index_compound_fused`
+  (a[i] op= v) resolve container+index once and write in place — no reference_holder mint,
+  no holder re-resolve, no operator consult on the numeric path. Fast-path gates: lvalue
+  shape + plain array + int index + in-bounds (+ int/float element and raw int/float rhs +
+  empty operator table for compounds). EVERYTHING else replays the exact old
+  INDEX(+flags)+INDEX_ASSIGN/INDEX_COMPOUND sequence by calling those very exec functions
+  on a rearranged stack — semantics and error text byte-identical by construction.
+  New opcodes ride the exec_extended grouped dispatch (invariant §5, Debug frame ceiling).
+- Interpreter store paths keep their existing shapes (parity is output-identical, not
+  implementation-mirrored); its table wins: no more per-op env probe on the generic binary
+  path, no string construction per compound store.
+
 ## Open risks
 
 - Frame-level payoff unconfirmed until a GLOOM profile run (first gate after Stage 1).

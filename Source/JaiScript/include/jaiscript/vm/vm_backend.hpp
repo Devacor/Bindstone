@@ -45,6 +45,7 @@ namespace jai::vm {
         void set_execution_budget(std::chrono::nanoseconds budget) override;
         void set_has_custom_numeric_ops(bool value) override { has_custom_numeric_ops_ = value; }
         void set_has_custom_binary_ops(bool value) override { has_custom_binary_ops_ = value; }
+        void set_operator_table(const detail::engine_operator_table* table) override { operator_table_ = table; }
         void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) override {
             subscript_resolver_ = std::move(resolver);
         }
@@ -413,6 +414,7 @@ namespace jai::vm {
 
         bool has_custom_numeric_ops_ = false;
         bool has_custom_binary_ops_ = false;
+        const detail::engine_operator_table* operator_table_ = nullptr;   // engine-owned flat dispatch
         std::function<checked_result<script_value>(const std::vector<script_value>&)> subscript_resolver_;
         std::function<std::shared_ptr<class_definition>(const std::string&)> class_lookup_;
 
@@ -688,6 +690,8 @@ namespace jai::vm {
         checked_result<void> exec_index(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_assign(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_compound(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_index_store(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_index_compound_fused(frame& f, const vm_instruction& ins);
         checked_result<void> exec_unary(frame& f, const vm_instruction& ins);
         checked_result<void> exec_call(frame& f, const vm_instruction& ins);
         // Callee-first probe pair (op_probe_callee / op_call_from_scratch)

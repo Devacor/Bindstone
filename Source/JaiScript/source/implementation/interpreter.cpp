@@ -3448,25 +3448,20 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
         default: break;
     }
 
-    // Check for custom operator function (excluding subscript). Operator symbols are
-    // only definable in the global env (C++ add_function), so the consult probes it
-    // directly - a chain walk here is O(depth) in recursive callees.
-    if (op_symbol_id != 0) {
-        auto global_env = get_global_environment();
-        if (global_env && global_env->contains(op_symbol_id)) {
-            auto op_result = global_env->get(op_symbol_id);
-            if (op_result && op_result.value().is_function()) {
-                script_value opFunc = std::move(op_result.value());
-                const script_function& func = opFunc.as_function();
-                std::vector<script_value> args = {left, right};
-                auto result = func(args);
-                if (!result) {
-                    // Function returned error - propagate it up
-                    return result.error_value();
-                }
-                push_value(std::move(result.value()));
-                return {};
+    // Check for custom operator function (excluding subscript) through the engine's
+    // flat operator table (detail/operator_table.hpp): one mask test + array read,
+    // no environment probe on any operator path.
+    if (op_symbol_id != 0 && operator_table_ && operator_table_->any()) {
+        if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(expr->op.type))) {
+            const script_function& func = opFunc->as_function();
+            std::vector<script_value> args = {left, right};
+            auto result = func(args);
+            if (!result) {
+                // Function returned error - propagate it up
+                return result.error_value();
             }
+            push_value(std::move(result.value()));
+            return {};
         }
     }
 
@@ -3660,19 +3655,19 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     }
                 }
 
-                // Fall back to global [] operator function
-                auto method_result = environment_->get("[]");
-                if (method_result && method_result.value().is_function()) {
-                    script_value getMethod = std::move(method_result.value());
-                    const script_function& func = getMethod.as_function();
-                    std::vector<script_value> args = {left, right};
-                    auto result = func(args);
-                    if (!result) {
-                        // Function returned error - propagate it up
-                        return result.error_value();
+                // Fall back to the global [] operator (flat table - no env probe)
+                if (operator_table_) {
+                    if (const script_value* getMethod = operator_table_->entry(detail::op_slot::subscript)) {
+                        const script_function& func = getMethod->as_function();
+                        std::vector<script_value> args = {left, right};
+                        auto result = func(args);
+                        if (!result) {
+                            // Function returned error - propagate it up
+                            return result.error_value();
+                        }
+                        push_value(std::move(result.value()));
+                        return {};
                     }
-                    push_value(std::move(result.value()));
-                    return {};
                 }
             }
             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
@@ -3681,10 +3676,13 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
         return {};
     }
 
-    // Use dispatch table for built-in operators with already-evaluated operands
-    auto handler = binary_dispatch_table_.find(expr->op.type);
-    if (handler != binary_dispatch_table_.end()) {
-        auto result = (this->*handler->second)(left, right);
+    // Flat handler dispatch for built-in operators with already-evaluated operands
+    // (direct op_slot index - no hash on the generic path)
+    const detail::op_slot handler_slot = detail::binary_op_slot(expr->op.type);
+    binary_op_handler handler_fn = handler_slot != detail::op_slot::none
+        ? binary_handlers_[static_cast<size_t>(handler_slot)] : nullptr;
+    if (handler_fn) {
+        auto result = (this->*handler_fn)(left, right);
         if (!result) [[unlikely]] {
             return result.error_value();
         }
@@ -3992,7 +3990,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             default: op = token_type::plus; opName = "+"; break;
                         }
                         auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
-                            get_global_environment().get(), engine_, string_symbolizer_,
+                            operator_table_, engine_, string_symbolizer_,
                             [this](const script_value& l, token_type o, const script_value& r) {
                                 return evaluate_arithmetic(l, o, r);
                             });
@@ -4140,20 +4138,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Get type for RHS
                 auto rightType = derefRight.type();
 
-                // Check for custom operators first (rare path)
+                // Check for custom operators first (rare path; flat table, no env probe)
                 if (has_custom_numeric_ops_) [[unlikely]] {
-                    const char* opName = nullptr;
+                    detail::op_slot op_slot = detail::op_slot::none;
                     switch (expr->op.type) {
-                        case token_type::plus_equal: opName = "+"; break;
-                        case token_type::minus_equal: opName = "-"; break;
-                        case token_type::star_equal: opName = "*"; break;
+                        case token_type::plus_equal: op_slot = detail::op_slot::plus; break;
+                        case token_type::minus_equal: op_slot = detail::op_slot::minus; break;
+                        case token_type::star_equal: op_slot = detail::op_slot::star; break;
                         default: break;
                     }
-                    if (opName && environment_->contains(opName)) {
-                        auto op_result = environment_->get(opName);
-                        if (op_result && op_result.value().is_function()) {
-                            script_value opFunc = std::move(op_result.value());
-                            const script_function& func = opFunc.as_function();
+                    if (operator_table_) {
+                        if (const script_value* opFunc = operator_table_->entry(op_slot)) {
+                            const script_function& func = opFunc->as_function();
                             std::vector<script_value> args = {target.clone(), rightValue};
                             auto result = func(args);
                             if (!result) {
@@ -4696,11 +4692,21 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Perform the compound operation
             script_value resultValue = make_value();
             
-            // Try custom operators first
-            auto op_result = environment_->get(std::string(1, expr->op.lexeme[0]));
-            if (op_result && op_result.value().is_function()) {
-                script_value opFunc = std::move(op_result.value());
-                const script_function& func = opFunc.as_function();
+            // Custom operator consult through the flat table (was a per-store
+            // string-construction + env-chain walk; KEEP BYTE-PARALLEL with
+            // vm_backend::exec_index_compound)
+            detail::op_slot compound_slot = detail::op_slot::none;
+            switch (expr->op.type) {
+                case token_type::plus_equal: compound_slot = detail::op_slot::plus; break;
+                case token_type::minus_equal: compound_slot = detail::op_slot::minus; break;
+                case token_type::star_equal: compound_slot = detail::op_slot::star; break;
+                case token_type::slash_equal: compound_slot = detail::op_slot::slash; break;
+                case token_type::percent_equal: compound_slot = detail::op_slot::percent; break;
+                default: break;
+            }
+            const script_value* compound_op_fn = operator_table_ ? operator_table_->entry(compound_slot) : nullptr;
+            if (compound_op_fn) {
+                const script_function& func = compound_op_fn->as_function();
                 std::vector<script_value> args = {currentValue, rightValue};
                 auto result = func(args);
                 if (!result) {

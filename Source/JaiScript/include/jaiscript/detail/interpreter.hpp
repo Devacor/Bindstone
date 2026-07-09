@@ -48,6 +48,7 @@
 #include "environment.hpp"
 #include "builtin_methods.hpp"
 #include "execution_limits.hpp"
+#include "operator_table.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -414,6 +415,7 @@ namespace jai {
         void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }
         bool has_custom_numeric_ops() const { return has_custom_numeric_ops_; }
         void set_has_custom_binary_ops(bool value) { has_custom_binary_ops_ = value; }
+        void set_operator_table(const detail::engine_operator_table* table) { operator_table_ = table; }
         
         // Accessors for script class support
         std::shared_ptr<environment> get_current_environment() const { return environment_; }
@@ -488,10 +490,11 @@ namespace jai {
         checked_result<script_value> construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                 const std::vector<script_value>& args);
 
-        // Binary operator dispatch table for performance
+        // Binary operator dispatch: flat array indexed by the shared op_slot enum
+        // (detail/operator_table.hpp) - direct index, no hashing on the generic path.
         // Returns checked_result for zero-allocation error handling
         using binary_op_handler = checked_result<script_value>(interpreter::*)(const script_value&, const script_value&);
-        std::unordered_map<token_type, binary_op_handler> binary_dispatch_table_;
+        std::array<binary_op_handler, static_cast<size_t>(detail::op_slot::count)> binary_handlers_{};
 
         // Initialize dispatch table
         void init_dispatch_table();
@@ -519,6 +522,7 @@ namespace jai {
         bool has_custom_numeric_ops_ = false;
         // ANY binary-operator / "[]" override: transient subscript reads keep minting
         bool has_custom_binary_ops_ = false;
+        const detail::engine_operator_table* operator_table_ = nullptr;   // engine-owned flat dispatch
         
         // Helper to check if we should use fast path
         bool can_use_fast_path(token_type op) const {

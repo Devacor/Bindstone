@@ -16,6 +16,7 @@ the fix ledger's job.
 |----|-------|-------------|--------------------------|--------|
 | KD-CORO-RESUME-PAST-END | resume past the final `yield` of a coroutine with no `return`: interpreter repeats the last yielded value, VM yields null | 4, 7, 38, 116, 195, 216 | interpreter (a finished coroutine has no value; repeating the last yield invents one) | in-flight coroutine final-return fix territory |
 | KD-ORDERING-THROW | `throw` inside a class `operator<` swallowed by one backend | none observed in pilot (fix may already be landed) | n/a | matcher retained defensively |
+| KD-ENV-RECURSION-LIMIT | deep-but-legal recursion (under `JAI_MAX_CALL_DEPTH` native frames, e.g. ~7.3k): interpreter's ENVIRONMENT recursion guard errors first; the vm's in-loop frames complete it and continue (erroring later or succeeding) | 2072 (needs `--timeout-ms 5000`; at the default 250ms Debug budget it hides as a budget-skip) | interpreter (the depth was legal; the env guard fires below the documented cap) | pre-existing, surfaced 2026-07-09 by Stage-2 timing (A/B-verified present at 71e93709 without Stage 2); needs its own recursion-limit-parity pass |
 
 ## Fixed (matchers removed; recorded seeds re-verified agreeing with --no-suppressions)
 

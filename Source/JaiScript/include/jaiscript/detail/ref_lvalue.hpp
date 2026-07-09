@@ -14,6 +14,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <vector>
 
@@ -629,12 +630,12 @@ namespace jai::detail {
 	// or field): mirrors the subscript-compound semantics - custom operator first, then
 	// arithmetic, then constraint check + convert + write-through. `arith` is the
 	// backend's evaluate_arithmetic. Returns the (pre-conversion) expression result.
-	// Operator symbols are only definable in the global env (C++ add_function), so the
-	// consult takes the GLOBAL env - a caller-chain walk is O(depth) in deep recursion.
+	// The operator consult reads the engine's flat table (operator_table.hpp) - no
+	// environment probe.
 	template <typename Arith>
 	inline checked_result<script_value> ref_compound_store_constrained(
 			script_value& refLocal, const script_value& rightArg, token_type op, const char* opName,
-			environment* global_env, engine* eng, string_symbolizer* symbolizer, Arith&& arith) {
+			const engine_operator_table* op_table, engine* eng, string_symbolizer* symbolizer, Arith&& arith) {
 		// Current-value read raw-derefs exactly like the unconstrained compound path: a
 		// removed element/field surfaces as the same caller-frame-catchable throw whether
 		// or not the bound container was typed
@@ -646,10 +647,9 @@ namespace jai::detail {
 		const script_value rightNorm = rightBound ? rightDeref.bound_decoded_temp() : script_value(std::monostate{}, eng);
 		const script_value& rightValue = rightBound ? rightNorm : rightDeref;
 		script_value resultValue(std::monostate{}, eng);
-		auto op_result = global_env->get(opName);
-		if (op_result && op_result.value().is_function()) {
-			script_value opFunc = std::move(op_result.value());
-			const script_function& func = opFunc.as_function();
+		const script_value* opFunc = op_table ? op_table->entry(binary_op_slot(op)) : nullptr;
+		if (opFunc) {
+			const script_function& func = opFunc->as_function();
 			std::vector<script_value> args = {currentValue, rightValue};
 			auto result = func(args);
 			if (!result) {

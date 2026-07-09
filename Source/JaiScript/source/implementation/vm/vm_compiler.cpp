@@ -1,6 +1,7 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/body_walker.hpp>
+#include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <cassert>
 #include <functional>
@@ -85,6 +86,7 @@ namespace {
 			case opcode::op_index_compound:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
+			case opcode::op_math:
 			case opcode::op_unary:
 			case opcode::op_array:
 			case opcode::op_map:
@@ -1473,6 +1475,18 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	}
 	if (expr->callee->get_type() == node_type::member_expr) {
 		auto member = std::static_pointer_cast<member_expr>(expr->callee);
+		// math:: language intrinsics (detail/math_intrinsics.hpp): args + one op_math,
+		// no namespace lookup, no call machinery. Arity errors surface from the kernel.
+		if (member->is_static) {
+			const detail::math_fn fn = detail::math_intrinsic_for_call(member.get());
+			if (fn != detail::math_fn::none && expr->arguments.size() <= 8) {
+				for (const auto& arg : expr->arguments) {
+					compile_expression(arg);
+				}
+				emit(opcode::op_math, static_cast<uint32_t>(fn), static_cast<uint32_t>(expr->arguments.size()));
+				return;
+			}
+		}
 		if (!member->is_static) {
 			compile_expression(member->object);
 			size_t null_guard = SIZE_MAX;

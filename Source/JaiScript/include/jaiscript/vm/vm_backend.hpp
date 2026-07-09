@@ -700,6 +700,7 @@ namespace jai::vm {
         checked_result<void> exec_index_compound(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_store(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_compound_fused(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_math(frame& f, const vm_instruction& ins);
         checked_result<const script_value*> fused_subscript_value(frame& f, const fused_operand& operand,
                                                                   std::optional<script_value>& scratch, size_t cache_slot);
         checked_result<void> exec_unary(frame& f, const vm_instruction& ins);

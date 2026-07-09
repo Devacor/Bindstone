@@ -7,6 +7,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
+#include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #ifdef JAISCRIPT_VM_PROFILE
@@ -4997,6 +4998,27 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 	return exec_index_compound(f, compound_ins);
 }
 
+// math:: language intrinsic: pops argc args, evaluates through the shared kernel
+// (detail/math_intrinsics.hpp - parity with the interpreter by construction), pushes
+// the result. Arg pointers are deref'd in place; the kernel copies nothing.
+checked_result<void> vm_backend::exec_math(frame& f, const vm_instruction& ins) {
+	const size_t argc = ins.b;
+	const size_t base = stack_.size() - argc;
+	const script_value* argp[8] = {};
+	for (size_t i = 0; i < argc; ++i) {
+		argp[i] = &stack_[base + i].deref();
+	}
+	auto result = detail::eval_math_intrinsic(static_cast<detail::math_fn>(ins.a), argp, argc,
+	                                          engine_, engine_->math_rng());
+	if (!result) {
+		return result.error_value();
+	}
+	script_value out = std::move(result.value());
+	stack_.erase(stack_.begin() + base, stack_.end());
+	stack_.push_back(std::move(out));
+	return {};
+}
+
 checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	const bool has_init = ins.b != 0;
@@ -8667,6 +8689,7 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 		case opcode::op_ref_return_lvalue: return exec_ref_return_lvalue(f, ins);
 		case opcode::op_index_store: return exec_index_store(f, ins);
 		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
+		case opcode::op_math: return exec_math(f, ins);
 		default: return {};
 	}
 }
@@ -8930,6 +8953,7 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			case opcode::op_ref_return_lvalue:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
+			case opcode::op_math:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

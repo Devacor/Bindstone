@@ -297,6 +297,11 @@ namespace jai {
         mutable uint8_t mcache_argc = 0xFF;
         mutable uint8_t mcache_flags = 0;                // 1 = access check needed, 2 = member is an sp-builtin name
 
+        // math:: intrinsic resolution cache (static access `math::<fn>`): 255 = not yet
+        // resolved, 254 = resolved-not-an-intrinsic, else detail::math_fn. Name-based,
+        // engine-independent - safe to share across engines like the other AST caches.
+        mutable uint8_t math_intrinsic_cache = 255;
+
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
 

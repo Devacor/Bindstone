@@ -106,6 +106,9 @@ namespace jai::vm {
                             // pending-callee register stack - no value-stack materialization
         op_call_from_scratch, // a=argc, b=site index: call the pending callee (args at stack top)
 
+        op_math,            // a=detail::math_fn id, b=argc: math:: language intrinsic; pops
+                            // argc args, evaluates via the shared kernel, pushes the result
+
         op_index_store,     // a=index_flag_lvalue_shape?; pops index,container,value: in-place
                             // element store (array fast path skips the reference mint; other
                             // shapes replay the exact INDEX(lvalue_write)+INDEX_ASSIGN
@@ -189,6 +192,7 @@ namespace jai::vm {
             case opcode::op_index_compound: return "INDEX_COMPOUND";
             case opcode::op_index_store: return "INDEX_STORE";
             case opcode::op_index_compound_fused: return "INDEX_COMPOUND_FUSED";
+            case opcode::op_math: return "MATH";
             case opcode::op_unary: return "UNARY";
             case opcode::op_array: return "ARRAY";
             case opcode::op_map: return "MAP";

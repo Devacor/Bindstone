@@ -1102,6 +1102,38 @@ public:
             check_eq(std::string("1|8"), r.as_string());
         });
 
+        // N-level chains as fused operands: array levels step in place; a MAP level
+        // mid-chain replays that level (never-insert) and the walk continues.
+        test("fused_subscript_chain_n_level", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                var grid = [[1, 2], [3, 4]];
+                var cube = [[[10, 20], [30, 40]], [[50, 60], [70, 80]]];
+                var deep = [[[[5, 6], [7, 8]]]];
+                var m = {"rows": [[100, 200], [300, 400]]};
+                int y = 1;
+                int x = 0;
+                int z = 1;
+                auto g = grid[y][x] + grid[0][1];          // 2-level both sides
+                auto c = cube[z][y][x] * 2;                // 3-level
+                auto d = deep[0][0][y][x] + 1;             // 4-level
+                auto mm = m["rows"][y][x] + grid[y][x];    // map level mid-chain + array levels
+                auto cmp = grid[y][x] < cube[z][y][x];     // chains in a fused comparison
+                to_string(g) + "|" + to_string(c) + "|" + to_string(d) + "|" +
+                    to_string(mm) + "|" + to_string(cmp);
+            )");
+            check_eq(std::string("5|140|8|303|true"), r.as_string());
+        });
+
+        test("fused_subscript_chain_errors", [this]() {
+            auto e = make_engine();
+            // OOB at an INNER level keeps the exact op_index error
+            check_throws([&]() { e->execute("var g = [[1]]; int i = 9; g[i][0] + 1;"); });
+            // OOB at the LAST level too
+            check_throws([&]() { e->execute("var g = [[1]]; int j = 9; g[0][j] + 1;"); });
+        });
+
         test("interp_subscript_compound_inplace", [this]() {
             auto e = make_engine();
             jai::stdlib::register_all(*e);

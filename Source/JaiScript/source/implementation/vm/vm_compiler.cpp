@@ -283,19 +283,30 @@ bool vm_compiler::symbol_is_env_only(uint64_t symbol_id) const {
 	return !callable_.active || callable_.declared.find(symbol_id) == callable_.declared.end();
 }
 
-// A subscript read fusable as a binary operand: `base[index]` where base is an
-// identifier, index is an identifier or int literal, and the classifier marked the
-// read transient (so the element-elision ruling applies; the runtime replays the
-// full op_index semantics for any non-array shape).
+// A subscript chain fusable as a binary operand: `base[i][j]...[k]` where base is an
+// identifier, every index is an identifier or int literal, and the classifier marked
+// every level transient (the element-elision ruling applies; the runtime replays the
+// full op_index semantics per level for any non-array shape). Truly N-level - the
+// depth cap is a sanity bound, not a semantic limit.
+static bool fusable_subscript_index(const expression* e) {
+	if (e->get_type() == node_type::identifier_expr) return true;
+	return e->get_type() == node_type::literal_expr &&
+	       static_cast<const literal_expr*>(e)->value.raw_storage_index() == script_value::TYPEID_INT;
+}
+
+static constexpr int k_max_fused_subscript_depth = 8;
+
 static bool fusable_subscript_operand(const expression* e) {
-	if (e->get_type() != node_type::binary_expr) return false;
-	const auto* sub = static_cast<const binary_expr*>(e);
-	if (sub->op.type != token_type::left_bracket || !sub->transient_element_read) return false;
-	if (sub->left->get_type() != node_type::identifier_expr) return false;
-	const auto it = sub->right->get_type();
-	if (it == node_type::identifier_expr) return true;
-	return it == node_type::literal_expr &&
-	       static_cast<const literal_expr*>(sub->right.get())->value.raw_storage_index() == script_value::TYPEID_INT;
+	int levels = 0;
+	const expression* cur = e;
+	while (cur->get_type() == node_type::binary_expr) {
+		const auto* sub = static_cast<const binary_expr*>(cur);
+		if (sub->op.type != token_type::left_bracket || !sub->transient_element_read) return false;
+		if (!fusable_subscript_index(sub->right.get())) return false;
+		if (++levels > k_max_fused_subscript_depth) return false;
+		cur = sub->left.get();
+	}
+	return levels > 0 && cur->get_type() == node_type::identifier_expr;
 }
 
 uint32_t vm_compiler::binary_shape(binary_expr* expr) {
@@ -1308,20 +1319,27 @@ fused_operand vm_compiler::make_fused_operand(const expression* e) {
 			out.load_flags |= load_flag_type_ctor;
 		}
 	} else if (e->get_type() == node_type::binary_expr) {
-		// fusable_subscript_operand-vetted `base[index]`: base rides the ident fields
-		const auto* sub = static_cast<const binary_expr*>(e);
-		auto* base = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(sub->left.get()));
+		// fusable_subscript_operand-vetted chain: walk to the base identifier collecting
+		// indexes innermost-first (application order), base rides the ident fields
+		const expression* cur = e;
+		while (cur->get_type() == node_type::binary_expr) {
+			const auto* sub = static_cast<const binary_expr*>(cur);
+			fused_subscript_index level;
+			if (sub->right->get_type() == node_type::identifier_expr) {
+				auto* idx = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(sub->right.get()));
+				level.kind = fused_subscript_index::index_ident;
+				level.slot = identifier_slot_operand(idx);
+				level.symbol = add_symbol(idx->symbol_id);
+			} else {
+				level.kind = fused_subscript_index::index_literal;
+				level.literal = static_cast<const literal_expr*>(sub->right.get())->value.unchecked_as_int();
+			}
+			out.subscript_chain.insert(out.subscript_chain.begin(), level);
+			cur = sub->left.get();
+		}
+		auto* base = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(cur));
 		out.slot = identifier_slot_operand(base);
 		out.symbol = add_symbol(base->symbol_id);
-		if (sub->right->get_type() == node_type::identifier_expr) {
-			auto* idx = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(sub->right.get()));
-			out.subscript_kind = fused_operand::subscript_index_ident;
-			out.index_slot = identifier_slot_operand(idx);
-			out.index_symbol = add_symbol(idx->symbol_id);
-		} else {
-			out.subscript_kind = fused_operand::subscript_index_literal;
-			out.index_literal = static_cast<const literal_expr*>(sub->right.get())->value.unchecked_as_int();
-		}
 	} else {
 		out.const_index = add_constant(static_cast<const literal_expr*>(e)->value);
 	}

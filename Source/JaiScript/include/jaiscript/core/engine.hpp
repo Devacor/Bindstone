@@ -744,6 +744,13 @@ namespace jai {
         void set_script_error_handler(std::function<void(const std::string&)> a_handler);
         void report_script_error(const std::string& a_message);
 
+        // Advisory diagnostics that are NOT errors (e.g. a class method shadowing a builtin
+        // handle method - Dev ruling 2026-07). Always-on, independent of static_checking().
+        // Default sink is std::cerr ("[jaiscript] warning: ..."); the host app / tests
+        // install their own handler to capture. Execution always proceeds.
+        void set_script_warning_handler(std::function<void(const std::string&)> a_handler);
+        void report_script_warning(const std::string& a_message);
+
         // Shelve/restore the in-flight script call's argument metadata around an external
         // (C++) invocation of a script function - see external_call_guard below.
         void push_external_call_scope();

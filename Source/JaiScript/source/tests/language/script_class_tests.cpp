@@ -1314,6 +1314,49 @@ public:
             }
         });
 
+        test("user_method_wins_over_builtin_handle_method", [this]() {
+            // Dev ruling (2026-07): a user class method takes PRIORITY over a same-named
+            // builtin shared_ptr handle method (reset/use_count/unique/cpp_ref_count).
+            // Previously the builtin shadowed the class method (gloom's fx.reset() silently
+            // no-op'd the builtin reset()); now the class method wins on shared_ptr<T>
+            // instances, the builtin stays reachable where NO class method shadows it, and
+            // a shadow emits ONE warning per colliding method per class definition.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                std::vector<std::string> warnings;
+                e->set_script_warning_handler([&](const std::string& m) { warnings.push_back(m); });
+
+                // class reset() defined -> user method WINS (builtin would have no-op'd)
+                e->execute("class Pool { int n = 0; void reset() { n = 99; } }");
+                e->execute("var p = new Pool(); p.reset();");                 // identifier receiver (fast path)
+                check_eq((int64_t)99, e->execute("p.n").as_int(), use_vm ? "vm fast-path" : "interp fast-path");
+                // generic (non-identifier receiver) path also resolves the user method
+                e->execute("var arr = [new Pool()]; arr[0].reset();");
+                check_eq((int64_t)99, e->execute("arr[0].n").as_int());
+                // a class-defined use_count() wins over the builtin ref-count reader
+                e->execute("class Counter { int use_count() { return 7; } }");
+                check_eq((int64_t)7, e->execute("var c = new Counter(); c.use_count()").as_int());
+
+                // the shadow fired a warning (both backends, byte-identical message)
+                bool saw_reset_warn = false, saw_uc_warn = false;
+                for (const auto& w : warnings) {
+                    if (w.find("class method 'reset' shadows the builtin shared_ptr reset()") != std::string::npos &&
+                        w.find("unreachable on Pool instances") != std::string::npos) { saw_reset_warn = true; }
+                    if (w.find("class method 'use_count' shadows the builtin shared_ptr use_count()") != std::string::npos) { saw_uc_warn = true; }
+                }
+                check_true(saw_reset_warn, "reset shadow warning fired");
+                check_true(saw_uc_warn, "use_count shadow warning fired");
+
+                // NO collision -> builtin stays reachable AND no warning for that class
+                size_t warn_count_before = warnings.size();
+                e->execute("class Bare { int x = 5; }");
+                check_eq(warn_count_before, warnings.size(), "no warning for a class without a collision");
+                check_ge(e->execute("shared_ptr<Bare> b = new Bare(); b.use_count()").as_int(), (int64_t)1,
+                         "builtin use_count still reachable when unshadowed");
+            }
+        });
+
         test("shared_ptr_construction_across_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

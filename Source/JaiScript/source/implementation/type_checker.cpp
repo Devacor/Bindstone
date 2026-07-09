@@ -14,6 +14,7 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/builtin_methods.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -1552,7 +1553,20 @@ private:
                     }
                 }
             } else if (m.declaration->get_type() == node_type::function_decl) {
-                walk_function(static_cast<function_decl*>(m.declaration.get()));
+                auto* fn = static_cast<function_decl*>(m.declaration.get());
+                // A class method that shadows a builtin shared_ptr handle method WINS over
+                // the builtin (Dev ruling 2026-07) - point at the now-unreachable builtin.
+                for (std::string_view b : k_shadowable_handle_method_names) {
+                    if (fn->name == b) {
+                        std::string m2(b);
+                        diag(diag_level::warning, fn->location,
+                             "class method '" + m2 + "' shadows the builtin shared_ptr " + m2 +
+                             "() - the builtin is unreachable on " + std::string(cd->name) +
+                             " instances; rename the class method to reach it");
+                        break;
+                    }
+                }
+                walk_function(fn);
             } else {
                 walk_decl(m.declaration.get());
             }

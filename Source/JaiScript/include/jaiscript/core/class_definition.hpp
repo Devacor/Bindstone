@@ -564,6 +564,18 @@ public:
         return methods_.find(id) != methods_.end();
     }
 
+    // Chain-aware (this class + script parents + cpp base): does ANY resolvable user
+    // method with this name exist? Used to let a user class method WIN over a same-named
+    // builtin handle method (Dev ruling 2026-07). Cheap: no symbolizer / no throw.
+    bool defines_method(uint64_t id) const {
+        if (methods_.find(id) != methods_.end()) { return true; }
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->defines_method(id)) { return true; }
+        }
+        if (cpp_base_class_ && cpp_base_class_->defines_method(id)) { return true; }
+        return false;
+    }
+
     script_value get_static_method(uint64_t id, bool throw_if_missing = true) const {
         auto it = static_methods_.find(id);
         if (it != static_methods_.end()) {

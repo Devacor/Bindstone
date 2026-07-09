@@ -252,6 +252,9 @@ struct engine::implementation {
     // Sink for script errors surfacing at the C++ boundary - nullptr means std::cerr
     std::function<void(const std::string&)> script_error_handler;
 
+    // Sink for advisory warnings (builtin-method shadowing) - nullptr means std::cerr
+    std::function<void(const std::string&)> script_warning_handler;
+
     // Serialization registry for class metadata (non-static to ensure test isolation)
     serialization::serialization_registry serialization_registry;
     
@@ -2509,6 +2512,18 @@ void engine::report_script_error(const std::string& a_message) {
         impl->script_error_handler(message);
     } else {
         std::cerr << "[jaiscript] " << message << std::endl;
+    }
+}
+
+void engine::set_script_warning_handler(std::function<void(const std::string&)> a_handler) {
+    impl->script_warning_handler = std::move(a_handler);
+}
+
+void engine::report_script_warning(const std::string& a_message) {
+    if (impl->script_warning_handler) {
+        impl->script_warning_handler(a_message);
+    } else {
+        std::cerr << "[jaiscript] warning: " << a_message << std::endl;
     }
 }
 

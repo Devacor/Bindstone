@@ -1132,11 +1132,40 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	}
 	const bool use_vm = engine_backend == backend_type::vm;
 
+	// Select this REGION's persistent slot pool by fingerprint (fn body + backend):
+	// distinct regions cycling in one frame each keep their own provisioned contexts.
+	// LRU-evict beyond the cap; pool selection happens before any slot reference is
+	// taken (the pools vector must not reallocate for the rest of this call).
+	const void* pool_key = static_cast<const void*>(fn_payload->fn->body.get());
+	parallel_engine_state::parallel_region_pool* pool = nullptr;
+	for (auto& candidate : state.region_pools) {
+		if (candidate.fn_body == pool_key && candidate.use_vm == use_vm) {
+			pool = &candidate;
+			break;
+		}
+	}
+	if (!pool) {
+		if (state.region_pools.size() >= parallel_engine_state::max_region_pools) {
+			auto evict = state.region_pools.begin();
+			for (auto it = state.region_pools.begin(); it != state.region_pools.end(); ++it) {
+				if (it->last_use < evict->last_use) { evict = it; }
+			}
+			*evict = parallel_engine_state::parallel_region_pool{};
+			pool = &*evict;
+		} else {
+			state.region_pools.emplace_back();
+			pool = &state.region_pools.back();
+		}
+		pool->fn_body = pool_key;
+		pool->use_vm = use_vm;
+	}
+	pool->last_use = ++state.region_use_counter;
+
 	// Acquire the first worker_count persistent slots: RESET matching ones (limits
 	// re-slice + budget re-arm + residual-state clear + host refresh), rebuild the rest.
 	std::vector<type_info*> value_types;
-	if (state.worker_slots.size() < worker_count) {
-		state.worker_slots.resize(worker_count);
+	if (pool->worker_slots.size() < worker_count) {
+		pool->worker_slots.resize(worker_count);
 	}
 	std::vector<parallel_worker_slot*> contexts;
 	contexts.reserve(worker_count);
@@ -1159,10 +1188,10 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 				slot->provisioned_nodes.clear();
 			}
 		}
-	} capture_guard{ eng, state.worker_slots, worker_count };
+	} capture_guard{ eng, pool->worker_slots, worker_count };
 
 	for (size_t k = 0; k < worker_count; ++k) {
-		auto& slot = state.worker_slots[k];
+		auto& slot = pool->worker_slots[k];
 		if (slot && slot_matches(*slot, *adm, *fn_payload->fn, use_vm)) {
 			reset_worker_slot(eng, *slot, budget);
 		} else {

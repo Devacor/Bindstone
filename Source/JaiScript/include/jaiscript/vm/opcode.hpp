@@ -149,6 +149,9 @@ namespace jai::vm {
     inline constexpr uint32_t binary_shape_ident_ident = 1;
     inline constexpr uint32_t binary_shape_ident_literal = 2;
     inline constexpr uint32_t binary_shape_literal_ident = 3;
+    inline constexpr uint32_t binary_shape_subscript = 4;   // >=1 operand is a fusable a[i] read
+                                                            // (only op_binary_fused consumes it;
+                                                            // binary_fast_shape ignores unknown codes)
 
     // op_index a flags
     inline constexpr uint32_t index_flag_lvalue_shape = 1; // container expr was identifier/member/subscript

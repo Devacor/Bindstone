@@ -1062,6 +1062,65 @@ public:
             check_eq((int64_t)15, r.as_int());
         });
 
+        // ---- Stage 3: fused subscript-read operands + interp subscript-compound ----
+
+        // a[ident] / a[literal] as binary operands (both sides, conditions, compound RHS)
+        // and the interpreter's in-place numeric subscript-compound must keep exact
+        // values across int/float/mixed, OOB errors, map bases, and impure RHS bails.
+        test("fused_subscript_operand_semantics", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                array<int> a = [10, 20, 30, 40];
+                var f = [0.5, 2.5];
+                int i = 1;
+                int j = 3;
+                auto s1 = a[i] + a[j];         // ident-index both sides
+                auto s2 = a[0] * a[i];         // literal + ident
+                auto s3 = a[i] < a[j];         // fused cmp bail path
+                auto s4 = f[0] + a[i];         // float element mixed
+                auto total = 0;
+                int k = 0;
+                while (a[k] < 35) { total += a[k]; k += 1; }   // condition + compound RHS
+                to_string(s1) + "|" + to_string(s2) + "|" + to_string(s3) + "|" +
+                    to_string(s4) + "|" + to_string(total);
+            )");
+            check_eq(std::string("60|200|true|20.500000|60"), r.as_string());
+        });
+
+        test("fused_subscript_operand_errors_and_maps", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            // OOB through the fused operand keeps the exact op_index error
+            check_throws([&]() { e->execute("var a = [1]; int i = 5; a[i] + 1;"); });
+            // Map base takes the replay path: never inserts, missing key = null
+            auto r = e->execute(R"(
+                var m = {"x": 7};
+                auto hit = m["x"] + 1;
+                to_string(m.size()) + "|" + to_string(hit);
+            )");
+            check_eq(std::string("1|8"), r.as_string());
+        });
+
+        test("interp_subscript_compound_inplace", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                array<int> pix = [0, 0, 0];
+                var fl = [1.5, 2.5];
+                int gi = 1;
+                pix[gi] += 41;                  // ident index, int
+                pix[0] += pix[gi] + 1;          // subscript RHS (callout-free)
+                fl[1] *= 2.0;                   // float in place
+                var arr2 = [10];
+                auto bump() -> auto { arr2.push(99); return 5; }
+                arr2[0] += bump();              // impure RHS: general path (ref re-resolve)
+                to_string(pix[0]) + "|" + to_string(pix[1]) + "|" + to_string(fl[1]) + "|" +
+                    to_string(arr2[0]) + "|" + to_string(arr2.size());
+            )");
+            check_eq(std::string("42|41|5.000000|15|2"), r.as_string());
+        });
+
         // A pooled holder escaping the engine must stay destructible after engine death
         // (orphaned pool: the last release frees it, no crash / no touch of freed engine).
         // A by-ref lambda capture boxes x into a CELL reference_holder held by the

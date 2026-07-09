@@ -1437,6 +1437,13 @@ script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, u
 }
 
 script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id) {
+	// SIZE_MAX = caller has no reserved (ip, role) slot for this symbol (e.g. the index
+	// of a fused subscript operand - the 3 roles/ip are taken). Entries are provenance-
+	// checked by {env, epoch} but NOT by symbol, so slot reuse across symbols would
+	// alias variables - skip the cache entirely instead.
+	if (cache_slot == SIZE_MAX) {
+		return nullptr;
+	}
 	// Top-level frames, or call frames running directly in the global env (lazy-elided
 	// plain functions - fib-style recursion): those environments are stable, so entries
 	// actually hit. Other call frames churn envs (binds/resets bump the epoch), which
@@ -3996,6 +4003,58 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 		"Undefined variable '{0}'", sym);
 }
 
+// Fused subscript-read operand `base[index]` (docs/element_read_overhead_design.md
+// Stage 3): the plain-array shape returns a pointer to the element in place - zero
+// copies, no op_index dispatch. Sound because the other operand's resolution runs no
+// user code (idents/literals/element reads only) and the numeric fast path consumes
+// scalars immediately. Every other shape (map/string/object/borrow/non-int index/OOB)
+// REPLAYS the exact unfused op_index (lvalue_shape + transient flags, matching what
+// the classifier stamped on this node) into scratch - semantics and error text
+// byte-identical by construction.
+checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, const fused_operand& operand,
+                                                                      std::optional<script_value>& scratch,
+                                                                      size_t cache_slot) {
+	std::optional<script_value> base_scratch;
+	auto base = fused_ident_value(f, operand, base_scratch, cache_slot);
+	if (!base) return base.error_value();
+	const script_value& container = *base.value();
+
+	std::optional<script_value> index_scratch;
+	const script_value* index_ptr = nullptr;
+	script_value index_literal_value(std::monostate{}, engine_);
+	if (operand.subscript_kind == fused_operand::subscript_index_literal) {
+		index_literal_value = script_value(static_cast<script_int>(operand.index_literal), engine_);
+		index_ptr = &index_literal_value;
+	} else {
+		fused_operand index_operand;
+		index_operand.slot = operand.index_slot;
+		index_operand.symbol = operand.index_symbol;
+		// SIZE_MAX: no reserved cache role for indexes - a shared slot would alias two
+		// different index symbols in one instruction (the cache is not symbol-checked)
+		auto idx = fused_ident_value(f, index_operand, index_scratch, SIZE_MAX);
+		if (!idx) return idx.error_value();
+		index_ptr = idx.value();
+	}
+
+	if (container.raw_storage_index() == script_value::TYPEID_ARRAY && index_ptr->is_int()) {
+		const script_int index = index_ptr->unchecked_as_int();
+		const auto& array = container.unchecked_as_array();
+		if (index >= 0 && index < static_cast<script_int>(array.size())) {
+			return &array[static_cast<size_t>(index)].deref();
+		}
+	}
+
+	// Slow replay: identical to the unfused op_index this proto replaced
+	stack_.push_back(container);
+	stack_.push_back(*index_ptr);
+	vm_instruction index_ins{opcode::op_index, index_flag_lvalue_shape | index_flag_transient_read, 0, 0};
+	auto indexed = exec_index(f, index_ins);
+	if (!indexed) return indexed.error_value();
+	scratch.emplace(std::move(stack_.back()));
+	stack_.pop_back();
+	return &scratch.value().deref();
+}
+
 checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[ins.a];
 	const token_type op = static_cast<token_type>(p.op);
@@ -4006,6 +4065,10 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 
 	if (p.left.const_index != k_invalid_u32) {
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
+	} else if (p.left.subscript_kind != fused_operand::subscript_none) {
+		auto resolved = fused_subscript_value(f, p.left, lscratch, f.ip * 3);
+		if (!resolved) return resolved.error_value();
+		lp = resolved.value();
 	} else {
 		auto resolved = fused_ident_value(f, p.left, lscratch, f.ip * 3);
 		if (!resolved) return resolved.error_value();
@@ -4013,6 +4076,10 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 	}
 	if (p.right.const_index != k_invalid_u32) {
 		rp = &f.code->constants[p.right.const_index];
+	} else if (p.right.subscript_kind != fused_operand::subscript_none) {
+		auto resolved = fused_subscript_value(f, p.right, rscratch, f.ip * 3 + 1);
+		if (!resolved) return resolved.error_value();
+		rp = resolved.value();
 	} else {
 		auto resolved = fused_ident_value(f, p.right, rscratch, f.ip * 3 + 1);
 		if (!resolved) return resolved.error_value();
@@ -4082,13 +4149,26 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 		}
 	}
 
-	// Fallback: snapshot the operands (isolation from mutation by nested calls) and
-	// give constant templates their engine ref, exactly as op_const would have
-	script_value left = *lp;
-	if (!left.has_valid_engine()) left.set_engine(engine_);
-	script_value right = *rp;
-	if (!right.has_valid_engine()) right.set_engine(engine_);
-	auto result = binary_general(op, left.deref(), right.deref());
+	// Fallback: snapshot ident/const operands (isolation from mutation by nested calls;
+	// constant templates get their engine ref, exactly as op_const would have).
+	// Subscript-resolved operands pass through IN PLACE: their unfused twin pushed a
+	// reference (no element copy), so a snapshot here would be an observable extra
+	// copy inside custom operators (use_count parity). binary_general copies into args
+	// before any user code runs, so the in-place pointer never outlives its validity.
+	std::optional<script_value> left_snap, right_snap;
+	const script_value* lv = lp;
+	const script_value* rv = rp;
+	if (p.left.subscript_kind == fused_operand::subscript_none) {
+		left_snap.emplace(*lp);
+		if (!left_snap->has_valid_engine()) left_snap->set_engine(engine_);
+		lv = &*left_snap;
+	}
+	if (p.right.subscript_kind == fused_operand::subscript_none) {
+		right_snap.emplace(*rp);
+		if (!right_snap->has_valid_engine()) right_snap->set_engine(engine_);
+		rv = &*right_snap;
+	}
+	auto result = binary_general(op, lv->deref(), rv->deref());
 	if (!result) {
 		return result.error_value();
 	}
@@ -4102,6 +4182,9 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot) {
 	if (operand.const_index != k_invalid_u32) {
 		return &f.code->constants[operand.const_index];
+	}
+	if (operand.subscript_kind != fused_operand::subscript_none) {
+		return nullptr;   // element reads bail to the pair (exec_binary_fused resolves them)
 	}
 	if (operand.load_flags & load_flag_type_ctor) {
 		return nullptr;

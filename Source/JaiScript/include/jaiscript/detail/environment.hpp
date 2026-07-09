@@ -245,17 +245,6 @@ namespace jai {
     };
 
     // Create a bound method - binds 'this' as the first argument
-    // Bound-method payload: a NAMED functor (not an anonymous lambda) so call boundaries
-    // can recover (receiver, method) via std::function::target<bound_method_binding>()
-    // and enter script methods in-loop instead of nesting a native dispatch - the same
-    // trampoline idea as script_callable_thunk. operator() (environment.cpp) is the
-    // opaque fallback and keeps the receiver keep_alive anchor for native chaining.
-    struct bound_method_binding {
-        script_value receiver;
-        script_value method;
-        checked_result<script_value> operator()(const std::vector<script_value>& args) const;
-    };
-
     script_value make_bound_method(const script_value& this_obj, const script_value& method);
 
     // The ONE implicit-copy kernel for assignment-shaped store boundaries (decl from

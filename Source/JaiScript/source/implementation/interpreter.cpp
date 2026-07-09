@@ -4954,6 +4954,26 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     auto expected_type = ptr_type_info->element_type();
                     std::string expected_type_name = expected_type ? expected_type->type_name : "";
 
+                    // Monotonic-ladder rule (Dev ruling 2026-07, refines c81c9812): a
+                    // var-held (dynamic_pointee) holder behaves IDENTICALLY to a typed
+                    // holder wherever typed is legal - a VALUE rhs of a COMPATIBLE class
+                    // (same class or subclass of the held pointee) assigns INTO the shared
+                    // pointee (aliases see it). var's ONLY extra power is rebinding on an
+                    // INCOMPATIBLE value or a primitive.
+                    bool dynamic_value_compatible = false;
+                    if (ptr_type_info->dynamic_pointee &&
+                        value.type() == script_value_type::jai_object_type) {
+                        auto src_ti = value.get_type_info();
+                        std::string src_name = src_ti ? src_ti->type_name : "";
+                        if (!src_name.empty()) {
+                            dynamic_value_compatible = (src_name == expected_type_name);
+                            if (!dynamic_value_compatible && engine_) {
+                                auto src_class = engine_->get_class_definition(src_name);
+                                dynamic_value_compatible = src_class && src_class->is_subtype_of(expected_type_name);
+                            }
+                        }
+                    }
+
                     if (value.is_null()) {
                         // POINTER OP: Nullify pointer
                         JAISCRIPT_TRY(store_back(std::move(value)));
@@ -4998,12 +5018,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             value.set_type_info(ptr_type_info);
                             JAISCRIPT_TRY(store_back(std::move(value)));
                         }
-                    } else if (ptr_type_info->dynamic_pointee) {
-                        // var-held handle receiving a VALUE rhs: REBIND, never reach
-                        // through the handle (Dev ruling 2026-07 - var is fully dynamic:
-                        // reassign anything, copy-on-assignment, never refuse). Replace
-                        // the stored handle with a value-copy of the rhs and keep the
-                        // 'any' marker so the variable stays dynamic for the next '='.
+                    } else if (ptr_type_info->dynamic_pointee && !dynamic_value_compatible) {
+                        // var-held handle receiving an INCOMPATIBLE value or a primitive:
+                        // REBIND (var's dynamic power where typed would error). A COMPATIBLE
+                        // value falls through to the auto-unwrap path below, IDENTICAL to a
+                        // typed holder (Dev ruling 2026-07, refines c81c9812). Replace the
+                        // stored handle with a value-copy of the rhs and keep the 'any'
+                        // marker so the variable stays dynamic for the next '='.
                         script_value rebound = clone_for_assignment(value);
                         if (engine_) {
                             if (auto* any_ti = engine_->get_type_info_any()) {

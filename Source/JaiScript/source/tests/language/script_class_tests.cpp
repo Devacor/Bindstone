@@ -1246,11 +1246,12 @@ public:
         });
 
         test("var_held_handles_rebind_unchecked", [this]() {
-            // Dev ruling (2026-07): a var-DECLARED holder is FULLY DYNAMIC - '=' with
-            // ANY rhs (handle OR value OR primitive) REBINDS the variable to a copy of
-            // the rhs value, never reaching through a held handle and never refusing.
-            // Typed spellings (shared_ptr<T>, shared_ptr<auto>, plain auto copies) keep
-            // enforcing, and their value-rhs auto-unwrap-into-the-handle stays as-is.
+            // Dev ruling (2026-07, refines c81c9812): a var-DECLARED holder behaves
+            // IDENTICALLY to a typed handle holder wherever typed is legal (the monotonic
+            // ladder). A handle rhs REBINDS; a COMPATIBLE value rhs assigns INTO the
+            // pointee (just like shared_ptr<T>/auto); var's ONLY extra power is REBINDING
+            // an INCOMPATIBLE value or a primitive where typed would refuse. Typed
+            // spellings (shared_ptr<T>, shared_ptr<auto>, plain auto copies) keep enforcing.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 if (use_vm) { e->set_backend(jai::backend_type::vm); }
@@ -1276,18 +1277,23 @@ public:
                 e->execute("var wsrc = new Foo(); weak_ptr<Foo> w = wsrc;");
                 check_eq(false, e->execute("w.expired()").as<bool>());
                 check_throws([&]() { e->execute("weak_ptr<Bar> wbad = wsrc;"); });
-                // FULLY DYNAMIC: a value rhs REBINDS the var to a fresh copy of that
-                // value - it does NOT reach through the held handle, so aliases of the
-                // old object are untouched (no leak).
+                // MONOTONIC LADDER (Dev ruling 2026-07, refines c81c9812): a var-held
+                // handle behaves IDENTICALLY to a typed holder wherever typed is legal.
+                // A COMPATIBLE value rhs (same class or subclass of the held pointee)
+                // assigns INTO the shared pointee, so aliases SEE the change - exactly
+                // like shared_ptr<Foo>/auto below. var's ONLY extra power is rebinding an
+                // INCOMPATIBLE value or a primitive.
                 e->execute("var u = new Foo(); var ualias = u; auto src = Foo(); src.x = 7; u = src;");
-                check_eq((int64_t)1, e->execute("ualias.x").as_int());   // alias keeps the ORIGINAL object (no leak)
-                check_eq((int64_t)7, e->execute("u.x").as_int());        // u now holds an independent copy of src
-                // the rebound value is INDEPENDENT: mutating it never touches the old shared object
+                check_eq((int64_t)7, e->execute("ualias.x").as_int());   // alias SEES the change (assign-into)
+                check_eq((int64_t)7, e->execute("u.x").as_int());
+                // it is the SAME shared object: mutating u touches the alias too
                 e->execute("u.x = 42;");
-                check_eq((int64_t)1, e->execute("ualias.x").as_int());
-                // cross-class value rhs also rebinds - a var NEVER refuses an assignment (no throw)
+                check_eq((int64_t)42, e->execute("ualias.x").as_int());
+                // cross-class (INCOMPATIBLE) value rhs REBINDS - var NEVER refuses (no throw),
+                // and the old alias is untouched (the handle was re-pointed, not written)
                 e->execute("u = Bar();");
                 check_eq((int64_t)2, e->execute("u.y").as_int());
+                check_eq((int64_t)42, e->execute("ualias.x").as_int());  // old object untouched by the rebind
                 // primitive rhs rebinds too
                 e->execute("var pv = new Foo(); pv = 5;");
                 check_eq((int64_t)5, e->execute("pv").as_int());

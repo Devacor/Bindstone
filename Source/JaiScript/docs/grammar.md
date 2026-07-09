@@ -870,14 +870,21 @@ string healthLevel = health > 75 ? "healthy" :
     supported (they error at call time — a plain `auto`/untyped parameter already binds
     anything, or use an explicit `shared_ptr<T>`). The ladder has exactly three handle
     spellings: `shared_ptr<T>` (enforced pointee), `shared_ptr<auto>` (infer then
-    enforce), and plain `var` (FULLY DYNAMIC — reassigns to anything: `=` with a handle
-    OR a value OR a primitive rhs always REBINDS the variable to a copy of the rhs value,
-    never reaching through a held handle and never refusing an assignment. `var p = new
-    Foo(); p = new Bar();` rebinds the handle; `p = someFooValue;` rebinds to an
-    independent copy of that value, leaving aliases of the old object untouched; `p = 5;`
-    rebinds to an int. The typed/auto/`shared_ptr<T>`/`shared_ptr<auto>` tiers enforce and
-    a value rhs to those still copy-assigns INTO the underlying object with its checks —
-    `var` does neither; `auto` copies of a var-held handle re-lock to the plain spelling).
+    enforce), and plain `var` (the MONOTONIC LADDER — Dev ruling 2026-07, refining the
+    earlier "fully dynamic" wording: a var-held handle behaves IDENTICALLY to a typed
+    handle holder wherever the typed spelling is legal; var's ONLY extra power is
+    accepting an incompatible type). For a var currently holding a shared_ptr handle, `=`
+    resolves by rhs: a HANDLE rhs (`p = new Bar();`, or another handle var) REBINDS; a
+    VALUE rhs of a COMPATIBLE class (same class or subclass of the held pointee) assigns
+    INTO the shared pointee — aliases SEE the change, IDENTICAL to what
+    `shared_ptr<T>`/`shared_ptr<auto>` already do (`var p = new Foo(); p = someFooValue;`
+    copies the fields into the shared object); a VALUE rhs of an INCOMPATIBLE class
+    (`p = Bar();`) or a PRIMITIVE (`p = 5;`) REBINDS to an independent copy — this is
+    var's one added power, exactly where a typed holder would error. `Foo()` (a value)
+    assigns-into; `new Foo()` (a handle) rebinds — same distinction as the typed tiers.
+    The typed/auto/`shared_ptr<T>`/`shared_ptr<auto>` tiers are UNCHANGED (enforce, and a
+    value rhs copy-assigns INTO the underlying object with its checks; an incompatible
+    value errors); `auto` copies of a var-held handle re-lock to the plain spelling.
     `shared_ptr<var>`
     is DELIBERATELY a parse error ("shared_ptr<var> is not supported: use var (holds and
     rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)") —

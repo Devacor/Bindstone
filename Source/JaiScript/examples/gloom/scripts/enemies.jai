@@ -53,7 +53,7 @@ public:
 		brain.resume();
 	}
 
-	float player_dist() { return sqrt(dist2(x, y, G.px, G.py)); }
+	float player_dist() { return math::sqrt(dist2(x, y, G.px, G.py)); }
 
 	bool sees_player() {
 		if (player_dist() > 13.0) { return false; }
@@ -68,7 +68,7 @@ public:
 	void move_toward(float tx, float ty) {
 		float dx = tx - x;
 		float dy = ty - y;
-		float len = sqrt(dx * dx + dy * dy);
+		float len = math::sqrt(dx * dx + dy * dy);
 		if (len < 0.0001) { return; }
 		float step = speed * TICK;
 		float nx = x + dx / len * step;
@@ -141,7 +141,7 @@ public:
 			if (anim % 20 == 19) { zig = 0 - zig; }
 			float fx = G.py - y;
 			float fy = x - G.px;
-			float fl = sqrt(fx * fx + fy * fy);
+			float fl = math::sqrt(fx * fx + fy * fy);
 			if (fl < 0.001) { fl = 1.0; }
 			float lean = d > 3.0 ? 0.9 : 0.2;
 			move_toward(G.px + fx / fl * lean * zig, G.py + fy / fl * lean * zig);
@@ -175,7 +175,7 @@ public:
 				for (int i = 0; i < 16; ++i) {
 					float ox = G.py - y;
 					float oy = x - G.px;
-					float ol = sqrt(ox * ox + oy * oy);
+					float ol = math::sqrt(ox * ox + oy * oy);
 					if (ol < 0.001) { ol = 1.0; }
 					move_toward(x + ox / ol * orbit, y + oy / ol * orbit);
 					yield;
@@ -298,8 +298,8 @@ function summon_adds(float wx, float wy) -> void {
 	int placed = 0;
 	for (auto& o : offs) {
 		if (placed >= 2) { break; }
-		int tx = ifloor(wx) + o[0];
-		int ty = ifloor(wy) + o[1];
+		int tx = math::ifloor(wx) + o[0];
+		int ty = math::ifloor(wy) + o[1];
 		if (!walkable(tx, ty)) { continue; }
 		spawn_enemy(0, tx, ty);
 		fx_explosion(tx + 0.5, ty + 0.5);

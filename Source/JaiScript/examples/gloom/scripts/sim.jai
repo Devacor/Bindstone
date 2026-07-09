@@ -3,10 +3,10 @@
 
 // circle-vs-grid: all four corners of the actor's square must be on floor
 function spot_free(float x, float y, float r) -> bool {
-	if (tile_solid(tile_at(ifloor(x - r), ifloor(y - r)))) { return false; }
-	if (tile_solid(tile_at(ifloor(x + r), ifloor(y - r)))) { return false; }
-	if (tile_solid(tile_at(ifloor(x - r), ifloor(y + r)))) { return false; }
-	if (tile_solid(tile_at(ifloor(x + r), ifloor(y + r)))) { return false; }
+	if (tile_solid(tile_at(math::ifloor(x - r), math::ifloor(y - r)))) { return false; }
+	if (tile_solid(tile_at(math::ifloor(x + r), math::ifloor(y - r)))) { return false; }
+	if (tile_solid(tile_at(math::ifloor(x - r), math::ifloor(y + r)))) { return false; }
+	if (tile_solid(tile_at(math::ifloor(x + r), math::ifloor(y + r)))) { return false; }
 	return true;
 }
 
@@ -20,8 +20,8 @@ function player_move(var& input) -> void {
 	while (G.pang > 6.2831853) { G.pang -= 6.2831853; }
 	while (G.pang < 0.0) { G.pang += 6.2831853; }
 
-	float dirx = cos(G.pang);
-	float diry = sin(G.pang);
+	float dirx = math::cos(G.pang);
+	float diry = math::sin(G.pang);
 	float wx = 0.0;
 	float wy = 0.0;
 	var fwd = input["fwd"];
@@ -32,7 +32,7 @@ function player_move(var& input) -> void {
 	if (back) { wx -= dirx; wy -= diry; }
 	if (sl) { wx += diry; wy -= dirx; }
 	if (sr) { wx -= diry; wy += dirx; }
-	float wl = sqrt(wx * wx + wy * wy);
+	float wl = math::sqrt(wx * wx + wy * wy);
 	if (wl > 0.001) {
 		var run = input["run"];
 		float speed = (run ? 5.0 : 3.4) * TICK;
@@ -53,12 +53,12 @@ function player_move(var& input) -> void {
 // ------------------------------------------------------------ 'use' ---------
 // probe a few steps down the facing for the first non-floor tile
 function player_use() -> void {
-	float dirx = cos(G.pang);
-	float diry = sin(G.pang);
+	float dirx = math::cos(G.pang);
+	float diry = math::sin(G.pang);
 	var probes = [0.5, 0.9, 1.3];
 	for (auto p : probes) {
-		int tx = ifloor(G.px + dirx * p);
-		int ty = ifloor(G.py + diry * p);
+		int tx = math::ifloor(G.px + dirx * p);
+		int ty = math::ifloor(G.py + diry * p);
 		int t = tile_at(tx, ty);
 		if (t == 0) { continue; }
 		use_tile(tx, ty, t);

@@ -88,7 +88,7 @@ function fx_explosion(float x, float y) -> void {
 	for (int i = 0; i < 10; ++i) {
 		float a = RNG.nextf() * 6.2831853;
 		float sp = 1.5 + RNG.nextf() * 3.0;
-		G.fx.spawn(1, x, y, 0.3 + RNG.nextf() * 0.5, cos(a) * sp, sin(a) * sp, 1.0 + RNG.nextf() * 2.0, 11);
+		G.fx.spawn(1, x, y, 0.3 + RNG.nextf() * 0.5, math::cos(a) * sp, math::sin(a) * sp, 1.0 + RNG.nextf() * 2.0, 11);
 	}
 	for (int i = 0; i < 5; ++i) {
 		G.fx.spawn(4, x, y, 0.4, rnd_spread(0.9), rnd_spread(0.9), 0.6 + RNG.nextf(), 24);

@@ -90,7 +90,7 @@ function hud_panel_rows(float fps, float ms_sim, float ms_draw) -> var {
 	// weapon art with walk-bob shift and fire frame
 	var art = G.cooldown > WEAPONS[G.weapon]["cd"] - 4 || G.gun_kick > 0
 		? WGFX_FIRE[G.weapon] : WGFX_IDLE[G.weapon];
-	int bob_shift = 1 + itrunc((sin(G.bob) + 1.0) * 1.4);
+	int bob_shift = 1 + math::itrunc((math::sin(G.bob) + 1.0) * 1.4);
 
 	var left = [
 		` HP  [${meter(G.hp, 100, 12)}] ${G.hp}`,

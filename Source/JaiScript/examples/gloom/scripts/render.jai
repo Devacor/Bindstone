@@ -79,12 +79,12 @@ function push_wall_tones(var& base, var& accent) -> void {
 		float facing = side == 1 ? 0.70 : 1.0;
 		for (int s = 0; s < 16; ++s) {
 			float lum = (0.13 + 0.87 * s / 15.0) * facing;
-			WALLT.push(rgb_idx(itrunc(base[0] * lum), itrunc(base[1] * lum), itrunc(base[2] * lum)));
+			WALLT.push(rgb_idx(math::itrunc(base[0] * lum), math::itrunc(base[1] * lum), math::itrunc(base[2] * lum)));
 			float alum = lum * 1.35;
 			alum = alum > 1.0 ? 1.0 : alum;
-			WALLT.push(rgb_idx(itrunc(accent[0] * alum), itrunc(accent[1] * alum), itrunc(accent[2] * alum)));
+			WALLT.push(rgb_idx(math::itrunc(accent[0] * alum), math::itrunc(accent[1] * alum), math::itrunc(accent[2] * alum)));
 			float mlum = lum * 0.42;
-			WALLT.push(rgb_idx(itrunc(base[0] * mlum), itrunc(base[1] * mlum), itrunc(base[2] * mlum)));
+			WALLT.push(rgb_idx(math::itrunc(base[0] * mlum), math::itrunc(base[1] * mlum), math::itrunc(base[2] * mlum)));
 		}
 	}
 }
@@ -126,14 +126,14 @@ function build_render_tables(int mi) -> void {
 		if (y < half) {
 			float t = half > 1 ? 1.0 * yq / (half - 1) : 1.0;
 			float lum = 1.0 - 0.72 * t;
-			CEILP.push(rgb_idx(itrunc(crgb[0] * lum), itrunc(crgb[1] * lum), itrunc(crgb[2] * lum)));
+			CEILP.push(rgb_idx(math::itrunc(crgb[0] * lum), math::itrunc(crgb[1] * lum), math::itrunc(crgb[2] * lum)));
 			FLOORP.push(0);
 		} else {
 			float t2 = 1.0 * (yq - half) / imax(1, G.vh - 1 - half);
 			t2 = t2 > 1.0 ? 1.0 : (t2 < 0.0 ? 0.0 : t2);
 			float lum2 = 0.26 + 0.74 * t2;
 			CEILP.push(0);
-			FLOORP.push(rgb_idx(itrunc(frgb[0] * lum2), itrunc(frgb[1] * lum2), itrunc(frgb[2] * lum2)));
+			FLOORP.push(rgb_idx(math::itrunc(frgb[0] * lum2), math::itrunc(frgb[1] * lum2), math::itrunc(frgb[2] * lum2)));
 		}
 	}
 	// prebaked background: one deep-copy assignment per frame replaces the
@@ -222,7 +222,7 @@ function sprite_lut(string name, int band, int flash) -> var {
 			g = imin(255, g + 150);
 			b = imin(255, b + 140);
 		}
-		lut.push(rgb_idx(itrunc(r * lum), itrunc(g * lum), itrunc(b * lum)));
+		lut.push(rgb_idx(math::itrunc(r * lum), math::itrunc(g * lum), math::itrunc(b * lum)));
 	}
 	G.lutc[key] = lut;
 	return lut;
@@ -240,8 +240,8 @@ function render_view() -> var {
 function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 	int vw = G.vw;
 	int vh = G.vh;
-	float dirx = cos(G.pang);
-	float diry = sin(G.pang);
+	float dirx = math::cos(G.pang);
+	float diry = math::sin(G.pang);
 	float planex = 0.0 - diry * 0.78;
 	float planey = dirx * 0.78;
 	float px = G.px;
@@ -297,7 +297,7 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 			int y1 = y0 + lineh;
 			int cy0 = y0 < 0 ? 0 : y0;
 			int cy1 = y1 > vh ? vh : y1;
-			int shade = 15 - itrunc(dist * 1.55) + boost;
+			int shade = 15 - math::itrunc(dist * 1.55) + boost;
 			shade = shade < 0 ? 0 : (shade > 15 ? 15 : shade);
 			int sidx = ((kind * 2 + side) * 16 + shade) * 32 + tx;
 			int have = STRIP_SET[sidx];
@@ -391,7 +391,7 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		int life = prt[7];
 		int phase = 3 - imin(3, life / 5);
 		int color = pcols[pk * 4 + phase];
-		int psz = itrunc(0.07 * span) + 1;
+		int psz = math::itrunc(0.07 * span) + 1;
 		psz = psz > 3 ? 3 : psz;
 		int psx = (psz * 2 * pxw) / pxh;           // square-ish regardless of mode
 		psx = psx < 1 ? 1 : psx;
@@ -641,7 +641,7 @@ function draw_billboard(var& rec, var& pix, var& zbuf) -> void {
 	// pixel aspect: a cell is ~1:2 (w:h) split into PIXW x PIXH
 	int pw = ph * aw * 2 * PIXW / (ah * PIXH);
 	if (pw < 2) { pw = 2; }
-	int band = itrunc(depth * 0.85) - (G.muzzle > 0 ? 1 : 0);
+	int band = math::itrunc(depth * 0.85) - (G.muzzle > 0 ? 1 : 0);
 	band = band < 0 ? 0 : (band > 7 ? 7 : band);
 	var lut = sprite_lut(name, band, flash);
 	int bottom = vh / 2 + span * 0.5 - zlift * span;
@@ -691,14 +691,14 @@ function draw_automap(var& pix, var& tiles) -> void {
 	for (int i = 0; i < G.items.size(); ++i) {
 		var taken = G.items[i][3];
 		if (taken == 1) { continue; }
-		blip(pix, ox + itrunc(G.items[i][1]) * sx, oy + itrunc(G.items[i][2]) * sy, AM_ITEM);
+		blip(pix, ox + math::itrunc(G.items[i][1]) * sx, oy + math::itrunc(G.items[i][2]) * sy, AM_ITEM);
 	}
 	for (auto& e : G.enemies) {
 		if (!e.alive) { continue; }
-		blip(pix, ox + itrunc(e.x) * sx, oy + itrunc(e.y) * sy, AM_ENEMY);
+		blip(pix, ox + math::itrunc(e.x) * sx, oy + math::itrunc(e.y) * sy, AM_ENEMY);
 	}
-	blip(pix, ox + itrunc(G.px) * sx, oy + itrunc(G.py) * sy, AM_SELF);
-	blip(pix, ox + itrunc(G.px + cos(G.pang) * 1.4) * sx, oy + itrunc(G.py + sin(G.pang) * 1.4) * sy, AM_HEAD);
+	blip(pix, ox + math::itrunc(G.px) * sx, oy + math::itrunc(G.py) * sy, AM_SELF);
+	blip(pix, ox + math::itrunc(G.px + math::cos(G.pang) * 1.4) * sx, oy + math::itrunc(G.py + math::sin(G.pang) * 1.4) * sy, AM_HEAD);
 }
 
 function blip(var& pix, int bx, int by, int c) -> void {

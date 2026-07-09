@@ -57,7 +57,7 @@ function gloom_ray_chunk(var t) -> var {
 		float pdist = side == 0 ? sdx - ddx : sdy - ddy;
 		pdist = pdist < 0.02 ? 0.02 : pdist;
 		float wallx = side == 0 ? posy + pdist * rdy : posx + pdist * rdx;
-		wallx = wallx - floor(wallx);
+		wallx = wallx - math::floor(wallx);
 		int texcol = wallx * 64.0;
 		out.push(pdist);
 		out.push(side);
@@ -105,7 +105,7 @@ function gloom_ray(var t) -> var {
 	float pdist = side == 0 ? sdx - ddx : sdy - ddy;
 	pdist = pdist < 0.02 ? 0.02 : pdist;
 	float wallx = side == 0 ? posy + pdist * rdy : posx + pdist * rdx;
-	wallx = wallx - floor(wallx);
+	wallx = wallx - math::floor(wallx);
 	int texcol = wallx * 64.0;
 	return [pdist, side, kind, texcol];
 }

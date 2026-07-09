@@ -4,14 +4,14 @@
 function los_clear(float ax, float ay, float bx, float by) -> bool {
 	float dx = bx - ax;
 	float dy = by - ay;
-	float len = sqrt(dx * dx + dy * dy);
+	float len = math::sqrt(dx * dx + dy * dy);
 	if (len < 0.001) { return true; }
 	float inv = 1.0 / len;
 	dx = dx * inv;
 	dy = dy * inv;
 	float t = 0.15;
 	while (t < len) {
-		if (tile_solid(tile_at(ifloor(ax + dx * t), ifloor(ay + dy * t)))) { return false; }
+		if (tile_solid(tile_at(math::ifloor(ax + dx * t), math::ifloor(ay + dy * t)))) { return false; }
 		t += 0.15;
 	}
 	return true;
@@ -66,10 +66,10 @@ function hitscan(float ax, float ay, float dx, float dy, int lo, int hi, bool fr
 function turret_shot(float tx, float ty) -> void {
 	float dx = G.px - tx;
 	float dy = G.py - ty;
-	float d = sqrt(dx * dx + dy * dy);
+	float d = math::sqrt(dx * dx + dy * dy);
 	if (d < 0.001) { return; }
 	fx_muzzle(tx, ty, dx / d, dy / d);
-	int hit_pct = imax(12, 66 - itrunc(d * 5.0));
+	int hit_pct = imax(12, 66 - math::itrunc(d * 5.0));
 	if (RNG.chance(hit_pct) && los_clear(tx, ty, G.px, G.py)) {
 		damage_player(RNG.roll(2, 6), "turret fire");
 	} else {
@@ -87,7 +87,7 @@ function turret_shot(float tx, float ty) -> void {
 function spawn_shot(int kind, float ax, float ay, float tx, float ty, float speed) -> void {
 	float dx = tx - ax;
 	float dy = ty - ay;
-	float len = sqrt(dx * dx + dy * dy);
+	float len = math::sqrt(dx * dx + dy * dy);
 	if (len < 0.001) { return; }
 	G.shots.push([kind, ax + dx / len * 0.4, ay + dy / len * 0.4, dx / len * speed, dy / len * speed, 150]);
 }
@@ -111,7 +111,7 @@ function update_shots() -> void {
 		for (int sub = 0; sub < 3 && !dead; ++sub) {
 			x += vx * TICK * 0.333333333;
 			y += vy * TICK * 0.333333333;
-			if (tile_solid(tile_at(ifloor(x), ifloor(y)))) {
+			if (tile_solid(tile_at(math::ifloor(x), math::ifloor(y)))) {
 				if (kind == 3) { explode_hex(x - vx * 0.02, y - vy * 0.02); }
 				else if (kind == 2) { explode_fire(x - vx * 0.02, y - vy * 0.02); }
 				else { fx_wall_hit(x - vx * 0.02, y - vy * 0.02); }
@@ -158,14 +158,14 @@ function explode_hex(float x, float y) -> void {
 		if (!e.alive) { continue; }
 		float d2 = dist2(x, y, e.x, e.y);
 		if (d2 < 3.24) {                              // radius 1.8
-			int dmg = itrunc(42.0 - sqrt(d2) * 14.0);
+			int dmg = math::itrunc(42.0 - math::sqrt(d2) * 14.0);
 			if (dmg > 0) { e.hurt(dmg); }
 		}
 	}
 	// standing in your own spell is a choice
 	float pd2 = dist2(x, y, G.px, G.py);
 	if (pd2 < 2.25) {
-		int self = itrunc(20.0 - sqrt(pd2) * 10.0);
+		int self = math::itrunc(20.0 - math::sqrt(pd2) * 10.0);
 		if (self > 0) { damage_player(self, "your own hex"); }
 	}
 }
@@ -174,7 +174,7 @@ function explode_fire(float x, float y) -> void {
 	fx_explosion(x, y);
 	float pd2 = dist2(x, y, G.px, G.py);
 	if (pd2 < 2.89) {                                 // radius 1.7
-		int dmg = itrunc(26.0 - sqrt(pd2) * 9.0);
+		int dmg = math::itrunc(26.0 - math::sqrt(pd2) * 9.0);
 		if (dmg > 0) { damage_player(dmg, "hollow fire"); }
 	}
 }
@@ -213,8 +213,8 @@ function player_fire() -> void {
 	G.muzzle = 3;
 	G.noise = 24;
 	G.gun_kick = 4;
-	float dirx = cos(G.pang);
-	float diry = sin(G.pang);
+	float dirx = math::cos(G.pang);
+	float diry = math::sin(G.pang);
 	fx_muzzle(G.px, G.py, dirx, diry);
 	if (w["kind"] == 1) {
 		spawn_shot_dir(3, G.px, G.py, dirx, diry, 9.0);
@@ -224,6 +224,6 @@ function player_fire() -> void {
 	float spread = w["spread"];
 	for (int i = 0; i < pellets; ++i) {
 		float a = G.pang + (RNG.nextf() - 0.5) * 2.0 * spread;
-		hitscan(G.px, G.py, cos(a), sin(a), w["lo"], w["hi"], true);
+		hitscan(G.px, G.py, math::cos(a), math::sin(a), w["lo"], w["hi"], true);
 	}
 }

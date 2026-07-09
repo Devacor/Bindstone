@@ -241,8 +241,8 @@ public:
 		var hh = hash;
 		hh = mix32(hh, tick);
 		hh = mix32(hh, mode * 31 + map_i);
-		hh = mix32(hh, itrunc(px * 256.0) * 4096 + itrunc(py * 256.0));
-		hh = mix32(hh, itrunc(pang * 1024.0));
+		hh = mix32(hh, math::itrunc(px * 256.0) * 4096 + math::itrunc(py * 256.0));
+		hh = mix32(hh, math::itrunc(pang * 1024.0));
 		hh = mix32(hh, hp * 512 + armor);
 		hh = mix32(hh, ammo[0] * 65536 + ammo[1] * 256 + ammo[2]);
 		hh = mix32(hh, weapon * 64 + (key_r ? 2 : 0) + (key_b ? 1 : 0));
@@ -251,7 +251,7 @@ public:
 		for (auto& e : enemies) {
 			if (!e.alive) { continue; }
 			live = live + 1;
-			acc = (acc + itrunc(e.x * 64.0) * 977 + itrunc(e.y * 64.0) * 331 + e.hp * 7) & 0xFFFFFFFF;
+			acc = (acc + math::itrunc(e.x * 64.0) * 977 + math::itrunc(e.y * 64.0) * 331 + e.hp * 7) & 0xFFFFFFFF;
 		}
 		hh = mix32(hh, live);
 		hh = mix32(hh, acc);
@@ -259,7 +259,7 @@ public:
 		for (auto& p : fx.pool) {
 			int pk = p[0];
 			if (pk == 0) { continue; }
-			pacc = (pacc + pk * 131 + (itrunc(p[1] * 16.0) * 61 + itrunc(p[2] * 16.0)) * 17 + p[7]) & 0xFFFFFFFF;
+			pacc = (pacc + pk * 131 + (math::itrunc(p[1] * 16.0) * 61 + math::itrunc(p[2] * 16.0)) * 17 + p[7]) & 0xFFFFFFFF;
 		}
 		hh = mix32(hh, pacc);
 		hh = mix32(hh, shots.size() * 8191 + kills * 127 + secrets * 31);
@@ -293,7 +293,7 @@ public:
 			float best_d = 12.0;
 			for (auto& e : enemies) {
 				if (!e.alive) { continue; }
-				float d = sqrt(dist2(e.x, e.y, px, py));
+				float d = math::sqrt(dist2(e.x, e.y, px, py));
 				if (d < best_d && los_clear(px, py, e.x, e.y)) {
 					best_d = d;
 					tgt_x = e.x;
@@ -303,7 +303,7 @@ public:
 			}
 			if (found && desperate && best_d > 3.0) { found = false; }
 			if (found) {
-				float want = atan2(tgt_y - py, tgt_x - px);
+				float want = math::atan2(tgt_y - py, tgt_x - px);
 				float da = ang_diff(pang, want);
 				int turn = 0;
 				if (da > 0.05) { turn = 1; }
@@ -340,7 +340,7 @@ public:
 			bool goal_gone = goal_x < 0 || field_age > 240;
 			if (!goal_gone) {
 				// goal completed? (item taken / secret opened / enemy dead handled above)
-				if (tile_at(goal_x, goal_y) == 0 && ifloor(px) == goal_x && ifloor(py) == goal_y) { goal_gone = true; }
+				if (tile_at(goal_x, goal_y) == 0 && math::ifloor(px) == goal_x && math::ifloor(py) == goal_y) { goal_gone = true; }
 			}
 			if (goal_gone) {
 				var goal = pick_goal();
@@ -356,8 +356,8 @@ public:
 				yield pilot_input(false, false, false, false, 1, false, false, -1, false);
 				continue;
 			}
-			int ptx = ifloor(px);
-			int pty = ifloor(py);
+			int ptx = math::ifloor(px);
+			int pty = math::ifloor(py);
 			var here = dist_field[pty * mw + ptx];
 			if (here < 0) {
 				// goal unreachable from here (shouldn't happen): drop it
@@ -383,7 +383,7 @@ public:
 			}
 			float wx = nx + 0.5;
 			float wy = ny + 0.5;
-			float want2 = atan2(wy - py, wx - px);
+			float want2 = math::atan2(wy - py, wx - px);
 			float da2 = ang_diff(pang, want2);
 			int turn2 = 0;
 			if (da2 > 0.08) { turn2 = 1; }
@@ -421,8 +421,8 @@ public:
 			float d = dist2(e.x, e.y, px, py);
 			if (d < hd) {
 				hd = d;
-				hunt_x = ifloor(e.x);
-				hunt_y = ifloor(e.y);
+				hunt_x = math::ifloor(e.x);
+				hunt_y = math::ifloor(e.y);
 			}
 		}
 		if (hunt_x >= 0) { return [hunt_x, hunt_y]; }
@@ -461,8 +461,8 @@ public:
 			float d = dist2(items[i][1], items[i][2], px, py);
 			if (d < bd) {
 				bd = d;
-				bx = ifloor(items[i][1]);
-				by = ifloor(items[i][2]);
+				bx = math::ifloor(items[i][1]);
+				by = math::ifloor(items[i][2]);
 			}
 		}
 		return [bx, by];

@@ -32,6 +32,7 @@
 #include <jaiscript/detail/interpreter_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/vm/vm_backend.hpp>
 
@@ -511,6 +512,20 @@ namespace {
 			if (call->callee && call->callee->get_type() == node_type::member_expr) {
 				auto* m = static_cast<member_expr*>(call->callee.get());
 				if (m->is_static) {
+					// math:: language intrinsics are pure value functions - admitted.
+					// The random trio stays rejected with its own message: it mutates
+					// the ENGINE-OWNED rng (worker race + worker-count nondeterminism).
+					const jai::detail::math_fn fn = jai::detail::math_intrinsic_for_call(m);
+					if (fn == jai::detail::math_fn::random_ || fn == jai::detail::math_fn::random_range ||
+					    fn == jai::detail::math_fn::random_seed) {
+						return fail(m, "math::random/random_seed are not allowed in a parallel body (engine-owned rng state)");
+					}
+					if (fn != jai::detail::math_fn::none) {
+						for (const auto& a : call->arguments) {
+							if (!walk_expr(a)) { return false; }
+						}
+						return true;
+					}
 					return fail(m, "static member calls are not allowed in a parallel body");
 				}
 				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }   // warm

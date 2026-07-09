@@ -1286,6 +1286,28 @@ public:
             check_eq(std::string("12.000000|10.000000|2.000000|2.000000"), r.as_string());
         });
 
+        // Parallel bodies admit math:: intrinsics (pure value functions; admission-time
+        // resolution doubles as the AST-cache prewarm) but reject the random trio
+        // (engine-owned rng = worker race).
+        test("intrinsics_in_parallel_bodies", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                var xs = [1.44, 4.0, 9.0, 20.25];
+                int body(float x) { return math::itrunc(math::sqrt(x) * 10.0); }
+                var out = parallel_transform(xs, body);
+                to_string(out[0]) + "|" + to_string(out[1]) + "|" + to_string(out[2]) + "|" + to_string(out[3]);
+            )");
+            check_eq(std::string("12|20|30|45"), r.as_string());
+            check_throws([&]() {
+                e->execute(R"(
+                    var ys = [1.0, 2.0];
+                    float rbody(float y) { return y + math::random(); }
+                    parallel_transform(ys, rbody);
+                )");
+            });
+        });
+
         // Intrinsics inside hot shapes: loops, method bodies, nested in expressions
         test("intrinsics_in_expressions", [this]() {
             auto e = make_engine();

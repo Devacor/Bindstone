@@ -9,9 +9,13 @@ class ParticlePool {
 public:
 	var pool = [];
 
-	ParticlePool() { reset(); }
+	ParticlePool() { reset_pool(); }
 
-	void reset() {
+	// reset_pool, not reset: the builtin shared_ptr reset() shadows same-named
+	// class methods, so fx.reset() silently no-ops (stale cursor = frames 3424+
+	// diverged from the ports while STATE_HASH stayed blind - its particle fold
+	// is additive, slot-order-invariant)
+	void reset_pool() {
 		pool = [];
 		for (int i = 0; i < PART_MAX; ++i) {
 			pool.push([0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]);

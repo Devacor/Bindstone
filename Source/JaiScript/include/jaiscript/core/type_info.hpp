@@ -54,6 +54,12 @@ namespace jai {
         // via engine::get_type_info_shared_ptr_dynamic. Excluded from equals().
         bool dynamic_pointee = false;
 
+        // Engine-interned "T&" twin cache (engine::get_type_info_reference fast path -
+        // elides the intern-map lookup on every reference mint). Only meaningful on the
+        // INTERNED instance; pre-intern copies carry a discarded value. Excluded from
+        // equals(). Written only outside parallel regions (workers read prewarmed values).
+        type_info* cached_reference_type = nullptr;
+
         // Constructors
         type_info(script_value_type type) : base_type(type) {}
         type_info(script_value_type type, std::string_view name) : base_type(type), type_name(name) {}

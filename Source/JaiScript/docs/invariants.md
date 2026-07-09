@@ -16,12 +16,15 @@ alternative must be pointer-sized and nothrow-move or the asserts fire.
 ## 2. strong_ptr single-pointer rules
 
 `strong_ptr.hpp`: the handle is ONE object pointer; the control block is *derived* at a negative
-offset (`cb_from_object`, :101-108, via `cb_storage_offset = offsetof(control_block<T>, storage)`
-:93 — never hardcode the offset: over-aligned T and the Debug-only magic member both move it).
-Sound only because `make_strong` is the sole producer of a non-null handle: the raw-`T*` ctor is
-deleted (:148) and the cross-type converting ctors are deleted by design (class comment :125-128
-— a Derived→Base conversion would adjust the pointer off the storage head AND slice the
-static-type destroy). `ptr_` MUST always be exactly `control_block<T>::storage`'s head.
+offset (`cb_from_object`, via `cb_storage_offset = offsetof(control_block<T>, storage)`
+— never hardcode the offset: over-aligned T and the Debug-only magic member both move it).
+Sound only because `make_strong` and `detail::adopt_pooled` are the only producers of a non-null
+handle: the raw-`T*` ctor is deleted and the cross-type converting ctors are deleted by design
+(a Derived→Base conversion would adjust the pointer off the storage head AND slice the
+static-type destroy). `adopt_pooled` exists solely for the per-engine `reference_holder` block
+pool (`script_value::reference_holder_pool`, value.cpp): pooled blocks derive `control_block<T>`
+without moving `storage`'s offset (static_assert-gated) and reset counts + Debug magic on reuse,
+so the derivation invariant is preserved. `ptr_` MUST always be exactly `control_block<T>::storage`'s head.
 Enforced: negative `is_constructible` static_asserts (strong_ptr_tests.cpp:224-225),
 `sizeof == sizeof(void*)` gates (strong_ptr.hpp:412-414), and a Debug canary
 `cb_magic_live = 0x5B0CB10C` (:22) asserted at every derivation (:106) and scrambled to
@@ -56,8 +59,16 @@ OWNS the value in inline storage — Lua upvalue), vector element (container+ind
 re-resolve), instance field (owner+id re-resolve), and map entry (pinned map + key
 re-resolve). Rules:
 
-- Cells are minted ONLY by `make_cell_reference` (make_strong single allocation,
-  memory_cap-charged); the boxed value is never itself a reference. Escape-marked
+- Holder blocks come from the per-engine pool (`script_value::acquire_reference_holder`,
+  value.cpp — one pop + placement-new per mint, memory_cap-charged for cells). The pool is
+  single-threaded: parallel workers DO mint cell references inside their bodies, so acquire
+  falls back to plain self-deleting `make_strong` blocks while a region is active (blocks
+  self-describe their release via `dealloc_fn`, so both kinds coexist). Cells are minted
+  ONLY by `make_cell_reference`; the boxed value is never itself a reference.
+- Subscript reads whose consumer provably discards identity skip the holder mint entirely
+  (`detail/transient_read.hpp`, parse-time classifier consumed by BOTH backends; runtime
+  gate `has_custom_binary_ops_`). Any NEW lvalue-consuming syntax must keep its operand
+  positions unmarked there — see the checklist comment at the classifier. Escape-marked
   declarations (`parser.cpp` ref_escape_marker) box at decl/bind; unmarked storage
   boxes ON DEMAND at the first ref bind through the ONE box-in-place + share kernel
   pair (`vm_backend::share_env_ref` / interpreter `share_boxed_env_storage`; ref-param

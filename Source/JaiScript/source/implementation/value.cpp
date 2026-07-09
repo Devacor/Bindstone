@@ -72,6 +72,90 @@ script_value* script_value::reference_holder::resolve_target() {
     return nullptr;   // unreachable: every factory sets a mode
 }
 
+// Per-engine free-list of reference_holder control blocks: a mint is a pop +
+// placement-new instead of a heap allocation (the hot element/field/cell paths).
+// Blocks self-describe their release through dealloc_fn, so plain make_strong
+// holders and pooled holders coexist - which is what keeps this single-threaded:
+// parallel workers DO mint cell references inside their bodies, so acquire falls
+// back to plain make_strong while a region is active (main thread parked). If the
+// engine dies while user-held references are still out, the pool is orphaned and
+// the last returning block frees it.
+struct script_value::reference_holder_pool {
+    struct block : jai::detail::control_block<reference_holder> {
+        reference_holder_pool* home = nullptr;
+    };
+    static_assert(offsetof(block, storage) == jai::detail::cb_storage_offset<reference_holder>,
+                  "pooled blocks must keep storage at control_block<T>'s head offset (cb_from_object)");
+
+    static constexpr size_t max_free_blocks = 256;
+    std::vector<block*> free_blocks;
+    size_t outstanding = 0;      // checked-out blocks (live holders)
+    bool engine_alive = true;
+
+    static void return_block(jai::detail::control_block_base* base) {
+        block* b = static_cast<block*>(static_cast<jai::detail::control_block<reference_holder>*>(base));
+        reference_holder_pool* pool = b->home;
+        --pool->outstanding;
+        if (pool->engine_alive && pool->free_blocks.size() < max_free_blocks) {
+#ifndef NDEBUG
+            base->magic = jai::detail::cb_magic_dead;   // scrambled while parked (use-after-free canary)
+#endif
+            pool->free_blocks.push_back(b);
+        } else {
+            delete b;
+            if (!pool->engine_alive && pool->outstanding == 0) {
+                delete pool;
+            }
+        }
+    }
+
+    strong_ptr<reference_holder> acquire() {
+        block* b;
+        if (!free_blocks.empty()) {
+            b = free_blocks.back();
+            free_blocks.pop_back();
+            b->strong_count = 1;
+            b->weak_count = 1;
+#ifndef NDEBUG
+            b->magic = jai::detail::cb_magic_live;
+#endif
+        } else {
+            b = new block();
+            b->home = this;
+            b->dealloc_fn = &return_block;
+        }
+        ++outstanding;
+        return jai::detail::adopt_pooled(new (b->storage) reference_holder());
+    }
+
+    static void teardown(void* p) {
+        auto* pool = static_cast<reference_holder_pool*>(p);
+        for (block* b : pool->free_blocks) {
+            delete b;
+        }
+        pool->free_blocks.clear();
+        if (pool->outstanding == 0) {
+            delete pool;
+        } else {
+            pool->engine_alive = false;
+        }
+    }
+};
+
+strong_ptr<script_value::reference_holder> script_value::acquire_reference_holder(engine* eng) {
+    // Worker-side mint (cell refs inside parallel bodies): the pool is single-threaded
+    // (main thread is parked while workers run), so take a plain self-deleting block
+    if (eng->parallel_region_active()) [[unlikely]] {
+        return make_strong<reference_holder>();
+    }
+    void*& slot = eng->reference_holder_pool_slot();
+    if (!slot) [[unlikely]] {
+        slot = new reference_holder_pool();
+        eng->set_reference_holder_pool_teardown(&reference_holder_pool::teardown);
+    }
+    return static_cast<reference_holder_pool*>(slot)->acquire();
+}
+
 script_value script_value::make_cell_reference(script_value&& boxed, engine* eng) {
     static_assert(sizeof(script_value) == reference_holder::cell_storage_size &&
                   alignof(script_value) <= 8, "cell inline storage must fit a script_value");
@@ -82,7 +166,7 @@ script_value script_value::make_cell_reference(script_value&& boxed, engine* eng
     v.type_info_ = eng->get_type_info_reference(boxed.get_type_info());
     // engine::memory_cap: cells are heap boxes (raised at the next loop back-edge)
     eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
-    auto ref = make_strong<reference_holder>();
+    auto ref = acquire_reference_holder(eng);
     new (ref->cell_storage) script_value(std::move(boxed));
     ref->has_cell = true;
     v.storage_ = ref;
@@ -101,7 +185,7 @@ script_value script_value::make_map_entry_reference(const strong_ptr<std::map<sc
     auto it = map_storage->find(key);
     v.type_info_ = eng->get_type_info_reference(it != map_storage->end() ? it->second.get_type_info() : nullptr);
     eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
-    auto ref = make_strong<reference_holder>();
+    auto ref = acquire_reference_holder(eng);
     new (ref->cell_storage) script_value(key.is_reference() ? key.deref() : key);
     ref->has_map_key = true;
     ref->container_map = map_storage;
@@ -270,7 +354,7 @@ script_value script_value::make_element_reference(const strong_ptr<std::vector<s
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_reference((*container)[index].get_type_info());
-    auto ref = make_strong<reference_holder>();
+    auto ref = acquire_reference_holder(eng);
     ref->container_element_type = element_type;
     ref->container = container;          // owns the vector (keeps it alive) + enables re-resolve
     ref->container_index = index;
@@ -292,7 +376,7 @@ script_value script_value::make_field_reference(const std::shared_ptr<class_inst
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_reference(field_value->get_type_info());
-    auto ref = make_strong<reference_holder>();
+    auto ref = acquire_reference_holder(eng);
     ref->owner_instance = owner;          // pins the instance for the reference's lifetime
     ref->field_id = field_id;
     ref->container_element_type = field_type;

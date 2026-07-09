@@ -1250,6 +1250,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		compile_expression(expr->left);
 		compile_expression(expr->right);
 		uint32_t flags = is_lvalue_shaped(expr->left.get()) ? index_flag_lvalue_shape : 0;
+		if (expr->transient_element_read) {
+			flags |= index_flag_transient_read;
+		}
 		emit(opcode::op_index, flags);
 		return;
 	}

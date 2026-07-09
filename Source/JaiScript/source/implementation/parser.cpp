@@ -2,6 +2,7 @@
 #include "../../include/jaiscript/core/engine.hpp"
 #include "../../include/jaiscript/detail/interpreter.hpp"  // For string_symbolizer
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // checked constant folding
+#include "../../include/jaiscript/detail/transient_read.hpp"
 #include <sstream>
 #include <iostream>
 #include <optional>
@@ -449,6 +450,10 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
         marker.symbolizer = symbolizer_;
         marker.run(declarations);
     }
+
+    // Transient-read pass: mark subscript reads consumed as transient values so both
+    // backends elide the element-reference mint (detail/transient_read.hpp)
+    detail::mark_transient_reads(declarations);
 
     // Mark the last expression declaration as an implicit return
     if (!declarations.empty()) {

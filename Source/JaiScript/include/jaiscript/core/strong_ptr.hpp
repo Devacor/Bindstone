@@ -92,9 +92,11 @@ struct control_block : control_block_base {
 template<typename T>
 inline constexpr size_t cb_storage_offset = offsetof(control_block<T>, storage);
 
-// Derive the control block from an object pointer. Sound because make_strong is the ONLY
-// producer of a non-null handle (raw ctor deleted, converting ctors deleted, no aliasing
-// ctor; lock() copies an existing ptr_), and it sets ptr_ = &control_block<T>::storage.
+// Derive the control block from an object pointer. Sound because make_strong and
+// adopt_pooled are the ONLY producers of a non-null handle (raw ctor deleted, converting
+// ctors deleted, no aliasing ctor; lock() copies an existing ptr_), and both set
+// ptr_ = &control_block<T>::storage (pooled blocks derive control_block<T> without
+// moving storage's offset).
 // A live weaker_ptr holds weak_count >= 1 and dealloc runs only when weak_count -> 0, so
 // the combined block outlives every non-null handle — the derivation stays valid for the
 // handle's whole life, including expired weaks (which touch only counts, never object bytes).
@@ -108,6 +110,14 @@ inline control_block_base* cb_from_object(T* p) noexcept {
 }
 
 struct adopt_tag {};
+
+// Reserved for engine-owned block pools (script_value's reference_holder pool,
+// value.cpp): adopt a strong count already established on a reused control_block<T>.
+// The single-pointer derivation invariant holds because pooled blocks ARE
+// control_block<T> (derived without moving storage's offset) and `ptr` is exactly
+// the placement-new result at control_block<T>::storage's head.
+template<typename T>
+strong_ptr<T> adopt_pooled(T* ptr) noexcept;
 
 } // namespace detail
 
@@ -258,7 +268,13 @@ private:
 
     template<typename U> friend class weaker_ptr;
     template<typename U, typename... Args> friend strong_ptr<U> make_strong(Args&&...);
+    template<typename U> friend strong_ptr<U> detail::adopt_pooled(U*) noexcept;
 };
+
+template<typename T>
+strong_ptr<T> detail::adopt_pooled(T* ptr) noexcept {
+    return strong_ptr<T>(ptr, detail::adopt_tag{});
+}
 
 /**
  * @brief Weak reference to an object managed by strong_ptr
@@ -380,8 +396,9 @@ private:
  * - Single allocation instead of two
  * - Reduced memory fragmentation
  *
- * make_strong is the ONLY producer of a non-null strong_ptr — the single-pointer
- * control-block derivation depends on that (see detail::cb_from_object).
+ * make_strong (and the pool-reuse twin detail::adopt_pooled) are the ONLY producers of
+ * a non-null strong_ptr — the single-pointer control-block derivation depends on that
+ * (see detail::cb_from_object).
  *
  * @tparam T The type of object to create
  * @tparam Args Constructor argument types

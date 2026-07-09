@@ -44,6 +44,7 @@ namespace jai::vm {
 
         void set_execution_budget(std::chrono::nanoseconds budget) override;
         void set_has_custom_numeric_ops(bool value) override { has_custom_numeric_ops_ = value; }
+        void set_has_custom_binary_ops(bool value) override { has_custom_binary_ops_ = value; }
         void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) override {
             subscript_resolver_ = std::move(resolver);
         }
@@ -411,6 +412,7 @@ namespace jai::vm {
 
 
         bool has_custom_numeric_ops_ = false;
+        bool has_custom_binary_ops_ = false;
         std::function<checked_result<script_value>(const std::vector<script_value>&)> subscript_resolver_;
         std::function<std::shared_ptr<class_definition>(const std::string&)> class_lookup_;
 

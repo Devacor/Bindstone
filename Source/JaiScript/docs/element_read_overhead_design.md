@@ -119,6 +119,36 @@ for reads, "mirror the map branch," then mirror to VM. **Not shipping it.** The 
   Beating Python (2.5ms) is NOT a Stage-1 outcome — it is a multi-stage target (this stage +
   the compound-store/dispatch work). First measurement gate after Stage 1.
 
+## Stage 1 status (landed, 2026-07)
+
+Implemented as specified, both backends atomically:
+
+- **(c) Classifier**: `detail/transient_read.hpp` — a parse-time pass (sibling of
+  `ref_escape_marker`) stamping `binary_expr::transient_element_read`; both backends consume
+  the same bit (parity by construction). Default mint-when-unknown; the transient set is
+  builtin-binary-op operands (left only under a `callout_free` sibling), `&&`/`||` operands,
+  if/while/for/ternary conditions, subscript index/key positions, transient-chain bases, and
+  assignment RHS under a `callout_free` target (both backends deref the RHS before storing —
+  verified byte-parallel). Unary operands are deliberately excluded (`-arr[i]`/`~arr[i]` do
+  not deref references today; marking would tie that pre-existing error to the runtime gate).
+- **(b) Copy fast path**: interpreter subscript branch + `vm_backend::exec_index` take the
+  existing temporary-copy branch when marked, runtime-gated on a new engine-wide
+  `has_custom_binary_ops_` (any binary-operator or `"[]"` global registration flips it via
+  the `register_overload_impl`/`add_global` chokepoints; `set_has_custom_numeric_operators(true)`
+  latches it). Map transient reads use the never-insert copy branch.
+- **(a) Mint elision**: `get_type_info_reference` caches the interned `T&` twin on the
+  referenced `type_info` itself (+ an engine slot for null), eliding the intern-map lookup;
+  write is skipped inside parallel regions (prewarm fills it beforehand). Holder blocks come
+  from a per-engine free-list pool (`script_value::reference_holder_pool`, value.cpp) via
+  `detail::adopt_pooled` — pop + placement-new instead of malloc; blocks self-describe via
+  `dealloc_fn`; engine death with escaped references orphans the pool (last release frees it).
+  Debug keeps the 0xDD-style canary: parked blocks scramble `cb_magic` (it caught the one
+  real bug during landing: parallel workers DO mint cell references in their bodies, so
+  in-region acquires fall back to plain `make_strong` — the pool stays single-threaded).
+- Pins in `Element Read Elision` suite (review_regression_tests.cpp): operand/condition/RHS
+  elision values, chain reads, map never-insert, impure-sibling mint retention, ref-decl
+  binds, override fallback via the gate, pool churn, and pool-orphan release after engine death.
+
 ## Open risks
 
 - Frame-level payoff unconfirmed until a GLOOM profile run (first gate after Stage 1).

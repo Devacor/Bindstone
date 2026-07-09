@@ -1702,6 +1702,14 @@ namespace jai {
             // (class_instance complete there).
             script_value* resolve_target();
         };
+
+        // Per-engine block pool for reference_holder mints (defined in value.cpp; state
+        // lives behind engine::reference_holder_pool_slot). Elides the make_strong heap
+        // allocation on the element/field/map-entry/cell mint paths. Single-threaded:
+        // while a parallel region's workers run (they mint cell refs in their bodies),
+        // acquire falls back to plain make_strong blocks that never touch the pool.
+        struct reference_holder_pool;
+        static strong_ptr<reference_holder> acquire_reference_holder(engine* eng);
         
         
         // Tag type for invalid values

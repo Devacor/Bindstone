@@ -229,6 +229,20 @@ static int compute_param_match_cost(
 }
 
 struct engine::implementation {
+    // Per-engine reference_holder block pool, type-erased (value.cpp owns the type).
+    // Declared FIRST so it is destroyed LAST - every other member releasing reference
+    // values on teardown returns its blocks to a live pool. The teardown orphans the
+    // pool if user-held references still exist; the last release then frees it.
+    struct ref_holder_pool_slot_holder {
+        void* pool = nullptr;
+        void (*teardown)(void*) = nullptr;
+        ~ref_holder_pool_slot_holder() {
+            if (pool && teardown) {
+                teardown(pool);
+            }
+        }
+    } ref_holder_pool_;
+
     // Unified conversion registry (replaces both type_conversions and custom_conversions)
     std::shared_ptr<conversions::conversion_registry> conversions;
 
@@ -478,6 +492,7 @@ struct engine::implementation {
     type_info* type_info_void_ = nullptr;
     type_info* type_info_invalid_ = nullptr;
     type_info* type_info_any_ = nullptr;
+    type_info* type_info_reference_null_ = nullptr;   // interned "null&" twin (get_type_info_reference fast path)
 
     
     // Template type registry for parsing (stores base template names like "Point", "MyMap")
@@ -491,6 +506,28 @@ struct engine::implementation {
     bool has_executed_ = false; // Once true, set_backend is forbidden (defined callables capture the backend)
     bool tearing_down = false;  // engine dtor: backend() must not reconstruct for late thunks
     bool custom_numeric_ops_flag_ = false; // sticky signal from add_function; applied at wiring
+    // Sticky: ANY binary-operator / "[]" symbol registered as a global function. While set,
+    // transient subscript reads keep minting references (detail/transient_read.hpp gate).
+    bool custom_binary_ops_flag_ = false;
+
+    static bool is_binary_operator_symbol(std::string_view name) {
+        // Exactly the operator symbols the backends' binary dispatch can resolve to a
+        // global function, plus the custom subscript resolver's "[]"
+        return name == "+" || name == "-" || name == "*" || name == "/" || name == "%" ||
+               name == "<" || name == "<=" || name == ">" || name == ">=" ||
+               name == "==" || name == "!=" || name == "<=>" ||
+               name == "&" || name == "|" || name == "^" || name == "<<" || name == ">>" ||
+               name == "[]";
+    }
+
+    void note_custom_binary_operator(const std::string& name) {
+        if (!custom_binary_ops_flag_ && is_binary_operator_symbol(name)) {
+            custom_binary_ops_flag_ = true;
+            if (backend) {
+                backend->set_has_custom_binary_ops(true);
+            }
+        }
+    }
 
     // Step-debugger controller, lazily created on first engine::debugger() call.
     std::unique_ptr<debug::controller> debugger_;
@@ -873,6 +910,18 @@ engine::implementation::implementation()
 }
 
 engine::implementation::~implementation() = default;
+
+void*& engine::reference_holder_pool_slot() {
+    return impl->ref_holder_pool_.pool;
+}
+
+void engine::set_reference_holder_pool_teardown(void (*teardown)(void*)) {
+    impl->ref_holder_pool_.teardown = teardown;
+}
+
+bool engine::parallel_region_active() const {
+    return impl->parallel_ && impl->parallel_->active_region;
+}
 
 void engine::implementation::updateOverloadedFunction(const std::string& name, engine* engine_ptr) {
     // Create a dispatch function that selects the right overload
@@ -1676,6 +1725,7 @@ size_t engine::jaibite_cache_write_failures() const {
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
     ++impl->check_surface_epoch_;   // the static checker can see globals
+    impl->note_custom_binary_operator(name);
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
     impl->global_environment_->define(id, std::move(value));
@@ -1715,6 +1765,7 @@ void engine::add_variadic_function(const std::string& name, script_function func
 void engine::register_overload_impl(const std::string& name, size_t arity, script_function func,
                                     const std::vector<param_type_info>& paramTypes, bool createSetOnFirst) {
     ++impl->check_surface_epoch_;   // the static checker can see registered functions
+    impl->note_custom_binary_operator(name);
     auto existing_result = impl->global_environment_->get(name);
     bool hasExisting = existing_result && existing_result.value().is_function();
     bool setExists = impl->overloadedFunctions.find(name) != impl->overloadedFunctions.end();
@@ -1939,6 +1990,12 @@ void engine::set_has_custom_numeric_operators(bool value) {
     // This allows users to opt-in to custom operator support when needed
     // By default, the fast path is enabled (no custom operators)
     impl->custom_numeric_ops_flag_ = value;
+    if (value && !impl->custom_binary_ops_flag_) {
+        impl->custom_binary_ops_flag_ = true;   // latch: numeric overrides imply the mint gate
+        if (impl->backend) {
+            impl->backend->set_has_custom_binary_ops(true);
+        }
+    }
     if (impl->backend) {
         impl->backend->set_has_custom_numeric_ops(value);
     }
@@ -1988,6 +2045,7 @@ void engine::wire_backend() {
                                               impl->overloadedFunctions.count("-") > 0 ||
                                               impl->overloadedFunctions.count("*") > 0 ||
                                               impl->overloadedFunctions.count("/") > 0);
+    impl->backend->set_has_custom_binary_ops(impl->custom_binary_ops_flag_ || impl->custom_numeric_ops_flag_);
 
     auto budget = impl->execution_budget_seconds_ > 0
         ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(impl->execution_budget_seconds_))
@@ -2052,6 +2110,12 @@ std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::sc
 void engine::setHasCustomNumericOps(bool value) {
     // Set the flag on the backend (which might be interpreter or VM)
     impl->custom_numeric_ops_flag_ = value;
+    if (value && !impl->custom_binary_ops_flag_) {
+        impl->custom_binary_ops_flag_ = true;   // latch: numeric overrides imply the mint gate
+        if (impl->backend) {
+            impl->backend->set_has_custom_binary_ops(true);
+        }
+    }
     if (impl->backend) {
         impl->backend->set_has_custom_numeric_ops(value);
     }
@@ -2259,21 +2323,40 @@ type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
 }
 
 type_info* engine::get_type_info_reference(type_info* referenced_type) {
+    // Hot mint path: the interned "T&" twin is cached on the referenced type itself
+    // (and on the engine for T == null), so repeat mints skip the intern-map lookup
+    if (referenced_type && referenced_type->cached_reference_type) {
+        return referenced_type->cached_reference_type;
+    }
+    if (!referenced_type && impl->type_info_reference_null_) {
+        return impl->type_info_reference_null_;
+    }
+
     // Use composite key for fast lookup - no string construction needed on cache hit
     implementation::type_key key{script_value_type::jai_reference_type, referenced_type ? referenced_type->id : 0, 0};
 
-    // Check if we already have this type interned
+    type_info* ptr = nullptr;
     auto it = impl->type_infos_.find(key);
     if (it != impl->type_infos_.end()) {
-        return &it->second;
+        ptr = &it->second;
+    } else {
+        // Cache miss - construct full type_info and insert
+        impl->deny_type_intern_in_region();
+        type_info temp = type_info::make_reference(impl->string_symbolizer_, referenced_type);
+        auto result = impl->type_infos_.emplace(key, temp);
+        ptr = &result.first->second;
+        impl->type_id_index_[ptr->id] = ptr;
     }
 
-    // Cache miss - construct full type_info and insert
-    impl->deny_type_intern_in_region();
-    type_info temp = type_info::make_reference(impl->string_symbolizer_, referenced_type);
-    auto result = impl->type_infos_.emplace(key, temp);
-    type_info* ptr = &result.first->second;
-    impl->type_id_index_[ptr->id] = ptr;
+    // Fill the twin cache only on the region-free path: workers may reach here for a
+    // shape that was interned but never prewarmed, and must not race the cache write
+    if (!(impl->parallel_ && impl->parallel_->active_region)) {
+        if (referenced_type) {
+            referenced_type->cached_reference_type = ptr;
+        } else {
+            impl->type_info_reference_null_ = ptr;
+        }
+    }
     return ptr;
 }
 

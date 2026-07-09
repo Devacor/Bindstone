@@ -206,6 +206,11 @@ namespace jai {
         expression_ptr left;
         token op;
         expression_ptr right;
+        // Subscript reads (op == left_bracket) whose result is provably consumed as a
+        // transient value: both backends elide the element-reference mint and push a
+        // shallow copy instead (runtime-gated on operator overrides). Stamped by the
+        // parser's transient_read_marker pass (detail/transient_read.hpp).
+        bool transient_element_read = false;
 
         binary_expr(const source_location& loc, expression_ptr l, const token& o, expression_ptr r)
             : expression(loc, node_type::binary_expr), left(l), op(o), right(r) {}

@@ -3506,7 +3506,14 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                             (expr->left->get_type() == node_type::binary_expr &&
                              static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
 
-            if (is_lvalue) {
+            // Transient read (transient_read.hpp): the consumer provably discards
+            // identity, so skip the reference mint and push a shallow element copy.
+            // Overrides re-enable the mint at runtime - operand copies would be
+            // observable via use_count inside them. (KEEP BYTE-PARALLEL with
+            // vm_backend::exec_index)
+            const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
+
+            if (is_lvalue && !transient_read) {
                 // Reallocation-safe reference to the element (container+index, not a raw
                 // pointer into the vector buffer): holding `arr[i]` as an lvalue across a
                 // push that reallocates would otherwise dangle -> heap corruption (#41).
@@ -3530,6 +3537,9 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                                 expr->left->get_type() == node_type::member_expr ||
                                 (expr->left->get_type() == node_type::binary_expr &&
                                  static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
+
+                // Transient map read: copy branch below (never inserts, never mints)
+                const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
 
                 if (is_lvalue && want_lvalue_write) {
                     // Assignment target (m[k] = v): auto-insert a slot so the
@@ -3562,7 +3572,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     // Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
                     script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, engine_, value_type);
                     push_value(ref_value);
-                } else if (is_lvalue) {
+                } else if (is_lvalue && !transient_read) {
                     // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
                     // of m[k][i] / m[k].field): return a reference to the EXISTING
                     // entry so nested in-place mutation still works, but NEVER

@@ -112,13 +112,25 @@ namespace jai::detail {
         // INTERNED symbol ids, never std::string (no per-region allocation).
         std::vector<std::pair<uint64_t, parallel_capture_kind>> last_captures;
 
-        // Worker-context reuse (Dev-greenlit): slots built inside the first region
-        // persist and are RESET per call (limits re-slice, budget re-arm, residual-state
-        // clear, host-copy refresh) instead of rebuilt; a slot rebuilds only when its
+        // Worker-context reuse (Dev-greenlit): slots built inside a region persist and
+        // are RESET per call (limits re-slice, budget re-arm, residual-state clear,
+        // host-copy refresh) instead of rebuilt; a slot rebuilds only when its
         // provisioning fingerprint (backend type + admission-graph bodies) changes.
-        // Sequential paths never see any of this - the state itself is created lazily
-        // inside the first region.
-        std::vector<std::unique_ptr<parallel_worker_slot>> worker_slots;
+        // Slot-sets are POOLED PER REGION FINGERPRINT (fn body + backend): a frame that
+        // cycles several distinct regions (GLOOM: rays, transform, glyph rows) keeps a
+        // persistent context set for each instead of rebuilding every slot every call
+        // (measured: 10k backend constructions per 600 ticks with the single-set pool).
+        // Small LRU cap; sequential paths never see any of this - the state itself is
+        // created lazily inside the first region.
+        struct parallel_region_pool {
+            const void* fn_body = nullptr;
+            bool use_vm = false;
+            uint64_t last_use = 0;
+            std::vector<std::unique_ptr<parallel_worker_slot>> worker_slots;
+        };
+        static constexpr size_t max_region_pools = 8;
+        std::vector<parallel_region_pool> region_pools;
+        uint64_t region_use_counter = 0;
 
         parallel_engine_state();
         ~parallel_engine_state();   // out of line: worker_slot is incomplete here

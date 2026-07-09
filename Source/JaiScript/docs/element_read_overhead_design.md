@@ -190,6 +190,32 @@ the non-fast-path operator machinery; op[] and += get true fast paths").
   implementation-mirrored); its table wins: no more per-op env probe on the generic binary
   path, no string construction per compound store.
 
+## Stage 3b: N-level chains + the profile that closes the campaign (2026-07-09)
+
+- **N-level chain fusion**: `fused_operand` holds a subscript CHAIN (outermost-application
+  order, sanity-capped at 8 levels — not a semantic limit). Array levels step a pointer in
+  place; ANY other level (map key, borrow, OOB, non-int) replays that one level through the
+  real `op_index` and the walk continues — so `m["rows"][y][x]` fuses its array suffix while
+  the map level keeps byte-identical never-insert semantics. Truly general N-level.
+- **Landing bug caught by pin**: the env-lookup cache is provenance-({env,epoch})-checked but
+  NOT symbol-checked; sharing role slot ip*3+2 for both operands' indexes aliased `i`/`j` at
+  top level. Index lookups now pass a SIZE_MAX sentinel that skips the cache (hot code
+  resolves indexes from frame slots anyway).
+- **JAISCRIPT_VM_PROFILE**: rdtsc opcode self-time histogram + in-loop-miss callee counts in
+  `run_dispatch`/`exec_call_from_scratch`, dumped by `~vm_backend`. Compile-flag-gated, zero
+  cost off; build a separate dir with `/DJAISCRIPT_VM_PROFILE` (the flag changes the class
+  layout — build-wide or not at all). The main engine's dump is the LARGEST "total N Mcycles"
+  block; small dumps are worker/startup engines.
+- **The GLOOM profile verdict** (600 ticks): element traffic (INDEX/INDEX_STORE/BINARY*)
+  is ~15% combined — this campaign is done as a frame lever. The wall is the CALL BOUNDARY:
+  `op_call_from_scratch` = 56.5% of cycles, and the in-loop-miss table names it — `itrunc`
+  80.5k, `ifloor` 78k, `sqrt` 12k (~290 math-builtin boundary crossings/tick, each paying
+  arg-vector + value copies + std::function for one machine instruction), `parallel_transform`
+  3/tick (main thread holds the whole region: barrier grid scan + palette snapshots),
+  `brain.resume()` fiber switches under CALL_METHOD. Plus 39k `op_load`/tick at ~37ns = the
+  structural stack-vs-register gap. Next campaign: builtin-call fast lane (intrinsic dispatch
+  for pure-numeric natives), then region-entry cost, then method/coroutine cost.
+
 ## Open risks
 
 - Frame-level payoff unconfirmed until a GLOOM profile run (first gate after Stage 1).

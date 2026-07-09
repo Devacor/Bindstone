@@ -18,24 +18,31 @@ namespace jai::vm {
 
     // One side of a fused binary/compound operand: identifier (slot + symbol index)
     // or literal (constant index). Mirrors what op_load/op_const would resolve.
+    // One level of a fused subscript chain: an identifier index or an int literal.
+    struct fused_subscript_index {
+        static constexpr uint8_t index_ident = 1;
+        static constexpr uint8_t index_literal = 2;
+        uint8_t kind = index_ident;
+        uint32_t slot = k_invalid_u32;    // ident: function-frame slot (k_invalid_u32 = env)
+        uint32_t symbol = k_invalid_u32;  // ident: index into chunk::symbols
+        int64_t literal = 0;              // literal: the int index
+    };
+
     struct fused_operand {
         uint32_t slot = k_invalid_u32;        // function-frame slot (k_invalid_u32 = env)
         uint32_t symbol = k_invalid_u32;      // index into chunk::symbols; invalid = literal
         uint32_t const_index = k_invalid_u32; // index into chunk::constants; invalid = identifier
         uint32_t load_flags = 0;              // load_flag_* (type-ctor names)
 
-        // Subscript-read operand `base[index]` (transient-marked element read, so the
-        // elision ruling applies): slot/symbol above name the BASE container; the index
-        // is an identifier (index_slot/index_symbol) or an int literal (index_literal).
+        // Subscript-read operand `base[i][j]...[k]` (every level transient-marked, so the
+        // elision ruling applies): slot/symbol above name the BASE container; the chain
+        // holds one entry per level, OUTERMOST-application order (base[chain[0]][chain[1]]...).
+        // Truly N-level: array levels resolve in place, any other level (map key, borrow,
+        // OOB) replays that one level through the real op_index and the walk continues.
         // Only exec_binary_fused resolves these; fused_cmp_operand and the counted-for /
         // call-site consumers never see one (compiler emits them for binary operands only).
-        static constexpr uint8_t subscript_none = 0;
-        static constexpr uint8_t subscript_index_ident = 1;
-        static constexpr uint8_t subscript_index_literal = 2;
-        uint8_t subscript_kind = subscript_none;
-        uint32_t index_slot = k_invalid_u32;
-        uint32_t index_symbol = k_invalid_u32;
-        int64_t index_literal = 0;
+        std::vector<fused_subscript_index> subscript_chain;
+        bool is_subscript() const noexcept { return !subscript_chain.empty(); }
     };
 
     // Per-call-site argument metadata: symbol id per argument (UINT64_MAX = not an identifier)

@@ -26,7 +26,15 @@ namespace jai::vm {
     class vm_backend : public execution_backend {
     public:
         vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env);
+#ifdef JAISCRIPT_VM_PROFILE
+        ~vm_backend() override { dump_opcode_profile(); }
+        void dump_opcode_profile() const;
+        uint64_t profile_cycles_[256] = {};
+        uint64_t profile_counts_[256] = {};
+        std::map<std::string, uint64_t> profile_native_callees_;   // in-loop fast-path misses by name
+#else
         ~vm_backend() override = default;
+#endif
 
         script_value execute(const std::vector<declaration_ptr>& declarations) override;
         script_value execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;

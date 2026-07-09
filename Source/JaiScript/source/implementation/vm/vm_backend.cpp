@@ -9,6 +9,10 @@
 #include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#ifdef JAISCRIPT_VM_PROFILE
+#include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
+#include <algorithm>
+#endif
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
 #include <jaiscript/debug/controller.hpp>   // step-debugger statement hook (phase 5)
@@ -4003,56 +4007,64 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 		"Undefined variable '{0}'", sym);
 }
 
-// Fused subscript-read operand `base[index]` (docs/element_read_overhead_design.md
-// Stage 3): the plain-array shape returns a pointer to the element in place - zero
-// copies, no op_index dispatch. Sound because the other operand's resolution runs no
+// Fused subscript-read operand `base[i][j]...[k]` (docs/element_read_overhead_design.md
+// Stage 3, N-level): array levels step a pointer IN PLACE - zero copies, no op_index
+// dispatch. Sound because index resolution and the other operand's resolution run no
 // user code (idents/literals/element reads only) and the numeric fast path consumes
-// scalars immediately. Every other shape (map/string/object/borrow/non-int index/OOB)
-// REPLAYS the exact unfused op_index (lvalue_shape + transient flags, matching what
-// the classifier stamped on this node) into scratch - semantics and error text
-// byte-identical by construction.
+// scalars immediately. Any other level (map key, string, object, borrow, non-int index,
+// OOB) REPLAYS that one level through the exact unfused op_index (lvalue_shape +
+// transient flags, matching what the classifier stamped on every chain node) into
+// scratch, then the walk continues - semantics and error text byte-identical per level
+// by construction.
 checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, const fused_operand& operand,
                                                                       std::optional<script_value>& scratch,
                                                                       size_t cache_slot) {
 	std::optional<script_value> base_scratch;
 	auto base = fused_ident_value(f, operand, base_scratch, cache_slot);
 	if (!base) return base.error_value();
-	const script_value& container = *base.value();
+	const script_value* current = base.value();
 
-	std::optional<script_value> index_scratch;
-	const script_value* index_ptr = nullptr;
-	script_value index_literal_value(std::monostate{}, engine_);
-	if (operand.subscript_kind == fused_operand::subscript_index_literal) {
-		index_literal_value = script_value(static_cast<script_int>(operand.index_literal), engine_);
-		index_ptr = &index_literal_value;
-	} else {
-		fused_operand index_operand;
-		index_operand.slot = operand.index_slot;
-		index_operand.symbol = operand.index_symbol;
-		// SIZE_MAX: no reserved cache role for indexes - a shared slot would alias two
-		// different index symbols in one instruction (the cache is not symbol-checked)
-		auto idx = fused_ident_value(f, index_operand, index_scratch, SIZE_MAX);
-		if (!idx) return idx.error_value();
-		index_ptr = idx.value();
-	}
-
-	if (container.raw_storage_index() == script_value::TYPEID_ARRAY && index_ptr->is_int()) {
-		const script_int index = index_ptr->unchecked_as_int();
-		const auto& array = container.unchecked_as_array();
-		if (index >= 0 && index < static_cast<script_int>(array.size())) {
-			return &array[static_cast<size_t>(index)].deref();
+	for (const fused_subscript_index& level : operand.subscript_chain) {
+		std::optional<script_value> index_scratch;
+		const script_value* index_ptr = nullptr;
+		script_value index_literal_value(std::monostate{}, engine_);
+		if (level.kind == fused_subscript_index::index_literal) {
+			index_literal_value = script_value(static_cast<script_int>(level.literal), engine_);
+			index_ptr = &index_literal_value;
+		} else {
+			fused_operand index_operand;
+			index_operand.slot = level.slot;
+			index_operand.symbol = level.symbol;
+			// SIZE_MAX: no reserved cache role for indexes - a shared slot would alias
+			// different index symbols in one instruction (the cache is not symbol-checked)
+			auto idx = fused_ident_value(f, index_operand, index_scratch, SIZE_MAX);
+			if (!idx) return idx.error_value();
+			index_ptr = idx.value();
 		}
-	}
 
-	// Slow replay: identical to the unfused op_index this proto replaced
-	stack_.push_back(container);
-	stack_.push_back(*index_ptr);
-	vm_instruction index_ins{opcode::op_index, index_flag_lvalue_shape | index_flag_transient_read, 0, 0};
-	auto indexed = exec_index(f, index_ins);
-	if (!indexed) return indexed.error_value();
-	scratch.emplace(std::move(stack_.back()));
-	stack_.pop_back();
-	return &scratch.value().deref();
+		if (current->raw_storage_index() == script_value::TYPEID_ARRAY && index_ptr->is_int()) {
+			const script_int index = index_ptr->unchecked_as_int();
+			const auto& array = current->unchecked_as_array();
+			if (index >= 0 && index < static_cast<script_int>(array.size())) {
+				current = &array[static_cast<size_t>(index)].deref();
+				continue;
+			}
+		}
+
+		// Slow replay for THIS level: identical to the unfused op_index it replaced.
+		// The container copy goes onto the stack before scratch is overwritten, so
+		// replacing a scratch the walk was pointing into is safe.
+		stack_.push_back(*current);
+		stack_.push_back(*index_ptr);
+		vm_instruction index_ins{opcode::op_index, index_flag_lvalue_shape | index_flag_transient_read, 0, 0};
+		auto indexed = exec_index(f, index_ins);
+		if (!indexed) return indexed.error_value();
+		script_value element = std::move(stack_.back());
+		stack_.pop_back();
+		scratch.emplace(std::move(element));
+		current = &scratch.value().deref();
+	}
+	return current;
 }
 
 checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
@@ -4065,7 +4077,7 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 
 	if (p.left.const_index != k_invalid_u32) {
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
-	} else if (p.left.subscript_kind != fused_operand::subscript_none) {
+	} else if (p.left.is_subscript()) {
 		auto resolved = fused_subscript_value(f, p.left, lscratch, f.ip * 3);
 		if (!resolved) return resolved.error_value();
 		lp = resolved.value();
@@ -4076,7 +4088,7 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 	}
 	if (p.right.const_index != k_invalid_u32) {
 		rp = &f.code->constants[p.right.const_index];
-	} else if (p.right.subscript_kind != fused_operand::subscript_none) {
+	} else if (p.right.is_subscript()) {
 		auto resolved = fused_subscript_value(f, p.right, rscratch, f.ip * 3 + 1);
 		if (!resolved) return resolved.error_value();
 		rp = resolved.value();
@@ -4158,12 +4170,12 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 	std::optional<script_value> left_snap, right_snap;
 	const script_value* lv = lp;
 	const script_value* rv = rp;
-	if (p.left.subscript_kind == fused_operand::subscript_none) {
+	if (!p.left.is_subscript()) {
 		left_snap.emplace(*lp);
 		if (!left_snap->has_valid_engine()) left_snap->set_engine(engine_);
 		lv = &*left_snap;
 	}
-	if (p.right.subscript_kind == fused_operand::subscript_none) {
+	if (!p.right.is_subscript()) {
 		right_snap.emplace(*rp);
 		if (!right_snap->has_valid_engine()) right_snap->set_engine(engine_);
 		rv = &*right_snap;
@@ -4183,7 +4195,7 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 	if (operand.const_index != k_invalid_u32) {
 		return &f.code->constants[operand.const_index];
 	}
-	if (operand.subscript_kind != fused_operand::subscript_none) {
+	if (operand.is_subscript()) {
 		return nullptr;   // element reads bail to the pair (exec_binary_fused resolves them)
 	}
 	if (operand.load_flags & load_flag_type_ctor) {
@@ -5375,6 +5387,14 @@ checked_result<void> vm_backend::exec_call_from_scratch(frame& f, const vm_instr
 	}
 
 	// Opaque / arity-window path: today's pooled invoke with the parked value
+#ifdef JAISCRIPT_VM_PROFILE
+	// Who misses the in-loop fast path: count native-boundary callees by site symbol
+	if (ins.b < f.code->call_sites.size() && site.callee.symbol != k_invalid_u32) {
+		profile_native_callees_[std::string(symbolizer_->get_string(f.code->symbols[site.callee.symbol]))]++;
+	} else {
+		profile_native_callees_["<unnamed-site>"]++;
+	}
+#endif
 	auto arguments = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &arguments};
 	const size_t base = stack_.size() - argc;
@@ -8704,8 +8724,48 @@ checked_result<void> vm_backend::run(frame& entry) {
 	}
 }
 
+#ifdef JAISCRIPT_VM_PROFILE
+// Diagnostic builds only (define JAISCRIPT_VM_PROFILE in this TU): sorted opcode
+// self-time histogram on backend teardown. Percentages are of total dispatched cycles.
+void vm_backend::dump_opcode_profile() const {
+	uint64_t total = 0;
+	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];
+	if (total == 0) return;
+	std::vector<int> order;
+	for (int i = 0; i < 256; ++i) if (profile_counts_[i]) order.push_back(i);
+	std::sort(order.begin(), order.end(), [&](int a, int b) { return profile_cycles_[a] > profile_cycles_[b]; });
+	fprintf(stderr, "\n[vm-profile] opcode self-time (total %llu Mcycles)\n", (unsigned long long)(total / 1000000));
+	fprintf(stderr, "%-24s %10s %14s %8s %7s\n", "opcode", "count", "cycles(M)", "avg", "pct");
+	for (int i : order) {
+		fprintf(stderr, "%-24.*s %10llu %14.1f %8.1f %6.2f%%\n",
+			(int)opcode_name(static_cast<opcode>(i)).size(), opcode_name(static_cast<opcode>(i)).data(),
+			(unsigned long long)profile_counts_[i],
+			profile_cycles_[i] / 1e6,
+			(double)profile_cycles_[i] / (double)profile_counts_[i],
+			100.0 * (double)profile_cycles_[i] / (double)total);
+	}
+	if (!profile_native_callees_.empty()) {
+		std::vector<std::pair<std::string, uint64_t>> callees(profile_native_callees_.begin(), profile_native_callees_.end());
+		std::sort(callees.begin(), callees.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		fprintf(stderr, "[vm-profile] call_from_scratch in-loop MISSES by callee (native/opaque boundary):\n");
+		size_t shown = 0;
+		for (const auto& [name, count] : callees) {
+			fprintf(stderr, "  %-32s %10llu\n", name.c_str(), (unsigned long long)count);
+			if (++shown >= 20) break;
+		}
+	}
+}
+#endif
+
 checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	checked_result<void> shared_op_result_;
+#ifdef JAISCRIPT_VM_PROFILE
+	// Self-time opcode histogram (diagnostic builds only; dumped by ~vm_backend).
+	// Elapsed cycles attribute to the PREVIOUS op at the next fetch, so call ops
+	// charge only their own machinery, not their callee's body.
+	uint64_t prof_t0 = __rdtsc();
+	unsigned prof_prev = 256;
+#endif
 	for (;;) {
 		// Rebound every iteration: frame switches write fp and `continue`
 		frame& f = *fp;
@@ -8719,6 +8779,17 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 		}
 		if (debug_hook_) [[unlikely]] { debug_statement_boundary(f); }
 		const vm_instruction& ins = code[f.ip];
+#ifdef JAISCRIPT_VM_PROFILE
+		{
+			const uint64_t prof_now = __rdtsc();
+			if (prof_prev < 256) {
+				profile_cycles_[prof_prev] += prof_now - prof_t0;
+				++profile_counts_[prof_prev];
+			}
+			prof_t0 = prof_now;
+			prof_prev = static_cast<unsigned>(ins.op);
+		}
+#endif
 		switch (ins.op) {
 			case opcode::op_halt:
 				if (call_records_top_ == records_base) {

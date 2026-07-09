@@ -41,12 +41,30 @@ public:
         // Note: Foundry's benchmark() runs 1000 iterations by default
         // Now we're measuring actual execution performance, not engine creation
 
-        benchmark("Integer Addition", [this]() {
-            auto result = test_engine->execute("42 + 58");
+        // x20 unrolled through runtime values: parse-time constant folding can't elide
+        // the ops, and 20 ops lift the row off the integer-uS floor (a 0uS row is noise)
+        benchmark("Integer Addition (x20)", [this]() {
+            auto result = test_engine->execute(R"(
+                auto a = 42;
+                auto acc = 0;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc;
+            )");
         });
 
-        benchmark("Float Multiplication", [this]() {
-            auto result = test_engine->execute("3.14 * 2.71");
+        benchmark("Float Multiplication (x20)", [this]() {
+            auto result = test_engine->execute(R"(
+                auto f = 1.001;
+                auto acc = 3.14;
+                acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f;
+                acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f;
+                acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f;
+                acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f;
+                acc;
+            )");
         });
 
         benchmark("Variable Operations", [this]() {
@@ -170,8 +188,50 @@ public:
             )");
         });
 
+        // === Type ladder: int (enforced) vs auto (inferred) vs var (dynamic) ===
+        // Same shapes, three declaration spellings - the measured cost of type
+        // enforcement. The plain rows above use auto; these are the int and var twins.
+        benchmark("Hot Loop 1000 (int decls)", [this]() {
+            test_engine->execute(R"(
+                int sum = 0;
+                for (int i = 0; i < 1000; i += 1) {
+                    sum += i * 2;
+                }
+            )");
+        });
+
+        benchmark("Hot Loop 1000 (var decls)", [this]() {
+            test_engine->execute(R"(
+                var sum = 0;
+                for (var i = 0; i < 1000; i += 1) {
+                    sum += i * 2;
+                }
+            )");
+        });
+
+        benchmark("Integer Addition x20 (var decls)", [this]() {
+            test_engine->execute(R"(
+                var a = 42;
+                var acc = 0;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc;
+            )");
+        });
+
+        benchmark("For Loop 100 (var decls)", [this]() {
+            test_engine->execute(R"(
+                var sum = 0;
+                for (var i = 0; i < 100; i += 1) {
+                    sum += i;
+                }
+            )");
+        });
+
         // Additional targeted benchmarks to isolate optimizations
-        benchmark("Simple Compound Assignment (x100)", [this]() {
+        benchmark("Simple Compound Assignment (x20)", [this]() {
             test_engine->execute(R"(
                 auto x = 0;
                 x += 1; x += 1; x += 1; x += 1; x += 1;
@@ -297,8 +357,16 @@ public:
 
         // === jaibite (pre-parsed) variants: steady-state execution cost only ===
 
-        benchmark("Integer Addition [jaibite]", [this]() {
-            run_bite("42 + 58");
+        benchmark("Integer Addition (x20) [jaibite]", [this]() {
+            run_bite(R"(
+                auto a = 42;
+                auto acc = 0;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+                acc;
+            )");
         });
 
         benchmark("Function Calls [jaibite]", [this]() {
@@ -347,6 +415,24 @@ public:
             if (!bite) {
                 test_engine->execute("function fib(auto n) -> auto { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }");
                 bite = test_engine->jaibite("fib(15);");
+            }
+            bite->execute();
+        });
+
+        // Type-ladder twins of the fib row (auto above): call-dense recursion is where
+        // param/return enforcement cost would show if it were material
+        benchmark("Fibonacci(15) (int params)", [this]() {
+            if (!bite) {
+                test_engine->execute("function ifib(int n) -> int { if (n <= 1) { return n; } return ifib(n - 1) + ifib(n - 2); }");
+                bite = test_engine->jaibite("ifib(15);");
+            }
+            bite->execute();
+        });
+
+        benchmark("Fibonacci(15) (var params)", [this]() {
+            if (!bite) {
+                test_engine->execute("function vfib(var n) -> var { if (n <= 1) { return n; } return vfib(n - 1) + vfib(n - 2); }");
+                bite = test_engine->jaibite("vfib(15);");
             }
             bite->execute();
         });

@@ -131,7 +131,7 @@ public:
 		key_r = false;
 		key_b = false;
 		shots = [];
-		fx.reset();
+		fx.reset_pool();
 		load_map(map_i);
 		mode = 1;
 		mode_t = 0;

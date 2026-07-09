@@ -5,6 +5,7 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
+#include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
@@ -6442,6 +6443,41 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
 
 // Placeholder implementations for remaining visitors
 checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
+    // math:: language intrinsics (detail/math_intrinsics.hpp): evaluate args, one
+    // shared-kernel call - no namespace lookup, no call machinery (KEEP BYTE-PARALLEL
+    // with vm_backend::exec_math; parity by the shared kernel).
+    if (expr->callee->get_type() == node_type::member_expr) {
+        auto* member_callee = static_cast<member_expr*>(expr->callee.get());
+        if (member_callee->is_static) {
+            const detail::math_fn fn = detail::math_intrinsic_for_call(member_callee);
+            if (fn != detail::math_fn::none && expr->arguments.size() <= 8) {
+                const size_t argc = expr->arguments.size();
+                for (const auto& arg : expr->arguments) {
+                    JAISCRIPT_TRY(dispatch_expr(arg.get()));
+                    if (is_unwinding_) {
+                        push_value(make_value());
+                        return {};
+                    }
+                }
+                // Args sit on the value stack in order; point the kernel at them deref'd
+                const script_value* argp[8] = {};
+                for (size_t i = 0; i < argc; ++i) {
+                    argp[i] = &valueStack_.peek(argc - 1 - i).deref();
+                }
+                auto result = detail::eval_math_intrinsic(fn, argp, argc, engine_, engine_->math_rng());
+                if (!result) {
+                    return result.error_value();
+                }
+                script_value out = std::move(result.value());
+                for (size_t i = 0; i < argc; ++i) {
+                    valueStack_.discard();
+                }
+                push_value(std::move(out));
+                return {};
+            }
+        }
+    }
+
     // Special handling for weak_from_this() and shared_from_this()
     if (expr->callee->get_type() == node_type::identifier_expr) {
         auto* ident_expr = static_cast<identifier_expr*>(expr->callee.get());

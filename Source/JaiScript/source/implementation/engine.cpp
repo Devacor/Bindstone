@@ -3,6 +3,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
+#include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
@@ -246,6 +247,9 @@ struct engine::implementation {
 
     // Unified conversion registry (replaces both type_conversions and custom_conversions)
     std::shared_ptr<conversions::conversion_registry> conversions;
+
+    // Engine-owned deterministic RNG for the math:: intrinsics (fixed default seed)
+    detail::math_rng_state math_rng_;
 
     // Current parameter storage for function calls (replaces thread_local)
     detail::parameter_storage* current_parameter_storage = nullptr;
@@ -940,6 +944,10 @@ void engine::set_reference_holder_pool_teardown(void (*teardown)(void*)) {
 
 bool engine::parallel_region_active() const {
     return impl->parallel_ && impl->parallel_->active_region;
+}
+
+detail::math_rng_state& engine::math_rng() {
+    return impl->math_rng_;
 }
 
 void engine::implementation::updateOverloadedFunction(const std::string& name, engine* engine_ptr) {

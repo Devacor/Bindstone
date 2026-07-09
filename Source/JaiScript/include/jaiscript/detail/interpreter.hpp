@@ -599,11 +599,20 @@ namespace jai {
                 }
             }
             
-            script_value& top() { 
+            script_value& top() {
                 if (top_ == 0) {
                     throw runtime_error("Internal error: empty value stack");
                 }
-                return values_[top_ - 1]; 
+                return values_[top_ - 1];
+            }
+
+            // Indexed peek below the top (0 = top): in-place reads for multi-arg
+            // consumers (math:: intrinsics) - no pops, no moves
+            script_value& peek(size_t from_top) {
+                if (from_top >= top_) {
+                    throw runtime_error("Internal error: value stack peek past bottom");
+                }
+                return values_[top_ - 1 - from_top];
             }
             
             script_value pop() {

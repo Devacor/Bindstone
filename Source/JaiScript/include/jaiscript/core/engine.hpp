@@ -43,6 +43,7 @@ namespace jai {
         struct execution_limits;
         struct parallel_engine_state;
         enum class parallel_capture_kind : int;
+        struct math_rng_state;
     }
 
     namespace serialization {
@@ -736,6 +737,10 @@ namespace jai {
 
         // Reference support for function parameters
         script_value try_create_reference(size_t arg_index, const script_value& fallback);
+
+        // Engine-owned deterministic RNG for the math:: intrinsics (zero statics;
+        // detail/math_intrinsics.hpp). Seeded via math::random_seed; fixed default seed.
+        detail::math_rng_state& math_rng();
 
         // INTERNAL (value.cpp): per-engine reference_holder block pool, held type-erased so
         // the private holder type never crosses this header. value.cpp lazily creates the

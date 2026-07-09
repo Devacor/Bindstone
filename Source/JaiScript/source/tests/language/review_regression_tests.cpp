@@ -1171,9 +1171,141 @@ public:
     }
 };
 
+// math:: language intrinsics (detail/math_intrinsics.hpp): recognized as call shapes by
+// both backends, evaluated through ONE shared kernel - values, errors, determinism, and
+// coexistence with user code all pinned here.
+class math_intrinsics_tests : public suite {
+public:
+    math_intrinsics_tests() : suite("Math Intrinsics") {}
+
+    void forge_tests() override {
+        test("numeric_values", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                to_string(math::floor(2.7)) + "|" + to_string(math::ceil(2.1)) + "|" +
+                to_string(math::itrunc(3.9)) + "|" + to_string(math::ifloor(-1.5)) + "|" +
+                to_string(math::sqrt(16.0)) + "|" + to_string(math::pow(2.0, 10.0)) + "|" +
+                to_string(math::abs(-7)) + "|" + to_string(math::min(3, 9)) + "|" +
+                to_string(math::max(3, 9)) + "|" + to_string(math::clamp(15, 0, 10));
+            )");
+            check_eq(std::string("2.000000|3.000000|3|-2|4.000000|1024.000000|7|3|9|10"), r.as_string());
+        });
+
+        test("trig_and_distance", [this]() {
+            auto e = make_engine();
+            check_near(0.0, e->execute("math::sin(0.0)").as_float(), 1e-12);
+            check_near(1.0, e->execute("math::cos(0.0)").as_float(), 1e-12);
+            check_near(5.0, e->execute("math::distance(0.0, 0.0, 3.0, 4.0)").as_float(), 1e-12);
+            check_near(25.0, e->execute("math::distance_squared(0.0, 0.0, 3.0, 4.0)").as_float(), 1e-12);
+            check_near(180.0, e->execute("math::radians_to_degrees(3.14159265358979323846)").as_float(), 1e-9);
+            check_near(3.14159265358979323846, e->execute("math::degrees_to_radians(180.0)").as_float(), 1e-12);
+        });
+
+        // The mix family must be VALUE-IDENTICAL to the stdlib registrations it
+        // supersedes (scripts migrate without hash drift); lerp == mix by ruling.
+        test("mix_family_matches_stdlib", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                auto ok = math::mix(2.0, 10.0, 0.25) == mix(2.0, 10.0, 0.25) &&
+                          math::lerp(2.0, 10.0, 0.25) == math::mix(2.0, 10.0, 0.25) &&
+                          math::unmix(2.0, 10.0, 4.0) == unmix(2.0, 10.0, 4.0) &&
+                          math::mix_in(0.0, 1.0, 0.3, 2.0) == mix_in(0.0, 1.0, 0.3, 2.0) &&
+                          math::mix_out(0.0, 1.0, 0.3, 2.0) == mix_out(0.0, 1.0, 0.3, 2.0) &&
+                          math::mix_in_out(0.0, 1.0, 0.7, 2.0) == mix_in_out(0.0, 1.0, 0.7, 2.0) &&
+                          math::mix_out_in(0.0, 1.0, 0.7, 2.0) == mix_out_in(0.0, 1.0, 0.7, 2.0) &&
+                          math::unmix_in(0.0, 1.0, 0.3, 2.0) == unmix_in(0.0, 1.0, 0.3, 2.0) &&
+                          math::unmix_out(0.0, 1.0, 0.3, 2.0) == unmix_out(0.0, 1.0, 0.3, 2.0) &&
+                          math::unmix_in_out(0.0, 1.0, 0.7, 2.0) == unmix_in_out(0.0, 1.0, 0.7, 2.0) &&
+                          math::unmix_out_in(0.0, 1.0, 0.7, 2.0) == unmix_out_in(0.0, 1.0, 0.7, 2.0);
+                ok;
+            )");
+            check(r.as_bool());
+        });
+
+        test("random_determinism_and_ranges", [this]() {
+            auto e = make_engine();
+            // Same seed -> exact same sequence (mt19937_64 is standard-specified)
+            auto r = e->execute(R"(
+                math::random_seed(1234);
+                auto a1 = math::random();
+                auto a2 = math::random(0, 100);
+                auto a3 = math::random(-2.5, 2.5);
+                math::random_seed(1234);
+                auto b1 = math::random();
+                auto b2 = math::random(0, 100);
+                auto b3 = math::random(-2.5, 2.5);
+                a1 == b1 && a2 == b2 && a3 == b3;
+            )");
+            check(r.as_bool());
+            // Inclusive endpoints: degenerate range returns its endpoint; unit range in [0,1]
+            check_eq((int64_t)7, e->execute("math::random(7, 7)").as_int());
+            auto bounds = e->execute(R"(
+                math::random_seed(42);
+                auto ok = true;
+                for (int i = 0; i < 200; ++i) {
+                    auto u = math::random();
+                    if (u < 0.0 || u > 1.0) { ok = false; }
+                    auto n = math::random(1, 6);
+                    if (n < 1 || n > 6) { ok = false; }
+                    auto f = math::random(-1.0, 1.0);
+                    if (f < -1.0 || f > 1.0) { ok = false; }
+                }
+                ok;
+            )");
+            check(bounds.as_bool());
+        });
+
+        test("intrinsic_errors", [this]() {
+            auto e = make_engine();
+            check_throws([&]() { e->execute("math::floor(\"nope\");"); });          // type
+            check_throws([&]() { e->execute("math::floor(1.0, 2.0);"); });          // arity
+            check_throws([&]() { e->execute("math::random(5, 1);"); });             // inverted range
+            // Engine stays usable after an intrinsic error
+            check_eq((int64_t)3, e->execute("1 + 2").as_int());
+        });
+
+        // Intrinsics coexist with user code: other namespaces, operator overloads on
+        // types, and the still-registered bare stdlib names are all untouched.
+        test("coexists_with_user_code", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                namespace geo { float area(float w, float h) { return w * h; } }
+                class Vec {
+                    float x = 0.0; float y = 0.0;
+                    Vec(float px, float py) { x = px; y = py; }
+                    function operator+(Vec o) -> Vec { return Vec(x + o.x, y + o.y); }
+                }
+                auto v = Vec(1.0, 2.0) + Vec(3.0, 4.0);
+                auto bare = floor(2.9);
+                to_string(geo::area(3.0, 4.0)) + "|" + to_string(v.x + v.y) + "|" +
+                    to_string(bare) + "|" + to_string(math::floor(2.9));
+            )");
+            check_eq(std::string("12.000000|10.000000|2.000000|2.000000"), r.as_string());
+        });
+
+        // Intrinsics inside hot shapes: loops, method bodies, nested in expressions
+        test("intrinsics_in_expressions", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto total = 0;
+                for (int i = 0; i < 10; ++i) {
+                    total += math::itrunc(math::sqrt(100.0) + i);
+                }
+                total;
+            )");
+            check_eq((int64_t)145, r.as_int());
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 using review_regression_tests = jai::foundry::tests::review_regression_tests;
 FOUNDRY_REGISTER(review_regression_tests)
+using math_intrinsics_tests = jai::foundry::tests::math_intrinsics_tests;
+FOUNDRY_REGISTER(math_intrinsics_tests)
 using element_read_elision_tests = jai::foundry::tests::element_read_elision_tests;
 FOUNDRY_REGISTER(element_read_elision_tests)

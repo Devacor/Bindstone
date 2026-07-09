@@ -669,6 +669,11 @@ int main(int argc, char *argv[]) {
 	derived->baseMember = 5;
 	derived->derived1Member = 10;
 
+	for (int i = 1; i < argc; ++i) {
+		if (strcmp(argv[i], "--no-script-debug") == 0) {
+			MV::scriptDebugEnabled(false);
+		}
+	}
 	auto testEngine = MV::makeScriptEngine(MV::Services::instance());
 	MV::Services::instance().connect<jai::engine>(testEngine.get());
 

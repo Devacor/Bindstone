@@ -263,6 +263,7 @@ int main(int, char *[]) {
 
 	MV::initializeSpineBindings();
 
+	MV::scriptDebugPortOffset(2);   // GameServer attach port = 52474 (see MV/Script/script.h)
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	MV::Services::instance().connect<jai::engine>(jaiEngine.get());

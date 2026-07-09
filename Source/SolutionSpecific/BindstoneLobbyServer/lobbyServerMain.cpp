@@ -25,6 +25,7 @@ int main(int, char *[]) {
 	Managers managers({});
 	managers.timer.start();
 
+	MV::scriptDebugPortOffset(1);   // LobbyServer attach port = 52473 (see MV/Script/script.h)
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	MV::Services::instance().connect<jai::engine>(jaiEngine.get());

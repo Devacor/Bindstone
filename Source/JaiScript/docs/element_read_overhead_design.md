@@ -147,7 +147,20 @@ Implemented as specified, both backends atomically:
   in-region acquires fall back to plain `make_strong` — the pool stays single-threaded).
 - Pins in `Element Read Elision` suite (review_regression_tests.cpp): operand/condition/RHS
   elision values, chain reads, map never-insert, impure-sibling mint retention, ref-decl
-  binds, override fallback via the gate, pool churn, and pool-orphan release after engine death.
+  binds, override fallback via the gate, pool churn, pool-orphan release after engine death,
+  class-operator dispatch over elided operands, and cross-engine reference minting.
+
+**Post-landing review fixes (same day):** the twin cache stamps only type_infos this engine
+interned (pointer identity via `type_id_index_`) — a cross-engine value must not carry a
+foreign twin pointer that dangles when the other engine dies; the pool free-list reserves up
+front (release runs inside noexcept `~strong_ptr`) and scrambles the Debug magic on the delete
+branch too. **Ruling recorded:** class operator/"[]" METHODS do not latch the runtime gate —
+an engine-wide latch would kill the elision for any host binding operator types
+(dynamic_binder overloading in MV/Bindstone). Elided operands reach class operators as
+evaluation-time copies, which is the interpreter's historical order (the old VM's late deref
+silently diverged from it); use_count inside class operator methods shifts by the documented
+transient-copy calibration, not semantics. Global operator/`"[]"` registration still gates
+(no false-positive cost there).
 
 ## Open risks
 

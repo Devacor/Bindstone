@@ -511,8 +511,13 @@ struct engine::implementation {
     bool custom_binary_ops_flag_ = false;
 
     static bool is_binary_operator_symbol(std::string_view name) {
-        // Exactly the operator symbols the backends' binary dispatch can resolve to a
-        // global function, plus the custom subscript resolver's "[]"
+        // Exactly the operator symbols the backends' GLOBAL binary dispatch can resolve
+        // to a registered function (KEEP IN SYNC with interpreter visit_binary's
+        // op_symbol_id switch), plus the custom subscript resolver's "[]". Class
+        // operator METHODS deliberately do not latch: an engine-wide latch would kill
+        // the elision for any host binding operator types (dynamic_binder overloading),
+        // and elided operands match the interpreter's historical read-at-evaluation
+        // order (see transient_read.hpp).
         return name == "+" || name == "-" || name == "*" || name == "/" || name == "%" ||
                name == "<" || name == "<=" || name == ">" || name == ">=" ||
                name == "==" || name == "!=" || name == "<=>" ||
@@ -520,12 +525,18 @@ struct engine::implementation {
                name == "[]";
     }
 
-    void note_custom_binary_operator(const std::string& name) {
-        if (!custom_binary_ops_flag_ && is_binary_operator_symbol(name)) {
+    void latch_custom_binary_ops() {
+        if (!custom_binary_ops_flag_) {
             custom_binary_ops_flag_ = true;
             if (backend) {
                 backend->set_has_custom_binary_ops(true);
             }
+        }
+    }
+
+    void note_custom_binary_operator(std::string_view name) {
+        if (!custom_binary_ops_flag_ && is_binary_operator_symbol(name)) {
+            latch_custom_binary_ops();
         }
     }
 
@@ -1990,11 +2001,8 @@ void engine::set_has_custom_numeric_operators(bool value) {
     // This allows users to opt-in to custom operator support when needed
     // By default, the fast path is enabled (no custom operators)
     impl->custom_numeric_ops_flag_ = value;
-    if (value && !impl->custom_binary_ops_flag_) {
-        impl->custom_binary_ops_flag_ = true;   // latch: numeric overrides imply the mint gate
-        if (impl->backend) {
-            impl->backend->set_has_custom_binary_ops(true);
-        }
+    if (value) {
+        impl->latch_custom_binary_ops();   // numeric overrides imply the mint gate
     }
     if (impl->backend) {
         impl->backend->set_has_custom_numeric_ops(value);
@@ -2110,11 +2118,8 @@ std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::sc
 void engine::setHasCustomNumericOps(bool value) {
     // Set the flag on the backend (which might be interpreter or VM)
     impl->custom_numeric_ops_flag_ = value;
-    if (value && !impl->custom_binary_ops_flag_) {
-        impl->custom_binary_ops_flag_ = true;   // latch: numeric overrides imply the mint gate
-        if (impl->backend) {
-            impl->backend->set_has_custom_binary_ops(true);
-        }
+    if (value) {
+        impl->latch_custom_binary_ops();   // numeric overrides imply the mint gate
     }
     if (impl->backend) {
         impl->backend->set_has_custom_numeric_ops(value);
@@ -2349,10 +2354,16 @@ type_info* engine::get_type_info_reference(type_info* referenced_type) {
     }
 
     // Fill the twin cache only on the region-free path: workers may reach here for a
-    // shape that was interned but never prewarmed, and must not race the cache write
-    if (!(impl->parallel_ && impl->parallel_->active_region)) {
+    // shape that was interned but never prewarmed, and must not race the cache write.
+    // Stamp only type_infos THIS engine interned (pointer identity via type_id_index_) -
+    // a value minted by another engine must not carry our twin pointer, which would
+    // dangle in ITS engine if we are destroyed first.
+    if (!parallel_region_active()) {
         if (referenced_type) {
-            referenced_type->cached_reference_type = ptr;
+            auto owned = impl->type_id_index_.find(referenced_type->id);
+            if (owned != impl->type_id_index_.end() && owned->second == referenced_type) {
+                referenced_type->cached_reference_type = ptr;
+            }
         } else {
             impl->type_info_reference_null_ = ptr;
         }

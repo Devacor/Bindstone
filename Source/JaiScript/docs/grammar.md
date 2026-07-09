@@ -870,9 +870,15 @@ string healthLevel = health > 75 ? "healthy" :
     supported (they error at call time — a plain `auto`/untyped parameter already binds
     anything, or use an explicit `shared_ptr<T>`). The ladder has exactly three handle
     spellings: `shared_ptr<T>` (enforced pointee), `shared_ptr<auto>` (infer then
-    enforce), and plain `var` (dynamic — it holds any class's handle, copies share, and
-    nulling re-points it across classes; while HELD, the handle keeps its class marker,
-    so direct cross-class reassignment enforces like the typed spellings). `shared_ptr<var>`
+    enforce), and plain `var` (FULLY DYNAMIC — reassigns to anything: `=` with a handle
+    OR a value OR a primitive rhs always REBINDS the variable to a copy of the rhs value,
+    never reaching through a held handle and never refusing an assignment. `var p = new
+    Foo(); p = new Bar();` rebinds the handle; `p = someFooValue;` rebinds to an
+    independent copy of that value, leaving aliases of the old object untouched; `p = 5;`
+    rebinds to an int. The typed/auto/`shared_ptr<T>`/`shared_ptr<auto>` tiers enforce and
+    a value rhs to those still copy-assigns INTO the underlying object with its checks —
+    `var` does neither; `auto` copies of a var-held handle re-lock to the plain spelling).
+    `shared_ptr<var>`
     is DELIBERATELY a parse error ("shared_ptr<var> is not supported: use var (holds and
     rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)") —
     the constrained-but-dynamic middle ground has no use case, and `var` meaning

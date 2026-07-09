@@ -2112,6 +2112,25 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     };
 }
 
+namespace detail {
+void warn_shadowed_handle_builtins(engine& eng, const class_definition& def) {
+    auto* sym = eng.get_symbolizer();
+    if (!sym) { return; }
+    // LOCAL methods only (has_method, not defines_method): warn where the shadow is
+    // introduced, once per colliding method per class definition - subclasses that merely
+    // inherit it don't re-warn.
+    for (std::string_view name : k_shadowable_handle_method_names) {
+        if (def.has_method(sym->intern(name))) {
+            std::string m(name);
+            eng.report_script_warning(
+                "class method '" + m + "' shadows the builtin shared_ptr " + m +
+                "() - the builtin is unreachable on " + def.get_name() +
+                " instances; rename the class method to reach it");
+        }
+    }
+}
+} // namespace detail
+
 void interpreter::init_builtin_methods() {
     builtin_method_registries registries;
     init_builtin_method_registries(string_symbolizer_, registries);
@@ -6443,10 +6462,13 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                         cls_pin = dispatch->cls;
                         ic_route = true;
                     } else {
-                        // Full gate (fills the IC on success)
+                        // Full gate (fills the IC on success). A user class method WINS
+                        // over a same-named builtin handle method (Dev ruling 2026-07): the
+                        // sp-builtin only applies when the class does NOT define the method.
                         const bool sp_builtin = objectValue.get_type_info() &&
                             objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
-                            shared_ptr_methods_.find(member->member_id) != shared_ptr_methods_.end();
+                            shared_ptr_methods_.find(member->member_id) != shared_ptr_methods_.end() &&
+                            !(cls_raw && cls_raw->defines_method(member->member_id));
                         if (!sp_builtin) {
                             auto target = resolve_member_target(objectValue);
                             if (target && target.class_def) {
@@ -7252,18 +7274,28 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         // This is an explicitly marked shared_ptr<T> object
         auto methodIt = shared_ptr_methods_.find(expr->member_id);
         if (methodIt != shared_ptr_methods_.end()) {
-            // Found the method in the registry (reset, use_count, unique)
-            const builtin_method& method = methodIt->second;
+            // A user class method WINS over a same-named builtin handle method (Dev ruling
+            // 2026-07): only mint the builtin when the underlying class does NOT define it.
+            bool user_shadows = false;
+            if (auto ci = objectValue.get_class_instance()) {
+                if (auto* cd = ci->get_class_definition()) {
+                    user_shadows = cd->defines_method(expr->member_id);
+                }
+            }
+            if (!user_shadows) {
+                // Found the method in the registry (reset, use_count, unique)
+                const builtin_method& method = methodIt->second;
 
-            // Create a wrapper function that captures the shared_ptr value by moving it
-            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-                return method(ctx, capturedValue, args);
-            };
+                // Create a wrapper function that captures the shared_ptr value by moving it
+                script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+                    return method(ctx, capturedValue, args);
+                };
 
-            push_value(script_value::make_function(boundMethod, engine_));
-            return {};
+                push_value(script_value::make_function(boundMethod, engine_));
+                return {};
+            }
         }
-        // Method not found in shared_ptr built-ins - forward to the underlying object
+        // Method not found in shared_ptr built-ins (or shadowed) - forward to the object
     }
 
     // After refactor: shared_ptr<T> uses same storage as regular objects
@@ -10622,6 +10654,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     if (!register_result) {
         return register_result;
     }
+    detail::warn_shadowed_handle_builtins(*eng, *class_def);
 
     // Store the class definition in a special variable for later retrieval
     // This allows inheritance and other features to work

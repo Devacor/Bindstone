@@ -5986,12 +5986,22 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 	    objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
 		auto methodIt = builtins_.shared_ptr_methods.find(expr->member_id);
 		if (methodIt != builtins_.shared_ptr_methods.end()) {
-			const builtin_method& method = methodIt->second;
-			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-				return method(ctx, capturedValue, args);
-			};
-			out = script_value::make_function(boundMethod, engine_);
-			return {};
+			// A user class method WINS over a same-named builtin handle method (Dev ruling
+			// 2026-07): only mint the builtin when the underlying class does NOT define it.
+			bool user_shadows = false;
+			if (auto ci = objectValue.get_class_instance()) {
+				if (auto* cd = ci->get_class_definition()) {
+					user_shadows = cd->defines_method(expr->member_id);
+				}
+			}
+			if (!user_shadows) {
+				const builtin_method& method = methodIt->second;
+				script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+					return method(ctx, capturedValue, args);
+				};
+				out = script_value::make_function(boundMethod, engine_);
+				return {};
+			}
 		}
 	}
 
@@ -6674,9 +6684,17 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 		script_value objv = object.deref();
 		if (objv.is_object()) {
 			auto holder = objv.get_object_holder();
+			// A user class method WINS over a same-named builtin handle method (Dev ruling
+			// 2026-07): the sp-builtin only applies when the class does NOT define it.
+			bool sp_class_defines = false;
+			if (holder && holder->is_class_instance_wrapper && holder->data) {
+				auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+				sp_class_defines = cd && cd->defines_method(member->member_id);
+			}
 			const bool shared_ptr_builtin = objv.get_type_info() &&
 				objv.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
-				builtins_.shared_ptr_methods.find(member->member_id) != builtins_.shared_ptr_methods.end();
+				builtins_.shared_ptr_methods.find(member->member_id) != builtins_.shared_ptr_methods.end() &&
+				!sp_class_defines;
 			if (holder && holder->type_id != coroutine_handle_type_id_ && !shared_ptr_builtin) {
 				auto target = resolve_member_target(objv);
 				if (target && target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
@@ -7358,6 +7376,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 	if (!register_result) {
 		return register_result;
 	}
+	detail::warn_shadowed_handle_builtins(*engine_, *class_def);
 
 	global_env->define(class_var_id, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_, false));
 

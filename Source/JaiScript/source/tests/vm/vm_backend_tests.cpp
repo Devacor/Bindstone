@@ -398,8 +398,14 @@ public:
 				"closure mint keeps the eager env");
 			check_true(body_needs_env("function tries() -> int { try { return 1; } catch (e) { return 0; } }"),
 				"try/catch keeps the eager env");
-			check_true(body_needs_env("function scoped() -> int { { var t = 1; t = t + 1; } return 2; }"),
-				"block scope push keeps the eager env");
+			// Slot-only block decls no longer push a scope inside callables (the env
+			// they forced held nothing and its push/reset bumped the global env epoch,
+			// poisoning every vm lookup cache) - the body is now lazy-eligible
+			check_false(body_needs_env("function scoped() -> int { { var t = 1; t = t + 1; } return 2; }"),
+				"slot-only block decl elides the scope AND the eager env");
+			// A block whose decl is env-resident (nested function decl) still scopes
+			check_true(body_needs_env("function outer() -> int { { function inner() -> int { return 1; } return inner(); } }"),
+				"env-defining block decl keeps scope + eager env");
 		});
 
 		// Stage 3 (method flattening): method self-recursion no longer stacks native

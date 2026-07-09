@@ -32,10 +32,17 @@ namespace {
 		return std::make_shared<block_stmt>(loc, std::move(stmts));
 	}
 
-	// True when executing the node can define a name directly into the CURRENT scope,
-	// so an enclosing block must own a real environment. Blocks whose statements all
-	// report false compile without op_scope_push/pop (hot for loop bodies).
-	bool declares_in_current_scope(const ast_node* node) {
+	// True when executing the node can define a name directly into the CURRENT scope's
+	// ENVIRONMENT, so an enclosing block must own a real one. Blocks whose statements
+	// all report false compile without op_scope_push/pop (hot for loop bodies).
+	// slot_decls_env_free: inside a callable body, slot-resident variable decls write
+	// the frame slot and never touch the environment (define_decl_value), so they
+	// don't need the scope either - and the scope they used to force is not free:
+	// every env push/reset bumps the GLOBAL env epoch, poisoning every vm lookup
+	// cache in the engine (measured: ~6.5k scope cycles/tick in GLOOM for scopes
+	// holding nothing). Top-level decls define into the environment even when
+	// slotted, so top-level blocks keep their scopes.
+	bool declares_in_current_scope(const ast_node* node, bool slot_decls_env_free) {
 		if (!node) return false;
 		switch (node->get_type()) {
 		case node_type::expression_stmt:
@@ -49,16 +56,19 @@ namespace {
 		case node_type::range_for_stmt:   // loop variable lives in the iteration scope
 			return false;
 		case node_type::statement_decl:
-			return declares_in_current_scope(static_cast<const statement_decl*>(node)->statement.get());
+			return declares_in_current_scope(static_cast<const statement_decl*>(node)->statement.get(), slot_decls_env_free);
 		case node_type::if_stmt: {
 			auto* branch = static_cast<const if_stmt*>(node);
-			return declares_in_current_scope(branch->then_statement.get()) ||
-			       declares_in_current_scope(branch->else_statement.get());
+			return declares_in_current_scope(branch->then_statement.get(), slot_decls_env_free) ||
+			       declares_in_current_scope(branch->else_statement.get(), slot_decls_env_free);
 		}
 		case node_type::while_stmt:
-			return declares_in_current_scope(static_cast<const while_stmt*>(node)->body.get());
+			return declares_in_current_scope(static_cast<const while_stmt*>(node)->body.get(), slot_decls_env_free);
+		case node_type::variable_decl:
+			return !slot_decls_env_free ||
+			       static_cast<const variable_decl*>(node)->slot_index == SIZE_MAX;
 		default:
-			return true;   // declarations, include/import, switch/try: keep the scope
+			return true;   // class/function decls, include/import, switch/try: keep the scope
 		}
 	}
 
@@ -649,7 +659,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 void vm_compiler::compile_block(block_stmt* block) {
 	bool needs_scope = false;
 	for (const auto& decl : block->declarations) {
-		if (declares_in_current_scope(decl.get())) {
+		if (declares_in_current_scope(decl.get(), callable_.active)) {
 			needs_scope = true;
 			break;
 		}

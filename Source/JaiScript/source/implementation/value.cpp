@@ -77,9 +77,12 @@ script_value* script_value::reference_holder::resolve_target() {
 // Blocks self-describe their release through dealloc_fn, so plain make_strong
 // holders and pooled holders coexist - which is what keeps this single-threaded:
 // parallel workers DO mint cell references inside their bodies, so acquire falls
-// back to plain make_strong while a region is active (main thread parked). If the
-// engine dies while user-held references are still out, the pool is orphaned and
-// the last returning block frees it.
+// back to plain make_strong while a region is active (main thread parked). Releases
+// inherit the value system's existing thread contract (non-atomic strong_ptr counts:
+// a value tree sharing storage with the engine's world must not be released off the
+// engine's thread - true before the pool existed). If the engine dies while
+// user-held references are still out, the pool is orphaned and the last returning
+// block frees it.
 struct script_value::reference_holder_pool {
     struct block : jai::detail::control_block<reference_holder> {
         reference_holder_pool* home = nullptr;
@@ -92,14 +95,18 @@ struct script_value::reference_holder_pool {
     size_t outstanding = 0;      // checked-out blocks (live holders)
     bool engine_alive = true;
 
+    // Reserve up front: return_block runs inside ~strong_ptr (noexcept), so the
+    // free-list push must never allocate
+    reference_holder_pool() { free_blocks.reserve(max_free_blocks); }
+
     static void return_block(jai::detail::control_block_base* base) {
         block* b = static_cast<block*>(static_cast<jai::detail::control_block<reference_holder>*>(base));
         reference_holder_pool* pool = b->home;
         --pool->outstanding;
-        if (pool->engine_alive && pool->free_blocks.size() < max_free_blocks) {
 #ifndef NDEBUG
-            base->magic = jai::detail::cb_magic_dead;   // scrambled while parked (use-after-free canary)
+        base->magic = jai::detail::cb_magic_dead;   // scrambled parked OR freed (use-after-free canary)
 #endif
+        if (pool->engine_alive && pool->free_blocks.size() < max_free_blocks) {
             pool->free_blocks.push_back(b);
         } else {
             delete b;

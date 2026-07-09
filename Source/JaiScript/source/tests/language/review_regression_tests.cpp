@@ -975,6 +975,44 @@ public:
             check_eq(std::string("20200|100|100"), r.as_string());
         });
 
+        // Class operator methods deliberately do NOT flip the runtime gate (that would
+        // kill the elision for any host binding operator types): subscript operands
+        // feeding a class operator arrive as evaluation-time copies on BOTH backends
+        // (the interpreter's historical order). Pin: correct dispatch and values.
+        test("class_operator_method_operands_elided_correctly", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                class Vec {
+                    int v = 0;
+                    Vec(int n) { v = n; }
+                    function operator+(Vec o) -> Vec { return Vec(v + o.v); }
+                }
+                var arr = [Vec(3), Vec(4)];
+                var plain = [10, 20];
+                auto combined = arr[0] + arr[1];        // object elements -> class operator+
+                auto untouched = plain[0] + plain[1];   // int elements -> builtin, still elided
+                combined.v * 100 + untouched;
+            )");
+            check_eq((int64_t)730, r.as_int());
+        });
+
+        // Cross-engine values: engine B minting a reference to an engine-A value must not
+        // stamp B's interned reference twin onto A's type_info (dangles when B dies).
+        test("cross_engine_reference_no_foreign_twin_stamp", [this]() {
+            auto a = make_engine();
+            a->execute("var arr = [1, 2, 3];");
+            script_value shared_arr = a->get_variable("arr");
+            {
+                auto b = make_engine();
+                b->add_global("borrowed", shared_arr);
+                b->execute("var& r = borrowed[0]; r = 9;");
+            }
+            // B is gone; A minting references for the same element type must not
+            // resolve through a pointer B cached onto A's type_info.
+            auto r = a->execute("var& s = arr[1]; s = 5; arr[0] + arr[1];");
+            check_eq((int64_t)14, r.as_int());
+        });
+
         // A pooled holder escaping the engine must stay destructible after engine death
         // (orphaned pool: the last release frees it, no crash / no touch of freed engine).
         // A by-ref lambda capture boxes x into a CELL reference_holder held by the

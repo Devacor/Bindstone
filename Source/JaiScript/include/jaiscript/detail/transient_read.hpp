@@ -32,10 +32,19 @@ namespace jai::detail {
     //     callout_free (both backends deref the RHS before storing - byte-parallel)
     //   - both branches of a ternary propagate the ternary's own consumer context
     //
-    // Runtime gate: the mark only takes effect while engine has no user binary-operator or
-    // "[]" override registered (has_custom_binary_ops) - overridden ops receive operand
-    // copies whose transient +1 would be observable via use_count()/cpp_ref_count inside
-    // the override, so the mint path is kept in that case.
+    // Runtime gate: the mark only takes effect while the engine has no GLOBAL
+    // binary-operator or "[]" registration (has_custom_binary_ops, latched at the
+    // register_overload_impl / add_global chokepoints) - globally overridden ops receive
+    // operand copies whose transient +1 would be observable via use_count()/cpp_ref_count
+    // inside the override, so the mint path is kept in that case.
+    //
+    // Class operator/"[]" METHODS deliberately do NOT latch the gate (an engine-wide
+    // latch would kill the elision for any host binding operator types). Consequences,
+    // both deliberate: (1) a subscript operand feeding a class operator method is READ
+    // (copied) at operand-evaluation time - the interpreter's historical order, which the
+    // old VM's late deref silently diverged from; (2) use_count observed inside a class
+    // operator method may sit one higher than the pre-elision VM - calibration, not
+    // semantics, per the standing transient-copy ruling.
     //
     // Unary value ops are deliberately NOT in the set: -/~ do not deref references today
     // (a subscript operand errors on both backends), and marking would make that shape's

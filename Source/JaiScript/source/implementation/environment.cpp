@@ -782,42 +782,46 @@ script_value* environment::get_value_ptr(uint64_t id) {
     return nullptr;
 }
 
-script_value make_bound_method(const script_value& this_obj, const script_value& method) {
-    auto eng = this_obj.get_engine();
-    return script_value::make_function([this_obj, method](const std::vector<script_value>& args) -> checked_result<script_value> {
-        // Create a new argument list with 'this' as the first argument
-        std::vector<script_value> method_args;
-        method_args.reserve(args.size() + 1);
-        method_args.push_back(this_obj);
-        method_args.insert(method_args.end(), args.begin(), args.end());
+// Opaque fallback path for a bound method (host callbacks, backends without in-loop
+// recovery, native methods): call with 'this' prepended, then anchor chaining returns.
+checked_result<script_value> bound_method_binding::operator()(const std::vector<script_value>& args) const {
+    // Create a new argument list with 'this' as the first argument
+    std::vector<script_value> method_args;
+    method_args.reserve(args.size() + 1);
+    method_args.push_back(receiver);
+    method_args.insert(method_args.end(), args.begin(), args.end());
 
-        // Call the method with 'this' included
-        const auto& method_func = method.as_function();
-        auto result = method_func(method_args);
+    // Call the method with 'this' included
+    const auto& method_func = method.as_function();
+    auto result = method_func(method_args);
 
-        // If the method returned a NON-OWNING reference into its receiver (the
-        // classic chaining idiom `Counter& increment() { ...; return *this; }`
-        // produces a cpp-bound T& whose object_holder owns nothing), pin the
-        // receiver's underlying object onto the result so it survives even when
-        // the receiver was a temporary, e.g. `Counter().increment().add(5)`.
-        // Without this, the temporary receiver is freed when this bound-method
-        // closure is destroyed, leaving the returned reference dangling
-        // (a use-after-free that Release builds happened to mask).
-        if (result && this_obj.is_object()) {
-            script_value& rv = result.value();
-            if (rv.is_non_owning_object()) {
-                auto rv_holder = rv.get_object_holder();
-                auto recv_holder = this_obj.get_object_holder();
-                if (rv_holder && recv_holder) {
-                    // Prefer the receiver's owning data; if the receiver is itself a
-                    // non-owning link in the chain, propagate its existing anchor.
-                    rv_holder->keep_alive = recv_holder->data ? recv_holder->data
-                                                              : recv_holder->keep_alive;
-                }
+    // If the method returned a NON-OWNING reference into its receiver (the
+    // classic chaining idiom `Counter& increment() { ...; return *this; }`
+    // produces a cpp-bound T& whose object_holder owns nothing), pin the
+    // receiver's underlying object onto the result so it survives even when
+    // the receiver was a temporary, e.g. `Counter().increment().add(5)`.
+    // Without this, the temporary receiver is freed when this bound-method
+    // closure is destroyed, leaving the returned reference dangling
+    // (a use-after-free that Release builds happened to mask).
+    if (result && receiver.is_object()) {
+        script_value& rv = result.value();
+        if (rv.is_non_owning_object()) {
+            auto rv_holder = rv.get_object_holder();
+            auto recv_holder = receiver.get_object_holder();
+            if (rv_holder && recv_holder) {
+                // Prefer the receiver's owning data; if the receiver is itself a
+                // non-owning link in the chain, propagate its existing anchor.
+                rv_holder->keep_alive = recv_holder->data ? recv_holder->data
+                                                          : recv_holder->keep_alive;
             }
         }
-        return result;
-    }, eng);
+    }
+    return result;
+}
+
+script_value make_bound_method(const script_value& this_obj, const script_value& method) {
+    auto eng = this_obj.get_engine();
+    return script_value::make_function(bound_method_binding{this_obj, method}, eng);
 }
 
 } // namespace jai

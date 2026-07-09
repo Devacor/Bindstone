@@ -5662,27 +5662,6 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 	const size_t argc = arguments.size();
 
 	const script_function& func = callee.as_function();
-	// Bound-method recovery (named bound_method_binding functor): a script-class method
-	// held as a VALUE (implicit-self calls, stored callbacks, coroutine brains) enters
-	// the dispatch loop through the same flattening exec_call_method uses - no nested
-	// native run(). Precedence questions (getter/builtin/field shadowing) were answered
-	// when the binding was minted; the held method IS the resolved dispatcher. Native
-	// methods, coroutines, and resolution misses fall through to the opaque invoke,
-	// which routes through the binding's operator() with identical behavior.
-	if (const auto* binding = func.target<bound_method_binding>()) {
-		if (const auto* dispatch = binding->method.as_function().target<script_method_dispatch>()) {
-			if (dispatch->eng == engine_) {
-				auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
-				if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
-					script_value method_val = binding->method;
-					script_value receiver = binding->receiver;
-					return enter_script_method(f, std::move(method_val), *dispatch,
-					                           resolved.value(), std::move(receiver), arguments, site);
-				}
-			}
-		}
-	}
-
 	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
 	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
 	const auto* thunk = func.target<script_callable_thunk>();

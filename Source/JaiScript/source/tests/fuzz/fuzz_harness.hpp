@@ -289,6 +289,13 @@ namespace jai::fuzz {
 			// (fix in flight; not observed since - matcher kept for the campaign).
 			{"KD-ORDERING-THROW", "throw inside operator< swallowed by one backend",
 				{"operator<"}, {"op-lt-boom"}},
+			// Deep-but-legal recursion (< JAI_MAX_CALL_DEPTH native frames): the
+			// interpreter's ENVIRONMENT recursion guard fires first, the vm's in-loop
+			// frames sail through and error later (or succeed). Pre-existing recursion-
+			// limit parity gap, NOT a Stage-2 regression (A/B verified at 71e93709,
+			// seed 2072, previously masked by 250ms budget-skips). Needs its own pass.
+			{"KD-ENV-RECURSION-LIMIT", "interp env recursion guard fires before vm on deep legal recursion",
+				{}, {"Maximum environment recursion depth exceeded"}},
 			// The 2026-07 FZ-* matchers (typed-fn-no-return, undef-var eval order,
 			// neg-zero, overflow op names, float divzero text, recursion text,
 			// spaceship overflow swallow) were removed when their fixes landed on

@@ -11,30 +11,33 @@ namespace {
     }
 }
 
-// Initialize the binary operator dispatch table
+// Initialize the flat binary operator handler array (indexed by detail::op_slot)
 void interpreter::init_dispatch_table() {
+    auto set = [this](detail::op_slot s, binary_op_handler h) {
+        binary_handlers_[static_cast<size_t>(s)] = h;
+    };
     // Arithmetic operators
-    binary_dispatch_table_[token_type::plus] = &interpreter::handle_add;
-    binary_dispatch_table_[token_type::minus] = &interpreter::handle_subtract;
-    binary_dispatch_table_[token_type::star] = &interpreter::handle_multiply;
-    binary_dispatch_table_[token_type::slash] = &interpreter::handle_divide;
-    binary_dispatch_table_[token_type::percent] = &interpreter::handle_modulo;
+    set(detail::op_slot::plus, &interpreter::handle_add);
+    set(detail::op_slot::minus, &interpreter::handle_subtract);
+    set(detail::op_slot::star, &interpreter::handle_multiply);
+    set(detail::op_slot::slash, &interpreter::handle_divide);
+    set(detail::op_slot::percent, &interpreter::handle_modulo);
 
     // Comparison operators
-    binary_dispatch_table_[token_type::less] = &interpreter::handle_less;
-    binary_dispatch_table_[token_type::less_equal] = &interpreter::handle_less_equal;
-    binary_dispatch_table_[token_type::greater] = &interpreter::handle_greater;
-    binary_dispatch_table_[token_type::greater_equal] = &interpreter::handle_greater_equal;
-    binary_dispatch_table_[token_type::equal_equal] = &interpreter::handle_equal;
-    binary_dispatch_table_[token_type::bang_equal] = &interpreter::handle_not_equal;
-    binary_dispatch_table_[token_type::spaceship] = &interpreter::handle_spaceship;
+    set(detail::op_slot::less, &interpreter::handle_less);
+    set(detail::op_slot::less_equal, &interpreter::handle_less_equal);
+    set(detail::op_slot::greater, &interpreter::handle_greater);
+    set(detail::op_slot::greater_equal, &interpreter::handle_greater_equal);
+    set(detail::op_slot::equal_equal, &interpreter::handle_equal);
+    set(detail::op_slot::bang_equal, &interpreter::handle_not_equal);
+    set(detail::op_slot::spaceship, &interpreter::handle_spaceship);
 
     // Bitwise operators
-    binary_dispatch_table_[token_type::ampersand] = &interpreter::handle_bitwise_and;
-    binary_dispatch_table_[token_type::pipe] = &interpreter::handle_bitwise_or;
-    binary_dispatch_table_[token_type::caret] = &interpreter::handle_bitwise_xor;
-    binary_dispatch_table_[token_type::left_shift] = &interpreter::handle_left_shift;
-    binary_dispatch_table_[token_type::right_shift] = &interpreter::handle_right_shift;
+    set(detail::op_slot::ampersand, &interpreter::handle_bitwise_and);
+    set(detail::op_slot::pipe, &interpreter::handle_bitwise_or);
+    set(detail::op_slot::caret, &interpreter::handle_bitwise_xor);
+    set(detail::op_slot::left_shift, &interpreter::handle_left_shift);
+    set(detail::op_slot::right_shift, &interpreter::handle_right_shift);
 }
 
 // Optimized binary operation handlers with cached type indices

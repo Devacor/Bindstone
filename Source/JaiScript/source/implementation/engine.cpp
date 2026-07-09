@@ -3,6 +3,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
+#include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
@@ -510,20 +511,11 @@ struct engine::implementation {
     // transient subscript reads keep minting references (detail/transient_read.hpp gate).
     bool custom_binary_ops_flag_ = false;
 
-    static bool is_binary_operator_symbol(std::string_view name) {
-        // Exactly the operator symbols the backends' GLOBAL binary dispatch can resolve
-        // to a registered function (KEEP IN SYNC with interpreter visit_binary's
-        // op_symbol_id switch), plus the custom subscript resolver's "[]". Class
-        // operator METHODS deliberately do not latch: an engine-wide latch would kill
-        // the elision for any host binding operator types (dynamic_binder overloading),
-        // and elided operands match the interpreter's historical read-at-evaluation
-        // order (see transient_read.hpp).
-        return name == "+" || name == "-" || name == "*" || name == "/" || name == "%" ||
-               name == "<" || name == "<=" || name == ">" || name == ">=" ||
-               name == "==" || name == "!=" || name == "<=>" ||
-               name == "&" || name == "|" || name == "^" || name == "<<" || name == ">>" ||
-               name == "[]";
-    }
+    // Flat operator dispatch table (detail/operator_table.hpp - THE operator enumeration):
+    // one mask test + array read replaces every env/string probe on operator paths in both
+    // backends. Holds the current global dispatcher per operator; overload/arity/type
+    // matching stays inside that value.
+    detail::engine_operator_table operator_table_;
 
     void latch_custom_binary_ops() {
         if (!custom_binary_ops_flag_) {
@@ -534,9 +526,25 @@ struct engine::implementation {
         }
     }
 
-    void note_custom_binary_operator(std::string_view name) {
-        if (!custom_binary_ops_flag_ && is_binary_operator_symbol(name)) {
+    // Sync the table with the global environment after a registration. Class operator
+    // METHODS deliberately do not participate: an engine-wide latch would kill the
+    // transient-read elision for any host binding operator types (dynamic_binder
+    // overloading), and elided operands match the interpreter's historical
+    // read-at-evaluation order (see transient_read.hpp).
+    void refresh_operator_entry(std::string_view name) {
+        detail::op_slot slot = detail::op_slot_for_name(name);
+        if (slot == detail::op_slot::none) {
+            return;
+        }
+        auto val = global_environment_->get(string_symbolizer_.intern(name));
+        if (val && val.value().is_function()) {
+            operator_table_.set(slot, std::move(val.value()));
             latch_custom_binary_ops();
+        } else {
+            // Operator name rebound to a non-function: dispatch falls back to builtins
+            // (matches the old contains+is_function probe); the transient gate stays
+            // conservatively latched
+            operator_table_.clear(slot);
         }
     }
 
@@ -1736,10 +1744,10 @@ size_t engine::jaibite_cache_write_failures() const {
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
     ++impl->check_surface_epoch_;   // the static checker can see globals
-    impl->note_custom_binary_operator(name);
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
     impl->global_environment_->define(id, std::move(value));
+    impl->refresh_operator_entry(name);
 
     // Track if this global should NOT be serialized (using string_view from symbolizer)
     std::string_view name_view = impl->string_symbolizer_.get_string(id);
@@ -1776,7 +1784,6 @@ void engine::add_variadic_function(const std::string& name, script_function func
 void engine::register_overload_impl(const std::string& name, size_t arity, script_function func,
                                     const std::vector<param_type_info>& paramTypes, bool createSetOnFirst) {
     ++impl->check_surface_epoch_;   // the static checker can see registered functions
-    impl->note_custom_binary_operator(name);
     auto existing_result = impl->global_environment_->get(name);
     bool hasExisting = existing_result && existing_result.value().is_function();
     bool setExists = impl->overloadedFunctions.find(name) != impl->overloadedFunctions.end();
@@ -1803,6 +1810,7 @@ void engine::register_overload_impl(const std::string& name, size_t arity, scrip
         impl->global_environment_->define(name, script_value::make_function(std::move(func), this));
         impl->functionArities[name] = arity;
     }
+    impl->refresh_operator_entry(name);
 }
 
 void engine::add_functionWithArity(const std::string& name, script_function func, size_t arity) {
@@ -2054,6 +2062,7 @@ void engine::wire_backend() {
                                               impl->overloadedFunctions.count("*") > 0 ||
                                               impl->overloadedFunctions.count("/") > 0);
     impl->backend->set_has_custom_binary_ops(impl->custom_binary_ops_flag_ || impl->custom_numeric_ops_flag_);
+    impl->backend->set_operator_table(&impl->operator_table_);
 
     auto budget = impl->execution_budget_seconds_ > 0
         ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(impl->execution_budget_seconds_))

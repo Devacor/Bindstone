@@ -1013,6 +1013,55 @@ public:
             check_eq((int64_t)14, r.as_int());
         });
 
+        // ---- Stage 2: fused subscript stores + flat operator table ----
+
+        // Fused a[i]=v / a[i]op=v fast paths and their slow replays must keep exact
+        // semantics: typed conversion, string-element concat, map auto-insert, nested
+        // chains, and rvalue-target errors.
+        test("fused_store_semantics", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                array<int> ints = [1, 2, 3];
+                ints[0] = 4.7;                 // typed element: converts like assignment
+                ints[1] += 2;
+                ints[2] *= 3;
+                var strs = ["a", "b"];
+                strs[0] += "x";                // string element: slow-replay concat
+                var m = {"k": 10};
+                m["k"] += 5;                   // map target: slow-replay through the entry ref
+                m["new"] = 1;                  // auto-insert
+                var grid = [[1, 2], [3, 4]];
+                grid[1][0] = grid[0][1] + 40;  // nested chain target + elided RHS
+                to_string(ints[0]) + "|" + to_string(ints[1]) + "|" + to_string(ints[2]) + "|" +
+                    strs[0] + "|" + to_string(m["k"]) + "|" + to_string(m.size()) + "|" + to_string(grid[1][0]);
+            )");
+            check_eq(std::string("4|4|9|ax|15|2|42"), r.as_string());
+        });
+
+        test("fused_store_error_paths", [this]() {
+            auto e = make_engine();
+            // Typed element mismatch keeps its error
+            check_throws([&]() { e->execute(R"(array<int> a = [1]; a[0] = "nope";)"); });
+            // Compound divide by zero keeps its error
+            check_throws([&]() { e->execute(R"(var a = [4]; a[0] /= 0;)"); });
+            // Rvalue base (function return) stays a store error
+            check_throws([&]() { e->execute(R"(auto f() -> auto { return [1, 2]; } f()[0] = 5;)"); });
+        });
+
+        // A registered global operator override must reach subscript compound stores
+        // through the flat table (no environment probe on the path anymore).
+        test("operator_table_dispatches_compound_override", [this]() {
+            auto e = make_engine();
+            e->add_function("+", [](script_int a, script_int b) { return a * b; });   // deliberately multiplies
+            auto r = e->execute(R"(
+                var a = [3];
+                a[0] += 5;
+                a[0];
+            )");
+            check_eq((int64_t)15, r.as_int());
+        });
+
         // A pooled holder escaping the engine must stay destructible after engine death
         // (orphaned pool: the last release frees it, no crash / no touch of freed engine).
         // A by-ref lambda capture boxes x into a CELL reference_holder held by the

@@ -7,6 +7,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
+#include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
@@ -2206,46 +2207,19 @@ checked_result<script_value> vm_backend::handle_binary_op(token_type op, const s
 }
 
 checked_result<script_value> vm_backend::binary_general(token_type op, const script_value& left, const script_value& right) {
-	uint64_t op_symbol_id = 0;
-	switch (op) {
-		case token_type::plus: op_symbol_id = op_plus_id_; break;
-		case token_type::minus: op_symbol_id = op_minus_id_; break;
-		case token_type::star: op_symbol_id = op_star_id_; break;
-		case token_type::slash: op_symbol_id = op_slash_id_; break;
-		case token_type::percent: op_symbol_id = op_percent_id_; break;
-		case token_type::less: op_symbol_id = op_less_id_; break;
-		case token_type::less_equal: op_symbol_id = op_less_equal_id_; break;
-		case token_type::greater: op_symbol_id = op_greater_id_; break;
-		case token_type::greater_equal: op_symbol_id = op_greater_equal_id_; break;
-		case token_type::equal_equal: op_symbol_id = op_equal_equal_id_; break;
-		case token_type::bang_equal: op_symbol_id = op_bang_equal_id_; break;
-		case token_type::spaceship: op_symbol_id = op_spaceship_id_; break;
-		case token_type::ampersand: op_symbol_id = op_ampersand_id_; break;
-		case token_type::pipe: op_symbol_id = op_pipe_id_; break;
-		case token_type::caret: op_symbol_id = op_caret_id_; break;
-		case token_type::left_shift: op_symbol_id = op_left_shift_id_; break;
-		case token_type::right_shift: op_symbol_id = op_right_shift_id_; break;
-		default: break;
-	}
-
 	// The interpreter's general path consults registered global operator functions
-	// regardless of has_custom_numeric_ops (quirk preserved deliberately). Operator
-	// symbols are only definable in the global env (C++ add_function), so the consult
-	// probes it directly - a chain walk here is O(depth) in eager-env recursion.
-	if (op_symbol_id != 0 && engine_) {
-		auto global_env = engine_->get_global_environment();
-		if (global_env && global_env->contains(op_symbol_id)) {
-			auto op_result = global_env->get(op_symbol_id);
-			if (op_result && op_result.value().is_function()) {
-				script_value opFunc = std::move(op_result.value());
-				const script_function& func = opFunc.as_function();
-				std::vector<script_value> args = {left, right};
-				auto result = func(args);
-				if (!result) {
-					return result.error_value();
-				}
-				return std::move(result.value());
+	// regardless of has_custom_numeric_ops (quirk preserved deliberately). The consult
+	// reads the engine's flat operator table (detail/operator_table.hpp) - one mask
+	// test + array read, no environment probe.
+	if (operator_table_ && operator_table_->any()) {
+		if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(op))) {
+			const script_function& func = opFunc->as_function();
+			std::vector<script_value> args = {left, right};
+			auto result = func(args);
+			if (!result) {
+				return result.error_value();
 			}
+			return std::move(result.value());
 		}
 	}
 
@@ -3399,9 +3373,8 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 					case compound_percent: op = token_type::percent; opName = "%"; break;
 					default: op = token_type::plus; opName = "+"; break;
 				}
-				auto global_env = engine_ ? engine_->get_global_environment() : environment_;
 				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
-					global_env.get(), engine_, symbolizer_,
+					operator_table_, engine_, symbolizer_,
 					[this](const script_value& l, token_type o, const script_value& r) {
 						return evaluate_arithmetic(l, o, r);
 					});
@@ -3422,18 +3395,16 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 		script_value& derefRight = rightValue.deref();
 
 		if (has_custom_numeric_ops_) [[unlikely]] {
-			const char* opName = nullptr;
+			detail::op_slot op_slot = detail::op_slot::none;
 			switch (kind) {
-				case compound_plus: opName = "+"; break;
-				case compound_minus: opName = "-"; break;
-				case compound_star: opName = "*"; break;
+				case compound_plus: op_slot = detail::op_slot::plus; break;
+				case compound_minus: op_slot = detail::op_slot::minus; break;
+				case compound_star: op_slot = detail::op_slot::star; break;
 				default: break;
 			}
-			if (opName && environment_->contains(opName)) {
-				auto op_result = environment_->get(opName);
-				if (op_result && op_result.value().is_function()) {
-					script_value opFunc = std::move(op_result.value());
-					const script_function& func = opFunc.as_function();
+			if (operator_table_) {
+				if (const script_value* opFunc = operator_table_->entry(op_slot)) {
+					const script_function& func = opFunc->as_function();
 					std::vector<script_value> args = {target.clone(), rightValue};
 					auto result = func(args);
 					if (!result) {
@@ -4634,17 +4605,18 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 				return {};
 			}
 		}
-		auto method_result = environment_->get("[]");
-		if (method_result && method_result.value().is_function()) {
-			script_value getMethod = std::move(method_result.value());
-			const script_function& func = getMethod.as_function();
-			std::vector<script_value> args = {left, right};
-			auto result = func(args);
-			if (!result) {
-				return result.error_value();
+		// Fall back to the global [] operator (flat table - no env probe)
+		if (operator_table_) {
+			if (const script_value* getMethod = operator_table_->entry(detail::op_slot::subscript)) {
+				const script_function& func = getMethod->as_function();
+				std::vector<script_value> args = {left, right};
+				auto result = func(args);
+				if (!result) {
+					return result.error_value();
+				}
+				stack_.push_back(std::move(result.value()));
+				return {};
 			}
-			stack_.push_back(std::move(result.value()));
-			return {};
 		}
 	}
 	return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
@@ -4698,21 +4670,21 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 	stack_.pop_back();
 
 	token_type op;
-	const char* opName;
 	switch (ins.a & compound_kind_mask) {
-		case compound_plus: op = token_type::plus; opName = "+"; break;
-		case compound_minus: op = token_type::minus; opName = "-"; break;
-		case compound_star: op = token_type::star; opName = "*"; break;
-		case compound_slash: op = token_type::slash; opName = "/"; break;
-		case compound_percent: op = token_type::percent; opName = "%"; break;
-		default: op = token_type::plus; opName = "+"; break;
+		case compound_plus: op = token_type::plus; break;
+		case compound_minus: op = token_type::minus; break;
+		case compound_star: op = token_type::star; break;
+		case compound_slash: op = token_type::slash; break;
+		case compound_percent: op = token_type::percent; break;
+		default: op = token_type::plus; break;
 	}
 
 	script_value resultValue = make_null();
-	auto op_result = environment_->get(opName);
-	if (op_result && op_result.value().is_function()) {
-		script_value opFunc = std::move(op_result.value());
-		const script_function& func = opFunc.as_function();
+	// Custom operator consult through the flat table (was a per-store string-keyed
+	// env-chain walk - the single hottest waste on the compound-store path)
+	const script_value* opFunc = operator_table_ ? operator_table_->entry(detail::binary_op_slot(op)) : nullptr;
+	if (opFunc) {
+		const script_function& func = opFunc->as_function();
 		std::vector<script_value> args = {currentValue, rightValue};
 		auto result = func(args);
 		if (!result) {
@@ -4792,6 +4764,142 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 	}
 	stack_.push_back(std::move(resultValue));
 	return {};
+}
+
+// Fused a[i] = v (docs/element_read_overhead_design.md store side): the plain-array
+// shape resolves container+index ONCE and writes in place - no reference_holder mint,
+// no holder re-resolve. Every other shape (map/object/string/borrow/temporary base/OOB)
+// replays the exact INDEX(lvalue_write)+INDEX_ASSIGN sequence, so semantics and error
+// text stay byte-identical by construction.
+checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
+	// stack: [value, container, index]. Decision peeks are read-only; committed fast
+	// paths pop into locals first - conversions can run user code that grows the value
+	// stack (invariant 2b: never hold references into stack_ across a possible push).
+	if ((ins.a & index_flag_lvalue_shape) != 0 && stack_.size() >= 3) {
+		script_value& container_peek = stack_[stack_.size() - 2].deref();
+		const script_value& index_peek = stack_.back().deref();
+		if (container_peek.raw_storage_index() == script_value::TYPEID_ARRAY && index_peek.is_int()) {
+			const script_int index = index_peek.unchecked_as_int();
+			auto storage = container_peek.get_array_storage();
+			if (storage && index >= 0 && index < static_cast<script_int>(storage->size())) {
+				auto container_type_info = container_peek.get_type_info();
+				type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
+				stack_.pop_back();   // index (decoded above)
+				script_value container_local = std::move(stack_.back());
+				stack_.pop_back();
+				script_value value = std::move(stack_.back());
+				stack_.pop_back();
+				script_value* target_ptr = &(*storage)[static_cast<size_t>(index)];
+				if (element_type) {
+					if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
+						std::string value_type = vm_value_type_name(value);
+						std::string expected_type = vm_type_info_name(element_type);
+						uint64_t value_type_id = symbolizer_->intern(value_type);
+						uint64_t expected_type_id = symbolizer_->intern(expected_type);
+						return checked_result<void>(
+							make_error_code(runtime_error_code::array_element_type_mismatch),
+							"Cannot assign '{0}' to element of type '{1}'",
+							value_type_id, expected_type_id);
+					}
+					script_value converted = vm_convert_array_element(engine_, value, element_type);
+					*target_ptr = std::move(converted);
+				} else {
+					// No element type constraint - values deep-copy, shared_ptr handles share
+					*target_ptr = clone_for_assignment(value);
+				}
+				stack_.push_back(std::move(value));   // assignment expression result
+				return {};
+			}
+		}
+	}
+	// Slow replay: identical to the old two-op sequence
+	vm_instruction index_ins{opcode::op_index, index_flag_lvalue_write | (ins.a & index_flag_lvalue_shape), 0, 0};
+	auto indexed = exec_index(f, index_ins);
+	if (!indexed) {
+		return indexed;
+	}
+	return exec_index_assign(f, ins);
+}
+
+// Fused a[i] op= v: the numeric plain-array shape (int/float element, raw int/float rhs,
+// no registered operator override) reads, computes, and writes in place. Everything else
+// replays INDEX(shape)+INDEX_COMPOUND byte-identically (string concat routing, S8 bound
+// decode, object operator methods, rvalue-target errors).
+checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& ins) {
+	// stack: [container, index, rhs]. Numeric fast path: all peeks are read-only and
+	// evaluate_arithmetic on raw int/float runs no user code, so in-place refs are safe.
+	if ((ins.b & index_flag_lvalue_shape) != 0 && stack_.size() >= 3 &&
+	    !(operator_table_ && operator_table_->any())) {
+		const script_value& rhs = stack_.back();
+		const size_t rhs_idx = rhs.raw_storage_index();
+		script_value& container = stack_[stack_.size() - 3].deref();
+		const script_value& index_v = stack_[stack_.size() - 2].deref();
+		if ((rhs_idx == script_value::TYPEID_INT || rhs_idx == script_value::TYPEID_FLOAT) &&
+		    container.raw_storage_index() == script_value::TYPEID_ARRAY && index_v.is_int()) {
+			const script_int index = index_v.unchecked_as_int();
+			auto storage = container.get_array_storage();
+			if (storage && index >= 0 && index < static_cast<script_int>(storage->size())) {
+				script_value* target_ptr = &(*storage)[static_cast<size_t>(index)];
+				const size_t elem_idx = target_ptr->raw_storage_index();
+				if (elem_idx == script_value::TYPEID_INT || elem_idx == script_value::TYPEID_FLOAT) {
+					token_type op;
+					switch (ins.a & compound_kind_mask) {
+						case compound_plus: op = token_type::plus; break;
+						case compound_minus: op = token_type::minus; break;
+						case compound_star: op = token_type::star; break;
+						case compound_slash: op = token_type::slash; break;
+						case compound_percent: op = token_type::percent; break;
+						default: op = token_type::plus; break;
+					}
+					// Zero pre-checks keep INDEX_COMPOUND's exact error codes/texts
+					if (op == token_type::slash &&
+					    ((rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
+					     (rhs_idx == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) {
+						return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+					}
+					if (op == token_type::percent && rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
+						return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+					}
+					script_value resultValue = make_null();
+					JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs));
+					auto container_type_info = container.get_type_info();
+					type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
+					if (element_type) {
+						if (!vm_is_element_type_compatible(resultValue, element_type, *target_ptr)) {
+							std::string value_type = vm_value_type_name(resultValue);
+							std::string expected_type = vm_type_info_name(element_type);
+							uint64_t value_type_id = symbolizer_->intern(value_type);
+							uint64_t expected_type_id = symbolizer_->intern(expected_type);
+							return checked_result<void>(
+								make_error_code(runtime_error_code::array_element_type_mismatch),
+								"Cannot assign '{0}' to element of type '{1}'",
+								value_type_id, expected_type_id);
+						}
+						// Numeric-to-numeric conversion: no user code (int/float only)
+						script_value converted = vm_convert_array_element(engine_, resultValue, element_type);
+						*target_ptr = std::move(converted);
+					} else {
+						*target_ptr = std::move(resultValue.clone());
+					}
+					stack_.pop_back();   // rhs
+					stack_.pop_back();   // index
+					stack_.back() = std::move(resultValue);   // container slot becomes the result
+					return {};
+				}
+			}
+		}
+	}
+	// Slow replay: identical to the old two-op sequence
+	script_value rhs = std::move(stack_.back());
+	stack_.pop_back();
+	vm_instruction index_ins{opcode::op_index, (ins.b & index_flag_lvalue_shape), 0, 0};
+	auto indexed = exec_index(f, index_ins);
+	if (!indexed) {
+		return indexed;
+	}
+	stack_.push_back(std::move(rhs));
+	vm_instruction compound_ins{opcode::op_index_compound, ins.a, 0, 0};
+	return exec_index_compound(f, compound_ins);
 }
 
 checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
@@ -8454,6 +8562,8 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 		case opcode::op_import: return exec_import(f, ins);
 		case opcode::op_ref_return_bind: return exec_ref_return_bind(f, ins);
 		case opcode::op_ref_return_lvalue: return exec_ref_return_lvalue(f, ins);
+		case opcode::op_index_store: return exec_index_store(f, ins);
+		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
 		default: return {};
 	}
 }
@@ -8664,6 +8774,8 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			case opcode::op_import:
 			case opcode::op_ref_return_bind:
 			case opcode::op_ref_return_lvalue:
+			case opcode::op_index_store:
+			case opcode::op_index_compound_fused:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

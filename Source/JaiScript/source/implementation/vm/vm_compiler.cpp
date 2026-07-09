@@ -83,6 +83,8 @@ namespace {
 			case opcode::op_index:
 			case opcode::op_index_assign:
 			case opcode::op_index_compound:
+			case opcode::op_index_store:
+			case opcode::op_index_compound_fused:
 			case opcode::op_unary:
 			case opcode::op_array:
 			case opcode::op_map:
@@ -1335,19 +1337,17 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 	if (expr->target->get_type() == node_type::binary_expr &&
 	    static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket) {
 		auto* sub = static_cast<binary_expr*>(expr->target.get());
+		uint32_t shape = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
 		if (!compound) {
+			// Fused store: the array fast path writes in place (no reference mint);
+			// other shapes replay the INDEX(lvalue_write)+INDEX_ASSIGN semantics inside
 			compile_expression(expr->value);
 			compile_expression(sub->left);
 			compile_expression(sub->right);
-			uint32_t flags = index_flag_lvalue_write;
-			if (is_lvalue_shaped(sub->left.get())) flags |= index_flag_lvalue_shape;
-			emit(opcode::op_index, flags);
-			emit(opcode::op_index_assign);
+			emit(opcode::op_index_store, shape);
 		} else {
 			compile_expression(sub->left);
 			compile_expression(sub->right);
-			uint32_t flags = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
-			emit(opcode::op_index, flags);
 			compile_expression(expr->value);
 			uint32_t kind;
 			switch (expr->op.type) {
@@ -1358,7 +1358,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			case token_type::percent_equal: kind = compound_percent; break;
 			default: kind = compound_plus; break;
 			}
-			emit(opcode::op_index_compound, kind);
+			emit(opcode::op_index_compound_fused, kind, shape);
 		}
 		return;
 	}

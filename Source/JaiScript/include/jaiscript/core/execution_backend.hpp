@@ -17,6 +17,7 @@ class string_symbolizer;
 class class_definition;
 class coroutine_handle;
 namespace debug { class controller; }
+namespace detail { class engine_operator_table; }
 
 // Backend-neutral payload describing a script-defined callable. Stored thunks capture
 // (engine*, payload) and resolve the live backend at call time via
@@ -117,6 +118,10 @@ public:
     // back to the reference mint (see detail/transient_read.hpp). Non-pure so custom
     // backends (which have no such fast path) are unaffected.
     virtual void set_has_custom_binary_ops(bool) {}
+    // Engine-owned flat operator dispatch table (detail/operator_table.hpp): backends
+    // resolve global operator overrides through it instead of probing environments.
+    // Outlives the backend; non-pure so custom backends are unaffected.
+    virtual void set_operator_table(const detail::engine_operator_table*) {}
     virtual void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) = 0;
     virtual void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) = 0;
     virtual void set_engine_reference(engine* engine_ref) = 0;

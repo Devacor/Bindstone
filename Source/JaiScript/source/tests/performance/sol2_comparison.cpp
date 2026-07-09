@@ -62,6 +62,94 @@ std::shared_ptr<CppTreeNode> cpp_rotateRight(std::shared_ptr<CppTreeNode> y) {
 
 namespace jai::foundry::tests {
 
+// x20 unrolled trivial-op sources: runtime values defeat parse-time constant folding,
+// and 20 ops lift the rows off the integer-uS floor (a 0uS row compares as noise).
+// Identical shapes on both sides.
+constexpr const char* k_jai_int_add_x20 = R"(
+	auto a = 42;
+	auto acc = 0;
+	acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+	acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+	acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+	acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a; acc = acc + a;
+	acc;
+)";
+constexpr const char* k_lua_int_add_x20 = R"(
+	local a = 42
+	local acc = 0
+	acc = acc + a acc = acc + a acc = acc + a acc = acc + a acc = acc + a
+	acc = acc + a acc = acc + a acc = acc + a acc = acc + a acc = acc + a
+	acc = acc + a acc = acc + a acc = acc + a acc = acc + a acc = acc + a
+	acc = acc + a acc = acc + a acc = acc + a acc = acc + a acc = acc + a
+	return acc
+)";
+constexpr const char* k_jai_float_mul_x20 = R"(
+	auto f = 1.001;
+	auto acc = 3.14;
+	acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f;
+	acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f;
+	acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f;
+	acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f; acc = acc * f;
+	acc;
+)";
+constexpr const char* k_lua_float_mul_x20 = R"(
+	local f = 1.001
+	local acc = 3.14
+	acc = acc * f acc = acc * f acc = acc * f acc = acc * f acc = acc * f
+	acc = acc * f acc = acc * f acc = acc * f acc = acc * f acc = acc * f
+	acc = acc * f acc = acc * f acc = acc * f acc = acc * f acc = acc * f
+	acc = acc * f acc = acc * f acc = acc * f acc = acc * f acc = acc * f
+	return acc
+)";
+
+// Shared C++-bound BST source (plain rows re-submit it per iteration, the
+// [precompiled] rows execute the compiled form) — one string so both paths
+// measure identical work.
+constexpr const char* k_jai_cpp_bst = R"(
+	root = CppTreeNode(8);
+	root = cpp_insertNode(root, 4);
+	root = cpp_insertNode(root, 12);
+	root = cpp_insertNode(root, 2);
+	root = cpp_insertNode(root, 6);
+	root = cpp_insertNode(root, 10);
+	root = cpp_insertNode(root, 14);
+	root = cpp_insertNode(root, 1);
+	root = cpp_insertNode(root, 3);
+	root = cpp_insertNode(root, 5);
+	root = cpp_insertNode(root, 7);
+	root = cpp_insertNode(root, 9);
+	root = cpp_insertNode(root, 11);
+	root = cpp_insertNode(root, 13);
+	root = cpp_insertNode(root, 15);
+
+	sum = cpp_inorderSum(root);
+	height = cpp_treeHeight(root);
+	root = cpp_rotateRight(root);
+	sum = cpp_inorderSum(root);
+)";
+constexpr const char* k_lua_cpp_bst = R"(
+	local root = CppTreeNode.new(8)
+	root = cpp_insertNode(root, 4)
+	root = cpp_insertNode(root, 12)
+	root = cpp_insertNode(root, 2)
+	root = cpp_insertNode(root, 6)
+	root = cpp_insertNode(root, 10)
+	root = cpp_insertNode(root, 14)
+	root = cpp_insertNode(root, 1)
+	root = cpp_insertNode(root, 3)
+	root = cpp_insertNode(root, 5)
+	root = cpp_insertNode(root, 7)
+	root = cpp_insertNode(root, 9)
+	root = cpp_insertNode(root, 11)
+	root = cpp_insertNode(root, 13)
+	root = cpp_insertNode(root, 15)
+
+	local sum = cpp_inorderSum(root)
+	local height = cpp_treeHeight(root)
+	root = cpp_rotateRight(root)
+	sum = cpp_inorderSum(root)
+)";
+
 class sol2_comparison : public suite {
 public:
 	sol2_comparison() : suite("Lua (sol2) Performance Comparison") {
@@ -355,10 +443,46 @@ public:
 		// every call, so those numbers mix Lua compile cost into the ratio. These
 		// variants remove the asymmetry: jaibite vs a loaded protected_function,
 		// execution only.
-		jai_pre_int_add = jai_engine->jaibite("42 + 58;");
+		jai_pre_int_add = jai_engine->jaibite(k_jai_int_add_x20);
+		jai_pre_float_mul = jai_engine->jaibite(k_jai_float_mul_x20);
+		jai_pre_var_ops = jai_engine->jaibite("auto x = 10; auto y = 20; auto z = x + y;");
 		jai_pre_func_call = jai_engine->jaibite("add(10, 20);");
 		jai_pre_method = jai_engine->jaibite("auto calc = Calculator(); calc.add(5, 3);");
+		jai_pre_class = jai_engine->jaibite("auto p = Point(3.0, 4.0);");
+		jai_pre_array = jai_engine->jaibite(R"(
+			auto arr = [];
+			arr.push(1); arr.push(2); arr.push(3);
+			arr.pop();
+			arr.size();
+		)");
+		jai_pre_map = jai_engine->jaibite(R"(
+			auto m = {};
+			m["key1"] = 100;
+			m["key2"] = 200;
+			auto val = m["key1"];
+		)");
+		jai_pre_for_loop = jai_engine->jaibite(R"(
+			auto sum = 0;
+			for (auto i = 0; i < 100; ++i) { sum += i; }
+		)");
+		jai_pre_factorial = jai_engine->jaibite("factorial(10);");
 		jai_pre_fib = jai_engine->jaibite("fib(15);");
+		jai_pre_recurse_locals = jai_engine->jaibite("recurseWithLocals(15);");
+		jai_engine->execute("auto preArr = [0,1,2,3,4,5,6,7,8,9];");
+		jai_pre_range_for = jai_engine->jaibite(R"(
+			auto s = 0;
+			for (auto x : preArr) { s += x; }
+			s;
+		)");
+		jai_pre_str_concat = jai_engine->jaibite(R"(
+			auto s = "";
+			for (auto i = 0; i < 20; ++i) { s = s + "x"; }
+		)");
+		jai_pre_null_check = jai_engine->jaibite(R"(
+			var x = null;
+			if (x == null) { x = 42; }
+			x;
+		)");
 		jai_pre_hot_loop = jai_engine->jaibite(R"(
 			auto sum = 0;
 			for (auto i = 0; i < 1000; ++i) { sum += i; }
@@ -385,15 +509,26 @@ public:
 			ref_sum;
 		)");
 
+		jai_pre_cpp_bst = jai_engine->jaibite(k_jai_cpp_bst);
+
 		// Correctness gates: each precompiled script produces the same value its
 		// per-iteration sibling does
-		check_eq((int64_t)100, jai_pre_int_add.execute().as_int());
+		check_eq((int64_t)840, jai_pre_int_add.execute().as_int());
+		check_near(3.2034, jai_pre_float_mul.execute().as_float(), 0.001); // 3.14 * 1.001^20
 		check_eq((int64_t)30, jai_pre_func_call.execute().as_int());
 		check_eq((int64_t)8, jai_pre_method.execute().as_int());
+		check_eq((int64_t)2, jai_pre_array.execute().as_int());
+		check_eq((int64_t)3628800, jai_pre_factorial.execute().as_int());
 		check_eq((int64_t)610, jai_pre_fib.execute().as_int());
+		check_eq((int64_t)45, jai_pre_range_for.execute().as_int());
+		check_eq((int64_t)42, jai_pre_null_check.execute().as_int());
+		jai_pre_for_loop.execute();
+		check_eq((int64_t)4950, jai_engine->execute("sum;").as_int());
 		jai_pre_hot_loop.execute();
 		check_eq((int64_t)499500, jai_engine->execute("sum;").as_int());
 		check_eq((int64_t)120, jai_pre_bst.execute().as_int());
+		jai_pre_cpp_bst.execute();
+		check_eq((int64_t)120, jai_engine->execute("sum;").as_int());
 
 #ifdef HAVE_SOL2
 		if (lua) {
@@ -405,10 +540,44 @@ public:
 				}
 				return loaded.get<sol::protected_function>();
 			};
-			lua_pre_int_add = lua_precompile("local _ = 42 + 58");
+			lua_pre_int_add = lua_precompile(k_lua_int_add_x20);
+			lua_pre_float_mul = lua_precompile(k_lua_float_mul_x20);
+			lua_pre_var_ops = lua_precompile("local x = 10 local y = 20 local z = x + y");
 			lua_pre_func_call = lua_precompile("add(10, 20)");
 			lua_pre_method = lua_precompile("local calc = Calculator.new() calc:add(5, 3)");
+			lua_pre_class = lua_precompile("local p = Point.new(3.0, 4.0)");
+			lua_pre_array = lua_precompile(R"(
+					local arr = {}
+					table.insert(arr, 1); table.insert(arr, 2); table.insert(arr, 3)
+					table.remove(arr)
+					local n = #arr
+				)");
+			lua_pre_map = lua_precompile(R"(
+					local m = {}
+					m["key1"] = 100
+					m["key2"] = 200
+					local val = m["key1"]
+				)");
+			lua_pre_for_loop = lua_precompile(R"(
+					local sum = 0
+					for i = 0, 99 do sum = sum + i end
+				)");
+			lua_pre_factorial = lua_precompile("factorial(10)");
 			lua_pre_fib = lua_precompile("fib(15)");
+			lua_pre_recurse_locals = lua_precompile("recurseWithLocals(15)");
+			lua->script("preArr = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}");
+			lua_pre_range_for = lua_precompile(R"(
+					local s = 0
+					for _, x in ipairs(preArr) do s = s + x end
+				)");
+			lua_pre_str_concat = lua_precompile(R"(
+					local s = ""
+					for i = 1, 20 do s = s .. "x" end
+				)");
+			lua_pre_null_check = lua_precompile(R"(
+					local x = nil
+					if x == nil then x = 42 end
+				)");
 			lua_pre_hot_loop = lua_precompile(R"(
 					local sum = 0
 					for i = 0, 999 do sum = sum + i end
@@ -434,10 +603,14 @@ public:
 					return tree_sum
 				)");
 
+			lua_pre_cpp_bst = lua_precompile(k_lua_cpp_bst);
+
 			// Gates: one-shot `return` variants of the same sources (locals are not
 			// observable after the chunk), plus the BST function's own return value
-			check_eq(100, (int)lua->script("return 42 + 58"));
+			check_eq(840, (int)lua->script(k_lua_int_add_x20));
 			check_eq(30, (int)lua->script("return add(10, 20)"));
+			check_eq(3628800, (int)lua->script("return factorial(10)"));
+			check_eq(45, (int)lua->script("local s = 0 for _, x in ipairs(preArr) do s = s + x end return s"));
 			check_eq(8, (int)lua->script("local calc = Calculator.new() return calc:add(5, 3)"));
 			check_eq(610, (int)lua->script("return fib(15)"));
 			check_eq(499500, (int)lua->script("local sum = 0 for i = 0, 999 do sum = sum + i end return sum"));
@@ -450,10 +623,16 @@ public:
 
 	std::shared_ptr<jai::engine> jai_engine;
 	jai::jaibite jai_pre_int_add, jai_pre_func_call, jai_pre_method, jai_pre_fib, jai_pre_hot_loop, jai_pre_bst;
+	jai::jaibite jai_pre_float_mul, jai_pre_var_ops, jai_pre_array, jai_pre_map, jai_pre_class,
+		jai_pre_for_loop, jai_pre_factorial, jai_pre_recurse_locals, jai_pre_range_for,
+		jai_pre_str_concat, jai_pre_null_check, jai_pre_cpp_bst;
 #ifdef HAVE_SOL2
 	std::unique_ptr<sol::state> lua;
 	// Declared after lua so they release their registry refs before the state closes
 	sol::protected_function lua_pre_int_add, lua_pre_func_call, lua_pre_method, lua_pre_fib, lua_pre_hot_loop, lua_pre_bst;
+	sol::protected_function lua_pre_float_mul, lua_pre_var_ops, lua_pre_array, lua_pre_map, lua_pre_class,
+		lua_pre_for_loop, lua_pre_factorial, lua_pre_recurse_locals, lua_pre_range_for,
+		lua_pre_str_concat, lua_pre_null_check, lua_pre_cpp_bst;
 #endif
 
 	void forge_tests() override {
@@ -468,38 +647,48 @@ public:
 		// Each lua->script() call compiles + runs, matching Squirrel's
 		// sq_compilebuffer-per-execute.
 
-		// ===== Integer Addition =====
-		test("JaiScript vs Lua(sol2): Integer Addition", [this]() {
-			benchmark("JaiScript - Integer Addition", [this]() {
-				jai_engine->execute("42 + 58;");
+		// ===== Integer Addition (x20 unrolled - see k_jai_int_add_x20) =====
+		test("JaiScript vs Lua(sol2): Integer Addition (x20)", [this]() {
+			benchmark("JaiScript - Integer Addition (x20)", [this]() {
+				jai_engine->execute(k_jai_int_add_x20);
 			}, 5000);
 
-			benchmark("Lua(sol2) - Integer Addition", [this]() {
-				lua->script("local _ = 42 + 58");
+			benchmark("Lua(sol2) - Integer Addition (x20)", [this]() {
+				lua->script(k_lua_int_add_x20);
 			}, 5000);
 		});
 
 		// Same pair with the compile cost removed on BOTH sides (jaibite vs loaded
 		// protected_function); the plain pair above keeps measuring the realistic
 		// script(src) path.
-		test("JaiScript vs Lua(sol2): Integer Addition [precompiled]", [this]() {
-			benchmark("JaiScript - Integer Addition [precompiled]", [this]() {
+		test("JaiScript vs Lua(sol2): Integer Addition (x20) [precompiled]", [this]() {
+			benchmark("JaiScript - Integer Addition (x20) [precompiled]", [this]() {
 				jai_pre_int_add.execute();
 			}, 5000);
 
-			benchmark("Lua(sol2) - Integer Addition [precompiled]", [this]() {
+			benchmark("Lua(sol2) - Integer Addition (x20) [precompiled]", [this]() {
 				lua_pre_int_add();
 			}, 5000);
 		});
 
-		// ===== Float Multiplication =====
-		test("JaiScript vs Lua(sol2): Float Multiplication", [this]() {
-			benchmark("JaiScript - Float Multiplication", [this]() {
-				jai_engine->execute("3.14 * 2.71;");
+		// ===== Float Multiplication (x20 unrolled) =====
+		test("JaiScript vs Lua(sol2): Float Multiplication (x20)", [this]() {
+			benchmark("JaiScript - Float Multiplication (x20)", [this]() {
+				jai_engine->execute(k_jai_float_mul_x20);
 			}, 5000);
 
-			benchmark("Lua(sol2) - Float Multiplication", [this]() {
-				lua->script("local _ = 3.14 * 2.71");
+			benchmark("Lua(sol2) - Float Multiplication (x20)", [this]() {
+				lua->script(k_lua_float_mul_x20);
+			}, 5000);
+		});
+
+		test("JaiScript vs Lua(sol2): Float Multiplication (x20) [precompiled]", [this]() {
+			benchmark("JaiScript - Float Multiplication (x20) [precompiled]", [this]() {
+				jai_pre_float_mul.execute();
+			}, 5000);
+
+			benchmark("Lua(sol2) - Float Multiplication (x20) [precompiled]", [this]() {
+				lua_pre_float_mul();
 			}, 5000);
 		});
 
@@ -511,6 +700,16 @@ public:
 
 			benchmark("Lua(sol2) - Variable Operations", [this]() {
 				lua->script("local x = 10 local y = 20 local z = x + y");
+			});
+		});
+
+		test("JaiScript vs Lua(sol2): Variable Operations [precompiled]", [this]() {
+			benchmark("JaiScript - Variable Operations [precompiled]", [this]() {
+				jai_pre_var_ops.execute();
+			});
+
+			benchmark("Lua(sol2) - Variable Operations [precompiled]", [this]() {
+				lua_pre_var_ops();
 			});
 		});
 
@@ -556,6 +755,16 @@ public:
 			});
 		});
 
+		test("JaiScript vs Lua(sol2): Array Operations [precompiled]", [this]() {
+			benchmark("JaiScript - Array Push/Pop [precompiled]", [this]() {
+				jai_pre_array.execute();
+			});
+
+			benchmark("Lua(sol2) - Array Push/Pop [precompiled]", [this]() {
+				lua_pre_array();
+			});
+		});
+
 		// ===== Table/Map Insert/Lookup =====
 		test("JaiScript vs Lua(sol2): Map/Table Operations", [this]() {
 			benchmark("JaiScript - Map Insert/Lookup", [this]() {
@@ -577,6 +786,16 @@ public:
 			});
 		});
 
+		test("JaiScript vs Lua(sol2): Map/Table Operations [precompiled]", [this]() {
+			benchmark("JaiScript - Map Insert/Lookup [precompiled]", [this]() {
+				jai_pre_map.execute();
+			});
+
+			benchmark("Lua(sol2) - Table Insert/Lookup [precompiled]", [this]() {
+				lua_pre_map();
+			});
+		});
+
 		// ===== Class Creation =====
 		test("JaiScript vs Lua(sol2): Class Creation", [this]() {
 			benchmark("JaiScript - Class Creation", [this]() {
@@ -585,6 +804,16 @@ public:
 
 			benchmark("Lua(sol2) - Class Creation", [this]() {
 				lua->script("local p = Point.new(3.0, 4.0)");
+			});
+		});
+
+		test("JaiScript vs Lua(sol2): Class Creation [precompiled]", [this]() {
+			benchmark("JaiScript - Class Creation [precompiled]", [this]() {
+				jai_pre_class.execute();
+			});
+
+			benchmark("Lua(sol2) - Class Creation [precompiled]", [this]() {
+				lua_pre_class();
 			});
 		});
 
@@ -626,6 +855,16 @@ public:
 			});
 		});
 
+		test("JaiScript vs Lua(sol2): For Loop (100 iterations) [precompiled]", [this]() {
+			benchmark("JaiScript - For Loop [precompiled]", [this]() {
+				jai_pre_for_loop.execute();
+			});
+
+			benchmark("Lua(sol2) - For Loop [precompiled]", [this]() {
+				lua_pre_for_loop();
+			});
+		});
+
 		// ===== Factorial (Recursion) =====
 		test("JaiScript vs Lua(sol2): Factorial (Recursion)", [this]() {
 			benchmark("JaiScript - Factorial(10)", [this]() {
@@ -634,6 +873,16 @@ public:
 
 			benchmark("Lua(sol2) - Factorial(10)", [this]() {
 				lua->script("factorial(10)");
+			});
+		});
+
+		test("JaiScript vs Lua(sol2): Factorial (Recursion) [precompiled]", [this]() {
+			benchmark("JaiScript - Factorial(10) [precompiled]", [this]() {
+				jai_pre_factorial.execute();
+			});
+
+			benchmark("Lua(sol2) - Factorial(10) [precompiled]", [this]() {
+				lua_pre_factorial();
 			});
 		});
 
@@ -672,6 +921,16 @@ public:
 			});
 		});
 
+		test("JaiScript vs Lua(sol2): Recursion with 10 Locals [precompiled]", [this]() {
+			benchmark("JaiScript - Recurse with Locals (depth=15) [precompiled]", [this]() {
+				jai_pre_recurse_locals.execute();
+			});
+
+			benchmark("Lua(sol2) - Recurse with Locals (depth=15) [precompiled]", [this]() {
+				lua_pre_recurse_locals();
+			});
+		});
+
 		// ===== Foreach / Range-For =====
 		test("JaiScript vs Lua(sol2): Foreach Loop", [this]() {
 			// Pre-declare arrays
@@ -693,6 +952,16 @@ public:
 			});
 		});
 
+		test("JaiScript vs Lua(sol2): Foreach Loop [precompiled]", [this]() {
+			benchmark("JaiScript - Range-For (10 elements) [precompiled]", [this]() {
+				jai_pre_range_for.execute();
+			});
+
+			benchmark("Lua(sol2) - Foreach (10 elements) [precompiled]", [this]() {
+				lua_pre_range_for();
+			});
+		});
+
 		// ===== String Operations =====
 		test("JaiScript vs Lua(sol2): String Concatenation", [this]() {
 			benchmark("JaiScript - String Concat", [this]() {
@@ -710,6 +979,16 @@ public:
 			});
 		});
 
+		test("JaiScript vs Lua(sol2): String Concatenation [precompiled]", [this]() {
+			benchmark("JaiScript - String Concat [precompiled]", [this]() {
+				jai_pre_str_concat.execute();
+			});
+
+			benchmark("Lua(sol2) - String Concat [precompiled]", [this]() {
+				lua_pre_str_concat();
+			});
+		});
+
 		// ===== Null Handling =====
 		test("JaiScript vs Lua(sol2): Null Handling", [this]() {
 			benchmark("JaiScript - Null Check", [this]() {
@@ -724,6 +1003,16 @@ public:
 					local x = nil
 					if x == nil then x = 42 end
 				)");
+			});
+		});
+
+		test("JaiScript vs Lua(sol2): Null Handling [precompiled]", [this]() {
+			benchmark("JaiScript - Null Check [precompiled]", [this]() {
+				jai_pre_null_check.execute();
+			});
+
+			benchmark("Lua(sol2) - Null Check [precompiled]", [this]() {
+				lua_pre_null_check();
 			});
 		});
 
@@ -889,53 +1178,21 @@ public:
 			// performance from class implementation.
 
 			benchmark("JaiScript - C++ BST (15 nodes)", [this]() {
-				jai_engine->execute(R"(
-					root = CppTreeNode(8);
-					root = cpp_insertNode(root, 4);
-					root = cpp_insertNode(root, 12);
-					root = cpp_insertNode(root, 2);
-					root = cpp_insertNode(root, 6);
-					root = cpp_insertNode(root, 10);
-					root = cpp_insertNode(root, 14);
-					root = cpp_insertNode(root, 1);
-					root = cpp_insertNode(root, 3);
-					root = cpp_insertNode(root, 5);
-					root = cpp_insertNode(root, 7);
-					root = cpp_insertNode(root, 9);
-					root = cpp_insertNode(root, 11);
-					root = cpp_insertNode(root, 13);
-					root = cpp_insertNode(root, 15);
-
-					sum = cpp_inorderSum(root);
-					height = cpp_treeHeight(root);
-					root = cpp_rotateRight(root);
-					sum = cpp_inorderSum(root);
-				)");
+				jai_engine->execute(k_jai_cpp_bst);
 			});
 
 			benchmark("Lua(sol2) - C++ BST (15 nodes)", [this]() {
-				lua->script(R"(
-					local root = CppTreeNode.new(8)
-					root = cpp_insertNode(root, 4)
-					root = cpp_insertNode(root, 12)
-					root = cpp_insertNode(root, 2)
-					root = cpp_insertNode(root, 6)
-					root = cpp_insertNode(root, 10)
-					root = cpp_insertNode(root, 14)
-					root = cpp_insertNode(root, 1)
-					root = cpp_insertNode(root, 3)
-					root = cpp_insertNode(root, 5)
-					root = cpp_insertNode(root, 7)
-					root = cpp_insertNode(root, 9)
-					root = cpp_insertNode(root, 11)
-					root = cpp_insertNode(root, 13)
-					root = cpp_insertNode(root, 15)
+				lua->script(k_lua_cpp_bst);
+			});
+		});
 
-					local sum = cpp_inorderSum(root)
-					local height = cpp_treeHeight(root)
-					root = cpp_rotateRight(root)
-					sum = cpp_inorderSum(root)
-				)");
+		test("JaiScript vs Lua(sol2): Binary Search Tree (C++ Bound) [precompiled]", [this]() {
+			benchmark("JaiScript - C++ BST (15 nodes) [precompiled]", [this]() {
+				jai_pre_cpp_bst.execute();
+			});
+
+			benchmark("Lua(sol2) - C++ BST (15 nodes) [precompiled]", [this]() {
+				lua_pre_cpp_bst();
 			});
 		});
 

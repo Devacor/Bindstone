@@ -48,6 +48,12 @@ namespace jai {
         size_t native_size = 0;     // Size in bytes of the native C++ type
         bool is_signed = true;      // For integral types
 
+        // shared_ptr held by a var-DECLARED variable (Dev ruling 2026-07): '=' with a
+        // handle rhs REBINDS unchecked across classes. Same name/id/element as the
+        // plain spelling (every other read behaves identically); interned as a twin
+        // via engine::get_type_info_shared_ptr_dynamic. Excluded from equals().
+        bool dynamic_pointee = false;
+
         // Constructors
         type_info(script_value_type type) : base_type(type) {}
         type_info(script_value_type type, std::string_view name) : base_type(type), type_name(name) {}

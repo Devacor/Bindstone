@@ -1228,11 +1228,7 @@ public:
                     // the engine stays usable after the rejection
                     check_eq((int64_t)7, e->execute("3 + 4").as_int());
                 }
-                // and plain var really does hold any class's handle (the why): decls
-                // adopt any handle unconstrained, copies share, and nulling re-points
-                // it across classes; a HELD handle keeps its class marker, so a direct
-                // cross-class reassign enforces exactly like the typed spellings
-                // (c6142450 marker semantics, deliberate)
+                // and plain var really does hold + rebind any class's handle (the why)
                 auto e = jai::engine::make();
                 if (use_vm) { e->set_backend(jai::backend_type::vm); }
                 e->execute(R"(
@@ -1242,10 +1238,73 @@ public:
                     var alias = p;
                 )");
                 e->execute("alias.x = 3;");
-                check_eq((int64_t)3, e->execute("p.x").as_int());    // var copies share the handle
-                check_throws([&]() { e->execute("p = new Bar();"); }); // held marker enforces
-                e->execute("p = null; p = new Bar();");               // null re-opens to any class
+                check_eq((int64_t)3, e->execute("p.x").as_int());   // var copies share the handle
+                e->execute("p = new Bar();");                        // and rebind across classes
                 check_eq((int64_t)2, e->execute("p.y").as_int());
+                check_eq((int64_t)3, e->execute("alias.x").as_int()); // rebind, not a copy: alias untouched
+            }
+        });
+
+        test("var_held_handles_rebind_unchecked", [this]() {
+            // Dev ruling (2026-07): a var-DECLARED holder is FULLY DYNAMIC - '=' with
+            // ANY rhs (handle OR value OR primitive) REBINDS the variable to a copy of
+            // the rhs value, never reaching through a held handle and never refusing.
+            // Typed spellings (shared_ptr<T>, shared_ptr<auto>, plain auto copies) keep
+            // enforcing, and their value-rhs auto-unwrap-into-the-handle stays as-is.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class Foo { int x = 1; }
+                    class Bar { int y = 2; }
+                )");
+                // decl-marker acquisition: var p = new Foo()
+                e->execute("var p = new Foo(); var keep = p;");
+                e->execute("p = new Bar();");
+                check_eq((int64_t)2, e->execute("p.y").as_int());
+                check_eq((int64_t)1, e->execute("keep.x").as_int());   // alias untouched by rebind
+                // assign-marker acquisition: var q; q = new Foo()
+                e->execute("var q; q = new Foo(); q = new Bar();");
+                check_eq((int64_t)2, e->execute("q.y").as_int());
+                // var-to-var rebind shares the handle
+                e->execute("var r = new Foo(); var s = new Bar(); r = s; r.y = 9;");
+                check_eq((int64_t)9, e->execute("s.y").as_int());
+                // rebindability survives copies into var decls and repeated rebinds
+                e->execute("var t = p; t = new Foo(); t = new Bar();");
+                check_eq((int64_t)2, e->execute("t.y").as_int());
+                // weak_ptr from a var-held handle still validates its pointee
+                e->execute("var wsrc = new Foo(); weak_ptr<Foo> w = wsrc;");
+                check_eq(false, e->execute("w.expired()").as<bool>());
+                check_throws([&]() { e->execute("weak_ptr<Bar> wbad = wsrc;"); });
+                // FULLY DYNAMIC: a value rhs REBINDS the var to a fresh copy of that
+                // value - it does NOT reach through the held handle, so aliases of the
+                // old object are untouched (no leak).
+                e->execute("var u = new Foo(); var ualias = u; auto src = Foo(); src.x = 7; u = src;");
+                check_eq((int64_t)1, e->execute("ualias.x").as_int());   // alias keeps the ORIGINAL object (no leak)
+                check_eq((int64_t)7, e->execute("u.x").as_int());        // u now holds an independent copy of src
+                // the rebound value is INDEPENDENT: mutating it never touches the old shared object
+                e->execute("u.x = 42;");
+                check_eq((int64_t)1, e->execute("ualias.x").as_int());
+                // cross-class value rhs also rebinds - a var NEVER refuses an assignment (no throw)
+                e->execute("u = Bar();");
+                check_eq((int64_t)2, e->execute("u.y").as_int());
+                // primitive rhs rebinds too
+                e->execute("var pv = new Foo(); pv = 5;");
+                check_eq((int64_t)5, e->execute("pv").as_int());
+                // ...and the var stays dynamic after a value rebind - it accepts a handle again
+                e->execute("pv = new Bar();");
+                check_eq((int64_t)2, e->execute("pv.y").as_int());
+                // TYPED tier UNCHANGED: value-rhs still auto-unwraps INTO the held handle
+                // (same-class copies fields into the shared object; cross-class errors)
+                e->execute("shared_ptr<Foo> tu = new Foo(); shared_ptr<Foo> tualias = tu; auto tsrc = Foo(); tsrc.x = 7; tu = tsrc;");
+                check_eq((int64_t)7, e->execute("tualias.x").as_int());   // typed reaches THROUGH the handle
+                check_throws([&]() { e->execute("shared_ptr<Foo> tf2 = new Foo(); tf2 = Bar();"); });
+                // typed handle-rhs still enforces; auto copies of a var handle
+                // re-lock to the plain spelling (infer-then-enforce)
+                check_throws([&]() { e->execute("shared_ptr<Foo> tf = new Foo(); tf = new Bar();"); });
+                check_throws([&]() { e->execute("auto af = p; af = new Foo();"); });   // p holds Bar; af locked to Bar
+                e->execute("auto ab = p; ab = new Bar();");                            // same class stays legal
+                check_eq((int64_t)2, e->execute("ab.y").as_int());
             }
         });
 

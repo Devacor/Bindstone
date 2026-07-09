@@ -4965,29 +4965,52 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // POINTER OP: shared_ptr<U> to shared_ptr<T> - polymorphic reassignment
                         auto value_type_info = value.get_type_info();
                         auto value_element = value_type_info->element_type();
-                        std::string actual_type_name = value_element ? value_element->type_name : "";
+                        if (ptr_type_info->dynamic_pointee) {
+                            // var-declared holder: '=' with a handle rhs REBINDS unchecked
+                            // (Dev ruling 2026-07; enforcement guards copy-assign-to-
+                            // underlying, not re-pointing) - carry the rebindable marker
+                            if (engine_ && value_element && !value_type_info->dynamic_pointee) {
+                                value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value_element.get()));
+                            }
+                            JAISCRIPT_TRY(store_back(std::move(value)));
+                        } else {
+                            std::string actual_type_name = value_element ? value_element->type_name : "";
 
-                        // Check type compatibility (same type or derived)
-                        bool compatible = (actual_type_name == expected_type_name);
-                        if (!compatible && !actual_type_name.empty()) {
-                            if (auto eng = engine_) {
-                                auto actual_class = eng->get_class_definition(actual_type_name);
-                                if (actual_class && actual_class->is_subtype_of(expected_type_name)) {
-                                    compatible = true;
+                            // Check type compatibility (same type or derived)
+                            bool compatible = (actual_type_name == expected_type_name);
+                            if (!compatible && !actual_type_name.empty()) {
+                                if (auto eng = engine_) {
+                                    auto actual_class = eng->get_class_definition(actual_type_name);
+                                    if (actual_class && actual_class->is_subtype_of(expected_type_name)) {
+                                        compatible = true;
+                                    }
                                 }
                             }
-                        }
 
-                        if (!compatible) {
-                            uint64_t actual_id = value_element ? value_element->id : 0;
-                            uint64_t expected_id = expected_type ? expected_type->id : 0;
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                                "Cannot assign shared_ptr<{0}> to shared_ptr<{1}>", actual_id, expected_id);
-                        }
+                            if (!compatible) {
+                                uint64_t actual_id = value_element ? value_element->id : 0;
+                                uint64_t expected_id = expected_type ? expected_type->id : 0;
+                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                                    "Cannot assign shared_ptr<{0}> to shared_ptr<{1}>", actual_id, expected_id);
+                            }
 
-                        // Compatible - reassign pointer (keep target's type info for polymorphism)
-                        value.set_type_info(ptr_type_info);
-                        JAISCRIPT_TRY(store_back(std::move(value)));
+                            // Compatible - reassign pointer (keep target's type info for polymorphism)
+                            value.set_type_info(ptr_type_info);
+                            JAISCRIPT_TRY(store_back(std::move(value)));
+                        }
+                    } else if (ptr_type_info->dynamic_pointee) {
+                        // var-held handle receiving a VALUE rhs: REBIND, never reach
+                        // through the handle (Dev ruling 2026-07 - var is fully dynamic:
+                        // reassign anything, copy-on-assignment, never refuse). Replace
+                        // the stored handle with a value-copy of the rhs and keep the
+                        // 'any' marker so the variable stays dynamic for the next '='.
+                        script_value rebound = clone_for_assignment(value);
+                        if (engine_) {
+                            if (auto* any_ti = engine_->get_type_info_any()) {
+                                rebound.set_type_info(any_ti);
+                            }
+                        }
+                        JAISCRIPT_TRY(store_back(std::move(rebound)));
                     } else {
                         // VALUE OP: Auto-unwrap - delegate to underlying object
                         // Equivalent to: *currentVal = value (like C++ dereference + assign)
@@ -5110,6 +5133,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                              (!value.get_type_info() ||
                               value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
                         value.set_type_info(target_type);  // Keep any_type marker
+                    }
+                    else if (target_type->base_type == script_value_type::jai_any_type &&
+                             engine_ && value.get_type_info()->element_type() &&
+                             !value.get_type_info()->dynamic_pointee) {
+                        // var target adopting a handle: mark it rebindable (Dev ruling 2026-07)
+                        value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
+                            value.get_type_info()->element_type().get()));
                     }
                     // For locked types, the value already has correct type from enforce_type_compatibility
 
@@ -5875,11 +5905,24 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 !value.get_type_info() ||
                 value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
                 value.set_type_info(decl->type);
+            } else if (engine_ && value.get_type_info()->element_type() &&
+                       !value.get_type_info()->dynamic_pointee) {
+                // var-held handle: '=' with a handle rhs REBINDS unchecked (Dev ruling
+                // 2026-07; enforcement guards copy-assign-to-underlying, not re-pointing)
+                value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
+                    value.get_type_info()->element_type().get()));
             }
         } else if (decl->initializer && value.get_type_info()) {
             // auto with initializer - type is inferred from value and locked
             // Value already has type_info from make_value() or evaluation
-            // Keep the value's type_info (already set)
+            // Keep the value's type_info (already set). Exception: a var-held handle's
+            // rebindable marker does NOT transfer - auto is infer-then-enforce
+            if (value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
+                value.get_type_info()->dynamic_pointee && engine_ &&
+                value.get_type_info()->element_type()) {
+                value.set_type_info(engine_->get_type_info_shared_ptr(
+                    value.get_type_info()->element_type().get()));
+            }
         }
         // else: auto without initializer - type_info remains nullptr (uninitialized)
         // First assignment will lock the type

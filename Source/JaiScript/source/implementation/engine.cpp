@@ -474,6 +474,7 @@ struct engine::implementation {
     type_info* type_info_char_ = nullptr;
     type_info* type_info_void_ = nullptr;
     type_info* type_info_invalid_ = nullptr;
+    type_info* type_info_any_ = nullptr;
 
     
     // Template type registry for parsing (stores base template names like "Point", "MyMap")
@@ -857,6 +858,10 @@ engine::implementation::implementation()
     type_info invalid_info = type_info::make_invalid(string_symbolizer_);
     type_info_invalid_ = &type_infos_.emplace(type_key{script_value_type::jai_invalid_type, 0, 0}, invalid_info).first->second;
     type_id_index_[type_info_invalid_->id] = type_info_invalid_;
+
+    type_info any_info = type_info::make_any(string_symbolizer_);
+    type_info_any_ = &type_infos_.emplace(type_key{script_value_type::jai_any_type, 0, 0}, any_info).first->second;
+    type_id_index_[type_info_any_->id] = type_info_any_;
 
     // Register standard C++ implicit conversions
     // NOTE: These conversions can't use engine reference yet because the engine isn't fully constructed
@@ -2102,6 +2107,10 @@ type_info* engine::get_type_info_invalid() {
     return impl->type_info_invalid_;
 }
 
+type_info* engine::get_type_info_any() {
+    return impl->type_info_any_;
+}
+
 type_info* engine::get_type_info_array(type_info* element_type) {
     // Use composite key for fast lookup - no string construction needed on cache hit
     implementation::type_key key{script_value_type::jai_array_type, element_type ? element_type->id : 0, 0};
@@ -2223,6 +2232,26 @@ type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
+    // var-held-handle twin (param2=1 keys it apart from the plain spelling): same
+    // name/id/element so every existing read behaves identically; dynamic_pointee
+    // lets the assignment route rebind unchecked (Dev ruling 2026-07)
+    implementation::type_key key{script_value_type::jai_shared_ptr_type, pointee_type ? pointee_type->id : 0, 1};
+
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    impl->deny_type_intern_in_region();
+    type_info temp = type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type);
+    temp.dynamic_pointee = true;
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
     return ptr;
 }
 

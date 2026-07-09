@@ -700,12 +700,16 @@ namespace jai {
         type_info* get_type_info_char();
         type_info* get_type_info_void();
         type_info* get_type_info_invalid();
+        type_info* get_type_info_any();  // 'var' marker (dynamic); var-held values stay fully dynamic
 
         // Get or create type_info for arrays/maps (interned by type_id)
         type_info* get_type_info_array(type_info* element_type);
         type_info* get_type_info_map(type_info* key_type, type_info* value_type);
         type_info* get_type_info_weak_ptr(type_info* pointee_type);
         type_info* get_type_info_shared_ptr(type_info* pointee_type);
+        // var-held-handle twin of get_type_info_shared_ptr: identical shape/name/id but
+        // dynamic_pointee=true, so '=' with a handle rhs rebinds unchecked (Dev ruling 2026-07)
+        type_info* get_type_info_shared_ptr_dynamic(type_info* pointee_type);
         type_info* get_type_info_reference(type_info* referenced_type);
         type_info* get_type_info_function(type_info* return_type, const std::vector<type_info*>& arg_types);
 

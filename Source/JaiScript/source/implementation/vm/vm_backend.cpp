@@ -3106,25 +3106,48 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 			           value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
 				auto value_type_info = value.get_type_info();
 				auto value_element = value_type_info->element_type();
-				std::string actual_type_name = value_element ? value_element->type_name : "";
+				if (ptr_type_info->dynamic_pointee) {
+					// var-declared holder: '=' with a handle rhs REBINDS unchecked
+					// (Dev ruling 2026-07; enforcement guards copy-assign-to-underlying,
+					// not re-pointing) - carry the rebindable marker
+					if (engine_ && value_element && !value_type_info->dynamic_pointee) {
+						value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value_element.get()));
+					}
+					JAISCRIPT_TRY(store_back(std::move(value)));
+				} else {
+					std::string actual_type_name = value_element ? value_element->type_name : "";
 
-				bool compatible = (actual_type_name == expected_type_name);
-				if (!compatible && !actual_type_name.empty() && engine_) {
-					auto actual_class = engine_->get_class_definition(actual_type_name);
-					if (actual_class && actual_class->is_subtype_of(expected_type_name)) {
-						compatible = true;
+					bool compatible = (actual_type_name == expected_type_name);
+					if (!compatible && !actual_type_name.empty() && engine_) {
+						auto actual_class = engine_->get_class_definition(actual_type_name);
+						if (actual_class && actual_class->is_subtype_of(expected_type_name)) {
+							compatible = true;
+						}
+					}
+
+					if (!compatible) {
+						uint64_t actual_id = value_element ? value_element->id : 0;
+						uint64_t expected_id = expected_type ? expected_type->id : 0;
+						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+							"Cannot assign shared_ptr<{0}> to shared_ptr<{1}>", actual_id, expected_id);
+					}
+
+					value.set_type_info(ptr_type_info);
+					JAISCRIPT_TRY(store_back(std::move(value)));
+				}
+			} else if (ptr_type_info->dynamic_pointee) {
+				// var-held handle receiving a VALUE rhs: REBIND, never reach through
+				// the handle (Dev ruling 2026-07 - var is fully dynamic: reassign
+				// anything, copy-on-assignment, never refuse). Replace the stored
+				// handle with a value-copy of the rhs and keep the 'any' marker so the
+				// variable stays dynamic for the next '='.
+				script_value rebound = clone_for_assignment(value);
+				if (engine_) {
+					if (auto* any_ti = engine_->get_type_info_any()) {
+						rebound.set_type_info(any_ti);
 					}
 				}
-
-				if (!compatible) {
-					uint64_t actual_id = value_element ? value_element->id : 0;
-					uint64_t expected_id = expected_type ? expected_type->id : 0;
-					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-						"Cannot assign shared_ptr<{0}> to shared_ptr<{1}>", actual_id, expected_id);
-				}
-
-				value.set_type_info(ptr_type_info);
-				JAISCRIPT_TRY(store_back(std::move(value)));
+				JAISCRIPT_TRY(store_back(std::move(rebound)));
 			} else {
 				auto holder = currentVal->get_object_holder();
 				if (!holder || !holder->data) {
@@ -3222,6 +3245,12 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 		    (!value.get_type_info() ||
 		     value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
 			value.set_type_info(target_type);
+		} else if (target_type && target_type->base_type == script_value_type::jai_any_type &&
+		           engine_ && value.get_type_info()->element_type() &&
+		           !value.get_type_info()->dynamic_pointee) {
+			// var target adopting a handle: mark it rebindable (Dev ruling 2026-07)
+			value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
+				value.get_type_info()->element_type().get()));
 		}
 
 		if (rhs_lvalue) {
@@ -4973,7 +5002,21 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		    !value.get_type_info() ||
 		    value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
 			value.set_type_info(decl->type);
+		} else if (engine_ && value.get_type_info()->element_type() &&
+		           !value.get_type_info()->dynamic_pointee) {
+			// var-held handle: '=' with a handle rhs REBINDS unchecked (Dev ruling
+			// 2026-07; enforcement guards copy-assign-to-underlying, not re-pointing)
+			value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
+				value.get_type_info()->element_type().get()));
 		}
+	} else if (has_init && value.get_type_info() &&
+	           value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
+	           value.get_type_info()->dynamic_pointee && engine_ &&
+	           value.get_type_info()->element_type()) {
+		// auto decl from a var-held handle: the rebindable marker does NOT transfer -
+		// auto is infer-then-enforce (re-tag with the plain spelling)
+		value.set_type_info(engine_->get_type_info_shared_ptr(
+			value.get_type_info()->element_type().get()));
 	}
 
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);

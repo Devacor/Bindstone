@@ -23,6 +23,19 @@ namespace jai::vm {
         uint32_t symbol = k_invalid_u32;      // index into chunk::symbols; invalid = literal
         uint32_t const_index = k_invalid_u32; // index into chunk::constants; invalid = identifier
         uint32_t load_flags = 0;              // load_flag_* (type-ctor names)
+
+        // Subscript-read operand `base[index]` (transient-marked element read, so the
+        // elision ruling applies): slot/symbol above name the BASE container; the index
+        // is an identifier (index_slot/index_symbol) or an int literal (index_literal).
+        // Only exec_binary_fused resolves these; fused_cmp_operand and the counted-for /
+        // call-site consumers never see one (compiler emits them for binary operands only).
+        static constexpr uint8_t subscript_none = 0;
+        static constexpr uint8_t subscript_index_ident = 1;
+        static constexpr uint8_t subscript_index_literal = 2;
+        uint8_t subscript_kind = subscript_none;
+        uint32_t index_slot = k_invalid_u32;
+        uint32_t index_symbol = k_invalid_u32;
+        int64_t index_literal = 0;
     };
 
     // Per-call-site argument metadata: symbol id per argument (UINT64_MAX = not an identifier)

@@ -6,6 +6,7 @@
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
+#include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
@@ -4678,6 +4679,101 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
             push_value(std::move(resultValue));
         } else {
+            // Numeric subscript-compound fast path (a[i] op= v, the GLOOM store shape):
+            // compute + write in place - no reference mint, no synthetic assignment
+            // replay. Bails to the general path below for ANY shape it can't prove
+            // identical (semantics + error text stay the general path's). Sound to bail
+            // AFTER probing because every probed expression is side-effect-free: base
+            // ident, index ident/int-literal, and a callout_free RHS re-evaluate safely.
+            if (expr->target->get_type() == node_type::binary_expr && !has_custom_numeric_ops_) {
+                auto* sub = static_cast<binary_expr*>(expr->target.get());
+                detail::op_slot cslot = detail::op_slot::none;
+                switch (expr->op.type) {
+                    case token_type::plus_equal: cslot = detail::op_slot::plus; break;
+                    case token_type::minus_equal: cslot = detail::op_slot::minus; break;
+                    case token_type::star_equal: cslot = detail::op_slot::star; break;
+                    case token_type::slash_equal: cslot = detail::op_slot::slash; break;
+                    case token_type::percent_equal: cslot = detail::op_slot::percent; break;
+                    default: break;
+                }
+                const bool op_overridden = operator_table_ && operator_table_->entry(cslot) != nullptr;
+                if (sub->op.type == token_type::left_bracket && cslot != detail::op_slot::none && !op_overridden &&
+                    sub->left->get_type() == node_type::identifier_expr &&
+                    detail::transient_read_marker::callout_free(expr->value.get())) {
+                    auto* base_ident = static_cast<identifier_expr*>(sub->left.get());
+                    if (base_ident->symbol_id == UINT64_MAX) {
+                        base_ident->symbol_id = string_symbolizer_->intern(base_ident->name);
+                    }
+                    script_value* base_ptr = resolve_local_or_env(base_ident->slot_index, base_ident->symbol_id);
+                    script_value* array_val = base_ptr ? &base_ptr->deref() : nullptr;
+                    if (array_val && array_val->raw_storage_index() == script_value::TYPEID_ARRAY) {
+                        // Index: ident or int literal only (re-evaluation-safe)
+                        std::optional<script_int> index;
+                        if (sub->right->get_type() == node_type::literal_expr) {
+                            const auto& lit = static_cast<literal_expr*>(sub->right.get())->value;
+                            if (lit.raw_storage_index() == script_value::TYPEID_INT) {
+                                index = lit.unchecked_as_int();
+                            }
+                        } else if (sub->right->get_type() == node_type::identifier_expr) {
+                            auto* idx_ident = static_cast<identifier_expr*>(sub->right.get());
+                            if (idx_ident->symbol_id == UINT64_MAX) {
+                                idx_ident->symbol_id = string_symbolizer_->intern(idx_ident->name);
+                            }
+                            if (script_value* idx_ptr = resolve_local_or_env(idx_ident->slot_index, idx_ident->symbol_id)) {
+                                const script_value& idx_v = idx_ptr->deref();
+                                if (idx_v.raw_storage_index() == script_value::TYPEID_INT) {
+                                    index = idx_v.unchecked_as_int();
+                                }
+                            }
+                        }
+                        auto storage = array_val->get_array_storage();
+                        if (index && storage && *index >= 0 && *index < static_cast<script_int>(storage->size())) {
+                            // RHS after target probing (general path's order); callout_free
+                            JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+                            if (is_unwinding_) {
+                                push_value(make_value());
+                                return {};
+                            }
+                            const script_value rhs_holder = pop_value();
+                            const script_value& rhs = rhs_holder.deref();
+                            script_value* target_ptr = &(*storage)[static_cast<size_t>(*index)];
+                            const size_t ei = target_ptr->raw_storage_index();
+                            const size_t ri = rhs.raw_storage_index();
+                            const bool numeric = (ei == script_value::TYPEID_INT || ei == script_value::TYPEID_FLOAT) &&
+                                                 (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
+                            // Zero divisors bail: the general path owns their error text
+                            const bool zero_div =
+                                (expr->op.type == token_type::slash_equal &&
+                                 ((ri == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
+                                  (ri == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) ||
+                                (expr->op.type == token_type::percent_equal &&
+                                 ri == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0);
+                            if (numeric && !zero_div) {
+                                token_type op;
+                                switch (expr->op.type) {
+                                    case token_type::minus_equal: op = token_type::minus; break;
+                                    case token_type::star_equal: op = token_type::star; break;
+                                    case token_type::slash_equal: op = token_type::slash; break;
+                                    case token_type::percent_equal: op = token_type::percent; break;
+                                    default: op = token_type::plus; break;
+                                }
+                                script_value resultValue = make_value();
+                                JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs));
+                                // Typed elements: only the identity case (same raw type) is
+                                // provably conversion-free; anything else bails
+                                auto array_type_info = array_val->get_type_info();
+                                type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
+                                if (!element_type || resultValue.raw_storage_index() == ei) {
+                                    *target_ptr = resultValue;
+                                    push_value(std::move(resultValue));
+                                    return {};
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // General compound assignment for any expression
             // This handles subscripts, function calls that return references, etc.
 

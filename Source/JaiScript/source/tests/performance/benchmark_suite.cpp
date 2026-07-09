@@ -982,6 +982,25 @@ public:
             check_true(true);
         });
 
+        test("element_read_ident_index", [this, build]() {
+            // Plain-ident index (the fusable operand shape; a[i&1023] above defeats fusion)
+            std::string body = std::string(build) +
+                "int s = 0; int i = 0; int k = 0; while (i < 200000) { s = s + a[k]; k = (k + 1) & 1023; i = i + 1; } s;";
+            std::string ovh = std::string(build) +
+                "int s = 0; int i = 0; int k = 0; while (i < 200000) { s = s + k; k = (k + 1) & 1023; i = i + 1; } s;";
+            row("element read ident idx  s += a[k]", body.c_str(), ovh.c_str(), 200000.0);
+            check_true(true);
+        });
+
+        test("element_compound_ident_index", [this, build]() {
+            std::string body = std::string(build) +
+                "int i = 0; int k = 0; while (i < 200000) { a[k] += 1; k = (k + 1) & 1023; i = i + 1; } a[0];";
+            std::string ovh = std::string(build) +
+                "int i = 0; int k = 0; int t = 0; while (i < 200000) { t += 1; k = (k + 1) & 1023; i = i + 1; } t;";
+            row("compound ident idx  a[k] += 1", body.c_str(), ovh.c_str(), 200000.0);
+            check_true(true);
+        });
+
         test("render_inner_loop", [this, build]() {
             // Mirror the GLOOM wall-slice paint shape: element store + element read +
             // shift + 3 compound-adds + compare, over int arrays.

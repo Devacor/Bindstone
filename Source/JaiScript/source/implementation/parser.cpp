@@ -469,6 +469,25 @@ namespace {
                     walk_stmt(r->body.get());
                     break;
                 }
+                case node_type::parallel_for_stmt: {
+                    // The body is a synthesized worker function whose one (by-ref)
+                    // parameter is the loop variable — walk it as a function body so
+                    // its own ref-decl/escape analysis applies; nothing in it can
+                    // escape-mark ENCLOSING locals (worker capture is env-resident by
+                    // symbol, never by slot).
+                    auto* pf = static_cast<parallel_for_stmt*>(s);
+                    walk_expr(pf->container.get());
+                    scopes.emplace_back();
+                    ref_return_stack.push_back(0);
+                    if (pf->loop_param.symbol_id == UINT64_MAX && symbolizer) {
+                        pf->loop_param.symbol_id = symbolizer->intern(pf->loop_param.name);
+                    }
+                    scopes.back().params.emplace(pf->loop_param.symbol_id, &pf->loop_param);
+                    walk_stmt(pf->body.get());
+                    ref_return_stack.pop_back();
+                    scopes.pop_back();
+                    break;
+                }
                 case node_type::return_stmt: {
                     auto* r = static_cast<return_stmt*>(s);
                     if (!ref_return_stack.empty() && ref_return_stack.back()) {
@@ -2183,6 +2202,7 @@ checked_result<declaration_ptr> parser::declaration() {
 
     // Check for other statements that can appear at top level
     if (check(token_type::if_keyword) || check(token_type::while_keyword) || check(token_type::for_keyword) ||
+        check(token_type::parallel_for_keyword) ||
         check(token_type::return_keyword) || check(token_type::break_keyword) || check(token_type::continue_keyword) ||
         check(token_type::try_keyword) || check(token_type::switch_keyword) || check(token_type::fallthrough_keyword)) {
         // We need to wrap the statement in a declaration since parse() returns declarations
@@ -2471,6 +2491,7 @@ checked_result<statement_ptr> parser::statement() {
     if (match(token_type::if_keyword)) return if_statement();
     if (match(token_type::while_keyword)) return while_statement();
     if (match(token_type::for_keyword)) return for_statement();
+    if (match(token_type::parallel_for_keyword)) return parallel_for_statement();
     if (match(token_type::return_keyword)) return return_statement();
     if (match(token_type::break_keyword)) return break_statement();
     if (match(token_type::continue_keyword)) return continue_statement();
@@ -2541,6 +2562,62 @@ checked_result<statement_ptr> parser::while_statement() {
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
     return std::make_shared<while_stmt>(whileToken.location, condition, body);
+}
+
+// parallel_for (auto& x : arr) { body } — range-for SYNTAX, but the body is parsed as a
+// ONE-PARAMETER FUNCTION BODY (fresh function scope: loop variable = slot 0, own
+// local_count): workers execute it as a synthesized function, so an enclosing frame's
+// slots must never be stamped on body identifiers (slot_lookup_boundary_). Enclosing
+// names in the body resolve by symbol through the worker environment at runtime —
+// captured GLOBAL/env-resident reads are provisioned there by the region barrier.
+checked_result<statement_ptr> parser::parallel_for_statement() {
+    token forToken = previous();
+
+    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'parallel_for'"));
+
+    bool is_const = match(token_type::const_keyword);
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr element_type, parse_type());
+    const bool is_reference = match(token_type::ampersand);
+    if (!check(token_type::identifier)) {
+        report_error("Expected loop variable name in parallel_for", peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    token varName = advance();
+    // auto& mutates the owned element in place (the loop's output channel);
+    // plain auto gets a worker-local COPY - zero side effects, still legal (Dev ruling)
+    JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after parallel_for loop variable"));
+
+    // The container evaluates in the ENCLOSING scope on the calling thread
+    JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
+    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after parallel_for range"));
+
+    parameter loop_param(element_type, std::string(varName.lexeme), is_reference, is_const);
+    loop_param.symbol_id = get_symbol_id(varName);
+
+    enter_function_scope();
+    const size_t saved_boundary = slot_lookup_boundary_;
+    slot_lookup_boundary_ = function_scope_stack_.size() - 1;
+    if (loop_param.symbol_id != UINT64_MAX) {
+        loop_param.slot_index = allocate_slot(loop_param.symbol_id);
+    }
+    auto restore_scope = [&]() {
+        slot_lookup_boundary_ = saved_boundary;
+        return exit_function_scope();
+    };
+    if (!match(token_type::left_brace)) {
+        restore_scope();
+        report_error("Expected '{' for parallel_for body", peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    auto body_result = block_statement();
+    if (!body_result) {
+        restore_scope();
+        return body_result;
+    }
+    auto node = std::make_shared<parallel_for_stmt>(forToken.location, std::move(loop_param),
+                                                    std::move(container), body_result.value());
+    node->local_count = restore_scope();
+    return node;
 }
 
 checked_result<statement_ptr> parser::for_statement() {

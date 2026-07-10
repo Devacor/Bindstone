@@ -25,6 +25,8 @@
 
 namespace jai {
     class engine;
+    class environment;
+    class parallel_for_stmt;
     class type_info;
     struct script_defined_function;
 }
@@ -139,6 +141,20 @@ namespace jai::detail {
 
     // The builtin bodies (registered by the engine constructor).
     checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args);
+
+    // parallel_for (auto& x : arr) { body } — the in-place fork-join statement
+    // (parallel_for v1). Both backends call this after evaluating the container in the
+    // enclosing scope: `container` must hold (or reference) the LIVE array handle so
+    // element writes land in the script-visible storage. Admission runs the same
+    // fail-closed walk in "in-place root" mode (member access/stores rooted at locals
+    // admitted, by-ref element required, no valued returns); the barrier proves every
+    // element safe for exclusive in-place mutation (primitives, typed primitive
+    // containers, flat-value-class instances — engine::allow_unsafe_parallel skips the
+    // proof) and pre-mints the element references single-threaded. capture_env is the
+    // statement's enclosing environment: captured reads resolve through its chain.
+    checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
+                                          const script_value& container,
+                                          const std::shared_ptr<environment>& capture_env);
 
     // Subscript READ through a parallel borrow - the tier-1 raw-read path. Called by
     // BOTH backends' subscript twins when the (deref'd) receiver is a parallel borrow

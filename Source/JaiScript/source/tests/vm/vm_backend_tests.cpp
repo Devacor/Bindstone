@@ -406,6 +406,10 @@ public:
 			// A block whose decl is env-resident (nested function decl) still scopes
 			check_true(body_needs_env("function outer() -> int { { function inner() -> int { return 1; } return inner(); } }"),
 				"env-defining block decl keeps scope + eager env");
+			// op_parallel_for is deliberately OFF the lazy allow-list (fail-closed):
+			// captured reads resolve through the statement's env chain
+			check_true(body_needs_env("function par(var a) { parallel_for (auto& x : a) { x = x + 1; } }"),
+				"parallel_for keeps the eager env");
 		});
 
 		test("method_env_reusable_trigger_table", [this]() {

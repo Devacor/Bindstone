@@ -25,6 +25,9 @@
 namespace jai::detail {
 
     inline constexpr uint8_t k_jaibite_magic[4] = { 'J', 'B', 'I', 'T' };
+    // Format-affecting enum edits (token_type / node_type values are serialized as raw
+    // u8) silently corrupt stale caches - pre-launch the fix is: delete the .jaibite
+    // sidecars and let them regen (Dev ruling; no version churn while private).
     inline constexpr uint32_t k_jaibite_version = 1;
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
@@ -360,6 +363,14 @@ namespace jai::detail {
                     slot(s->variable_slot_index);
                     flag(s->is_reference);
                     flag(s->is_const);
+                    node(s->container.get());
+                    node(s->body.get());
+                    break;
+                }
+                case node_type::parallel_for_stmt: {
+                    auto* s = static_cast<const parallel_for_stmt*>(n);
+                    parameters(std::vector<parameter>{ s->loop_param });
+                    varint(s->local_count);
                     node(s->container.get());
                     node(s->body.get());
                     break;
@@ -965,6 +976,17 @@ namespace jai::detail {
                     auto body = stmt_req();
                     auto s = std::make_shared<range_for_stmt>(loc, et, vname, vid, is_ref, is_const, cont, body);
                     s->variable_slot_index = vslot;
+                    result = s;
+                    break;
+                }
+                case node_type::parallel_for_stmt: {
+                    auto params = parameters();
+                    if (params.size() != 1) jaibite_fail("parallel_for_stmt parameter count");
+                    size_t locals = size_t(varint());
+                    auto cont = expr_req();
+                    auto body = stmt_req();
+                    auto s = std::make_shared<parallel_for_stmt>(loc, std::move(params[0]), cont, body);
+                    s->local_count = locals;
                     result = s;
                     break;
                 }

@@ -389,6 +389,7 @@ namespace jai {
         checked_result<void> visit_while_stmt(while_stmt* stmt) override;
         checked_result<void> visit_for_stmt(for_stmt* stmt) override;
         checked_result<void> visit_range_for_stmt(range_for_stmt* stmt) override;
+        checked_result<void> visit_parallel_for_stmt(parallel_for_stmt* stmt) override;
         checked_result<void> visit_return_stmt(return_stmt* stmt) override;
         checked_result<void> visit_break_stmt(break_stmt* stmt) override;
         checked_result<void> visit_continue_stmt(continue_stmt* stmt) override;
@@ -1154,8 +1155,15 @@ namespace jai {
             pending_call_ctx_ = nullptr;
             external_ctx_stack_.clear();
             execution_budget(budget);
+            parallel_worker_ = true;
             arm_execution_deadline();
         }
+
+        // True on worker-configured instances only: the script-class method dispatch
+        // wall (methods aren't provisioned per worker - their shared body caches and
+        // arbitrary env reach are unsafe off-thread) checks this, gated by
+        // engine::allow_unsafe_parallel. Never set on the engine's own backend.
+        bool parallel_worker_ = false;
 
         // Environment pooling functions (public: scoped_method_environment uses them)
         std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);

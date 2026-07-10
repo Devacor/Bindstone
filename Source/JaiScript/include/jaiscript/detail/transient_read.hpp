@@ -252,6 +252,12 @@ namespace jai::detail {
                     walk_stmt(r->body.get());
                     return;
                 }
+                case node_type::parallel_for_stmt: {
+                    auto* pf = static_cast<parallel_for_stmt*>(s);
+                    walk_expr(pf->container.get(), false);  // container is bound live for the region
+                    walk_stmt(pf->body.get());
+                    return;
+                }
                 case node_type::return_stmt:
                     walk_expr(static_cast<return_stmt*>(s)->value.get(), false);   // ref-returns: mint
                     return;

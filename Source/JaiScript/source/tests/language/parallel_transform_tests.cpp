@@ -888,7 +888,267 @@ public:
 	}
 };
 
+// parallel_for v1 (Dev rulings 2026-07-09): the in-place fork-join statement.
+// auto& mutates the owned element in place (no output array, no merge); plain auto is
+// a side-effect-free worker copy. Elements must be value-closed (primitives, strings,
+// value containers, flat classes); the barrier detaches shared string nodes instead of
+// rejecting them. Determinism: identical results at every worker count.
+class parallel_for_tests : public suite {
+public:
+	parallel_for_tests() : suite("Parallel For") {}
+
+	// Runs `source` (returns [parallel_result, serial_expectation]) at several worker
+	// counts and checks equality each time.
+	void check_matches_serial_at(std::shared_ptr<engine> e, const std::string& source,
+	                             std::initializer_list<size_t> worker_counts) {
+		for (size_t workers : worker_counts) {
+			e->parallel_thread_count(workers);
+			auto r = e->execute(source);
+			check_true(r.is_array());
+			const auto& pair = r.as_array();
+			check_eq((size_t)2, pair.size());
+			check_true(parallel_transform_tests::deep_equal(pair[0], pair[1]));
+		}
+	}
+
+	void forge_tests() override {
+		test("inplace_row_mutation_matches_serial_1_2_8", [this]() {
+			auto e = make_engine();
+			const std::string src = R"(
+				var a = [];
+				var b = [];
+				for (var i = 0; i < 200; i++) { a.push([i, 0]); b.push([i, 0]); }
+				parallel_for (auto& p : a) { p[1] = p[0] * 3 - 1; }
+				for (auto& p : b) { p[1] = p[0] * 3 - 1; }
+				return [a, b];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+		});
+
+		test("primitive_elements_mutate_in_place", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				var a = [];
+				for (var i = 0; i < 100; i++) { a.push(i); }
+				parallel_for (auto& x : a) { x = x * x; }
+				return [a[0], a[7], a[99]];
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)0, vals[0].as_int());
+			check_eq((int64_t)49, vals[1].as_int());
+			check_eq((int64_t)9801, vals[2].as_int());
+		});
+
+		test("flat_object_elements_mutate_in_place", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class Particle { float x = 0.0; float vx = 0.0; int life = 0; }
+				var pool = [];
+				for (var i = 0; i < 64; i++) {
+					auto p = Particle();
+					p.x = 1.0 * i;
+					p.vx = 0.5;
+					p.life = i;
+					pool.push(p);
+				}
+				parallel_for (auto& p : pool) {
+					p.x = p.x + p.vx;
+					p.life = p.life - 1;
+				}
+				return [pool[0].x, pool[10].x, pool[63].life];
+			)");
+			const auto& vals = r.as_array();
+			check_near(0.5, vals[0].as_float(), 0.0001);
+			check_near(10.5, vals[1].as_float(), 0.0001);
+			check_eq((int64_t)62, vals[2].as_int());
+		});
+
+		// Strings are value-closed by ruling: fields AND elements. The shared-node case
+		// (two elements assigned from one variable) must normalize at the barrier, not
+		// error - and the mutation must not corrupt the sibling.
+		test("string_fields_and_shared_nodes_normalize", [this]() {
+			auto e = make_engine();
+			jai::stdlib::register_all(e);
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class Row { int idx = 0; string out = ""; }
+				var rows = [];
+				string shared_seed = "seed";
+				for (var i = 0; i < 32; i++) {
+					auto rec = Row();
+					rec.idx = i;
+					rec.out = shared_seed;
+					rows.push(rec);
+				}
+				parallel_for (auto& rec : rows) {
+					rec.out = "row_" + to_string(rec.idx);
+				}
+				return [rows[0].out, rows[31].out, shared_seed];
+			)");
+			const auto& vals = r.as_array();
+			check_eq(std::string("row_0"), vals[0].as<std::string>());
+			check_eq(std::string("row_31"), vals[1].as<std::string>());
+			check_eq(std::string("seed"), vals[2].as<std::string>());
+		});
+
+		test("by_value_element_is_side_effect_free", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push([i, 0]); }
+				parallel_for (auto p : a) { p[1] = 999; }
+				return [a[0][1], a[63][1]];
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)0, vals[0].as_int());
+			check_eq((int64_t)0, vals[1].as_int());
+		});
+
+		test("captured_scalar_and_borrow_reads", [this]() {
+			auto e = make_engine();
+			const std::string src = R"(
+				var scale = 7;
+				var lut = [];
+				for (var i = 0; i < 256; i++) { lut.push(i * 2); }
+				var a = [];
+				var b = [];
+				for (var i = 0; i < 128; i++) { a.push([i, 0]); b.push([i, 0]); }
+				parallel_for (auto& p : a) { p[1] = lut[p[0]] * scale; }
+				for (auto& p : b) { p[1] = lut[p[0]] * scale; }
+				return [a, b];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+		});
+
+		test("helper_function_calls_in_body", [this]() {
+			auto e = make_engine();
+			const std::string src = R"(
+				int shape(int v) { return v * v - 3; }
+				var a = [];
+				var b = [];
+				for (var i = 0; i < 96; i++) { a.push([i, 0]); b.push([i, 0]); }
+				parallel_for (auto& p : a) { p[1] = shape(p[0]) + math::itrunc(math::sqrt(1.0 * p[0])); }
+				for (auto& p : b) { p[1] = shape(p[0]) + math::itrunc(math::sqrt(1.0 * p[0])); }
+				return [a, b];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 8});
+		});
+
+		// === Contract A: violations ERROR ===
+
+		test("enclosing_write_rejected", [this]() {
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				var g = 0;
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(i); }
+				try { parallel_for (auto& x : a) { g = x; } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("parallel_for: body writes enclosing state 'g'") != std::string::npos);
+		});
+
+		test("enclosing_member_store_rejected", [this]() {
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				class World { int hits = 0; }
+				var w = World();
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(i); }
+				try { parallel_for (auto& x : a) { w.hits = x; } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("captured state 'w'") != std::string::npos);
+		});
+
+		test("mutated_container_borrow_capture_rejected", [this]() {
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push(i); }
+				try { parallel_for (auto& x : a) { x = a[0] + x; } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("container being mutated") != std::string::npos);
+		});
+
+		test("non_value_semantic_element_rejected", [this]() {
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				class Node { var payload = 0; }
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(Node()); }
+				try { parallel_for (auto& x : a) { x.payload = 1; } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("cannot be mutated in place") != std::string::npos);
+		});
+
+		test("method_call_wall_and_unsafe_override", [this]() {
+			auto e = make_engine();
+			// Small n -> one worker chunk, so the trusted run is genuinely single-threaded
+			auto r = e->execute(R"(
+				class Cell { int v = 0; int doubled() { return v * 2; } }
+				var a = [];
+				for (var i = 0; i < 8; i++) { auto c = Cell(); c.v = i; a.push(c); }
+				try { parallel_for (auto& c : a) { c.v = c.doubled(); } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("cannot call script class methods in a parallel body") != std::string::npos);
+			e->allow_unsafe_parallel(true);
+			auto r2 = e->execute(R"(
+				var a2 = [];
+				for (var i = 0; i < 8; i++) { auto c = Cell(); c.v = i; a2.push(c); }
+				parallel_for (auto& c : a2) { c.v = c.doubled(); }
+				return a2[3].v;
+			)");
+			check_eq((int64_t)6, r2.as_int());
+		});
+
+		test("determinism_across_worker_counts", [this]() {
+			// Byte-identical results at 1/2/4/8 workers from identical initial state
+			std::string first;
+			for (size_t workers : {1, 2, 4, 8}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(e);
+				e->parallel_thread_count(workers);
+				auto r = e->execute(R"(
+					var a = [];
+					for (var i = 0; i < 300; i++) { a.push([i, 0.0]); }
+					parallel_for (auto& p : a) { p[1] = math::sqrt(1.0 * p[0]) * 3.7; }
+					return to_json(a);
+				)");
+				if (first.empty()) { first = r.as<std::string>(); }
+				else { check_eq(first, r.as<std::string>()); }
+			}
+		});
+
+		test("second_region_reuses_slots_cleanly", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push(i); }
+				parallel_for (auto& x : a) { x = x + 1; }
+				parallel_for (auto& x : a) { x = x * 2; }
+				return a[63];
+			)");
+			check_eq((int64_t)128, r.as_int());
+		});
+	}
+};
+
 } // namespace jai::foundry::tests
 
 using parallel_transform_tests = jai::foundry::tests::parallel_transform_tests;
 FOUNDRY_REGISTER(parallel_transform_tests)
+using parallel_for_tests = jai::foundry::tests::parallel_for_tests;
+FOUNDRY_REGISTER(parallel_for_tests)

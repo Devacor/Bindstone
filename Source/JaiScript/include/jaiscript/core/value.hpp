@@ -621,6 +621,11 @@ namespace jai {
             return *std::get_if<TYPEID_MAP>(&storage_);
         }
 
+        // Unchecked mutable string storage accessor - caller must verify raw string storage first
+        inline strong_ptr<script_string>& unchecked_get_string_storage() noexcept {
+            return *std::get_if<TYPEID_STRING>(&storage_);
+        }
+
         inline const std::vector<script_value>& as_array() const {
             auto result = checked_as_array();
             if (!result) {
@@ -1910,6 +1915,12 @@ namespace jai {
             return jai::weaker_ptr<object_holder>();
         }
         
+        // Unchecked mutable object storage accessor - caller must verify raw object storage first
+        // (count inspection without the handle copy get_object_holder() takes)
+        inline strong_ptr<object_holder>& unchecked_get_object_storage() noexcept {
+            return *std::get_if<TYPEID_OBJECT>(&storage_);
+        }
+
         // Safe class_instance extraction from object_holder
         std::shared_ptr<class_instance> get_class_instance() {
             auto holder = get_object_holder();

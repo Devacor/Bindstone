@@ -54,6 +54,7 @@ namespace {
 		case node_type::block_stmt:       // owns its own scope
 		case node_type::for_stmt:         // compile_for pushes its own scope
 		case node_type::range_for_stmt:   // loop variable lives in the iteration scope
+		case node_type::parallel_for_stmt: // body is a separate worker function
 			return false;
 		case node_type::statement_decl:
 			return declares_in_current_scope(static_cast<const statement_decl*>(node)->statement.get(), slot_decls_env_free);
@@ -715,6 +716,15 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 	case node_type::range_for_stmt:
 		compile_range_for(static_cast<range_for_stmt*>(stmt.get()));
 		return;
+	case node_type::parallel_for_stmt: {
+		// Container onto the stack in the enclosing scope; the exec case hands the
+		// popped value plus the pinned statement node to detail::run_parallel_for
+		// (the body never compiles into THIS chunk - workers compile their own copies)
+		auto* pf = static_cast<parallel_for_stmt*>(stmt.get());
+		compile_expression(pf->container);
+		emit(opcode::op_parallel_for, add_node(stmt));
+		return;
+	}
 	case node_type::fallthrough_stmt:
 		// Sets the runtime fallthrough flag: the [value, ft] pair of the innermost
 		// switch sits on top of the value stack at every statement boundary

@@ -25,6 +25,7 @@
 //   ITERATION order wins at the join; a terminal worker failure (budget) latches the
 //   engine's terminal rail.
 
+#include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
@@ -69,6 +70,11 @@ namespace jai::detail {
 		// traffic (primitive copies touch no counts). Non-null only DURING a region
 		// (points into the run call's locals; the join guard nulls it).
 		const std::vector<script_value>* raw_input = nullptr;
+		// In-place region (parallel_for): pre-minted element references for this slot's
+		// chunk (index i - begin), bound to the body's by-ref parameter per iteration.
+		// Minted single-threaded at the barrier (each holder pins the container handle);
+		// cleared at the join - a dormant slot must never pin the caller's array.
+		std::vector<script_value> element_refs;
 		size_t begin = 0;
 		size_t end = 0;
 		std::optional<parallel_worker_error> error;
@@ -168,6 +174,13 @@ namespace {
 		std::unordered_map<uint64_t, size_t> capture_index;   // name id -> adm.captures slot
 		std::vector<std::unordered_set<uint64_t>> scopes;   // current function's scopes
 		bool failed = false;
+		// parallel_for bodies (in-place root mode): member access and member STORES are
+		// admitted when the chain roots at a LOCAL identifier - the owned element
+		// (chunk-exclusive) or a worker-private local. Enclosing-rooted member access
+		// stays rejected (capture classification cannot provision objects). Applies to
+		// the whole call graph: helper functions do member work on their own params.
+		bool inplace_root = false;
+		const char* prefix = "parallel_transform";
 
 		admission_builder(engine& e) : eng(e), sym(*e.get_symbolizer()) { adm.admitted = false; }
 
@@ -183,6 +196,50 @@ namespace {
 			} else if (!subscript_root) {
 				adm.captures[it->second].borrow_eligible = false;
 			}
+		}
+
+		// In-place mode member access (read or store position): admitted iff the chain
+		// roots at a LOCAL identifier - the owned element or a worker-private local.
+		// Index expressions inside the chain walk under the normal rules. Every member
+		// node's interned ids (member/getter/setter) warm HERE, single-threaded: worker
+		// field access probes them against the frozen symbolizer.
+		bool walk_local_member_chain(const member_expr* m, const char* what) {
+			std::vector<const expression_ptr*> indexes;
+			const expression* cur = m;
+			identifier_expr* root = nullptr;
+			while (cur) {
+				if (cur->get_type() == node_type::identifier_expr) {
+					root = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(cur));
+					break;
+				}
+				if (cur->get_type() == node_type::member_expr) {
+					auto* node = const_cast<member_expr*>(static_cast<const member_expr*>(cur));
+					if (node->member_id == UINT64_MAX) { node->member_id = sym.intern(node->member); }
+					node->getter_id = sym.get_getter_id_with_view(node->member_id).first;
+					(void)sym.get_setter_id_with_view(node->member_id);
+					cur = node->object.get();
+					continue;
+				}
+				if (cur->get_type() == node_type::binary_expr) {
+					auto* b = static_cast<const binary_expr*>(cur);
+					if (b->op.type != token_type::left_bracket) { break; }
+					indexes.push_back(&b->right);
+					cur = b->left.get();
+					continue;
+				}
+				break;
+			}
+			if (!root) {
+				return fail(m, std::string(what) + " must root at a local variable in a parallel body");
+			}
+			if (!is_local(root->symbol_id)) {
+				return fail(m, std::string(what) + " reaches captured state '" + std::string(root->name) +
+				               "' (captured reads are read-only, and objects cannot be captured)");
+			}
+			for (const expression_ptr* idx : indexes) {
+				if (!walk_expr(*idx)) { return false; }
+			}
+			return true;
 		}
 
 		// The enclosing identifier at the root of a bare name or a [ ]-chain
@@ -209,7 +266,7 @@ namespace {
 				failed = true;
 				adm.admitted = false;
 				adm.code = make_error_code(runtime_error_code::unsupported_operation);
-				adm.message = "parallel_transform: " + std::move(reason);
+				adm.message = std::string(prefix) + ": " + std::move(reason);
 				if (node) {
 					adm.message += " at " + std::to_string(node->location.line) + ":" +
 					               std::to_string(node->location.column);
@@ -232,16 +289,21 @@ namespace {
 			return false;
 		}
 
+		// Root-parameter contract for the region's entry body: transform requires a
+		// by-value unary param; parallel_for takes either (auto& mutates in place,
+		// plain auto is a side-effect-free worker copy - Dev ruling)
+		enum class root_param { none, unary_value, unary };
+
 		bool admit_function(const std::shared_ptr<script_defined_function>& fn, uint64_t global_name_id,
-		                    bool require_unary_value_param, const ast_node* call_node) {
+		                    root_param param_mode, const ast_node* call_node) {
 			if (!fn || !fn->body) {
 				return fail(call_node, "fn has no body known at admission time");
 			}
-			if (require_unary_value_param) {
+			if (param_mode != root_param::none) {
 				if (fn->parameters().size() != 1) {
 					return fail(fn->body.get(), "fn must take exactly one parameter");
 				}
-				if (fn->parameters()[0].is_reference) {
+				if (param_mode == root_param::unary_value && fn->parameters()[0].is_reference) {
 					return fail(fn->body.get(), "fn may not take its element by reference (elements are detached copies)");
 				}
 			}
@@ -445,6 +507,9 @@ namespace {
 			case node_type::call_expr:
 				return walk_call(static_cast<call_expr*>(e.get()));
 			case node_type::member_expr:
+				if (inplace_root) {
+					return walk_local_member_chain(static_cast<member_expr*>(e.get()), "member access");
+				}
 				return fail(e.get(), "member access is not allowed in a parallel body (v0)");
 			case node_type::lambda_expr:
 				return fail(e.get(), "lambdas are not allowed in a parallel body (v0)");
@@ -505,6 +570,11 @@ namespace {
 				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
 			}
 			case node_type::member_expr:
+				if (inplace_root && !aliasing) {
+					// Own-element / worker-local member store (the parallel_for output
+					// channel); enclosing-rooted chains still fail inside
+					return walk_local_member_chain(static_cast<member_expr*>(t.get()), "member store");
+				}
 				return fail(t.get(), "member stores are not allowed in a parallel body (v0)");
 			default:
 				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
@@ -579,7 +649,7 @@ namespace {
 					if (payload->kind != script_callable::kind_type::function || !payload->fn) {
 						return fail(callee, "call target '" + callee_name + "' is not a plain function (v0)");
 					}
-					if (!admit_function(payload->fn, callee->symbol_id, false, callee)) { return false; }
+					if (!admit_function(payload->fn, callee->symbol_id, root_param::none, callee)) { return false; }
 					// A by-ref parameter receiving captured state is a write channel
 					// (the callee may store through it) - reject the alias statically
 					const auto& params = payload->fn->parameters();
@@ -608,9 +678,17 @@ namespace {
 		}
 	};
 
-	parallel_admission build_admission(engine& eng, const std::shared_ptr<script_defined_function>& fn) {
+	parallel_admission build_admission(engine& eng, const std::shared_ptr<script_defined_function>& fn,
+	                                   bool inplace_root = false) {
 		admission_builder builder(eng);
-		if (builder.admit_function(fn, UINT64_MAX, true, nullptr)) {
+		if (inplace_root) {
+			builder.inplace_root = true;
+			builder.prefix = "parallel_for";
+		}
+		if (builder.admit_function(fn, UINT64_MAX,
+		                           inplace_root ? admission_builder::root_param::unary
+		                                        : admission_builder::root_param::unary_value,
+		                           nullptr)) {
 			builder.adm.admitted = true;
 		}
 		return std::move(builder.adm);
@@ -630,13 +708,14 @@ namespace {
 	}
 
 	const parallel_admission* admit_cached(engine& eng, parallel_engine_state& state,
-	                                       const std::shared_ptr<script_defined_function>& fn) {
+	                                       const std::shared_ptr<script_defined_function>& fn,
+	                                       bool inplace_root = false) {
 		const void* key = fn->body.get();
 		auto it = state.admission_cache.find(key);
 		if (it != state.admission_cache.end() && admission_graph_current(eng, it->second)) {
 			return &it->second;
 		}
-		auto [pos, inserted] = state.admission_cache.insert_or_assign(key, build_admission(eng, fn));
+		auto [pos, inserted] = state.admission_cache.insert_or_assign(key, build_admission(eng, fn, inplace_root));
 		(void)inserted;
 		return &pos->second;
 	}
@@ -823,6 +902,39 @@ namespace {
 		return ctx;
 	}
 
+	// In-place worker loop (parallel_for): by-ref bodies bind each iteration to the
+	// pre-minted element reference - the body mutates the caller's element directly
+	// under chunk exclusivity. Plain-auto bodies read the element through raw_input
+	// (the by-value binding clones per value semantics - zero side effects). No
+	// output, results discarded. Every refcount touched is element-internal
+	// (normalization made elements exclusive) or worker-private: single-threaded.
+	void run_worker_inplace(parallel_worker_slot& ctx, engine& eng) {
+		std::vector<script_value> call_args;
+		call_args.emplace_back(std::monostate{}, &eng);
+		size_t i = ctx.begin;
+		try {
+			for (; i < ctx.end; ++i) {
+				call_args[0] = ctx.raw_input ? (*ctx.raw_input)[i] : ctx.element_refs[i - ctx.begin];
+				auto r = ctx.backend->execute_callable(ctx.fn_payload, call_args);
+				if (ctx.backend->is_unwinding()) {
+					ctx.error = parallel_worker_error{ i,
+						make_error_code(runtime_error_code::evaluation_failed),
+						ctx.backend->get_current_exception().what(),
+						ctx.limits.terminal_error };
+					return;
+				}
+				if (!r) {
+					ctx.error = parallel_worker_error{ i, r.error(),
+						format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
+					return;
+				}
+			}
+		} catch (const std::exception& e) {
+			ctx.error = parallel_worker_error{ i, make_error_code(runtime_error_code::cpp_exception),
+				e.what(), ctx.limits.terminal_error };
+		}
+	}
+
 	void run_worker(parallel_worker_slot& ctx, std::vector<script_value>& out, engine& eng) {
 		std::vector<script_value> call_args;
 		call_args.emplace_back(std::monostate{}, &eng);
@@ -929,6 +1041,109 @@ namespace {
 			return primitive_type(t->key_type()) && primitive_type(t->value_type());
 		}
 		return false;
+	}
+
+	// In-place element PROOF + NORMALIZATION (parallel_for; Dev rulings 2026-07-09):
+	// after this pass returns true, mutating the element under chunk exclusivity can
+	// never touch a refcount another thread can see. Value semantics carry most of the
+	// argument (script stores deep-copy, so elements cannot share structure); the one
+	// value shape whose copies DO share storage - strings - is handled by DETACHING
+	// here instead of banning: a string node with use_count > 1 (assigned from a
+	// shared source, or aliased cross-element) is replaced in place with a fresh copy,
+	// single-threaded at the barrier, semantically invisible. Steady-state this walk
+	// detaches nothing (worker-minted strings from the previous region are already
+	// exclusive). Containers/objects whose HANDLE is shared (engine-internal aliasing;
+	// value semantics makes it rare) detach wholesale the same way. What still fails:
+	// shared_ptr/weak_ptr (aliasing IS their semantics), functions, bound host values,
+	// references, and instances of non-flat classes.
+	bool normalize_element_inplace(script_value& v, engine& eng) {
+		switch (v.raw_storage_index()) {
+		case script_value::TYPEID_NULL:
+		case script_value::TYPEID_INT:
+		case script_value::TYPEID_FLOAT:
+		case script_value::TYPEID_CHAR:
+		case script_value::TYPEID_BOOL:
+			return true;
+		case script_value::TYPEID_STRING: {
+			auto& handle = v.unchecked_get_string_storage();
+			if (handle && handle.use_count() > 1) {
+				eng.execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
+				handle = make_strong<script_string>(*handle);
+			}
+			return true;
+		}
+		case script_value::TYPEID_ARRAY: {
+			if (statically_all_primitive(v)) { return true; }
+			auto& handle = v.unchecked_get_array_storage();
+			if (!handle) { return true; }
+			if (handle.use_count() > 1) {
+				v = v.parallel_detached_copy();
+				return normalize_element_inplace(v, eng);
+			}
+			for (auto& elem : *handle) {
+				if (!normalize_element_inplace(elem, eng)) { return false; }
+			}
+			return true;
+		}
+		case script_value::TYPEID_MAP: {
+			if (statically_all_primitive(v)) { return true; }
+			auto& handle = v.unchecked_get_map_storage();
+			if (!handle) { return true; }
+			if (handle.use_count() > 1) {
+				v = v.parallel_detached_copy();
+				return normalize_element_inplace(v, eng);
+			}
+			// Keys are const in the map node; a shared KEY string forces a whole-map
+			// detach (fresh keys). Values normalize in place.
+			bool shared_key = false;
+			for (const auto& [key, val] : *handle) {
+				(void)val;
+				if (key.raw_storage_index() == script_value::TYPEID_STRING &&
+				    const_cast<script_value&>(key).unchecked_get_string_storage().use_count() > 1) {
+					shared_key = true;
+					break;
+				}
+				if (key.raw_storage_index() == script_value::TYPEID_ARRAY ||
+				    key.raw_storage_index() == script_value::TYPEID_MAP ||
+				    key.raw_storage_index() == script_value::TYPEID_OBJECT) {
+					shared_key = true;   // structured keys: detach wholesale, then values re-walk
+					break;
+				}
+			}
+			if (shared_key) {
+				v = v.parallel_detached_copy();
+				return normalize_element_inplace(v, eng);
+			}
+			for (auto& [key, val] : *handle) {
+				(void)key;
+				if (!normalize_element_inplace(val, eng)) { return false; }
+			}
+			return true;
+		}
+		case script_value::TYPEID_OBJECT: {
+			auto& handle = v.unchecked_get_object_storage();
+			if (!handle || !handle->is_class_instance_wrapper || !handle->data) {
+				return false;   // bound host object wrapper
+			}
+			auto* inst = static_cast<class_instance*>(handle->data.get());
+			const class_definition* cd = inst->get_class_definition();
+			if (!cd || !cd->flat_value_semantics()) {
+				return false;
+			}
+			if (handle.use_count() > 1 || handle->data.use_count() > 1) {
+				v = v.clone();   // engine-internal aliasing: fresh exclusive instance
+				auto& fresh = v.unchecked_get_object_storage();
+				inst = static_cast<class_instance*>(fresh->data.get());
+			}
+			for (auto& [field_id, field] : inst->get_fields_mutable()) {
+				(void)field_id;
+				if (!normalize_element_inplace(field, eng)) { return false; }
+			}
+			return true;
+		}
+		default:
+			return false;
+		}
 	}
 
 	// Borrow admission (content half): TRUE when every element of the container is a
@@ -1371,6 +1586,338 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	script_value result = script_value::make_array(nullptr, &eng);
 	result.as_array() = std::move(out);
 	return result;
+}
+
+// parallel_for (see parallel_transform.hpp): the in-place fork-join statement. Shares
+// the transform machinery wholesale - admission cache (in-place root mode), region
+// pools, worker slots, capture provisioning, the join rules - and differs at exactly
+// three points: captured reads resolve through the STATEMENT's environment chain (not
+// just globals), the barrier proves elements in-place-mutation-safe and pre-mints one
+// element reference per iteration (single-threaded; holders pin the live container),
+// and workers run the by-ref body over their chunk with no output array.
+checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
+                                      const script_value& container,
+                                      const std::shared_ptr<environment>& capture_env) {
+	parallel_engine_state& state = eng.parallel_state();
+	auto raise = [&state](std::error_code code, std::string message) {
+		state.error_text = std::move(message);
+		return checked_result<void>(code, std::string_view(state.error_text));
+	};
+	auto usage = [&raise](std::string message) {
+		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
+	};
+
+	if (state.region_running) {
+		return usage("parallel_for: nested parallel regions are not supported (v0)");
+	}
+	const script_value& array_value = container.is_reference() ? container.deref() : container;
+	if (!array_value.is_array()) {
+		return usage("parallel_for: can only iterate an array (v1)");
+	}
+
+	// The shared body function (admission + pool key + per-worker provisioning source).
+	// Hot reload reparses into a fresh statement node, so this cache cannot go stale.
+	if (!stmt->body_fn_cache) {
+		auto body_block = std::dynamic_pointer_cast<block_stmt>(stmt->body);
+		if (!body_block) {
+			return usage("parallel_for: body is not a block (internal)");
+		}
+		stmt->body_fn_cache = std::make_shared<script_defined_function>(
+			std::string_view("<parallel_for>"), std::vector<parameter>{ stmt->loop_param },
+			type_info_ptr(nullptr), std::move(body_block), nullptr, stmt->local_count);
+	}
+	const std::shared_ptr<script_defined_function>& body_fn = stmt->body_fn_cache;
+
+	struct running_guard {
+		parallel_engine_state& s;
+		running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
+		~running_guard() { s.region_running = false; }
+	} guard(state);
+
+	const parallel_admission* adm = admit_cached(eng, state, body_fn, /*inplace_root*/ true);
+	if (!adm->admitted) {
+		return raise(adm->code, adm->message);
+	}
+
+	// CAPTURED READS resolve through the statement's enclosing environment chain (its
+	// walk reaches the global env; slot-resident function locals are not env-visible
+	// and correctly error as undefined). A BORROW of the very container being mutated
+	// would read racing content (borrow indexes any element, writes own chunks only) -
+	// contract A errors instead of silently demoting; snapshots of it stay legal
+	// (barrier-frozen copy, deterministic).
+	const std::vector<script_value>* source_node = &array_value.unchecked_as_array();
+	std::vector<resolved_capture> captures;
+	state.last_captures.clear();
+	captures.reserve(adm->captures.size());
+	for (const auto& entry : adm->captures) {
+		auto global = capture_env ? capture_env->get(entry.name_id)
+		                          : eng.get_global_environment()->get(entry.name_id);
+		if (!global) {
+			return usage("parallel_for: captured name '" + std::string(entry.name) + "' is not defined at the region barrier");
+		}
+		resolved_capture cap;
+		cap.entry = &entry;
+		cap.source = global.value().deref();
+		switch (cap.source->raw_storage_index()) {
+		case script_value::TYPEID_NULL:
+		case script_value::TYPEID_INT:
+		case script_value::TYPEID_FLOAT:
+		case script_value::TYPEID_CHAR:
+		case script_value::TYPEID_BOOL:
+			cap.kind = parallel_capture_kind::scalar;
+			break;
+		case script_value::TYPEID_CPP_BOUND: {
+			const size_t sem = cap.source->bound_semantic_index();
+			if (sem == script_value::TYPEID_NULL && !cap.source->is_null()) {
+				return usage("parallel_for: captured name '" + std::string(entry.name) + "' is not value-semantic (bound host object)");
+			}
+			cap.source = cap.source->clone();
+			cap.kind = sem == script_value::TYPEID_STRING
+				? parallel_capture_kind::string : parallel_capture_kind::scalar;
+			break;
+		}
+		case script_value::TYPEID_STRING:
+			cap.kind = parallel_capture_kind::string;
+			break;
+		case script_value::TYPEID_ARRAY:
+		case script_value::TYPEID_MAP: {
+			const bool same_container = cap.source->raw_storage_index() == script_value::TYPEID_ARRAY &&
+			                            &cap.source->unchecked_as_array() == source_node;
+			const bool borrowable = entry.borrow_eligible && !same_container &&
+			                        (statically_all_primitive(*cap.source) || parallel_content_all_primitive(*cap.source));
+			if (same_container && entry.borrow_eligible) {
+				return usage("parallel_for: captured name '" + std::string(entry.name) +
+				             "' is the container being mutated (reads through it would race the element writes)");
+			}
+			cap.kind = borrowable ? parallel_capture_kind::borrow : parallel_capture_kind::snapshot;
+			break;
+		}
+		case script_value::TYPEID_FUNCTION:
+			return usage("parallel_for: captured name '" + std::string(entry.name) +
+			             "' is a function value (only direct calls to statically-known functions are allowed in a parallel body)");
+		default:
+			return usage("parallel_for: captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
+		}
+		state.last_captures.emplace_back(entry.name_id, cap.kind);
+		captures.push_back(std::move(cap));
+	}
+
+	// ELEMENT PROOF + NORMALIZATION: every element must end this pass exclusively-
+	// mutable (shared strings detach in place - see normalize_element_inplace). Typed
+	// all-primitive containers prove statically; engine::allow_unsafe_parallel skips
+	// the walk entirely (trusted scripts).
+	auto& source = *const_cast<std::vector<script_value>*>(source_node);
+	const size_t n = source.size();
+	if (!eng.allow_unsafe_parallel() && !statically_all_primitive(array_value)) {
+		for (size_t i = 0; i < n; ++i) {
+			bool ok = false;
+			try {
+				ok = normalize_element_inplace(source[i], eng);
+			} catch (const std::exception& e) {
+				return usage("parallel_for: element " + std::to_string(i) + ": " + e.what());
+			}
+			if (!ok) {
+				return usage("parallel_for: element " + std::to_string(i) +
+				             " cannot be mutated in place (only value-semantic shapes - primitives, strings,"
+				             " value containers, flat value-class instances - are provably exclusive;"
+				             " engine::allow_unsafe_parallel(true) overrides)");
+			}
+		}
+	}
+	if (n == 0) {
+		return {};
+	}
+
+	size_t worker_count = eng.parallel_thread_count();
+	if (worker_count < 1) { worker_count = 1; }
+	if (worker_count > n) { worker_count = n; }
+	if (n < k_parallel_small_n) { worker_count = 1; }
+	std::vector<size_t> bounds = partition_flat(n, worker_count);
+	state.last_chunk_bounds = bounds;
+
+	const std::chrono::nanoseconds budget =
+		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
+	const backend_type engine_backend = eng.get_backend_type();
+	if (engine_backend == backend_type::custom) {
+		return usage("parallel_for: custom execution backends are not supported");
+	}
+	const bool use_vm = engine_backend == backend_type::vm;
+
+	// Region pool by fingerprint (body + backend), LRU-evicted - same policy as transform
+	const void* pool_key = static_cast<const void*>(body_fn->body.get());
+	parallel_engine_state::parallel_region_pool* pool = nullptr;
+	for (auto& candidate : state.region_pools) {
+		if (candidate.fn_body == pool_key && candidate.use_vm == use_vm) {
+			pool = &candidate;
+			break;
+		}
+	}
+	if (!pool) {
+		if (state.region_pools.size() >= parallel_engine_state::max_region_pools) {
+			auto evict = state.region_pools.begin();
+			for (auto it = state.region_pools.begin(); it != state.region_pools.end(); ++it) {
+				if (it->last_use < evict->last_use) { evict = it; }
+			}
+			*evict = parallel_engine_state::parallel_region_pool{};
+			pool = &*evict;
+		} else {
+			state.region_pools.emplace_back();
+			pool = &state.region_pools.back();
+		}
+		pool->fn_body = pool_key;
+		pool->use_vm = use_vm;
+	}
+	pool->last_use = ++state.region_use_counter;
+
+	std::vector<type_info*> value_types;
+	if (pool->worker_slots.size() < worker_count) {
+		pool->worker_slots.resize(worker_count);
+	}
+	std::vector<parallel_worker_slot*> contexts;
+	contexts.reserve(worker_count);
+
+	// Join guard: no capture define and no element reference survives this call - the
+	// holders pin the caller's array, and a dormant slot must never do that.
+	struct inplace_join_guard {
+		engine& eng;
+		std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
+		size_t count;
+		~inplace_join_guard() {
+			for (size_t k = 0; k < count && k < slots.size(); ++k) {
+				parallel_worker_slot* slot = slots[k].get();
+				if (!slot) { continue; }
+				for (uint64_t id : slot->capture_name_ids) {
+					slot->root_env->define(id, script_value(std::monostate{}, &eng));
+				}
+				slot->capture_name_ids.clear();
+				slot->provisioned_nodes.clear();
+				slot->element_refs.clear();
+				slot->raw_input = nullptr;
+			}
+		}
+	} join_guard{ eng, pool->worker_slots, worker_count };
+
+	// The container handle for element references: holders re-deref container+index on
+	// every access (reallocation-safe), and each mint here bumps the handle count once,
+	// single-threaded, released by the guard above.
+	const bool by_ref_element = stmt->loop_param.is_reference;
+	auto& array_handle = const_cast<script_value&>(array_value).unchecked_get_array_storage();
+	type_info_ptr element_type = array_value.get_type_info().get() ? array_value.get_type_info()->element_type() : type_info_ptr(nullptr);
+	if (type_info* t = array_value.get_type_info().get()) { value_types.push_back(t); }
+
+	for (size_t k = 0; k < worker_count; ++k) {
+		auto& slot = pool->worker_slots[k];
+		if (slot && slot_matches(*slot, *adm, *body_fn, use_vm)) {
+			reset_worker_slot(eng, *slot, budget);
+		} else {
+			slot = provision_worker(eng, *adm, budget, use_vm);
+		}
+		slot->begin = bounds[k];
+		slot->end = bounds[k + 1];
+		slot->input.clear();
+		slot->element_refs.clear();
+		if (by_ref_element) {
+			slot->raw_input = nullptr;
+			slot->element_refs.reserve(slot->end - slot->begin);
+			for (size_t i = slot->begin; i < slot->end; ++i) {
+				slot->element_refs.push_back(script_value::make_element_reference(array_handle, i, &eng, element_type));
+			}
+		} else {
+			// Plain-auto element: workers read the live vector directly; the by-value
+			// binding clones (value semantics), and normalization made every element
+			// exclusive, so those clones touch no cross-thread counts
+			slot->raw_input = &source;
+		}
+		slot->capture_name_ids.clear();
+		slot->provisioned_nodes.clear();
+		std::vector<const void*> capture_nodes;
+		for (const auto& cap : captures) {
+			script_value provisioned(std::monostate{}, &eng);
+			try {
+				switch (cap.kind) {
+				case parallel_capture_kind::scalar:
+					provisioned = *cap.source;
+					break;
+				case parallel_capture_kind::string:
+				case parallel_capture_kind::snapshot:
+					capture_nodes.clear();
+					provisioned = cap.source->parallel_detached_copy(&value_types, &capture_nodes);
+					slot->provisioned_nodes.insert(capture_nodes.begin(), capture_nodes.end());
+					break;
+				case parallel_capture_kind::borrow:
+					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
+					provisioned = script_value::make_parallel_borrow(*cap.source, &eng);
+					break;
+				}
+			} catch (const std::exception& e) {
+				return usage("parallel_for: captured name '" + std::string(cap.entry->name) + "': " + e.what());
+			}
+			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
+			slot->capture_name_ids.push_back(cap.entry->name_id);
+		}
+		contexts.push_back(slot.get());
+	}
+	prewarm_region_types(eng, [&] {
+		std::vector<type_info*> seed = adm->referenced_types;
+		seed.insert(seed.end(), value_types.begin(), value_types.end());
+		if (element_type.get()) { seed.push_back(element_type.get()); }
+		return seed;
+	}());
+
+	parallel_region_table table;
+	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits });
+	if (worker_count > 1) {
+		const size_t pool_workers_needed = worker_count - 1;
+		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
+			state.pool = std::make_unique<jai::thread_pool>(
+				std::max(pool_workers_needed, jai::thread_pool::default_worker_count()));
+		}
+		for (size_t k = 1; k < worker_count; ++k) {
+			table.entries.push_back({ state.pool->worker_thread_id(k - 1), &contexts[k]->limits });
+		}
+	}
+
+	// Safe mode freezes the symbolizer (worker interns are bugs, caught loudly).
+	// Trusted mode leaves it live: script-class method dispatch legitimately warms
+	// getter/setter ids mid-region - the user vouched for the concurrency.
+	const bool freeze_symbols = !eng.allow_unsafe_parallel();
+	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(true); }
+	state.active_region = &table;
+	for (size_t k = 1; k < worker_count; ++k) {
+		parallel_worker_slot* ctx = contexts[k];
+		engine* eng_ptr = &eng;
+		state.pool->submit_to(k - 1, [ctx, eng_ptr] { run_worker_inplace(*ctx, *eng_ptr); });
+	}
+	run_worker_inplace(*contexts[0], eng);
+	if (worker_count > 1) {
+		state.pool->wait_idle();
+	}
+	state.active_region = nullptr;
+	if (freeze_symbols) { eng.get_symbolizer()->set_frozen(false); }
+
+	size_t rolled_up = 0;
+	for (const auto& ctx : contexts) {
+		rolled_up += ctx->limits.memory_used;
+	}
+	if (rolled_up) {
+		eng.execution_limits().memory_charge_deferred(rolled_up);
+	}
+	const parallel_worker_error* winner = nullptr;
+	for (const auto& ctx : contexts) {
+		if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {
+			winner = &*ctx->error;
+		}
+	}
+	if (winner) {
+		if (winner->terminal) {
+			eng.execution_limits().terminal_error = true;
+		}
+		std::error_code code = winner->code ? winner->code
+			: make_error_code(runtime_error_code::unsupported_operation);
+		return raise(code, winner->message.empty() ? std::string("parallel_for: worker failed")
+		                                           : winner->message);
+	}
+	return {};
 }
 
 // Tier-1 raw read through a region borrow (see parallel_transform.hpp). Runs on worker

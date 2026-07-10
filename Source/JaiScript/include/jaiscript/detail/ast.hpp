@@ -74,6 +74,7 @@ namespace jai {
         case_stmt,
         default_stmt,
         fallthrough_stmt,
+        parallel_for_stmt,   // parallel_for (auto& x : arr) { ... } - in-place fork-join
 
         // Declarations (40-59)
         variable_decl = 40,
@@ -142,6 +143,7 @@ namespace jai {
         virtual checked_result<void> visit_case_stmt(class case_stmt* stmt) = 0;
         virtual checked_result<void> visit_default_stmt(class default_stmt* stmt) = 0;
         virtual checked_result<void> visit_fallthrough_stmt(class fallthrough_stmt* stmt) = 0;
+        virtual checked_result<void> visit_parallel_for_stmt(class parallel_for_stmt* stmt) = 0;
 
         // declaration visitors
         virtual checked_result<void> visit_variable_decl(class variable_decl* decl) = 0;
@@ -518,6 +520,28 @@ namespace jai {
                      bool ref, bool constRef, expression_ptr cont, statement_ptr b)
             : statement(loc, node_type::range_for_stmt), element_type(type), variable_name(varName), variable_name_id(varNameId),
               is_reference(ref), is_const(constRef), container(cont), body(b) {}    };
+
+    // parallel_for (auto& x : arr) { ... } — the in-place fork-join loop (parallel_for
+    // v1; docs/parallel_design.md §1, §11 Q4 RULED). The body is parsed as a
+    // ONE-PARAMETER FUNCTION BODY (own slot numbering: the loop variable is slot 0,
+    // own local_count) so both backends execute it through the parallel region
+    // machinery: workers bind the loop variable by reference to each owned element of
+    // the evaluated container and mutate it in place. No output array, no merge.
+    class parallel_for_stmt : public statement {
+    public:
+        parameter loop_param;            // declarator: name/type; is_reference must be true (admission errors otherwise)
+        expression_ptr container;
+        statement_ptr body;              // block_stmt, parsed inside the body's own function scope
+        size_t local_count = 0;          // body frame size (loop variable = slot 0)
+        // The lazily-synthesized body function both backends share. Its body pointer
+        // keys admission + the region slot pools; hot reload reparses the file and
+        // mints a fresh node, so the cache can never go stale.
+        mutable std::shared_ptr<script_defined_function> body_fn_cache;
+
+        parallel_for_stmt(const source_location& loc, parameter p, expression_ptr cont, statement_ptr b)
+            : statement(loc, node_type::parallel_for_stmt), loop_param(std::move(p)),
+              container(std::move(cont)), body(std::move(b)) {}
+    };
 
     // Return statement
     class return_stmt : public statement {

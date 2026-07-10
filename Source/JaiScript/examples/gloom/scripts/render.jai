@@ -5,9 +5,10 @@
 //   quad  (--pix quad): 2x2 px/cell, quadrant glyphs, 2 colors by luminosity
 //   sext  (--pix sext): 2x3 px/cell, sextant glyphs (needs a Unicode-13 font)
 //
-// Wall columns are computed by parallel_transform over per-column ray records
-// (pure.jai); everything after the join is ordinary serial painting, demoreel
-// discipline throughout: locals for hot scalars, var& for every hot array.
+// Wall columns are computed by parallel_for over persistent ray-chunk pair
+// workspaces (pure.jai, in-place outputs); everything after the join is
+// ordinary serial painting, demoreel discipline throughout: locals for hot
+// scalars, var& for every hot array.
 
 var PIXW = 2;        // pixels per cell horizontally (set by gloom_boot)
 var PIXH = 2;        // pixels per cell vertically
@@ -20,6 +21,30 @@ var PIX = [];
 var VW = 0;
 var VH = 0;
 var ROWIDX = [];
+// Persistent ray-chunk pair workspaces (parallel_for v1): header + map snapshot
+// + preallocated out cells per record (layout in gloom_ray_chunk_step). Rebuilt
+// only when the map snapshot changes (WS_MAPGEN vs G.mapgen); the pose header
+// rewrites per frame, the region writes outputs in place.
+var WALL_WS = [];
+var WS_MAPGEN = -1;
+
+function build_wall_ws(int ncols) -> void {
+	WALL_WS = [];
+	int nchunks = 16;
+	int per_chunk = (ncols + nchunks - 1) / nchunks;
+	int bx0 = 0;
+	while (bx0 < ncols) {
+		int bx1 = bx0 + per_chunk;
+		if (bx1 > ncols) { bx1 = ncols; }
+		var rec = [bx0, bx1, ncols, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, G.mw, 0];
+		for (auto wv : G.mappack) { rec.push(wv); }
+		rec[10] = rec.size();          // out_base: outputs start after the pack
+		int outn = (bx1 - bx0) * 4;
+		for (int k = 0; k < outn; ++k) { rec.push(0); }
+		WALL_WS.push(rec);
+		bx0 = bx1;
+	}
+}
 var RESET = "";
 var QUADG = [];      // quadrant glyphs by TL|TR<<1|BL<<2|BR<<3
 var SEXTG = [];      // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
@@ -247,41 +272,38 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 	float px = G.px;
 	float py = G.py;
 	int mw = G.mw;
-	var pack = G.mappack;              // one snapshot copy per frame
 
 	// --- 1. the rays: ONE ray per cell column (sub-pixels share it; sprites
-	// and particles still use the full pixel grid), parallel over column
-	// CHUNKS. Elements duplicate the map snapshot (the pure-value contract),
-	// so 16 chunk records instead of one per column keep the input build
-	// ~16x cheaper.
+	// and particles still use the full pixel grid), parallel_for over
+	// PERSISTENT column-chunk workspaces (built on map change, pose header
+	// rewritten per frame) - zero per-frame array traffic, in-place outputs.
 	int pxw = PIXW;
 	int ncols = vw / pxw;
-	var wall_in = [];
-	int nchunks = 16;
-	int per_chunk = (ncols + nchunks - 1) / nchunks;
-	int bx0 = 0;
-	while (bx0 < ncols) {
-		int bx1 = bx0 + per_chunk;
-		if (bx1 > ncols) { bx1 = ncols; }
-		var rec = [bx0, bx1, ncols, px, py, dirx, diry, planex, planey, mw];
-		for (auto wv : pack) { rec.push(wv); }
-		wall_in.push(rec);
-		bx0 = bx1;
+	if (WS_MAPGEN != G.mapgen) {
+		build_wall_ws(ncols);
+		WS_MAPGEN = G.mapgen;
 	}
-	var hits = [];
+	for (auto& t : WALL_WS) {
+		t[3] = px;
+		t[4] = py;
+		t[5] = dirx;
+		t[6] = diry;
+		t[7] = planex;
+		t[8] = planey;
+	}
 	if (HOST_WORKERS == 0) {
-		for (auto& t : wall_in) { hits.push(gloom_ray_chunk(t)); }
+		for (auto& t : WALL_WS) { gloom_ray_chunk_step(t); }
 	} else {
-		hits = parallel_transform(wall_in, gloom_ray_chunk);
+		parallel_for (auto& t : WALL_WS) { gloom_ray_chunk_step(t); }
 	}
 
 	// --- 2. columns: prebaked background + textured wall slices ---
 	pix = G.bg;                        // ceiling + floor in ONE deep-copy assign
 	int boost = G.muzzle > 0 ? 2 : 0;
 	int x = 0;
-	for (auto& ch : hits) {
+	for (auto& ch : WALL_WS) {
 		int cn = ch.size();
-		int ci = 0;
+		int ci = ch[10];
 		while (ci < cn) {
 			float dist = ch[ci];
 			int side = ch[ci + 1];

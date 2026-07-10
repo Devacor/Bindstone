@@ -1,7 +1,8 @@
 // Particle pool: a fixed-size VALUE array of [kind, x, y, z, vx, vy, vz, life]
-// records, updated by the pure gloom_particle body (pure.jai) through
-// parallel_transform. The pool object owns slot recycling; access labels keep
-// the cursor honest.
+// records, stepped IN PLACE by the pure gloom_particle_step body (pure.jai)
+// through parallel_for (safe mode: all-primitive rows prove exclusive at the
+// barrier). The pool object owns slot recycling; access labels keep the
+// cursor honest.
 
 var PART_MAX = 288;
 
@@ -28,15 +29,15 @@ public:
 		cursor = (cursor + 1) % PART_MAX;
 	}
 
-	// the whole pool steps through ONE pure function — parallel when the host
-	// grants workers, the same function in a serial loop when HOST_WORKERS == 0
+	// the whole pool steps through ONE pure in-place function — parallel_for owns
+	// each element exclusively when the host grants workers (SAFE mode: elements are
+	// all-primitive rows, proven at the barrier), the same function in a serial
+	// range-for when HOST_WORKERS == 0. No output array, no pool replacement.
 	void update() {
 		if (HOST_WORKERS == 0) {
-			var out = [];
-			for (auto& p : pool) { out.push(gloom_particle(p)); }
-			pool = out;
+			for (auto& p : pool) { gloom_particle_step(p); }
 		} else {
-			pool = parallel_transform(pool, gloom_particle);
+			parallel_for (auto& p : pool) { gloom_particle_step(p); }
 		}
 	}
 

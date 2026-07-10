@@ -4,14 +4,15 @@
 // beyond the math whitelist. The same functions run serially when
 // HOST_WORKERS == 0, which is the 1-vs-N determinism check by construction.
 
-// A CHUNK of wall rays. The pure-value contract means shared inputs (the map
-// snapshot) ride inside every element, so elements are column RANGES — the
-// snapshot is duplicated once per chunk, not once per column. Element:
-//   [x0, x1, vw, posx, posy, dirx, diry, planex, planey, mw, pack0, ...]
+// A CHUNK of wall rays over a PERSISTENT pair workspace (parallel_for v1, SAFE
+// mode): input header + map snapshot + preallocated output cells live in ONE
+// boot-built record the body owns exclusively; per frame only the pose header
+// changes (main thread) and the body rewrites the out region in place. Element:
+//   [x0, x1, vw, posx, posy, dirx, diry, planex, planey, mw, out_base, pack0...,
+//    dist, side, kind, texcol, dist, ...]   (out region at t[10], 4 per column)
 // pack = tile snapshot, 15 cells x 4 bits per int64 (bits 60+ unused: no
-// sign-bit traps under checked overflow). Returns 4 values per column, flat:
-// [dist, side, kind, texcol, dist, side, ...].
-function gloom_ray_chunk(var t) -> var {
+// sign-bit traps under checked overflow).
+function gloom_ray_chunk_step(var& t) -> void {
 	int x0 = t[0];
 	int x1 = t[1];
 	int vw = t[2];
@@ -22,8 +23,8 @@ function gloom_ray_chunk(var t) -> var {
 	float planex = t[7];
 	float planey = t[8];
 	int mw = t[9];
+	int ob = t[10];
 	float xstep = 2.0 / (vw - 1.0);
-	var out = [];
 	for (int x = x0; x < x1; ++x) {
 		float camx = x * xstep - 1.0;
 		float rdx = dirx + planex * camx;
@@ -46,7 +47,7 @@ function gloom_ray_chunk(var t) -> var {
 			if (sdx < sdy) { sdx += ddx; mx += stepx; side = 0; }
 			else { sdy += ddy; my += stepy; side = 1; }
 			int cell = my * mw + mx;
-			int word = t[10 + cell / 15];
+			int word = t[11 + cell / 15];
 			int c = (word >> ((cell % 15) * 4)) & 15;
 			if (c != 0) {
 				hit = true;
@@ -59,12 +60,12 @@ function gloom_ray_chunk(var t) -> var {
 		float wallx = side == 0 ? posy + pdist * rdy : posx + pdist * rdx;
 		wallx = wallx - math::floor(wallx);
 		int texcol = wallx * 64.0;
-		out.push(pdist);
-		out.push(side);
-		out.push(kind);
-		out.push(texcol);
+		t[ob] = pdist;
+		t[ob + 1] = side;
+		t[ob + 2] = kind;
+		t[ob + 3] = texcol;
+		ob += 4;
 	}
-	return out;
 }
 
 // One wall ray (the serial helper for hitscan/tracers; ray_record builds its
@@ -117,9 +118,11 @@ function gloom_ray(var t) -> var {
 // z is height in [0..~1.2], 0 = floor. Pure ballistic/drag updates; collision
 // with WALLS is intentionally skipped (particles are garnish, walls clip them
 // visually via the z-buffer at render time).
-function gloom_particle(var p) -> var {
+// IN PLACE (parallel_for v1, SAFE mode): mutates its owned element through the
+// by-ref parameter — no output array, no per-frame pool replacement.
+function gloom_particle_step(var& p) -> void {
 	int kind = p[0];
-	if (kind == 0) { return p; }
+	if (kind == 0) { return; }
 	float x = p[1];
 	float y = p[2];
 	float z = p[3];
@@ -128,7 +131,7 @@ function gloom_particle(var p) -> var {
 	float vz = p[6];
 	int life = p[7];
 	life = life - 1;
-	if (life <= 0) { return [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]; }
+	if (life <= 0) { p = [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]; return; }
 	if (kind == 1) {                       // spark: fast, hard gravity
 		vz = vz - 0.30;
 		vx = vx * 0.90;
@@ -160,5 +163,11 @@ function gloom_particle(var p) -> var {
 		else { vz = 0.0; }
 		if (kind == 1 || kind == 2) { life = life < 4 ? life : 4; }
 	}
-	return [kind, x, y, z, vx, vy, vz, life];
+	p[1] = x;
+	p[2] = y;
+	p[3] = z;
+	p[4] = vx;
+	p[5] = vy;
+	p[6] = vz;
+	p[7] = life;
 }

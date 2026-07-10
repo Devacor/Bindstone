@@ -104,6 +104,10 @@ namespace jai::detail {
 				if (holder->container_index >= holder->container->size()) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
 				}
+				if (holder->container->is_typed()) {
+					// materialized view per touch (no script_value element exists)
+					return holder->container->get(holder->container_index, v.get_engine());
+				}
 				cur = &holder->container->values()[holder->container_index];
 				continue;
 			}
@@ -299,16 +303,25 @@ namespace jai::detail {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
 				}
 				if (is_final) {
-					script_value& element = storage->values()[static_cast<size_t>(index)];
-					if (element.is_reference()) {
-						if (!element.get_reference_holder()) {
-							return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+					// typed nodes: elements are never references, straight to the mint
+					if (!storage->is_typed()) {
+						script_value& element = storage->values()[static_cast<size_t>(index)];
+						if (element.is_reference()) {
+							if (!element.get_reference_holder()) {
+								return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+							}
+							return script_value(element);
 						}
-						return script_value(element);
 					}
 					auto array_type_info = cur.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 					return script_value::make_element_reference(storage, static_cast<size_t>(index), eng, element_type);
+				}
+				if (storage->is_typed()) {
+					// non-final steps only descend into containers; a typed element is a
+					// primitive, so the next step will produce the same non-lvalue error
+					cur = storage->get(static_cast<size_t>(index), eng);
+					continue;
 				}
 				auto derefed = ref_checked_deref(storage->values()[static_cast<size_t>(index)]);
 				if (!derefed) { return derefed; }
@@ -602,6 +615,22 @@ namespace jai::detail {
 		return std::move(result);
 	}
 
+	// Write-through for a (pre-converted) value: TYPED elements store into the raw
+	// buffer (a mutable deref would hand back the holder SCRATCH and the write would be
+	// silently lost); every other mode keeps the exact deref()= line. Bounds text
+	// matches deref's own re-resolve error.
+	inline void ref_write_through(script_value& refLocal, script_value&& v) {
+		const auto* holder = refLocal.get_reference_holder();
+		if (holder && holder->typed_element()) {
+			if (holder->container_index >= holder->container->size()) {
+				throw runtime_error("Reference to a removed array element");
+			}
+			holder->container->set(holder->container_index, std::move(v));
+			return;
+		}
+		refLocal.deref() = std::move(v);
+	}
+
 	// Identifier-assignment through a reference local: unconstrained refs keep today's
 	// exact clone-through-deref line; constrained element/field refs enforce like the
 	// subscript-assign paths do.
@@ -609,20 +638,20 @@ namespace jai::detail {
 	                                              engine* eng, string_symbolizer* symbolizer) {
 		const auto* holder = refLocal.get_reference_holder();
 		if (!holder || !holder->container_element_type) {
-			refLocal.deref() = clone_for_assignment(value);
+			ref_write_through(refLocal, clone_for_assignment(value));
 			return {};
 		}
 		type_info_ptr constraint = holder->container_element_type;
 		const bool is_field = holder->owner_instance != nullptr;
 		if (is_field && ref_field_accepts_null(value, constraint)) {
-			refLocal.deref() = clone_for_assignment(value);
+			ref_write_through(refLocal, clone_for_assignment(value));
 			return {};
 		}
 		if (!ref_constraint_compatible(value, constraint, eng, is_field)) {
 			return ref_constraint_error(symbolizer, value, constraint, is_field);
 		}
 		script_value converted = ref_convert_for_constraint(eng, value, constraint);
-		refLocal.deref() = std::move(converted);
+		ref_write_through(refLocal, std::move(converted));
 		return {};
 	}
 
@@ -708,7 +737,7 @@ namespace jai::detail {
 			return err.error_value();
 		}
 		script_value converted = ref_convert_for_constraint(eng, resultValue, constraint);
-		refLocal.deref() = std::move(converted);
+		ref_write_through(refLocal, std::move(converted));
 		return resultValue;
 	}
 

@@ -6,6 +6,7 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/type_info.hpp>
+#include <jaiscript/core/engine.hpp>   // typed_array_storage scaffold flag
 
 // Typed-container enforcement kernel, shared VERBATIM by both backends and the field
 // kernel (parity by construction — stage 0 of docs/typed_array_design.md). Two layers:
@@ -176,19 +177,52 @@ namespace jai::detail {
 				return out;
 			}
 			const auto target_elem_base = element_type->base_type;
-			const auto& arr = value.unchecked_as_array();
-			bool needs_conversion = false;
-			for (const auto& element : arr) {
-				const script_value& actual = element.is_reference() ? element.deref() : element;
-				if (!container_element_compatible(actual, element_type)) {
-					out.offending = container_value_type_name(actual);
+			const script_array* src = value.unchecked_array_node();
+
+			// The node kind this binding wants: raw buffers for int/float element types
+			// when typed storage is on (the boundary kernel is THE typed-node producer)
+			script_array::kind_t expected_kind = script_array::kind_t::hetero;
+			if (eng && eng->typed_array_storage()) {
+				if (target_elem_base == script_value_type::jai_int_type) {
+					expected_kind = script_array::kind_t::i64;
+				} else if (target_elem_base == script_value_type::jai_float_type) {
+					expected_kind = script_array::kind_t::f64;
+				}
+			}
+
+			// Proof by kind: a same-kind typed node cannot hold a mismatched element
+			if (src->is_typed() && src->kind() == expected_kind) {
+				value.set_type_info(target_type);
+				out.value = std::move(value);
+				return out;
+			}
+
+			bool needs_conversion = src->is_typed() || src->kind() != expected_kind;
+			const size_t count = src->size();
+			if (src->is_typed()) {
+				// typed source elements are int/float by construction — compatible with
+				// numeric targets, mismatched with everything else
+				if (target_elem_base != script_value_type::jai_int_type &&
+				    target_elem_base != script_value_type::jai_float_type) {
+					out.offending = container_base_type_name(
+						src->kind() == script_array::kind_t::i64 ? script_value_type::jai_int_type
+						                                         : script_value_type::jai_float_type);
 					out.expected = target_type->canonical_name();
 					return out;
 				}
-				if (actual.type() != target_elem_base &&
-				    (target_elem_base == script_value_type::jai_int_type ||
-				     target_elem_base == script_value_type::jai_float_type)) {
-					needs_conversion = true;
+			} else {
+				for (const auto& element : src->values()) {
+					const script_value& actual = element.is_reference() ? element.deref() : element;
+					if (!container_element_compatible(actual, element_type)) {
+						out.offending = container_value_type_name(actual);
+						out.expected = target_type->canonical_name();
+						return out;
+					}
+					if (actual.type() != target_elem_base &&
+					    (target_elem_base == script_value_type::jai_int_type ||
+					     target_elem_base == script_value_type::jai_float_type)) {
+						needs_conversion = true;
+					}
 				}
 			}
 			if (!needs_conversion) {
@@ -197,10 +231,10 @@ namespace jai::detail {
 				return out;
 			}
 			script_value rebuilt = script_value::make_array(element_type, eng);
-			auto& dest = rebuilt.get_array_storage()->values();
-			dest.reserve(arr.size());
-			for (const auto& element : arr) {
-				dest.push_back(convert_container_element(eng, element, element_type));
+			auto& dest = *rebuilt.get_array_storage();
+			dest.reserve(count);
+			for (size_t i = 0; i < count; ++i) {
+				dest.push(convert_container_element(eng, src->get(i, eng), element_type));
 			}
 			rebuilt.set_type_info(target_type);
 			out.value = std::move(rebuilt);

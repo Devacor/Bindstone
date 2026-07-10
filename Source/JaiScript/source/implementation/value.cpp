@@ -48,11 +48,23 @@ script_value::script_value(script_bool b, engine* eng) : type_info_(nullptr), en
 
 
 script_value::reference_holder::~reference_holder() {
-    if (has_cell || has_map_key) {
+    if (has_cell || has_map_key || has_elem_scratch) {
         cell()->~script_value();
         has_cell = false;
         has_map_key = false;
+        has_elem_scratch = false;
     }
+}
+
+const script_value& script_value::reference_holder::materialize_typed_element(engine* eng) {
+    script_value v = container->get(container_index, eng);
+    if (has_elem_scratch) {
+        *cell() = std::move(v);
+    } else {
+        new (cell_storage) script_value(std::move(v));
+        has_elem_scratch = true;
+    }
+    return *cell();
 }
 
 script_value* script_value::reference_holder::resolve_target() {
@@ -64,6 +76,12 @@ script_value* script_value::reference_holder::resolve_target() {
         return it != container_map->end() ? &it->second : nullptr;
     }
     if (container) {
+        if (container->is_typed()) {
+            // no script_value element exists - callers pre-check typed_element() and
+            // take the scratch+commit path; null here means a missed caller fails
+            // loudly ("Invalid reference") instead of corrupting memory
+            return nullptr;
+        }
         return container_index < container->size() ? &container->values()[container_index] : nullptr;
     }
     if (owner_instance) {
@@ -208,9 +226,20 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_array(element_type);
 
+    // Typed flat storage (stage 2, behind the scaffold flag): int/float element types
+    // mint raw-buffer nodes. The airtight tag (stage 0) is what makes this sound.
+    script_array::kind_t node_kind = script_array::kind_t::hetero;
+    if (eng->typed_array_storage() && element_type) {
+        if (element_type->base_type == script_value_type::jai_int_type) {
+            node_kind = script_array::kind_t::i64;
+        } else if (element_type->base_type == script_value_type::jai_float_type) {
+            node_kind = script_array::kind_t::f64;
+        }
+    }
+
     // Create node with small default capacity to avoid first few reallocations
-    auto node = make_strong<script_array>();
-    node->values().reserve(8);
+    auto node = make_strong<script_array>(node_kind);
+    node->reserve(8);
     v.storage_ = node;
     return v;
 }
@@ -360,7 +389,14 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(container->values()[index].get_type_info());
+    type_info_ptr referent_tag;
+    if (container->is_typed()) {
+        referent_tag = container->kind() == script_array::kind_t::i64 ? eng->get_type_info_int()
+                                                                      : eng->get_type_info_float();
+    } else {
+        referent_tag = container->values()[index].get_type_info();
+    }
+    v.type_info_ = eng->get_type_info_reference(referent_tag);
     auto ref = acquire_reference_holder(eng);
     ref->container_element_type = element_type;
     ref->container = container;          // owns the node (keeps it alive) + enables re-resolve
@@ -488,7 +524,20 @@ script_value script_value::clone() const {
     // Use current_type() to check what's actually stored, not the declared type
     switch (current_type()) {
         case script_value_type::jai_array_type: {
-            const auto& other_array = std::get<strong_ptr<script_array>>(storage_)->values();
+            const auto& other_node = *std::get<strong_ptr<script_array>>(storage_);
+            if (other_node.is_typed()) {
+                // kind-preserving deep copy = one buffer copy (8B/element)
+                engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (other_node.size() + 1));
+                auto new_node = make_strong<script_array>(other_node.kind());
+                if (other_node.kind() == script_array::kind_t::i64) {
+                    new_node->ints() = other_node.ints();
+                } else {
+                    new_node->floats() = other_node.floats();
+                }
+                result.storage_ = new_node;
+                break;
+            }
+            const auto& other_array = other_node.values();
             // engine::memory_cap: count the fresh container storage (raised at the next
             // loop back-edge); element clones charge themselves recursively
             engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (other_array.size() + 1));
@@ -650,6 +699,19 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
         case TYPEID_ARRAY: {
             const auto& handle = std::get<strong_ptr<script_array>>(storage_);
             if (!handle) { break; }
+            if (handle->is_typed()) {
+                // all-primitive by construction: detach = one buffer copy
+                engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (handle->size() + 1));
+                auto fresh = make_strong<script_array>(handle->kind());
+                if (handle->kind() == script_array::kind_t::i64) {
+                    fresh->ints() = handle->ints();
+                } else {
+                    fresh->floats() = handle->floats();
+                }
+                if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
+                result.storage_ = fresh;
+                break;
+            }
             engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (handle->size() + 1));
             auto fresh = make_strong<script_array>();
             fresh->values().reserve(handle->size());
@@ -850,6 +912,9 @@ const script_value& script_value::deref() const {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Reference to a removed array element");
             }
+            if (refHolder->container->is_typed()) {
+                return refHolder->materialize_typed_element(engine_);
+            }
             return refHolder->container->values()[refHolder->container_index].deref();
         }
         if (refHolder->owner_instance) {
@@ -890,6 +955,12 @@ script_value& script_value::deref() {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Reference to a removed array element");
             }
+            if (refHolder->container->is_typed()) {
+                // Materialized VIEW: reads are correct (refreshed per touch); WRITERS
+                // must never come through mutable deref on a typed element (audited -
+                // they use assign_through / the typed store chokepoints)
+                return const_cast<script_value&>(refHolder->materialize_typed_element(engine_));
+            }
             return refHolder->container->values()[refHolder->container_index].deref();
         }
         if (refHolder->owner_instance) {
@@ -927,6 +998,17 @@ void script_value::assign_through(const script_value& value) {
             // so a write-through after a reallocation/shrink can't corrupt the heap (#41).
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Assignment to a removed array element");
+            }
+            if (refHolder->container->is_typed()) {
+                // constraint enforcement ran upstream (the tag is airtight) - defensive
+                // wall for the unreachable non-numeric case
+                const script_value& v = value.is_reference() ? value.deref() : value;
+                const size_t vi = v.raw_storage_index();
+                if (vi != TYPEID_INT && vi != TYPEID_FLOAT) {
+                    throw runtime_error("Type mismatch in assignment");
+                }
+                refHolder->container->set(refHolder->container_index, v);
+                return;
             }
             refHolder->container->values()[refHolder->container_index] = value;
             return;
@@ -1009,6 +1091,15 @@ void script_value::assign_through(script_value&& value) {
         if (refHolder->container) {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Assignment to a removed array element");
+            }
+            if (refHolder->container->is_typed()) {
+                const script_value& v = value.is_reference() ? value.deref() : value;
+                const size_t vi = v.raw_storage_index();
+                if (vi != TYPEID_INT && vi != TYPEID_FLOAT) {
+                    throw runtime_error("Type mismatch in assignment");
+                }
+                refHolder->container->set(refHolder->container_index, v);
+                return;
             }
             refHolder->container->values()[refHolder->container_index] = std::move(value);
             return;

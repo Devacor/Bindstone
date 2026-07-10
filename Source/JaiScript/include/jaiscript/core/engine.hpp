@@ -311,6 +311,12 @@ namespace jai {
         void allow_unsafe_parallel(bool allowed);
         bool allow_unsafe_parallel() const;
 
+        // SCAFFOLDING (typed_array_design.md stage 2, DELETE when the default flips):
+        // array<int>/array<float> mint raw-buffer nodes instead of vector<script_value>.
+        // Off until every element path is kind-correct; tests and GLOOM opt in.
+        void typed_array_storage(bool enabled) { typed_array_storage_ = enabled; }
+        bool typed_array_storage() const { return typed_array_storage_; }
+
         // Chunk boundaries chosen by the most recent parallel_transform (n+1 bounds for n
         // chunks). Instrumentation for tests/benchmarks — never observable from script.
         const std::vector<size_t>& last_parallel_chunk_bounds() const;
@@ -847,6 +853,9 @@ namespace jai {
     private:
         struct implementation;
         std::unique_ptr<implementation> impl;
+
+        // SCAFFOLDING (typed_array_design.md stage 2): see typed_array_storage() above.
+        bool typed_array_storage_ = false;
 
         // Single post-parse execution pipeline shared by execute(string) and
         // execute(jaibite&): every string execute exercises the same machinery a

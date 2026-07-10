@@ -153,6 +153,33 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   in the INDEX family; mutable-deref audit. The big test stage: aliasing through refs,
   range-for auto&/auto, f(arr[i]) by-ref, ++ through refs, OOB, shrink-under-ref, COW
   uniqueness, hot reload with typed fields, coroutines holding element refs.
+
+  **As-built (2a, 2026-07-10):** typed kinds live behind `engine::typed_array_storage()`
+  (scaffold flag, default OFF — DELETE when the default flips after stage 3 bake).
+  Deviations from the plan above, each deliberate:
+  - The **boundary kernel is the one typed-node producer** (not make_array alone):
+    crossing into `array<int>`/`array<float>` rebuilds into the raw-buffer kind;
+    same-kind sources pass by proof-of-kind. `make_array(element_type)` mints typed
+    only under the flag (empty literals ride the rebuild).
+  - **Demote-on-stamp lives inside `set_type_info`** (the ONE chokepoint) rather than
+    at the ~16 enumerated stamp sites — a missed site is impossible; a demote of a
+    shared node is value-correct (identity + contents preserved), merely losing form.
+  - Holder ELEMENT mode: typed deref materializes into **cell_storage as a per-touch
+    scratch** (`materialize_typed_element`, `has_elem_scratch`); `resolve_target()`
+    returns null for typed (callers pre-check `typed_element()` and use the
+    scratch-target + buffer-commit shape); in-place ++/-- commits via
+    `commit_typed_element_scratch`; kernel stores go through `ref_write_through`.
+  - INDEX-family fast paths **bail to slow replay** on typed nodes (2a correctness;
+    2b adds the raw load/store fast paths with the profiler watching).
+  - **Parallel: the stage-2a bridge demotes a typed SOURCE in place at the barrier**
+    (parallel_for + parallel_transform); typed CAPTURES already borrow as raw reads
+    (`parallel_borrow_subscript_read` typed branch). Stage 3 replaces the source
+    demotion with raw typed worker access.
+  - `unchecked_as_array`/`as_array`/`checked_as_array` **Debug-assert hetero** — any
+    unconverted path trips loudly under tests/fuzz instead of reading empty.
+  - Tests pin a 4-way battery: every snippet runs interp/vm × flag off/on and all four
+    outputs must be byte-identical ("typed storage is observationally invisible"),
+    plus C++-level checks that buffers actually engage and laundering actually demotes.
 - **Stage 3 — parallel + GLOOM payoff.** Typed borrows/raw_input; kind-checked static
   proof; type GLOOM's PIX/zbuf/ROWIDX/mappack as `array<int>`/`array<float>` (globals get
   typed decls; `var&` param plumbing already tag-safe, banked as hash-safe). Measure:

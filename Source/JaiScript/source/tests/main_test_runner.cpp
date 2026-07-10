@@ -3,6 +3,9 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#if defined(_MSC_VER) && !defined(NDEBUG)
+#include <crtdbg.h>
+#endif
 #include <iostream>
 #include <string>
 #include <chrono>
@@ -111,6 +114,15 @@ struct test_filter_config {
 
 int main(int argc, char** argv) {
     using namespace jai::foundry;
+
+#if defined(_MSC_VER) && !defined(NDEBUG)
+    // CRT asserts print to stderr and abort instead of hanging the run on a dialog
+    // (a Debug assert in a headless/CI invocation was an invisible wedge)
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
 
     // Parse command line flags
     // FOUNDRY_VERBOSE can be set at compile time (e.g., for benchmark builds)

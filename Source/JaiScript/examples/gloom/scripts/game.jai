@@ -28,6 +28,7 @@ public:
 	int mh = 0;
 	var tiles = [];
 	var mappack = [];      // 15 tiles per int64, 4-bit render kinds (raycast snapshot)
+	int mapgen = 0;        // bumps with every mappack rebuild (ray workspaces re-seed on it)
 
 	// player
 	float px = 2.5;

@@ -216,6 +216,7 @@ var TILE_TO_KIND = [0, 1, 2, 3, 4, 5, 6, 1, 7, 8];
 
 function rebuild_mapstr() -> void {
 	G.mappack = mappack_from(G.tiles, G.mw * G.mh);
+	G.mapgen = G.mapgen + 1;
 }
 
 function mappack_from(var& tiles, int n) -> var {

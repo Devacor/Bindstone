@@ -256,6 +256,11 @@ namespace jai {
         expression_ptr target;
         token op;
         expression_ptr value;
+        // Simple `=` whose identifier target resolves to a slot-resident int/float value
+        // decl AND whose RHS's static type provably matches it (typed-store proof pass in
+        // parser.cpp): both backends may skip store-time type enforcement. Consumers
+        // re-guard on the runtime type tags, so a stale/wrong stamp only costs the skip.
+        bool typed_store_provable = false;
 
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
             : expression(loc, node_type::assignment_expr), target(t), op(o), value(v) {}    };
@@ -599,11 +604,41 @@ namespace jai {
         bool ref_escaping = false;
         size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = global/class member)
 
+        // Construction-time classification for both backends' decl fast path
+        // (exec_decl_var / visit_variable_decl): a decl carrying BOTH bits stores a
+        // scalar payload whose storage index already matches the declared type straight
+        // into its slot - conversion/clone/homogeneity are provably identity there.
+        // 0 = always the full path (weak_ptr/shared_ptr/reference declared types).
+        static constexpr uint8_t decl_fast_plain = 1 << 0;  // no weak_ptr/shared_ptr/reference init rules apply
+        static constexpr uint8_t decl_fast_scalar = 1 << 1; // auto/var/int/float/bool/char: matching payloads need no conversion
+        static constexpr uint8_t decl_fast_slot_store = decl_fast_plain | decl_fast_scalar;
+        uint8_t decl_fast_flags = 0;
+
+        static uint8_t classify_decl_fast(const type_info_ptr& t) {
+            if (!t) {
+                return decl_fast_slot_store;   // auto: infer-then-enforce, matching scalars pass untouched
+            }
+            switch (t->base_type) {
+                case script_value_type::jai_weak_ptr_type:
+                case script_value_type::jai_shared_ptr_type:
+                case script_value_type::jai_reference_type:
+                    return 0;
+                case script_value_type::jai_any_type:
+                case script_value_type::jai_int_type:
+                case script_value_type::jai_float_type:
+                case script_value_type::jai_bool_type:
+                case script_value_type::jai_char_type:
+                    return decl_fast_slot_store;
+                default:
+                    return decl_fast_plain;   // string/container/object: payload needs full enforcement
+            }
+        }
+
         variable_decl(const source_location& loc, type_info_ptr t, std::string_view n, expression_ptr init = nullptr)
-            : declaration(loc, node_type::variable_decl), type(t), name(n), initializer(init), is_static(false), slot_index(SIZE_MAX) {}
+            : declaration(loc, node_type::variable_decl), type(t), name(n), initializer(init), is_static(false), slot_index(SIZE_MAX), decl_fast_flags(classify_decl_fast(t)) {}
 
         variable_decl(const source_location& loc, type_info_ptr t, std::string_view n, uint64_t nid, expression_ptr init = nullptr)
-            : declaration(loc, node_type::variable_decl), type(t), name(n), name_id(nid), initializer(init), is_static(false), slot_index(SIZE_MAX) {}
+            : declaration(loc, node_type::variable_decl), type(t), name(n), name_id(nid), initializer(init), is_static(false), slot_index(SIZE_MAX), decl_fast_flags(classify_decl_fast(t)) {}
     };
     
     // Constructor initialization entry (for : super(args), : this(args))

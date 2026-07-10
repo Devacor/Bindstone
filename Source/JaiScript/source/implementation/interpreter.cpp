@@ -4956,6 +4956,21 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     if (store_through) {
                         JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_));
                     } else {
+                        // Parse-proven typed store: an IDENTICAL interned type tag (raw
+                        // pointer compare - int/float tags are engine-canonical) makes
+                        // enforcement a provable no-op, and a plain int/float payload makes
+                        // the assignment kernel a plain copy. Guarded at runtime, so a
+                        // mis-stamp just falls through. (KEEP BYTE-PARALLEL with
+                        // vm_backend::exec_store.)
+                        if (expr->typed_store_provable) {
+                            const size_t vi = value.raw_storage_index();
+                            if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) &&
+                                storage->get_type_info().get() == value.get_type_info().get()) {
+                                *storage = value;
+                                push_value(std::move(value));
+                                return {};
+                            }
+                        }
                         // Slot locals enforce their locked type like the environment path does
                         // (same-type fast guard keeps the hot store path call-free)
                         type_info_ptr slot_type = storage->get_type_info();
@@ -5929,10 +5944,14 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             auto* identExpr = static_cast<identifier_expr*>(decl->initializer.get());
             // Get the target variable's address
             uint64_t targetSymbolId = string_symbolizer_->intern(identExpr->name);
-            
-            // Get a pointer to the target value in the environment
-            // This is safe because environment uses unordered_map which doesn't invalidate pointers
-            script_value* targetPtr = environment_->get_value_ptr(targetSymbolId);
+
+            // SLOT-aware resolution (Dev ruling 2026-07-09): plain function locals live
+            // in frame slots, not the environment - the escape marker cell-boxes the
+            // SLOT, so the binder must look there first or `auto& r = x` errors
+            // "undefined variable" for every slot-resident local. Env storage is
+            // pointer-stable (unordered_map); slots are stable within the frame and
+            // the share below boxes into an escape-legal cell immediately.
+            script_value* targetPtr = resolve_local_or_env(identExpr->slot_index, targetSymbolId);
             if (!targetPtr) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
             }
@@ -5971,6 +5990,34 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         if (decl->initializer) {
             JAISCRIPT_TRY(dispatch_expr(decl->initializer.get()));
             value = std::move(pop_value());
+
+            // Decl fast path (construction-stamped flags): a scalar payload whose
+            // storage index already matches the declared type stores straight into the
+            // slot - enforce/clone/homogeneity are provably identity for
+            // int/float/bool/char (clone of a scalar is a copy, so is_lvalue_expression
+            // is irrelevant here). Anything else - references, mismatched payloads,
+            // env-resident decls, escape-boxed decls - falls through to the untouched
+            // full path below. (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+            if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
+                !decl->ref_escaping && decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                const size_t vi = value.raw_storage_index();
+                if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+                    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
+                    const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
+                    const bool matches = bt == script_value_type::jai_any_type ||
+                        (vi == script_value::TYPEID_INT && bt == script_value_type::jai_int_type) ||
+                        (vi == script_value::TYPEID_FLOAT && bt == script_value_type::jai_float_type) ||
+                        (vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
+                        (vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
+                    if (matches) {
+                        if (decl->type) {
+                            value.set_type_info(decl->type);
+                        }
+                        call_stack_.back().set_local(decl->slot_index, std::move(value));
+                        return {};
+                    }
+                }
+            }
 
             // Element/subscript reads arrive as reference wrappers (rhs-lvalue read
             // shape) - and so do ternaries over them, which is_lvalue_expression can't
@@ -8108,9 +8155,15 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                             if (ref.symbol_id == var_id) {
                                 script_value* slot_val = call_stack_.back().get_local(ref.outer_slot);
                                 if (slot_val) {
-                                    // By-ref of a slot is lifetime-unsafe for escaping closures;
-                                    // both modes capture by value (cpp-backed objects share).
-                                    captureEnv->define(var_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                                    if (capture_by_ref) {
+                                        // Cell share (escape-legal, C++ [&] semantics):
+                                        // the slot boxes in place and the capture shares
+                                        // the cell - writes land in the original local
+                                        // and the cell outlives the frame
+                                        captureEnv->define(var_id, share_boxed_env_storage(*slot_val, engine_));
+                                    } else {
+                                        captureEnv->define(var_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                                    }
                                 }
                                 break;
                             }
@@ -8148,10 +8201,13 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
 
             if (can_capture) {
                 if (capture_from_slot) {
-                    // Local in outer call frame: always capture by value (clone).
-                    // Capturing a stack slot by reference for an escaping closure is
-                    // a use-after-free; value semantics are safe in all cases.
-                    captureEnv->define(capture.symbol_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                    if (capture.by_reference) {
+                        // Cell share (escape-legal, C++ [&x] semantics): the slot boxes
+                        // in place; the closure and the original local share the cell
+                        captureEnv->define(capture.symbol_id, share_boxed_env_storage(*slot_val, engine_));
+                    } else {
+                        captureEnv->define(capture.symbol_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                    }
                 } else if (capture.by_reference) {
                     script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
                     if (targetPtr) {
@@ -8186,11 +8242,14 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 }
                 script_value* slot_val = call_stack_.back().get_local(ref.outer_slot);
                 if (slot_val) {
-                    // Always capture by VALUE (clone) — by-reference into a stack
-                    // slot is inherently lifetime-unsafe for an escaping closure.
-                    // [&] users wanting live binding should capture an explicit ref
-                    // or use a wrapper object; silent by-ref from slot is a UAF.
-                    captureEnv->define(ref.symbol_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                    if (expr->default_capture == lambda_expr::capture_default::by_reference) {
+                        // C++ [&] semantics: share the cell (the slot boxes in place;
+                        // escape-legal - the cell outlives the frame)
+                        captureEnv->define(ref.symbol_id, share_boxed_env_storage(*slot_val, engine_));
+                    } else {
+                        // Automatic / [=] capture of a local: by value
+                        captureEnv->define(ref.symbol_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                    }
                 }
                 // Patch the AST node so future lookups go through the env path
                 if (ref.node) { ref.node->slot_index = SIZE_MAX; }

@@ -188,6 +188,12 @@ namespace jai::vm {
         // Compile-time lazy-env gate: false = every op proven not to need the per-call
         // scope environment, so plain in-loop callees skip creating it (fail-closed default)
         bool needs_frame_env = true;
+        // Compile-time sticky-method-scope gate: true = no op parks per-call state in the
+        // scope env or captures its identity beyond the call (closures/refs/try/scopes/env
+        // decls), so a method body may run in ONE persistent per-dispatch method env
+        // (vm_backend::push_method_frame). Superset of the lazy list: member-access ops are
+        // allowed here (they read this/access-context, both re-stamped per call).
+        bool method_env_reusable = false;
 
         // Pins the whole program tree for top-level chunks
         std::vector<declaration_ptr> pinned_decls;

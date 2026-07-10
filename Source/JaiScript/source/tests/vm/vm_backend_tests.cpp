@@ -408,6 +408,200 @@ public:
 				"env-defining block decl keeps scope + eager env");
 		});
 
+		test("method_env_reusable_trigger_table", [this]() {
+			// Sticky-method-scope gate (chunk::method_env_reusable): superset of the lazy
+			// list - member access stays eligible (this/access-context re-stamped per
+			// call); anything parking state in the env or capturing its identity beyond
+			// the call disqualifies (fail-closed).
+			auto e = vm_engine();
+			auto body_reusable = [&](const char* script) -> bool {
+				auto* symbolizer = e->get_symbolizer();
+				auto templates = e->get_registered_template_types();
+				jai::lexer lex(script, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, e.get(), templates);
+				auto parsed = p.parse();
+				check_true(parsed.has_value(), "reusable-table snippet parses");
+				for (const auto& d : parsed.value()) {
+					if (d->get_type() == jai::node_type::function_decl) {
+						auto fn = std::static_pointer_cast<jai::function_decl>(d);
+						jai::vm::vm_compiler compiler(symbolizer);
+						auto compiled = compiler.compile_callable(fn->name, fn->parameters, fn->body, fn->local_count);
+						return compiled->method_env_reusable;
+					}
+				}
+				check_true(false, "no function decl in reusable-table snippet");
+				return false;
+			};
+			check_true(body_reusable("function fib(auto n) -> auto { if (n <= 1) { return n; } return fib(n - 1) + fib(n - 2); }"),
+				"slot-only body is sticky-eligible (lazy list subset)");
+			check_true(body_reusable("function getx(auto o) -> auto { return o.x; }"),
+				"member read stays sticky-eligible");
+			check_true(body_reusable("function setx(auto o) { o.x = 5; }"),
+				"member write stays sticky-eligible");
+			check_false(body_reusable("function closes() -> auto { var n = 2; return [=](int v) { return v + n; }; }"),
+				"closure mint captures the env - not sticky");
+			check_false(body_reusable("function refs(int x) -> int { int& r = x; r = 7; return x; }"),
+				"reference decl - not sticky");
+			check_false(body_reusable("function tries() -> int { try { return 1; } catch (e) { return 0; } }"),
+				"try/catch - not sticky");
+			check_false(body_reusable("function iter(auto a) -> int { int t = 0; for (auto v : a) { t = t + v; } return t; }"),
+				"range-for (iter scope) - not sticky, fail closed");
+			check_false(body_reusable("function outer() -> int { { function inner() -> int { return 1; } return inner(); } }"),
+				"env-defining block decl - not sticky");
+		});
+
+		test("sticky_method_env_receiver_rebind", [this]() {
+			// Alternating receivers through the SAME dispatcher must each see their own
+			// fields (the sticky env re-binds 'this' per call); repeated calls keep state.
+			const char* src = R"(
+				class V { int x = 0; V(int n) { x = n; } int bump() { x = x + 1; return x; } int probe() { return this.x; } }
+				var a = V(10);
+				var b = V(100);
+				a.bump(); b.bump(); a.bump(); b.bump(); a.bump();
+				a.probe() * 1000 + b.probe();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)13102, e->execute(src).as_int(),
+					use_vm ? "[vm] receiver rebind" : "[interp] receiver rebind");
+			}
+		});
+
+		test("sticky_method_env_global_read_through", [this]() {
+			// Method bodies resolve globals through the persistent scope's caches; global
+			// reassignment AND redefinition (across executes) write the global env in
+			// place, so warmed cached pointers must read the new values.
+			const char* src = R"(
+				var gmul = 3;
+				function triple(int v) -> int { return v * gmul; }
+				class U { int u(int v) { return triple(v) + gmul; } }
+				var q = U();
+				int first = q.u(4) + q.u(4);
+				gmul = 5;
+				int second = q.u(4);
+				first * 100 + second;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				// first = (12+3)*2 = 30, second = 20+5 = 25
+				check_eq((int64_t)3025, e->execute(src).as_int(),
+					use_vm ? "[vm] global read-through" : "[interp] global read-through");
+				// Redefinition of a warm global (in-place into stable storage)
+				check_eq((int64_t)35, e->execute("var gmul = 7; q.u(4);").as_int(),
+					use_vm ? "[vm] global redefinition read-through" : "[interp] global redefinition read-through");
+			}
+		});
+
+		test("sticky_method_env_recursion_falls_back", [this]() {
+			// Self-recursive method calls re-enter while the sticky env is busy
+			// (use_count > 1): inner activations take the pooled path and each depth
+			// keeps its own receiver binding.
+			const char* src = R"(
+				class F { int fib(int n) { if (n <= 1) { return n; } return this.fib(n - 1) + this.fib(n - 2); } }
+				var f = F();
+				f.fib(10);
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)55, e->execute(src).as_int(),
+					use_vm ? "[vm] recursive method" : "[interp] recursive method");
+			}
+		});
+
+		test("sticky_method_env_recursion_depth_error_catchable", [this]() {
+			// Warm the sticky scope first, then unbounded self-recursion must still raise
+			// the catchable depth error and leave the engine usable.
+			const char* src = R"(
+				class R { int ok() { return 1; } int deep(int n) { return this.deep(n + 1); } }
+				var r = R();
+				r.ok(); r.ok();
+				var msg = "";
+				try { r.deep(0); } catch (err) { msg = err; }
+				msg + "|" + r.ok();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->execution_budget(0);
+				auto out = e->execute(src).as<std::string>();
+				check_true(out.find("recursion") != std::string::npos,
+					"depth error is raised and catchable through the sticky entry");
+				check_true(out.size() >= 2 && out.substr(out.size() - 2) == "|1",
+					"engine (and the method) stay usable after the unwind");
+			}
+		});
+
+		test("method_closure_mint_keeps_per_call_env", [this]() {
+			// Closure-minting bodies are NOT sticky-eligible: each call's env is private,
+			// so closures from different receivers keep distinct this-bindings.
+			const char* src = R"(
+				class C2 { int k = 0; C2(int n) { k = n; } auto mk() { return [this]() { return this.k; }; } }
+				var a = C2(7);
+				var b = C2(9);
+				var fa = a.mk();
+				var fb = b.mk();
+				fa() * 10 + fb();
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq((int64_t)79, e->execute(src).as_int(),
+					use_vm ? "[vm] closures keep per-call env" : "[interp] closures keep per-call env");
+			}
+		});
+
+		test("sticky_method_env_hot_reload_reresolves", [this]() {
+			// A warmed sticky scope belongs to the OLD dispatcher; class redefinition
+			// mints a new dispatcher and the next call must resolve the new body.
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				auto first = e->execute(R"(
+					class H { int v() { return 1; } }
+					var h = H();
+					h.v(); h.v();
+					h.v();
+				)");
+				check_eq((int64_t)1, first.as_int(), "warmed original body");
+				auto second = e->execute(R"(
+					class H { int v() { return 2; } }
+					h.v();
+				)");
+				check_eq((int64_t)2, second.as_int(), "reloaded body resolves through the fresh dispatcher");
+			}
+		});
+
+		test("sticky_method_env_private_access_context", [this]() {
+			// The persistent scope carries the declaring class as access context: private
+			// members stay reachable from inside, unreachable from outside, across
+			// repeated warmed calls and alternating receivers.
+			const char* src = R"(
+				class P {
+				private:
+					int secret = 21;
+					int half() { return secret / 3; }
+				public:
+					int peek() { return this.secret + half(); }
+				}
+				var p = P();
+				var q = P();
+				p.peek(); q.peek();
+				var out = "" + p.peek() + "|" + q.peek();
+				try { var leak = p.secret; out = out + "|LEAK"; } catch (err) { out = out + "|blocked"; }
+				out;
+			)";
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_eq(std::string("28|28|blocked"), e->execute(src).as<std::string>(),
+					use_vm ? "[vm] access context" : "[interp] access context");
+			}
+		});
+
 		// Stage 3 (method flattening): method self-recursion no longer stacks native
 		// frames, but the depth-10000 error must still be raised and stay catchable
 		// through the flattened path on both backends.

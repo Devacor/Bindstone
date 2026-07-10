@@ -63,6 +63,12 @@ namespace jai::detail {
 		interpreter_backend* interp = nullptr;            // set otherwise
 		script_callable fn_payload;
 		std::vector<script_value> input;
+		// Raw in-place input (Dev ruling 2026-07-09 "safe AND free"): when the source's
+		// elements are all-primitive (typed proof or one dynamic scan), workers read the
+		// caller's vector directly - zero per-element detach copies, zero refcount
+		// traffic (primitive copies touch no counts). Non-null only DURING a region
+		// (points into the run call's locals; the join guard nulls it).
+		const std::vector<script_value>* raw_input = nullptr;
 		size_t begin = 0;
 		size_t end = 0;
 		std::optional<parallel_worker_error> error;
@@ -823,7 +829,13 @@ namespace {
 		size_t i = ctx.begin;
 		try {
 			for (; i < ctx.end; ++i) {
-				call_args[0] = std::move(ctx.input[i - ctx.begin]);
+				if (ctx.raw_input) {
+					// All-primitive source: plain copy from the caller's vector is the
+					// worker-local mint (no refcounts anywhere in a primitive value)
+					call_args[0] = (*ctx.raw_input)[i];
+				} else {
+					call_args[0] = std::move(ctx.input[i - ctx.begin]);
+				}
 				auto r = ctx.backend->execute_callable(ctx.fn_payload, call_args);
 				if (ctx.backend->is_unwinding()) {
 					// Uncaught script throw: surfaces as backend unwinding state, not a
@@ -887,6 +899,36 @@ namespace {
 			if (type_info* k = t->key_type().get()) { pending.push_back(k); }
 			if (type_info* v = t->value_type().get()) { pending.push_back(v); }
 		}
+	}
+
+	// STATIC all-primitive proof (Dev ruling 2026-07-09 "safety AND free"): a TYPED
+	// container's element types are store-enforced invariants, so array<int> etc. is
+	// all-primitive by construction - no O(n) content scan needed, ever. Untyped
+	// containers fall back to the dynamic scan below.
+	bool statically_all_primitive(const script_value& v) {
+		const type_info_ptr t = v.get_type_info();
+		if (!t) {
+			return false;
+		}
+		auto primitive_type = [](const type_info_ptr& p) {
+			if (!p) return false;
+			switch (p->base_type) {
+				case script_value_type::jai_int_type:
+				case script_value_type::jai_float_type:
+				case script_value_type::jai_bool_type:
+				case script_value_type::jai_char_type:
+					return true;
+				default:
+					return false;
+			}
+		};
+		if (t->base_type == script_value_type::jai_array_type) {
+			return primitive_type(t->element_type());
+		}
+		if (t->base_type == script_value_type::jai_map_type) {
+			return primitive_type(t->key_type()) && primitive_type(t->value_type());
+		}
+		return false;
 	}
 
 	// Borrow admission (content half): TRUE when every element of the container is a
@@ -1066,7 +1108,9 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			break;
 		case script_value::TYPEID_ARRAY:
 		case script_value::TYPEID_MAP:
-			cap.kind = (entry.borrow_eligible && parallel_content_all_primitive(*cap.source))
+			// Typed containers prove all-primitive statically (no O(n) scan per region)
+			cap.kind = (entry.borrow_eligible &&
+			            (statically_all_primitive(*cap.source) || parallel_content_all_primitive(*cap.source)))
 				? parallel_capture_kind::borrow : parallel_capture_kind::snapshot;
 			break;
 		case script_value::TYPEID_FUNCTION:
@@ -1186,9 +1230,25 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 				}
 				slot->capture_name_ids.clear();
 				slot->provisioned_nodes.clear();
+				slot->raw_input = nullptr;   // points into this call's locals - never dormant
 			}
 		}
 	} capture_guard{ eng, pool->worker_slots, worker_count };
+
+	// Raw in-place input (Dev ruling: safe AND free): all-primitive sources are read
+	// directly from the caller's vector by every worker - no per-element detach. Typed
+	// primitive containers prove it statically (zero scans); untyped pay ONE content
+	// scan (vs N detach constructions). The array value is anchored by this call for
+	// the whole region and workers never touch its structure (elements arrive by value
+	// through the body parameter; the container itself is not visible to the body
+	// unless separately captured, where borrow/snapshot rules apply).
+	const bool raw_input_ok = statically_all_primitive(array_value) ||
+	                          parallel_content_all_primitive(array_value);
+	if (raw_input_ok) {
+		// The detach loop used to feed per-element types into the prewarm; the raw path
+		// only needs the container's own shape (primitives are always pre-interned)
+		if (type_info* t = array_value.get_type_info().get()) { value_types.push_back(t); }
+	}
 
 	for (size_t k = 0; k < worker_count; ++k) {
 		auto& slot = pool->worker_slots[k];
@@ -1199,12 +1259,18 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		}
 		slot->begin = bounds[k];
 		slot->end = bounds[k + 1];
-		slot->input.reserve(slot->end - slot->begin);
-		for (size_t i = slot->begin; i < slot->end; ++i) {
-			try {
-				slot->input.push_back(source[i].parallel_detached_copy(&value_types));
-			} catch (const std::exception& e) {
-				return usage("parallel_transform: element " + std::to_string(i) + ": " + e.what());
+		slot->input.clear();
+		if (raw_input_ok) {
+			slot->raw_input = &source;
+		} else {
+			slot->raw_input = nullptr;
+			slot->input.reserve(slot->end - slot->begin);
+			for (size_t i = slot->begin; i < slot->end; ++i) {
+				try {
+					slot->input.push_back(source[i].parallel_detached_copy(&value_types));
+				} catch (const std::exception& e) {
+					return usage("parallel_transform: element " + std::to_string(i) + ": " + e.what());
+				}
 			}
 		}
 		// Provision the captured reads into THIS worker's root env (single-threaded,

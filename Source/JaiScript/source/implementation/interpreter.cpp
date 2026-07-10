@@ -8,6 +8,7 @@
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
+#include <jaiscript/detail/container_enforce.hpp> // typed-container boundary kernel (vm parity)
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
@@ -101,132 +102,23 @@ namespace {
     }
 }
 
-// Helper function to check if a value is compatible with a target element type
-// Returns: true if compatible, false otherwise
-// For array<var>: any element is allowed
-// For array<auto> (nullptr element_type): deduces type from first element, locks it
-// For array<T>: only T or convertible types allowed
+// Element compatibility/conversion live in the shared kernel (detail/container_enforce.hpp,
+// used verbatim by both backends and the field kernel). These forwards keep the
+// historical local names push/subscript-store call.
 static bool is_element_type_compatible(
     const script_value& element,
     type_info_ptr element_type,
-    script_value& array_owner  // Mutable for auto type deduction
+    script_value& /*array_owner*/
 ) {
-    // Dereference if element is a reference to get the actual value type
-    const script_value& actual_element = element.is_reference() ? element.deref() : element;
-
-    // Case 1: array<var> - any_type allows anything
-    if (element_type && element_type->base_type == script_value_type::jai_any_type) {
-        return true;
-    }
-
-    // Case 2: array<auto> or untyped - deduce from first element and lock
-    if (!element_type) {
-        // For untyped arrays, we allow anything (legacy behavior)
-        // This happens with bare array literals like [1, 2, 3]
-        return true;
-    }
-
-    // Case 3: array<T> - validate element matches T
-    auto elem_type = actual_element.type();
-    auto target_type = element_type->base_type;
-
-    // Exact match
-    if (elem_type == target_type) {
-        // For object types, also check class name match
-        if (target_type == script_value_type::jai_object_type) {
-            auto elem_type_info = actual_element.get_type_info();
-            if (elem_type_info && !element_type->type_name.empty()) {
-                return elem_type_info->type_name == element_type->type_name;
-            }
-        }
-        return true;
-    }
-
-    // Numeric conversions: int <-> float allowed
-    if (target_type == script_value_type::jai_int_type &&
-        elem_type == script_value_type::jai_float_type) {
-        return true;  // float -> int (truncation)
-    }
-    if (target_type == script_value_type::jai_float_type &&
-        elem_type == script_value_type::jai_int_type) {
-        return true;  // int -> float (widening)
-    }
-
-    // Nested arrays: array<array<T>> must match recursively
-    if (target_type == script_value_type::jai_array_type &&
-        elem_type == script_value_type::jai_array_type) {
-        // Check inner element types match
-        auto inner_target = element_type->element_type();
-        auto elem_type_info = actual_element.get_type_info();
-        auto inner_elem = elem_type_info ? elem_type_info->element_type() : nullptr;
-
-        // Both have inner types - they must match
-        if (inner_target && inner_elem) {
-            return inner_target->base_type == inner_elem->base_type;
-        }
-        // If target has inner type but element doesn't, it's a mismatch
-        if (inner_target && !inner_elem) {
-            return false;
-        }
-        // If target doesn't have inner type, allow any array
-        return true;
-    }
-
-    // Nested maps: check key/value types
-    if (target_type == script_value_type::jai_map_type &&
-        elem_type == script_value_type::jai_map_type) {
-        auto target_key = element_type->key_type();
-        auto target_val = element_type->value_type();
-        auto elem_type_info = actual_element.get_type_info();
-        auto elem_key = elem_type_info ? elem_type_info->key_type() : nullptr;
-        auto elem_val = elem_type_info ? elem_type_info->value_type() : nullptr;
-
-        // Both have types - they must match
-        if (target_key && elem_key && target_key->base_type != elem_key->base_type) {
-            return false;
-        }
-        if (target_val && elem_val && target_val->base_type != elem_val->base_type) {
-            return false;
-        }
-        return true;
-    }
-
-    return false;
+    return detail::container_element_compatible(element, element_type);
 }
 
-// Helper to convert element if needed (e.g., int -> float for array<float>)
 static script_value convert_array_element(
     engine* eng,
     const script_value& element,
     type_info_ptr element_type
 ) {
-    // Dereference if element is a reference to get the actual value
-    const script_value& actual_element = element.is_reference() ? element.deref() : element;
-
-    // shared_ptr types should NOT be cloned - they have reference semantics
-    auto actual_type_info = actual_element.get_type_info();
-    if (actual_type_info && actual_type_info->base_type == script_value_type::jai_shared_ptr_type) {
-        return actual_element;  // Share reference, don't clone
-    }
-
-    if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
-        return actual_element.clone();
-    }
-
-    auto elem_type = actual_element.type();
-    auto target_type = element_type->base_type;
-
-    // Numeric conversions
-    if (target_type == script_value_type::jai_int_type &&
-        elem_type == script_value_type::jai_float_type) {
-        return script_value(static_cast<script_int>(actual_element.unchecked_as_float()), eng);
-    }
-    if (target_type == script_value_type::jai_float_type &&
-        elem_type == script_value_type::jai_int_type) {
-        return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
-    }
-
-    return actual_element.clone();
+    return detail::convert_container_element(eng, element, element_type);
 }
 
 // Capture semantics: C++-backed objects (make_object wrappers, raw cpp holders) are
@@ -6193,6 +6085,20 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
 
     // Fast path: same type (but NOT for object types - need to compare class names)
     if (source_type == target && target != script_value_type::jai_object_type) {
+        // Typed-container boundary: array/map payloads are element-checked with push's
+        // rules before they may sit behind an array<T>/map<K,V> tag (shared kernel,
+        // KEEP BYTE-PARALLEL with vm_backend::enforce_type_compatibility)
+        if (target == script_value_type::jai_array_type || target == script_value_type::jai_map_type) {
+            auto outcome = detail::enforce_container_boundary(std::move(value), target_type, engine_);
+            if (!outcome.value) {
+                auto* sym = engine_->get_symbolizer();
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::array_element_type_mismatch),
+                    detail::container_boundary_mismatch_text,
+                    sym->intern(outcome.offending), sym->intern(outcome.expected));
+            }
+            return std::move(*outcome.value);
+        }
         return std::move(value);
     }
 

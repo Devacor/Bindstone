@@ -50,7 +50,7 @@ public:
         test("move_preserves_engine_ref", [this]() {
             auto eng = make_engine();
             script_value holder = script_value::make_array(nullptr, eng.get());
-            auto& backing = const_cast<script_array&>(holder.as_array());
+            auto& backing = const_cast<std::vector<script_value>&>(holder.as_array());
 
             bound_array<script_int> ref(backing, eng.get());   // reference mode, engine_ref_ = eng
             bound_array<script_int> moved = std::move(ref);     // move ctor must carry engine_ref_

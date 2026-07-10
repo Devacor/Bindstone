@@ -194,8 +194,9 @@ namespace jai {
         // borrow survives the join. `source` must be a (deref'd) array or map.
         static script_value make_parallel_borrow(const script_value& source, engine* eng);
         bool is_parallel_borrow() const noexcept { return raw_storage_index() == TYPEID_PARALLEL_BORROW; }
-        // Viewed container accessors (nullptr when the borrow is of the other kind)
-        const std::vector<script_value>* parallel_borrow_array() const noexcept;
+        // Viewed container accessors (nullptr when the borrow is of the other kind).
+        // Arrays hand back the NODE (its address is the identity; kind dispatch in stage 2).
+        const script_array* parallel_borrow_array() const noexcept;
         const std::map<script_value, script_value>* parallel_borrow_map() const noexcept;
 
     public:
@@ -211,7 +212,7 @@ namespace jai {
         // Reallocation-safe reference to a vector element (range-for auto&, arr[i] lvalue):
         // holds the owning container + index so deref/assign-through recompute the element
         // address each time and bounds-check it (see reference_holder::container).
-        static script_value make_element_reference(const strong_ptr<std::vector<script_value>>& container, size_t index,
+        static script_value make_element_reference(const strong_ptr<script_array>& container, size_t index,
                                                    engine* eng, type_info_ptr element_type);
         // Instance-pinned reference to a class field: deref/assign-through re-resolve the
         // field node by id (never a cached address), so hot reload cannot dangle it.
@@ -598,12 +599,18 @@ namespace jai {
 
         // Unchecked array accessor - caller must verify is_array() first
         inline const std::vector<script_value>& unchecked_as_array() const noexcept {
-            return **std::get_if<TYPEID_ARRAY>(&storage_);
+            return (*std::get_if<TYPEID_ARRAY>(&storage_))->values();
         }
 
-        // Unchecked mutable array storage accessor - caller must verify is_array() first
-        inline strong_ptr<std::vector<script_value>>& unchecked_get_array_storage() noexcept {
+        // Unchecked mutable array NODE handle - caller must verify is_array() first
+        inline strong_ptr<script_array>& unchecked_get_array_storage() noexcept {
             return *std::get_if<TYPEID_ARRAY>(&storage_);
+        }
+
+        // Unchecked const array NODE pointer - the array's identity (node-alias keys,
+        // borrow tags). Caller must verify is_array() first.
+        inline const script_array* unchecked_array_node() const noexcept {
+            return std::get_if<TYPEID_ARRAY>(&storage_)->get();
         }
 
         // Unchecked function accessor - caller must verify is_function() first
@@ -640,7 +647,7 @@ namespace jai {
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
-            return *std::get<strong_ptr<std::vector<script_value>>>(storage_);
+            return std::get<strong_ptr<script_array>>(storage_)->values();
         }
         
         inline const std::map<script_value, script_value>& as_map() const {
@@ -850,7 +857,7 @@ namespace jai {
                     "script_value is not an array"
                 );
             }
-            return checked_result<const std::vector<script_value>*>(std::get<strong_ptr<std::vector<script_value>>>(storage_).get());
+            return checked_result<const std::vector<script_value>*>(&std::get<strong_ptr<script_array>>(storage_)->values());
         }
 
         inline checked_result<const std::map<script_value, script_value>*> checked_as_map() const {
@@ -1690,7 +1697,7 @@ namespace jai {
             // recompute the element address from container+index each time (surviving
             // reallocation) and bounds-check the index (a shrink throws instead of
             // reading freed memory). The strong_ptr also keeps the vector alive.
-            strong_ptr<std::vector<script_value>> container;
+            strong_ptr<script_array> container;
             size_t container_index = SIZE_MAX;
 
             // FIELD mode (ref bind of obj.field): pins the owning instance and
@@ -1786,7 +1793,7 @@ namespace jai {
             strong_ptr<script_string>,                    // 3 - script_string (wrapped for cheap copies)
             script_char,                                  // 4 - script_char
             script_bool,                                  // 5 - script_bool
-            strong_ptr<std::vector<script_value>>,        // 6 - Array<T>
+            strong_ptr<script_array>,                     // 6 - Array<T> (script_array node = identity)
             strong_ptr<std::map<script_value, script_value>>, // 7 - Map<K,V>
             strong_ptr<object_holder>,                    // 8 - Object<T>
             strong_ptr<script_function>,                  // 9 - Function (wrapped for cheap copies)
@@ -1839,12 +1846,12 @@ namespace jai {
             storage_ = holder;
         }
 
-        // Get raw array storage for interpreter operations
-        strong_ptr<std::vector<script_value>>& get_array_storage() {
+        // Get the array NODE handle for interpreter operations
+        strong_ptr<script_array>& get_array_storage() {
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
-            return std::get<strong_ptr<std::vector<script_value>>>(storage_);
+            return std::get<strong_ptr<script_array>>(storage_);
         }
 
         // Get raw map storage for interpreter operations
@@ -1898,7 +1905,7 @@ namespace jai {
         // Check if array/map has unique ownership (for COW optimization)
         bool is_unique_reference() const {
             if (type() == script_value_type::jai_array_type) {
-                const auto& ptr = std::get<strong_ptr<std::vector<script_value>>>(storage_);
+                const auto& ptr = std::get<strong_ptr<script_array>>(storage_);
                 return ptr.use_count() == 1;
             } else if (type() == script_value_type::jai_map_type) {
                 const auto& ptr = std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);

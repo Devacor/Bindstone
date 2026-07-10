@@ -104,7 +104,7 @@ namespace jai::detail {
 				if (holder->container_index >= holder->container->size()) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
 				}
-				cur = &(*holder->container)[holder->container_index];
+				cur = &holder->container->values()[holder->container_index];
 				continue;
 			}
 			if (holder->owner_instance) {
@@ -299,7 +299,7 @@ namespace jai::detail {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
 				}
 				if (is_final) {
-					script_value& element = (*storage)[static_cast<size_t>(index)];
+					script_value& element = storage->values()[static_cast<size_t>(index)];
 					if (element.is_reference()) {
 						if (!element.get_reference_holder()) {
 							return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
@@ -310,7 +310,7 @@ namespace jai::detail {
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 					return script_value::make_element_reference(storage, static_cast<size_t>(index), eng, element_type);
 				}
-				auto derefed = ref_checked_deref((*storage)[static_cast<size_t>(index)]);
+				auto derefed = ref_checked_deref(storage->values()[static_cast<size_t>(index)]);
 				if (!derefed) { return derefed; }
 				cur = std::move(derefed.value());
 			}

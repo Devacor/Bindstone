@@ -4851,7 +4851,7 @@ checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction
 				stack_.pop_back();
 				script_value value = std::move(stack_.back());
 				stack_.pop_back();
-				script_value* target_ptr = &(*storage)[static_cast<size_t>(index)];
+				script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
 				if (element_type) {
 					if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
 						std::string value_type = vm_value_type_name(value);
@@ -4901,7 +4901,7 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 			const script_int index = index_v.unchecked_as_int();
 			auto storage = container.get_array_storage();
 			if (storage && index >= 0 && index < static_cast<script_int>(storage->size())) {
-				script_value* target_ptr = &(*storage)[static_cast<size_t>(index)];
+				script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
 				const size_t elem_idx = target_ptr->raw_storage_index();
 				if (elem_idx == script_value::TYPEID_INT || elem_idx == script_value::TYPEID_FLOAT) {
 					token_type op;
@@ -5349,7 +5349,7 @@ checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction
 			"Destructuring requires an array on the right-hand side");
 	}
 
-	auto& arr = *source.get_array_storage();
+	auto& arr = source.get_array_storage()->values();
 	const destructure_proto& proto = f.code->destructure_protos[ins.a];
 
 	for (size_t i = 0; i < proto.names.size(); ++i) {
@@ -8593,7 +8593,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 			element = script_value::make_element_reference(array_storage, state.index, engine_, element_constraint);
 		} else {
 			// Copy binding: values deep-copy per iteration, shared_ptr elements share
-			element = clone_for_assignment((*array_storage)[state.index]);
+			element = clone_for_assignment(array_storage->values()[state.index]);
 		}
 		++state.index;
 	} else {

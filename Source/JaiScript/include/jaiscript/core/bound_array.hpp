@@ -31,7 +31,7 @@ class bound_array {
 private:
     // Either owns the data (for by-value) or references it (for by-reference)
     mutable std::shared_ptr<script_value> owned_value_;
-    script_array* arr_ = nullptr;
+    std::vector<script_value>* arr_ = nullptr;
     engine* engine_ref_ = nullptr;
 
     // Helper to get engine reference
@@ -157,7 +157,7 @@ public:
      * @param arr Reference to existing script array
      * @param eng Engine reference for creating new script_values
      */
-    explicit bound_array(script_array& arr, engine* eng)
+    explicit bound_array(std::vector<script_value>& arr, engine* eng)
         : owned_value_(nullptr), arr_(&arr), engine_ref_(eng) {}
     
     /**
@@ -338,14 +338,14 @@ public:
     // ===== Element modification proxy =====
     
     class element_proxy {
-        script_array& arr_;
+        std::vector<script_value>& arr_;
         size_type idx_;
         engine* engine_ref_;
         // Storage for nested bound_map wrappers (no copying, just wrapper objects)
         mutable std::unique_ptr<std::any> nested_wrapper_storage_;
 
     public:
-        element_proxy(script_array& arr, size_type idx, engine* eng)
+        element_proxy(std::vector<script_value>& arr, size_type idx, engine* eng)
             : arr_(arr), idx_(idx), engine_ref_(eng) {}
 
         // Copy constructor
@@ -562,7 +562,7 @@ public:
     // ===== Iterators =====
     
     class iterator {
-        script_array::iterator it_;
+        std::vector<script_value>::iterator it_;
         
     public:
         using iterator_category = std::random_access_iterator_tag;
@@ -572,7 +572,7 @@ public:
         using reference = T;
         
         iterator() = default;
-        explicit iterator(script_array::iterator it) : it_(it) {}
+        explicit iterator(std::vector<script_value>::iterator it) : it_(it) {}
         
         T operator*() const { return extract_value(*it_); }
         
@@ -600,7 +600,7 @@ public:
     };
     
     class const_iterator {
-        script_array::const_iterator it_;
+        std::vector<script_value>::const_iterator it_;
         
     public:
         using iterator_category = std::random_access_iterator_tag;
@@ -610,7 +610,7 @@ public:
         using reference = const T;
         
         const_iterator() = default;
-        explicit const_iterator(script_array::const_iterator it) : it_(it) {}
+        explicit const_iterator(std::vector<script_value>::const_iterator it) : it_(it) {}
         const_iterator(const iterator& other) : it_(other.it_) {}
         
         T operator*() const { return extract_value(*it_); }

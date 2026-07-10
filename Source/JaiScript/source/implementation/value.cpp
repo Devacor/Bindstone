@@ -64,7 +64,7 @@ script_value* script_value::reference_holder::resolve_target() {
         return it != container_map->end() ? &it->second : nullptr;
     }
     if (container) {
-        return container_index < container->size() ? &(*container)[container_index] : nullptr;
+        return container_index < container->size() ? &container->values()[container_index] : nullptr;
     }
     if (owner_instance) {
         return owner_instance->find_field_value(field_id);
@@ -208,10 +208,10 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_array(element_type);
 
-    // Create vector with small default capacity to avoid first few reallocations
-    auto vec = make_strong<std::vector<script_value>>();
-    vec->reserve(8);
-    v.storage_ = vec;
+    // Create node with small default capacity to avoid first few reallocations
+    auto node = make_strong<script_array>();
+    node->values().reserve(8);
+    v.storage_ = node;
     return v;
 }
 
@@ -351,7 +351,7 @@ checked_result<script_value> script_value::make_weak_ptr(const script_value& val
     return checked_result<script_value>(v);
 }
 
-script_value script_value::make_element_reference(const strong_ptr<std::vector<script_value>>& container, size_t index,
+script_value script_value::make_element_reference(const strong_ptr<script_array>& container, size_t index,
                                                   engine* eng, type_info_ptr element_type) {
     if (!container || index >= container->size()) {
         throw runtime_error("Cannot create reference to out-of-range array element");
@@ -360,10 +360,10 @@ script_value script_value::make_element_reference(const strong_ptr<std::vector<s
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference((*container)[index].get_type_info());
+    v.type_info_ = eng->get_type_info_reference(container->values()[index].get_type_info());
     auto ref = acquire_reference_holder(eng);
     ref->container_element_type = element_type;
-    ref->container = container;          // owns the vector (keeps it alive) + enables re-resolve
+    ref->container = container;          // owns the node (keeps it alive) + enables re-resolve
     ref->container_index = index;
     v.storage_ = ref;
     return v;
@@ -488,16 +488,16 @@ script_value script_value::clone() const {
     // Use current_type() to check what's actually stored, not the declared type
     switch (current_type()) {
         case script_value_type::jai_array_type: {
-            auto& other_array = *std::get<strong_ptr<std::vector<script_value>>>(storage_);
+            const auto& other_array = std::get<strong_ptr<script_array>>(storage_)->values();
             // engine::memory_cap: count the fresh container storage (raised at the next
             // loop back-edge); element clones charge themselves recursively
             engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (other_array.size() + 1));
-            auto new_array = make_strong<std::vector<script_value>>();
-            new_array->reserve(other_array.size());
+            auto new_node = make_strong<script_array>();
+            new_node->values().reserve(other_array.size());
             for (const auto& elem : other_array) {
-                new_array->push_back(elem.clone());
+                new_node->values().push_back(elem.clone());
             }
-            result.storage_ = new_array;
+            result.storage_ = new_node;
             break;
         }
         case script_value_type::jai_map_type: {
@@ -648,13 +648,13 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             break;
         }
         case TYPEID_ARRAY: {
-            const auto& handle = std::get<strong_ptr<std::vector<script_value>>>(storage_);
+            const auto& handle = std::get<strong_ptr<script_array>>(storage_);
             if (!handle) { break; }
             engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (handle->size() + 1));
-            auto fresh = make_strong<std::vector<script_value>>();
-            fresh->reserve(handle->size());
-            for (const auto& elem : *handle) {
-                fresh->push_back(elem.parallel_detached_copy(collected_types, collected_nodes));
+            auto fresh = make_strong<script_array>();
+            fresh->values().reserve(handle->size());
+            for (const auto& elem : handle->values()) {
+                fresh->values().push_back(elem.parallel_detached_copy(collected_types, collected_nodes));
             }
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
@@ -687,10 +687,10 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             const auto& tag = std::get<parallel_borrow_tag>(storage_);
             if (const auto* arr = parallel_borrow_array()) {
                 engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (arr->size() + 1));
-                auto fresh = make_strong<std::vector<script_value>>();
-                fresh->reserve(arr->size());
-                for (const auto& elem : *arr) {
-                    fresh->push_back(elem.parallel_detached_copy(collected_types, collected_nodes));
+                auto fresh = make_strong<script_array>();
+                fresh->values().reserve(arr->size());
+                for (const auto& elem : arr->values()) {
+                    fresh->values().push_back(elem.parallel_detached_copy(collected_types, collected_nodes));
                 }
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
@@ -727,7 +727,7 @@ script_value script_value::make_parallel_borrow(const script_value& source, engi
     result.type_info_ = v.type_info_;
     parallel_borrow_tag tag;
     if (v.raw_storage_index() == TYPEID_ARRAY) {
-        const auto& handle = std::get<strong_ptr<std::vector<script_value>>>(v.storage_);
+        const auto& handle = std::get<strong_ptr<script_array>>(v.storage_);
         tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get()));
     } else if (v.raw_storage_index() == TYPEID_MAP) {
         const auto& handle = std::get<strong_ptr<std::map<script_value, script_value>>>(v.storage_);
@@ -739,10 +739,10 @@ script_value script_value::make_parallel_borrow(const script_value& source, engi
     return result;
 }
 
-const std::vector<script_value>* script_value::parallel_borrow_array() const noexcept {
+const script_array* script_value::parallel_borrow_array() const noexcept {
     if (const auto* tag = std::get_if<TYPEID_PARALLEL_BORROW>(&storage_)) {
         if (!tag->is_map_kind()) {
-            return static_cast<const std::vector<script_value>*>(tag->pointer());
+            return static_cast<const script_array*>(tag->pointer());
         }
     }
     return nullptr;
@@ -850,7 +850,7 @@ const script_value& script_value::deref() const {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Reference to a removed array element");
             }
-            return (*refHolder->container)[refHolder->container_index].deref();
+            return refHolder->container->values()[refHolder->container_index].deref();
         }
         if (refHolder->owner_instance) {
             // Field reference: re-resolve by id (no lazy default insert - the pinned
@@ -890,7 +890,7 @@ script_value& script_value::deref() {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Reference to a removed array element");
             }
-            return (*refHolder->container)[refHolder->container_index].deref();
+            return refHolder->container->values()[refHolder->container_index].deref();
         }
         if (refHolder->owner_instance) {
             script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
@@ -928,7 +928,7 @@ void script_value::assign_through(const script_value& value) {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Assignment to a removed array element");
             }
-            (*refHolder->container)[refHolder->container_index] = value;
+            refHolder->container->values()[refHolder->container_index] = value;
             return;
         }
         if (refHolder->owner_instance) {
@@ -1010,7 +1010,7 @@ void script_value::assign_through(script_value&& value) {
             if (refHolder->container_index >= refHolder->container->size()) {
                 throw runtime_error("Assignment to a removed array element");
             }
-            (*refHolder->container)[refHolder->container_index] = std::move(value);
+            refHolder->container->values()[refHolder->container_index] = std::move(value);
             return;
         }
         if (refHolder->owner_instance) {

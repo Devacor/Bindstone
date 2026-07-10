@@ -103,6 +103,7 @@ namespace jai::detail {
         std::unique_ptr<jai::thread_pool> pool;
         parallel_region_table* active_region = nullptr;   // non-null only while workers run
         bool region_running = false;                       // reentrancy guard (v0: no nesting)
+        bool allow_unsafe = false;                         // engine::allow_unsafe_parallel(bool)
         size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)
         std::unordered_map<const void*, parallel_admission> admission_cache;
         std::string error_text;                            // owns the message a re-raise views

@@ -304,6 +304,13 @@ namespace jai {
         void parallel_thread_count(size_t workers);
         size_t parallel_thread_count() const;
 
+        // Trusted-script escape hatch: parallel-body shapes whose safety cannot be
+        // PROVEN statically (script-class method dispatch, non-whitelisted host calls)
+        // are admitted instead of rejected — the caller vouches for them. Default OFF:
+        // safe mode proves or errors, it never foot-guns.
+        void allow_unsafe_parallel(bool allowed);
+        bool allow_unsafe_parallel() const;
+
         // Chunk boundaries chosen by the most recent parallel_transform (n+1 bounds for n
         // chunks). Instrumentation for tests/benchmarks — never observable from script.
         const std::vector<size_t>& last_parallel_chunk_bounds() const;
@@ -691,6 +698,13 @@ namespace jai {
         
         // Get the class registry for this engine
         class_registry& get_class_registry();
+
+        // Monotonic counter bumped on every script-class (re)definition. Class-shape
+        // caches (class_definition::flat_value_semantics) validate against it: a nested
+        // field class redefining must invalidate its CONTAINING classes' stamps too, and
+        // per-class epochs cannot see containment.
+        uint64_t class_definition_epoch() const;
+        void bump_class_definition_epoch();
 
         // === TYPE INFO INTERNING ===
         // Get or create type_info for basic types (fast O(1) access for common types)

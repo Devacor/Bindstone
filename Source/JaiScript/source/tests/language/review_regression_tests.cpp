@@ -6,6 +6,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <optional>
@@ -1753,6 +1754,124 @@ public:
     }
 };
 
+// Flat-value-class stamp (class_definition::flat_value_semantics, parallel_for v1):
+// instances of a flat class are alias-free by construction, so parallel workers may
+// mutate an owned instance in place. These pin the stamp's shape rules and the
+// epoch-based invalidation (a nested field class redefining must invalidate its
+// CONTAINING classes' stamps).
+class flat_value_class_tests : public suite {
+public:
+    flat_value_class_tests() : suite("Flat Value Class") {}
+
+    bool flat_of(std::shared_ptr<jai::engine>& e, const char* name) {
+        auto cls = e->get_class_registry().find_script_class(name);
+        check_not_null(cls.get());
+        return cls->flat_value_semantics();
+    }
+
+    void forge_tests() override {
+        test("all_primitive_fields_flat", [this]() {
+            auto e = make_engine();
+            e->execute("class P { int a = 0; float b = 1.5; bool c = false; char d = 'x'; }");
+            check_true(flat_of(e, "P"));
+        });
+        test("no_fields_flat", [this]() {
+            auto e = make_engine();
+            e->execute("class P { int helper(int v) { return v * 2; } }");
+            check_true(flat_of(e, "P"));
+        });
+        test("string_field_not_flat", [this]() {
+            auto e = make_engine();
+            e->execute("class P { int a = 0; string s = \"\"; }");
+            check_false(flat_of(e, "P"));
+        });
+        test("var_field_not_flat", [this]() {
+            auto e = make_engine();
+            e->execute("class P { var v = 0; }");
+            check_false(flat_of(e, "P"));
+        });
+        test("typed_primitive_container_field_flat", [this]() {
+            auto e = make_engine();
+            e->execute("class P { array<int> xs = []; int n = 0; }");
+            check_true(flat_of(e, "P"));
+        });
+        test("untyped_container_field_not_flat", [this]() {
+            auto e = make_engine();
+            e->execute("class P { var xs = []; }");
+            check_false(flat_of(e, "P"));
+        });
+        test("string_container_field_not_flat", [this]() {
+            auto e = make_engine();
+            e->execute("class P { array<string> xs = []; }");
+            check_false(flat_of(e, "P"));
+        });
+        test("nested_flat_class_field_flat", [this]() {
+            auto e = make_engine();
+            e->execute(R"(
+                class Inner { float x = 0.0; float y = 0.0; }
+                class Outer { Inner a = Inner(); int n = 0; }
+            )");
+            check_true(flat_of(e, "Inner"));
+            check_true(flat_of(e, "Outer"));
+        });
+        test("nested_string_field_poisons_outer", [this]() {
+            auto e = make_engine();
+            e->execute(R"(
+                class Inner { string s = ""; }
+                class Outer { Inner a = Inner(); }
+            )");
+            check_false(flat_of(e, "Outer"));
+        });
+        test("flat_inheritance_chain_flat", [this]() {
+            auto e = make_engine();
+            e->execute(R"(
+                class Base { int hp = 10; }
+                class Kid : Base { float speed = 1.0; }
+            )");
+            check_true(flat_of(e, "Kid"));
+        });
+        test("string_parent_poisons_child", [this]() {
+            auto e = make_engine();
+            e->execute(R"(
+                class Base { string name = ""; }
+                class Kid : Base { int hp = 10; }
+            )");
+            check_false(flat_of(e, "Kid"));
+        });
+        // THE invalidation case: Outer's cached stamp must fall when Inner hot-reloads
+        // to a non-flat shape (per-class epochs cannot see containment; the stamp
+        // validates against engine::class_definition_epoch).
+        test("nested_redefinition_invalidates_containing_stamp", [this]() {
+            auto e = make_engine();
+            e->execute(R"(
+                class Inner { float x = 0.0; }
+                class Outer { Inner a = Inner(); }
+            )");
+            check_true(flat_of(e, "Outer"));
+            e->execute("class Inner { float x = 0.0; string tag = \"\"; }");
+            check_false(flat_of(e, "Outer"));
+        });
+        test("cpp_class_not_flat", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            auto r = e->execute("pair(1, 2)");
+            auto holder = r.get_object_holder();
+            check_not_null(holder.get());
+            auto pair_cls = e->get_class_definition(holder->type_id);
+            check_not_null(pair_cls.get());
+            check_false(pair_cls->flat_value_semantics());
+        });
+        test("allow_unsafe_parallel_defaults_off", [this]() {
+            auto e = make_engine();
+            check_false(e->allow_unsafe_parallel());
+            e->allow_unsafe_parallel(true);
+            check_true(e->allow_unsafe_parallel());
+            e->allow_unsafe_parallel(false);
+            check_false(e->allow_unsafe_parallel());
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 using review_regression_tests = jai::foundry::tests::review_regression_tests;
@@ -1765,3 +1884,5 @@ using element_read_elision_tests = jai::foundry::tests::element_read_elision_tes
 FOUNDRY_REGISTER(element_read_elision_tests)
 using ref_capture_semantics_tests = jai::foundry::tests::ref_capture_semantics_tests;
 FOUNDRY_REGISTER(ref_capture_semantics_tests)
+using flat_value_class_tests = jai::foundry::tests::flat_value_class_tests;
+FOUNDRY_REGISTER(flat_value_class_tests)

@@ -1,9 +1,101 @@
 #include "jaiscript/core/class_registry.hpp"
 #include "jaiscript/core/dynamic_binder.hpp"
+#include "jaiscript/core/engine.hpp"
 #include <stdexcept>
 #include <set>
 
 namespace jai {
+
+// ===== flat_value_semantics (class_definition.hpp doc) =====
+// Out of line: nested field classes resolve through the engine's registry, which the
+// class_definition header cannot see.
+
+bool class_definition::flat_value_semantics() const {
+    if (!engine_) {
+        return false;
+    }
+    const uint64_t epoch = engine_->class_definition_epoch();
+    if (flat_value_epoch_ == epoch) {
+        return flat_value_cached_;
+    }
+    std::vector<const class_definition*> in_progress;
+    flat_value_cached_ = flat_value_semantics_impl(in_progress);
+    flat_value_epoch_ = epoch;
+    return flat_value_cached_;
+}
+
+bool class_definition::flat_value_semantics_impl(std::vector<const class_definition*>& in_progress) const {
+    if (class_type_ != script_class && class_type_ != vm_class) {
+        return false;
+    }
+    if (cpp_base_class_) {
+        return false;
+    }
+    for (const class_definition* visiting : in_progress) {
+        if (visiting == this) {
+            return false;   // declared-type cycle: unconstructible by value, never flat
+        }
+    }
+    in_progress.push_back(this);
+    bool flat = true;
+    for (const auto& parent : parent_classes_) {
+        if (!parent || !parent->flat_value_semantics_impl(in_progress)) {
+            flat = false;
+            break;
+        }
+    }
+    if (flat) {
+        for (const auto& [field_id, field_default] : field_defaults_) {
+            (void)field_default;
+            if (!flat_field_type(get_field_declared_type(field_id), in_progress)) {
+                flat = false;
+                break;
+            }
+        }
+    }
+    in_progress.pop_back();
+    return flat;
+}
+
+bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const {
+    auto primitive = [](const type_info_ptr& p) {
+        if (!p) {
+            return false;
+        }
+        switch (p->base_type) {
+        case script_value_type::jai_int_type:
+        case script_value_type::jai_float_type:
+        case script_value_type::jai_bool_type:
+        case script_value_type::jai_char_type:
+            return true;
+        default:
+            return false;
+        }
+    };
+    if (!t) {
+        return false;   // auto/untyped field: no store-enforced shape to lean on
+    }
+    switch (t->base_type) {
+    case script_value_type::jai_int_type:
+    case script_value_type::jai_float_type:
+    case script_value_type::jai_bool_type:
+    case script_value_type::jai_char_type:
+        return true;
+    case script_value_type::jai_array_type:
+        return primitive(t->element_type());
+    case script_value_type::jai_map_type:
+        return primitive(t->key_type()) && primitive(t->value_type());
+    case script_value_type::jai_object_type: {
+        if (!engine_ || t->type_name.empty()) {
+            return false;
+        }
+        auto nested = engine_->get_class_registry().find_script_class(std::string(t->type_name));
+        return nested && nested->flat_value_semantics_impl(in_progress);
+    }
+    default:
+        return false;   // string (shared storage under assign), function, shared/weak, reference, var
+    }
+}
 
 checked_result<void> class_registry::register_script_class(std::shared_ptr<script_class_definition> class_def) {
     if (!class_def) {

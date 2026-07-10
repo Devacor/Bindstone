@@ -1083,6 +1083,7 @@ namespace {
 				v = v.parallel_detached_copy();
 				return normalize_element_inplace(v, eng);
 			}
+			if (handle->is_typed()) { return true; }   // raw buffer: all-primitive by construction
 			for (auto& elem : handle->values()) {
 				if (!normalize_element_inplace(elem, eng)) { return false; }
 			}
@@ -1339,6 +1340,13 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		}
 		state.last_captures.emplace_back(entry.name_id, cap.kind);
 		captures.push_back(std::move(cap));
+	}
+
+	// STAGE-2a BRIDGE (typed_array_design.md): typed-node input demotes in place at the
+	// barrier (main thread, node identity preserved) so the hetero kernel stays correct;
+	// stage 3 reads typed buffers directly.
+	if (const script_array* input_node = array_value.unchecked_array_node(); input_node->is_typed()) {
+		const_cast<script_array*>(input_node)->demote_to_hetero(&eng);
 	}
 
 	const auto& source = array_value.as_array();
@@ -1705,6 +1713,14 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		captures.push_back(std::move(cap));
 	}
 
+	// STAGE-2a BRIDGE (typed_array_design.md): a typed-node source demotes IN PLACE at
+	// the barrier (main thread, node identity preserved) so the hetero kernel below
+	// stays correct. Stage 3 replaces this with raw typed-buffer worker reads/writes —
+	// the demotion is the correctness bridge, not the destination.
+	if (source_node->is_typed()) {
+		const_cast<script_array*>(source_node)->demote_to_hetero(&eng);
+	}
+
 	// ELEMENT PROOF + NORMALIZATION: every element must end this pass exclusively-
 	// mutable (shared strings detach in place - see normalize_element_inplace). Typed
 	// all-primitive containers prove statically; engine::allow_unsafe_parallel skips
@@ -1949,6 +1965,10 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 			// twins' numeric form would - the captured-array read names the condition
 			return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds),
 				"Array index out of bounds reading a captured array in a parallel body");
+		}
+		if (arr->is_typed()) {
+			// raw buffer read -> worker-local mint, no script_value even exists to copy
+			return arr->get(static_cast<size_t>(i), eng);
 		}
 		const script_value& elem = arr->values()[static_cast<size_t>(i)];
 		switch (elem.raw_storage_index()) {

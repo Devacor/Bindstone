@@ -3747,6 +3747,10 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 
 	script_value* varPtr = resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
+		// TYPED array element ref: deref hands back the holder scratch - the in-place
+		// mutation below must commit it to the raw buffer (KEEP BYTE-PARALLEL with the
+		// interpreter ++/-- twin)
+		auto* typed_elem = varPtr->typed_element_holder();
 		script_value& target = varPtr->deref();
 		// §12.1 write-through: ++/-- on a bound VARIABLE decodes the live value and stores
 		// back through assign_through (the type() switch below would mutate a dead shadow).
@@ -3786,6 +3790,7 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 					if (!ints::try_sub(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '--'");
 				}
 				tref = newVal;
+				if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
 				return {};
 			}
@@ -3799,6 +3804,7 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 					else target.unchecked_as_float_ref() -= 1.0;
 					stack_.push_back(script_value(target.unchecked_as_float(), engine_));
 				}
+				if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
 				return {};
 			}
 			default:
@@ -4011,9 +4017,11 @@ checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, 
 
 		if (current->raw_storage_index() == script_value::TYPEID_ARRAY && index_ptr->is_int()) {
 			const script_int index = index_ptr->unchecked_as_int();
-			const auto& array = current->unchecked_as_array();
-			if (index >= 0 && index < static_cast<script_int>(array.size())) {
-				current = &array[static_cast<size_t>(index)].deref();
+			const script_array* node = current->unchecked_array_node();
+			// typed nodes have no element to point at in place - they take the replay
+			// (which materializes into scratch through the typed-aware op_index)
+			if (!node->is_typed() && index >= 0 && index < static_cast<script_int>(node->size())) {
+				current = &node->values()[static_cast<size_t>(index)].deref();
 				continue;
 			}
 		}
@@ -4533,16 +4541,16 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 			return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "Array index must be an integer");
 		}
 		script_int index = right.unchecked_as_int();
-		const auto& array = left.unchecked_as_array();
+		const script_array* node = left.unchecked_array_node();
 
-		if (index < 0 || index >= static_cast<script_int>(array.size())) {
+		if (index < 0 || index >= static_cast<script_int>(node->size())) {
 			// Numbers intern as symbols: the {0}/{1} machinery resolves symbol ids,
 			// so raw counts printed garbage names (KEEP BYTE-PARALLEL with the
 			// interpreter subscript path)
 			return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
 				"Array index {0} out of bounds for array of size {1}",
 				symbolizer_->intern(std::to_string(index)),
-				symbolizer_->intern(std::to_string(array.size())));
+				symbolizer_->intern(std::to_string(node->size())));
 		}
 
 		if (lvalue_shape && !transient_read) {
@@ -4551,8 +4559,10 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 			script_value ref_value = script_value::make_element_reference(
 				left.get_array_storage(), static_cast<size_t>(index), engine_, element_type);
 			stack_.push_back(std::move(ref_value));
+		} else if (node->is_typed()) {
+			stack_.push_back(node->get(static_cast<size_t>(index), engine_));   // raw buffer read
 		} else {
-			stack_.push_back(array[index]);
+			stack_.push_back(node->values()[index]);
 		}
 		return {};
 	}
@@ -4696,11 +4706,22 @@ checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instructio
 	}
 
 	// Mode-based re-resolution (never a cached address): realloc/erase between mint
-	// and write can't corrupt the heap
+	// and write can't corrupt the heap. TYPED elements have no script_value to point
+	// at: target_ptr aims at the holder scratch so the enforcement flow below stays
+	// byte-identical, and the result commits into the raw buffer at the end.
 	auto refHolder = target_ref.get_reference_holder();
-	script_value* target_ptr = refHolder->resolve_target();
-	if (!target_ptr) {
-		return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+	const bool typed_element = refHolder && refHolder->typed_element();
+	script_value* target_ptr;
+	if (typed_element) {
+		if (refHolder->container_index >= refHolder->container->size()) {
+			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+		}
+		target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
+	} else {
+		target_ptr = refHolder->resolve_target();
+		if (!target_ptr) {
+			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+		}
 	}
 
 	type_info_ptr element_type = refHolder->container_element_type;
@@ -4720,6 +4741,9 @@ checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instructio
 	} else {
 		// No element type constraint - values deep-copy, shared_ptr handles share
 		*target_ptr = clone_for_assignment(value);
+	}
+	if (typed_element) {
+		refHolder->container->set(refHolder->container_index, *target_ptr);
 	}
 	stack_.push_back(std::move(value));
 	return {};
@@ -4801,11 +4825,21 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
 	}
 	// Mode-based re-resolution (never a cached address): realloc/erase between mint
-	// and write can't corrupt the heap
+	// and write can't corrupt the heap. TYPED elements: scratch target + buffer commit
+	// (see exec_index_assign).
 	auto refHolder = currentValue.get_reference_holder();
-	script_value* target_ptr = refHolder->resolve_target();
-	if (!target_ptr) {
-		return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+	const bool typed_element = refHolder && refHolder->typed_element();
+	script_value* target_ptr;
+	if (typed_element) {
+		if (refHolder->container_index >= refHolder->container->size()) {
+			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+		}
+		target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
+	} else {
+		target_ptr = refHolder->resolve_target();
+		if (!target_ptr) {
+			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+		}
 	}
 	type_info_ptr element_type = refHolder->container_element_type;
 	if (element_type) {
@@ -4823,6 +4857,9 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 		*target_ptr = std::move(converted);
 	} else {
 		*target_ptr = std::move(resultValue.clone());
+	}
+	if (typed_element) {
+		refHolder->container->set(refHolder->container_index, *target_ptr);
 	}
 	stack_.push_back(std::move(resultValue));
 	return {};
@@ -4843,7 +4880,9 @@ checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction
 		if (container_peek.raw_storage_index() == script_value::TYPEID_ARRAY && index_peek.is_int()) {
 			const script_int index = index_peek.unchecked_as_int();
 			auto storage = container_peek.get_array_storage();
-			if (storage && index >= 0 && index < static_cast<script_int>(storage->size())) {
+			// typed nodes take the replay (holder scratch + buffer commit); 2b gives
+			// them a raw-store fast path
+			if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
 				auto container_type_info = container_peek.get_type_info();
 				type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
 				stack_.pop_back();   // index (decoded above)
@@ -4900,7 +4939,8 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 		    container.raw_storage_index() == script_value::TYPEID_ARRAY && index_v.is_int()) {
 			const script_int index = index_v.unchecked_as_int();
 			auto storage = container.get_array_storage();
-			if (storage && index >= 0 && index < static_cast<script_int>(storage->size())) {
+			// typed nodes take the replay; 2b gives them a raw load-op-store fast path
+			if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
 				script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
 				const size_t elem_idx = target_ptr->raw_storage_index();
 				if (elem_idx == script_value::TYPEID_INT || elem_idx == script_value::TYPEID_FLOAT) {
@@ -5349,11 +5389,13 @@ checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction
 			"Destructuring requires an array on the right-hand side");
 	}
 
-	auto& arr = source.get_array_storage()->values();
+	const auto& node = *source.get_array_storage();
 	const destructure_proto& proto = f.code->destructure_protos[ins.a];
 
 	for (size_t i = 0; i < proto.names.size(); ++i) {
-		script_value val = (i < arr.size()) ? clone_for_assignment(arr[i]) : make_null();
+		script_value val = i < node.size()
+			? (node.is_typed() ? node.get(i, engine_) : clone_for_assignment(node.values()[i]))
+			: make_null();
 		JAISCRIPT_TRY(define_decl_value(f, proto.names[i].first, proto.names[i].second, std::move(val)));
 	}
 	return {};
@@ -8591,6 +8633,8 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 				}
 			}
 			element = script_value::make_element_reference(array_storage, state.index, engine_, element_constraint);
+		} else if (array_storage->is_typed()) {
+			element = array_storage->get(state.index, engine_);   // raw buffer read
 		} else {
 			// Copy binding: values deep-copy per iteration, shared_ptr elements share
 			element = clone_for_assignment(array_storage->values()[state.index]);

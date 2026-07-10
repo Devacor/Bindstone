@@ -12,6 +12,7 @@
 #include <variant>
 #include <memory>
 #include <compare>
+#include <cassert>
 #include <cstdint>
 #include <limits>
 #include <type_traits>
@@ -597,8 +598,12 @@ namespace jai {
             return *std::get_if<TYPEID_CHAR>(&storage_);
         }
 
-        // Unchecked array accessor - caller must verify is_array() first
+        // Unchecked array accessor - caller must verify is_array() first.
+        // HETERO surface: a typed node reaching here means a path missing its kind
+        // dispatch (typed_array_design.md stage 2) - loud in Debug, empty in Release.
         inline const std::vector<script_value>& unchecked_as_array() const noexcept {
+            assert(!(*std::get_if<TYPEID_ARRAY>(&storage_))->is_typed() &&
+                   "typed array reached a hetero-only path (missing kind dispatch)");
             return (*std::get_if<TYPEID_ARRAY>(&storage_))->values();
         }
 
@@ -612,6 +617,7 @@ namespace jai {
         inline const script_array* unchecked_array_node() const noexcept {
             return std::get_if<TYPEID_ARRAY>(&storage_)->get();
         }
+
 
         // Unchecked function accessor - caller must verify is_function() first
         inline const script_function& unchecked_as_function() const noexcept {
@@ -647,6 +653,8 @@ namespace jai {
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
+            assert(!std::get<strong_ptr<script_array>>(storage_)->is_typed() &&
+                   "typed array reached a hetero-only path (missing kind dispatch)");
             return std::get<strong_ptr<script_array>>(storage_)->values();
         }
         
@@ -857,6 +865,8 @@ namespace jai {
                     "script_value is not an array"
                 );
             }
+            assert(!std::get<strong_ptr<script_array>>(storage_)->is_typed() &&
+                   "typed array reached a hetero-only path (missing kind dispatch)");
             return checked_result<const std::vector<script_value>*>(&std::get<strong_ptr<script_array>>(storage_)->values());
         }
 
@@ -1700,6 +1710,25 @@ namespace jai {
             strong_ptr<script_array> container;
             size_t container_index = SIZE_MAX;
 
+            // TYPED element mode (raw-buffer nodes): there is no script_value element to
+            // reference, so deref() materializes container[index] into cell_storage
+            // (free in element mode) refreshed on EVERY touch — same re-resolve contract
+            // as the other modes; callers already may not cache the address. Writers
+            // never go through deref on typed elements: assign_through()/the typed
+            // chokepoints store into the raw buffer (a scratch write-back would be
+            // silent data loss — audited; see typed_array_design.md).
+            bool has_elem_scratch = false;
+            bool typed_element() const noexcept { return container && container->is_typed(); }
+            const script_value& materialize_typed_element(engine* eng);   // value.cpp
+            // In-place mutation sites (++/--) mutate the materialized scratch through
+            // deref() and commit it back to the raw buffer with this (bounds re-checked:
+            // no user code runs between materialize and commit, but stay defensive).
+            void commit_typed_element_scratch() {
+                if (has_elem_scratch && container_index < container->size()) {
+                    container->set(container_index, *cell());
+                }
+            }
+
             // FIELD mode (ref bind of obj.field): pins the owning instance and
             // re-resolves the field node by id on every deref/assign-through, so it
             // survives hot-reload field migration (a removed field errors instead of
@@ -1900,6 +1929,15 @@ namespace jai {
             }
             return nullptr;
         }
+
+        // Non-null iff *this is a reference to a TYPED array element: deref() hands
+        // back the holder's materialized scratch there, so in-place mutators must
+        // commit_typed_element_scratch() after writing (typed_array_design.md).
+        reference_holder* typed_element_holder() noexcept {
+            if (raw_storage_index() != TYPEID_REFERENCE) { return nullptr; }
+            auto& holder = *std::get_if<TYPEID_REFERENCE>(&storage_);
+            return holder && holder->typed_element() ? holder.get() : nullptr;
+        }
         
         
         // Check if array/map has unique ownership (for COW optimization)
@@ -1978,6 +2016,18 @@ namespace jai {
         // Set type info for special cases (like weak_ptr creation)
         void set_type_info(type_info_ptr type) {
             type_info_ = type;
+            // Demote-on-stamp (typed_array_design.md): re-tagging an array value 'any'
+            // (var binding) demotes a typed node in place — node kind must never outrun
+            // the views' tags. The stamp sites operate on fresh clones/moved temps, so
+            // the node is unique here; a shared demote would still be value-correct
+            // (identity + contents preserved), merely losing the raw-buffer form.
+            if (type && type->base_type == script_value_type::jai_any_type &&
+                raw_storage_index() == TYPEID_ARRAY) {
+                auto& node = *std::get_if<TYPEID_ARRAY>(&storage_);
+                if (node && node->is_typed()) {
+                    node->demote_to_hetero(engine_);
+                }
+            }
         }
         
     private:
@@ -2000,6 +2050,100 @@ namespace jai {
     static_assert(sizeof(script_value) == 32 && alignof(script_value) == 8,
                   "script_value must stay 32 bytes / 8-aligned (thin-value fold)");
     static_assert(std::is_nothrow_move_constructible_v<script_value>);
+
+    // ---- script_array kind-dispatched element access (script_value complete here) ----
+
+    inline script_value script_array::get(size_t i, engine* eng) const {
+        switch (kind_) {
+            case kind_t::i64: return script_value(ints_[i], eng);
+            case kind_t::f64: return script_value(floats_[i], eng);
+            default: return values_[i];
+        }
+    }
+
+    inline void script_array::set(size_t i, script_value v) {
+        switch (kind_) {
+            case kind_t::i64:
+                ints_[i] = v.raw_storage_index() == script_value::TYPEID_FLOAT
+                    ? static_cast<script_int>(v.unchecked_as_float()) : v.unchecked_as_int();
+                break;
+            case kind_t::f64:
+                floats_[i] = v.raw_storage_index() == script_value::TYPEID_INT
+                    ? static_cast<script_float>(v.unchecked_as_int()) : v.unchecked_as_float();
+                break;
+            default:
+                values_[i] = std::move(v);
+                break;
+        }
+    }
+
+    inline void script_array::push(script_value pre_converted) {
+        switch (kind_) {
+            case kind_t::i64:
+                ints_.push_back(pre_converted.raw_storage_index() == script_value::TYPEID_FLOAT
+                    ? static_cast<script_int>(pre_converted.unchecked_as_float()) : pre_converted.unchecked_as_int());
+                break;
+            case kind_t::f64:
+                floats_.push_back(pre_converted.raw_storage_index() == script_value::TYPEID_INT
+                    ? static_cast<script_float>(pre_converted.unchecked_as_int()) : pre_converted.unchecked_as_float());
+                break;
+            default:
+                values_.push_back(std::move(pre_converted));
+                break;
+        }
+    }
+
+    inline void script_array::pop_back() {
+        switch (kind_) {
+            case kind_t::i64: ints_.pop_back(); break;
+            case kind_t::f64: floats_.pop_back(); break;
+            default: values_.pop_back(); break;
+        }
+    }
+
+    inline void script_array::erase_at(size_t i) {
+        switch (kind_) {
+            case kind_t::i64: ints_.erase(ints_.begin() + i); break;
+            case kind_t::f64: floats_.erase(floats_.begin() + i); break;
+            default: values_.erase(values_.begin() + i); break;
+        }
+    }
+
+    inline void script_array::reverse() {
+        switch (kind_) {
+            case kind_t::i64: std::reverse(ints_.begin(), ints_.end()); break;
+            case kind_t::f64: std::reverse(floats_.begin(), floats_.end()); break;
+            default: std::reverse(values_.begin(), values_.end()); break;
+        }
+    }
+
+    inline std::vector<script_value> script_array::materialize_values(engine* eng) const {
+        std::vector<script_value> out;
+        const size_t n = size();
+        out.reserve(n);
+        for (size_t i = 0; i < n; ++i) { out.push_back(get(i, eng)); }
+        return out;
+    }
+
+    inline void script_array::demote_to_hetero(engine* eng) {
+        switch (kind_) {
+            case kind_t::i64:
+                values_.reserve(ints_.size());
+                for (script_int n : ints_) { values_.emplace_back(n, eng); }
+                ints_.clear();
+                ints_.shrink_to_fit();
+                break;
+            case kind_t::f64:
+                values_.reserve(floats_.size());
+                for (script_float f : floats_) { values_.emplace_back(f, eng); }
+                floats_.clear();
+                floats_.shrink_to_fit();
+                break;
+            default:
+                break;
+        }
+        kind_ = kind_t::hetero;
+    }
 
 } // namespace jai
 

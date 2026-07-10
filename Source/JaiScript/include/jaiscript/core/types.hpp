@@ -5,6 +5,7 @@
 
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/core/checked_result.hpp>
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -30,19 +31,69 @@ namespace jai {
     
     // Container types. script_array is the ONE array node behind TYPEID_ARRAY (the
     // strong_ptr pointee — its address is the array's identity for ordering, borrows,
-    // and COW probes). Stage 1 of docs/typed_array_design.md: wraps the historical
-    // std::vector<script_value>; typed kinds (raw i64/f64 buffers) land behind this
-    // same node in stage 2, at which point values() asserts hetero and kind-dispatched
-    // accessors join it.
+    // and COW probes). Typed kinds (docs/typed_array_design.md stage 2) store raw
+    // primitive buffers instead of 32-byte script_values; the airtight array<T> tag
+    // (stage 0) + demote-on-stamp keep node kind ⟺ view tag. values() is the HETERO
+    // element surface only — every caller either sits behind a kind check or handles
+    // typed nodes through get()/set()/typed buffers (kind-dispatch helpers live in
+    // value.hpp where script_value is complete).
     class script_array {
     public:
+        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2 };
+
         script_array() = default;
+        explicit script_array(kind_t k) : kind_(k) {}
+
+        kind_t kind() const noexcept { return kind_; }
+        bool is_typed() const noexcept { return kind_ != kind_t::hetero; }
+
+        size_t size() const noexcept {
+            switch (kind_) {
+                case kind_t::i64: return ints_.size();
+                case kind_t::f64: return floats_.size();
+                default: return values_.size();
+            }
+        }
+        bool empty() const noexcept { return size() == 0; }
+        void clear() noexcept { values_.clear(); ints_.clear(); floats_.clear(); }
+        void reserve(size_t n) {
+            switch (kind_) {
+                case kind_t::i64: ints_.reserve(n); break;
+                case kind_t::f64: floats_.reserve(n); break;
+                default: values_.reserve(n); break;
+            }
+        }
+
         std::vector<script_value>& values() noexcept { return values_; }
         const std::vector<script_value>& values() const noexcept { return values_; }
-        size_t size() const noexcept { return values_.size(); }
-        bool empty() const noexcept { return values_.empty(); }
+        std::vector<script_int>& ints() noexcept { return ints_; }
+        const std::vector<script_int>& ints() const noexcept { return ints_; }
+        std::vector<script_float>& floats() noexcept { return floats_; }
+        const std::vector<script_float>& floats() const noexcept { return floats_; }
+
+        // Kind-dispatched element access — defined in value.hpp (script_value complete
+        // there; the element-touching vector ops instantiate at definition, so every
+        // body that destroys/moves elements lives there too). get materializes;
+        // set/push take a PRE-CONVERTED value (the caller ran element-type conversion;
+        // typed kinds unbox, hetero stores as-is).
+        inline void pop_back();
+        inline void erase_at(size_t i);
+        inline void reverse();
+        inline script_value get(size_t i, engine* eng) const;
+        inline void set(size_t i, script_value v);
+        inline void push(script_value pre_converted);
+        // Boxed snapshot of every element (typed builtin paths that need a hetero
+        // vector: comparator sorts, predicate scans) — defined in value.hpp.
+        inline std::vector<script_value> materialize_values(engine* eng) const;
+        // Rebox a typed buffer into hetero storage IN PLACE (same node identity) — the
+        // demote-on-stamp kernel for var-laundered typed arrays.
+        inline void demote_to_hetero(engine* eng);
+
     private:
+        kind_t kind_ = kind_t::hetero;
         std::vector<script_value> values_;
+        std::vector<script_int> ints_;
+        std::vector<script_float> floats_;
     };
     using script_map = std::map<script_value, script_value>;
     

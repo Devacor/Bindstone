@@ -346,7 +346,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
         }
-        return ctx.make_value(static_cast<script_int>(self.unchecked_as_array().size()));
+        return ctx.make_value(static_cast<script_int>(self.unchecked_array_node()->size()));
     }},
 
         {symbolizer->intern("push"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -384,8 +384,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
         }
 
-        auto& arrayPtr = self.unchecked_get_array_storage()->values();
-        arrayPtr.push_back(std::move(converted));
+        self.unchecked_get_array_storage()->push(std::move(converted));
         return ctx.make_value();
     }},
 
@@ -393,12 +392,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pop() takes no arguments");
         }
-        auto& arrayPtr = self.unchecked_get_array_storage()->values();
-        if (arrayPtr.empty()) {
+        auto& node = *self.unchecked_get_array_storage();
+        if (node.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot pop from empty array");
         }
-        script_value last = arrayPtr.back();
-        arrayPtr.pop_back();
+        script_value last = node.get(node.size() - 1, ctx.get_engine());
+        node.pop_back();
         return last;
     }},
 
@@ -406,15 +405,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
         }
-        return ctx.make_value(self.unchecked_as_array().empty());
+        return ctx.make_value(self.unchecked_array_node()->empty());
     }},
 
         {symbolizer->intern("clear"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
-        auto& arrayPtr = self.unchecked_get_array_storage()->values();
-        arrayPtr.clear();
+        self.unchecked_get_array_storage()->clear();
         return ctx.make_value();
     }},
 
@@ -422,31 +420,31 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "front() takes no arguments");
         }
-        const auto& arr = self.unchecked_as_array();
-        if (arr.empty()) {
+        const script_array* node = self.unchecked_array_node();
+        if (node->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get front of empty array");
         }
-        return arr.front();
+        return node->get(0, ctx.get_engine());
     }},
 
         {symbolizer->intern("back"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "back() takes no arguments");
         }
-        const auto& arr = self.unchecked_as_array();
-        if (arr.empty()) {
+        const script_array* node = self.unchecked_array_node();
+        if (node->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get back of empty array");
         }
-        return arr.back();
+        return node->get(node->size() - 1, ctx.get_engine());
     }},
 
         {symbolizer->intern("index_of"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "index_of() takes exactly one argument");
         }
-        const auto& arr = self.unchecked_as_array();
-        for (size_t i = 0; i < arr.size(); ++i) {
-            if (arr[i] == args[0]) {
+        const script_array* node = self.unchecked_array_node();
+        for (size_t i = 0; i < node->size(); ++i) {
+            if (node->get(i, ctx.get_engine()) == args[0]) {
                 return ctx.make_value(static_cast<script_int>(i));
             }
         }
@@ -457,9 +455,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "has() takes exactly one argument");
         }
-        const auto& arr = self.unchecked_as_array();
-        for (const auto& elem : arr) {
-            if (elem == args[0]) {
+        const script_array* node = self.unchecked_array_node();
+        for (size_t i = 0; i < node->size(); ++i) {
+            if (node->get(i, ctx.get_engine()) == args[0]) {
                 return ctx.make_value(true);
             }
         }
@@ -470,9 +468,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
         }
-        const auto& arr = self.unchecked_as_array();
-        for (const auto& elem : arr) {
-            if (elem == args[0]) {
+        const script_array* node = self.unchecked_array_node();
+        for (size_t i = 0; i < node->size(); ++i) {
+            if (node->get(i, ctx.get_engine()) == args[0]) {
                 return ctx.make_value(true);
             }
         }
@@ -483,29 +481,29 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "first() takes no arguments");
         }
-        const auto& arr = self.unchecked_as_array();
-        if (arr.empty()) {
+        const script_array* node = self.unchecked_array_node();
+        if (node->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get first of empty array");
         }
-        return arr.front();
+        return node->get(0, ctx.get_engine());
     }},
 
         {symbolizer->intern("last"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "last() takes no arguments");
         }
-        const auto& arr = self.unchecked_as_array();
-        if (arr.empty()) {
+        const script_array* node = self.unchecked_array_node();
+        if (node->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get last of empty array");
         }
-        return arr.back();
+        return node->get(node->size() - 1, ctx.get_engine());
     }},
 
         {symbolizer->intern("length"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
         }
-        return ctx.make_value(static_cast<script_int>(self.unchecked_as_array().size()));
+        return ctx.make_value(static_cast<script_int>(self.unchecked_array_node()->size()));
     }},
 
         {symbolizer->intern("slice"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -515,24 +513,24 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args[0].is_int() || !args[1].is_int()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "slice() arguments must be integers");
         }
-        const auto& arr = self.unchecked_as_array();
+        const script_array* node = self.unchecked_array_node();
         script_int start = args[0].unchecked_as_int();
         script_int end = args[1].unchecked_as_int();
 
         // Handle negative indices
-        if (start < 0) start = static_cast<script_int>(arr.size()) + start;
-        if (end < 0) end = static_cast<script_int>(arr.size()) + end;
+        if (start < 0) start = static_cast<script_int>(node->size()) + start;
+        if (end < 0) end = static_cast<script_int>(node->size()) + end;
 
         // Clamp to valid range
-        start = std::max<script_int>(0, std::min<script_int>(start, static_cast<script_int>(arr.size())));
-        end = std::max<script_int>(0, std::min<script_int>(end, static_cast<script_int>(arr.size())));
+        start = std::max<script_int>(0, std::min<script_int>(start, static_cast<script_int>(node->size())));
+        end = std::max<script_int>(0, std::min<script_int>(end, static_cast<script_int>(node->size())));
 
         if (start > end) start = end;
 
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& resultPtr = result.unchecked_get_array_storage()->values();
         for (script_int i = start; i < end; ++i) {
-            resultPtr.push_back(arr[i].clone());
+            resultPtr.push_back(node->get(static_cast<size_t>(i), ctx.get_engine()).clone());
         }
         return result;
     }},
@@ -547,7 +545,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         // Snapshot first: func is user script that may mutate THIS array (shared
         // storage), reallocating the buffer and invalidating the iterator.
-        const std::vector<script_value> arr = self.unchecked_as_array();
+        const script_array* self_node = self.unchecked_array_node();
+        const std::vector<script_value> arr = self_node->is_typed()
+            ? self_node->materialize_values(ctx.get_engine()) : self_node->values();
         const auto& func = args[0].unchecked_as_function();
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& resultPtr = result.unchecked_get_array_storage()->values();
@@ -569,14 +569,21 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "sort() takes zero or one argument");
         }
 
-        auto& arrPtr = self.unchecked_get_array_storage()->values();
+        auto& node = *self.unchecked_get_array_storage();
+        if (node.is_typed() && args.empty()) {
+            // raw buffer sort: no comparator, so no user script can mutate mid-sort
+            if (node.kind() == script_array::kind_t::i64) { std::sort(node.ints().begin(), node.ints().end()); }
+            else { std::sort(node.floats().begin(), node.floats().end()); }
+            return ctx.make_value();
+        }
 
         // Sort a SNAPSHOT, then write it back. The comparator (default or custom) can
         // run user script that mutates THIS array; sorting the live buffer while it
         // reallocates is undefined behavior / a crash. (A user-supplied comparator
         // that isn't a strict weak ordering is still the caller's responsibility, as
         // in C++ — but it can no longer corrupt the container.)
-        std::vector<script_value> tmp = arrPtr;
+        std::vector<script_value> tmp = node.is_typed()
+            ? node.materialize_values(ctx.get_engine()) : node.values();
 
         if (args.empty()) {
             // Default order: a strict weak ordering for ALL element types. Numerics
@@ -604,7 +611,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return result.value().is_bool() && result.value().unchecked_as_bool();
             });
         }
-        arrPtr = std::move(tmp);
+        if (node.is_typed()) {
+            // snapshot wins wholesale (matches the hetero write-back below)
+            node.clear();
+            for (auto& v : tmp) { node.push(std::move(v)); }
+        } else {
+            node.values() = std::move(tmp);
+        }
         return ctx.make_value();
     }},
 
@@ -612,8 +625,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
         }
-        auto& arrPtr = self.unchecked_get_array_storage()->values();
-        std::reverse(arrPtr.begin(), arrPtr.end());
+        self.unchecked_get_array_storage()->reverse();
         return ctx.make_value();
     }},
 
@@ -624,14 +636,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args[0].is_int()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove() argument must be an integer");
         }
-        auto& arrPtr = self.unchecked_get_array_storage()->values();
+        auto& node = *self.unchecked_get_array_storage();
         script_int index = args[0].unchecked_as_int();
 
-        if (index < 0 || index >= static_cast<script_int>(arrPtr.size())) {
+        if (index < 0 || index >= static_cast<script_int>(node.size())) {
             return ctx.make_value(false);
         }
 
-        arrPtr.erase(arrPtr.begin() + index);
+        node.erase_at(static_cast<size_t>(index));
         return ctx.make_value(true);
     }},
 
@@ -643,7 +655,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_if() requires a function argument");
         }
 
-        auto& arrPtr = self.unchecked_get_array_storage()->values();
+        auto& node = *self.unchecked_get_array_storage();
         const auto& predicate = args[0].unchecked_as_function();
         script_int removed_count = 0;
 
@@ -651,7 +663,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         // can mutate THIS array (arrays share strong_ptr storage), and a push/clear
         // would reallocate the buffer and dangle a live iterator. Evaluate against the
         // snapshot, collect survivors, then write them back.
-        std::vector<script_value> snapshot = arrPtr;
+        std::vector<script_value> snapshot = node.is_typed()
+            ? node.materialize_values(ctx.get_engine()) : node.values();
         std::vector<script_value> kept;
         kept.reserve(snapshot.size());
         for (auto& elem : snapshot) {
@@ -665,7 +678,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 kept.push_back(elem);     // survivor
             }
         }
-        arrPtr = std::move(kept);
+        if (node.is_typed()) {
+            node.clear();
+            for (auto& v : kept) { node.push(std::move(v)); }
+        } else {
+            node.values() = std::move(kept);
+        }
         return ctx.make_value(removed_count);
     }},
 
@@ -682,11 +700,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             sep = args[0].unchecked_as_string();
         }
 
-        const auto& arr = self.unchecked_as_array();
+        const script_array* node = self.unchecked_array_node();
         std::string result;
 
         bool first = true;
-        for (const auto& elem : arr) {
+        for (size_t join_i = 0; join_i < node->size(); ++join_i) {
+            const script_value elem = node->get(join_i, ctx.get_engine());
             if (!first) {
                 result += sep;
             }
@@ -3376,16 +3395,16 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "Array index must be an integer");
             }
             script_int index = right.unchecked_as_int();
-            const auto& array = left.unchecked_as_array();
+            const script_array* node = left.unchecked_array_node();
 
-            if (index < 0 || index >= static_cast<script_int>(array.size())) {
+            if (index < 0 || index >= static_cast<script_int>(node->size())) {
                 // Numbers intern as symbols: the {0}/{1} machinery resolves symbol ids,
                 // so raw counts printed garbage names ("Array index bool out of bounds
                 // for array of size class_definition")
                 return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
                     "Array index {0} out of bounds for array of size {1}",
                     string_symbolizer_->intern(std::to_string(index)),
-                    string_symbolizer_->intern(std::to_string(array.size())));
+                    string_symbolizer_->intern(std::to_string(node->size())));
             }
 
             // Check if the left side is an lvalue (variable, member access, or subscript)
@@ -3411,9 +3430,11 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 script_value ref_value = script_value::make_element_reference(
                     left.get_array_storage(), static_cast<size_t>(index), engine_, element_type);
                 push_value(ref_value);
+            } else if (node->is_typed()) {
+                push_value(node->get(static_cast<size_t>(index), engine_));   // raw buffer read
             } else {
                 // True temporary (e.g., function return), read-only access
-                push_value(array[index]);
+                push_value(node->values()[index]);
             }
         } else if (left.is_map()) {
             // For maps, we need to handle both assignment and read access
@@ -3689,6 +3710,10 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                 // live in call-frame slots, not the environment), then environment
                 script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id);
                 if (varPtr) {
+                    // TYPED array element ref: deref hands back the holder scratch - the
+                    // in-place mutation below must commit it to the raw buffer (KEEP
+                    // BYTE-PARALLEL with the VM exec_incdec twin)
+                    auto* typed_elem = varPtr->typed_element_holder();
                     // Fast path: direct in-place mutation for local variables
                     script_value& target = varPtr->deref();
 
@@ -3731,6 +3756,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                                 if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
                             }
                             tref = newVal;
+                            if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
                             push_value(make_value(expr->is_postfix ? oldVal : newVal));
                             return {};
                         }
@@ -3744,6 +3770,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                                 else target.unchecked_as_float_ref() -= 1.0;
                                 push_value(make_value(target.unchecked_as_float()));
                             }
+                            if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
                             return {};
                         }
                         default:
@@ -4641,7 +4668,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             }
                         }
                         auto storage = array_val->get_array_storage();
-                        if (index && storage && *index >= 0 && *index < static_cast<script_int>(storage->size())) {
+                        // typed nodes take the general path (holder scratch + buffer
+                        // commit); 2b gives them a raw load-op-store fast path
+                        if (index && storage && !storage->is_typed() && *index >= 0 && *index < static_cast<script_int>(storage->size())) {
                             // RHS after target probing (general path's order); callout_free
                             JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
                             if (is_unwinding_) {
@@ -5472,11 +5501,22 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Check if we got a reference
                 if (target_ref.is_reference()) {
                     // Mode-based re-resolution (never a cached address): realloc/erase
-                    // between mint and write can't corrupt the heap
+                    // between mint and write can't corrupt the heap. TYPED elements:
+                    // scratch target + buffer commit (KEEP BYTE-PARALLEL with
+                    // vm_backend::exec_index_assign)
                     auto refHolder = target_ref.get_reference_holder();
-                    script_value* target_ptr = refHolder->resolve_target();
-                    if (!target_ptr) {
-                        return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+                    const bool typed_element = refHolder && refHolder->typed_element();
+                    script_value* target_ptr;
+                    if (typed_element) {
+                        if (refHolder->container_index >= refHolder->container->size()) {
+                            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+                        }
+                        target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
+                    } else {
+                        target_ptr = refHolder->resolve_target();
+                        if (!target_ptr) {
+                            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+                        }
                     }
 
                     // Validate element type if this is a container subscript reference
@@ -5502,6 +5542,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // No element type constraint - values deep-copy, shared_ptr
                         // handles share
                         *target_ptr = clone_for_assignment(value);
+                    }
+                    if (typed_element) {
+                        refHolder->container->set(refHolder->container_index, *target_ptr);
                     }
                     push_value(std::move(value));  // Assignment expressions return the assigned value
                 } else {
@@ -9532,7 +9575,9 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 } else {
                     // Copy binding: values deep-copy per iteration, shared_ptr
                     // elements share (for (auto e : registry) e.hurt() mutates)
-                    *loop_var_ptr = clone_for_assignment(array_storage->values()[i]);
+                    *loop_var_ptr = array_storage->is_typed()
+                        ? array_storage->get(i, engine_)   // raw buffer read
+                        : clone_for_assignment(array_storage->values()[i]);
                 }
 
                 // Execute loop body
@@ -12994,10 +13039,12 @@ checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* d
             "Destructuring requires an array on the right-hand side");
     }
 
-    auto& arr = get_array_storage(source)->values();
+    const auto& node = *get_array_storage(source);
 
     for (size_t i = 0; i < decl->names.size(); ++i) {
-        script_value val = (i < arr.size()) ? clone_for_assignment(arr[i]) : make_value();
+        script_value val = i < node.size()
+            ? (node.is_typed() ? node.get(i, engine_) : clone_for_assignment(node.values()[i]))
+            : make_value();
 
         if (decl->slot_indices[i] != SIZE_MAX && !call_stack_.empty()) {
             call_stack_.back().set_local(decl->slot_indices[i], std::move(val));

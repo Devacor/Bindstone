@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <array>
 
 namespace jai::foundry::tests {
 
@@ -1468,6 +1469,143 @@ public:
             auto [i1, v1] = both("array<int> b = [1]; var& r = b; r.push(\"s\"); b.size()");
             check_eq(i1, v1, "var& push parity");
             check(i1.find("ERROR") == 0, "push through var& alias stays enforced");
+        });
+
+        // ===== TYPED FLAT ARRAY STORAGE (typed_array_design.md stage 2) =====
+        // Behind engine::typed_array_storage(), array<int>/array<float> bindings hold
+        // raw primitive buffers. The contract: ZERO observable difference — every
+        // snippet runs interp/vm × flag off/on and all four outputs must be identical.
+
+        auto quad = [](const char* src) {
+            std::string out[4];
+            int idx = 0;
+            for (bool typed : {false, true}) {
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->execution_budget(0);
+                    e->typed_array_storage(typed);
+                    jai::stdlib::register_all(e);
+                    try { out[idx] = e->execute(src).to_string(); }
+                    catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                    ++idx;
+                }
+            }
+            return std::array<std::string, 4>{out[0], out[1], out[2], out[3]};
+        };
+        auto check_quad = [this, quad](const char* src, const std::string& expected, const char* what) {
+            auto r = quad(src);
+            check_eq(expected, r[0], std::string("interp/plain: ") + what);
+            check_eq(expected, r[1], std::string("vm/plain: ") + what);
+            check_eq(expected, r[2], std::string("interp/typed: ") + what);
+            check_eq(expected, r[3], std::string("vm/typed: ") + what);
+        };
+        auto check_quad_error = [this, quad](const char* src, const char* what) {
+            auto r = quad(src);
+            check_eq(r[0], r[1], std::string("plain parity: ") + what);
+            check_eq(r[0], r[2], std::string("typed/interp matches plain: ") + what);
+            check_eq(r[0], r[3], std::string("typed/vm matches plain: ") + what);
+            check(r[0].find("ERROR") == 0, std::string("raises: ") + what);
+        };
+
+        test("typed_storage_reads_and_stores", [check_quad]() {
+            check_quad("array<int> a = [1,2,3]; to_string(a[0]) + \",\" + to_string(a[2])", "1,3", "reads");
+            check_quad("array<int> a = [1,2,3]; a[1] = 9; to_string(a[1])", "9", "store");
+            check_quad("array<int> a = [1]; a[0] = 2.7; type_of(a[0]) + \":\" + to_string(a[0])", "int:2", "store converts");
+            check_quad("array<float> a = [1.5]; a[0] = 2; type_of(a[0]) + \":\" + to_string(a[0])", "float:2.000000", "float store widens");
+            check_quad("array<int> a = [10]; a[0] += 2.5; type_of(a[0]) + \":\" + to_string(a[0])", "int:12", "compound converts");
+            check_quad("array<int> a = [10]; a[0] %= 4.5; to_string(a[0])", "1", "compound modulo");
+        });
+
+        test("typed_storage_errors_match_plain", [check_quad_error]() {
+            check_quad_error("array<int> a = [1]; a[0] = \"s\"; a[0]", "store mismatch");
+            check_quad_error("array<int> a = []; a.push(\"s\"); a.size()", "push mismatch");
+            check_quad_error("array<int> a = [1]; a[5]", "read OOB");
+            check_quad_error("array<int> a = [1]; a[3] = 2; a[0]", "store OOB");
+            check_quad_error("array<int> a = [1]; for (auto& x : a) { x = \"s\"; } a[0]", "range-for ref mismatch");
+        });
+
+        test("typed_storage_builtins", [check_quad]() {
+            check_quad("array<float> f = []; f.push(1); f.push(2.5); to_string(f.size()) + type_of(f[0]) + to_string(f.back())",
+                       "2float2.500000", "push/size/back");
+            check_quad("array<int> a = [3,1,2]; a.sort(); to_string(a[0]) + to_string(a[1]) + to_string(a[2])", "123", "default sort");
+            check_quad("array<int> a = [3,1,2]; a.sort([](auto x, auto y) -> auto { return x > y; }); to_string(a[0]) + to_string(a[2])", "31", "comparator sort");
+            check_quad("array<int> a = [1,2,3]; a.reverse(); to_string(a[0])", "3", "reverse");
+            check_quad("array<int> a = [1,2,3]; a.remove(1); to_string(a.size()) + to_string(a[1])", "23", "remove");
+            check_quad("array<int> a = [1,2,3,4]; var n = a.remove_if([](auto x) -> auto { return x % 2 == 0; }); to_string(n) + \":\" + to_string(a.size()) + to_string(a[1])", "2:23", "remove_if");
+            check_quad("array<int> a = [5,6,7]; to_string(a.index_of(6)) + to_string(a.has(7)) + to_string(a.has(9))", "1truefalse", "index_of/has");
+            check_quad("array<int> a = [1,2,3,4]; var s = a.slice(1,3); to_string(s.size()) + to_string(s[0])", "22", "slice");
+            check_quad("array<int> a = [1,2]; to_string(a.pop()) + \":\" + to_string(a.size())", "2:1", "pop");
+            check_quad("array<int> a = [1,2,3]; a.join(\"-\")", "1-2-3", "join");
+            check_quad("array<int> a = [9]; to_string(a.front()) + to_string(a.first()) + to_string(a.back()) + to_string(a.last())", "9999", "front/back");
+            check_quad("array<float> f = [1.5,2.5]; var t = 0.0; var r = f.filter([](auto x) -> auto { return x > 2.0; }); to_string(r.size()) + to_string(r[0])", "12.500000", "filter");
+        });
+
+        test("typed_storage_iteration_and_refs", [check_quad]() {
+            check_quad("array<int> a = [1,2,3]; var s = 0; for (auto x : a) { s += x; } to_string(s)", "6", "range-for copy");
+            check_quad("array<int> a = [1,2,3]; for (auto& x : a) { x *= 2; } to_string(a[0]) + to_string(a[2])", "26", "range-for ref mutates");
+            check_quad("array<int> a = [5]; var& r = a[0]; r = 9; to_string(a[0])", "9", "var& element write");
+            check_quad("array<int> a = [5]; var& r = a[0]; r += 2.5; type_of(a[0]) + \":\" + to_string(a[0])", "int:7", "ref compound converts");
+            check_quad("array<int> a = [5]; var& r = a[0]; r++; to_string(a[0]) + to_string(r)", "66", "ref increment commits");
+            check_quad("array<float> a = [1.5]; var& r = a[0]; r--; to_string(a[0])", "0.500000", "float ref decrement");
+            check_quad(R"(
+                array<int> a = [10];
+                function f(int& r) { r += 2.5; }
+                f(a[0]);
+                type_of(a[0]) + ":" + to_string(a[0])
+            )", "int:12", "int& param through element");
+            check_quad("array<int> a = [1,2]; var [x, y] = a; to_string(x) + to_string(y)", "12", "destructure");
+        });
+
+        test("typed_storage_value_semantics_and_laundering", [check_quad]() {
+            // decl copy is a deep copy (kind-preserving buffer copy)
+            check_quad("array<int> a = [1,2]; array<int> b = a; b[0] = 9; to_string(a[0]) + to_string(b[0])", "19", "typed->typed copy");
+            // var laundering demotes the (fresh) node: heterogeneous writes then work
+            check_quad("array<int> a = [1,2]; var v = a; v.push(\"s\"); to_string(v.size()) + type_of(v[2]) + to_string(a.size())", "3string2", "laundered var accepts strings");
+            // var& preserves the tag: still enforced
+            check_quad("array<int> a = [1]; var& r = a; r.push(2); to_string(a.size())", "2", "var& push int");
+            // shrink-under-ref errors identically
+            check_quad("array<int> a = [1,2]; var v = a.pop(); to_string(v) + to_string(a.size())", "21", "pop shrink");
+            // nested in maps/untyped containers: element keeps its tag + storage
+            check_quad("var m = []; array<int> a = [7]; m.push(a); to_string(m[0][0])", "7", "typed inside untyped");
+        });
+
+        test("typed_storage_parallel_bridge", [check_quad]() {
+            // stage-2a bridge: a typed parallel source demotes in place at the barrier
+            // (stage 3 replaces this with raw typed worker reads) — results identical
+            check_quad(R"(
+                array<int> a = [1, 2, 3, 4];
+                parallel_for (auto& x : a) { x = x * 2; }
+                to_string(a[0]) + to_string(a[3])
+            )", "28", "parallel_for over typed");
+            check_quad(R"(
+                array<float> f = [1.5, 2.5];
+                function dbl(var x) { return x * 2.0; }
+                var r = parallel_transform(f, dbl);
+                to_string(r[1])
+            )", "5.000000", "parallel_transform over typed");
+            check_quad(R"(
+                array<int> pal = [10, 20, 30];
+                var src = [0, 1, 2];
+                function lookup(var i) { return pal[i]; }
+                var r = parallel_transform(src, lookup);
+                to_string(r[2])
+            )", "30", "typed array as parallel capture");
+        });
+
+        test("typed_storage_engages_raw_buffers", [this]() {
+            // Not just parity: the flag must actually produce typed nodes (and the
+            // laundering path must actually demote)
+            auto e = jai::engine::make();
+            e->typed_array_storage(true);
+            jai::stdlib::register_all(e);
+            auto v = e->execute("array<int> a = [1,2,3]; a");
+            check(v.is_array(), "returns array");
+            check(v.unchecked_array_node()->kind() == jai::script_array::kind_t::i64, "array<int> holds an i64 buffer");
+            auto f = e->execute("array<float> b = [1.5]; b");
+            check(f.unchecked_array_node()->kind() == jai::script_array::kind_t::f64, "array<float> holds an f64 buffer");
+            auto d = e->execute("array<int> c = [1]; var laundered = c; laundered");
+            check(d.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "var laundering demotes the node");
         });
 
         // type_of on a shared-pointer-semantic instance must match a value instance: both "object".

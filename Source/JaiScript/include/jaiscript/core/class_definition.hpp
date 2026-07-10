@@ -409,6 +409,21 @@ public:
         }
     }
 
+    // TRUE when instances are provably alias-free by construction (parallel_for v1,
+    // Dev ruling 2026-07-09): a script class whose every instance field is
+    // store-enforced to a shape with no cross-instance sharing channel — primitive
+    // (int/float/bool/char), typed all-primitive container (array<prim> /
+    // map<prim,prim>), or a nested script class that is itself flat — with a flat
+    // parent chain and no C++ base/data. Because those stores all deep-clone, two
+    // live instances can never share reachable mutable structure, so a parallel
+    // worker owning an instance may mutate it in place without any alias walk.
+    // STRINGS ARE EXCLUDED: string assignment shares storage (clone() treats
+    // script_string as immutable), which would smuggle a shared node past the stamp.
+    // auto/var fields (no enforced declared type) exclude too. Cached against
+    // engine::class_definition_epoch (a nested field class redefining must invalidate
+    // containing classes). Defined out of line in class_registry.cpp.
+    bool flat_value_semantics() const;
+
     type_info_ptr get_field_declared_type(uint64_t id) const {
         auto it = field_declared_types_.find(id);
         if (it != field_declared_types_.end()) {
@@ -1123,6 +1138,7 @@ public:
                         engine* engine_ref,
                         bool structurally_identical = false) {
         field_defaults_cache_valid_ = false;
+        if (engine_ref) { engine_ref->bump_class_definition_epoch(); }
 
         if (structurally_identical) {
             // Identical reload (structural AST equality, established by the caller):
@@ -1384,6 +1400,12 @@ private:
     size_t key_member_count_ = 0;
     size_t key_base_count_ = 0;
     size_t identical_redefinitions_ = 0;
+
+    // flat_value_semantics() cache + recursion internals (class_registry.cpp)
+    mutable bool flat_value_cached_ = false;
+    mutable uint64_t flat_value_epoch_ = 0;
+    bool flat_value_semantics_impl(std::vector<const class_definition*>& in_progress) const;
+    bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
     void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref) {
         has_property_getters_ = false;

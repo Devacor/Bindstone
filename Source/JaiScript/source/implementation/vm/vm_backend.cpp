@@ -7693,6 +7693,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 	if (!register_result) {
 		return register_result;
 	}
+	engine_->bump_class_definition_epoch();
 	detail::warn_shadowed_handle_builtins(*engine_, *class_def);
 
 	global_env->define(class_var_id, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_, false));

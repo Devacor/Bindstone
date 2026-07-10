@@ -10861,6 +10861,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     if (!register_result) {
         return register_result;
     }
+    eng->bump_class_definition_epoch();
     detail::warn_shadowed_handle_builtins(*eng, *class_def);
 
     // Store the class definition in a special variable for later retrieval

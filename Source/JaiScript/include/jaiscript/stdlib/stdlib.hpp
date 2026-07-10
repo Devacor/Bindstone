@@ -23,7 +23,7 @@ namespace stdlib {
     }
     
     // Overload for shared_ptr convenience
-    inline void register_all(std::shared_ptr<engine> eng_ptr) {
+    inline void register_all(const std::shared_ptr<engine>& eng_ptr) {
         register_all(*eng_ptr);
     }
 

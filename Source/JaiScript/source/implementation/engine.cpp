@@ -775,6 +775,10 @@ struct engine::implementation {
     bool jaibite_cache_enabled = true;
     size_t jaibite_cache_write_failures_ = 0;
 
+    // Class-shape cache validity (engine::class_definition_epoch): starts at 1 so a
+    // cache initialized to epoch 0 always misses its first query.
+    uint64_t class_definition_epoch_ = 1;
+
     // Empty result = caching inactive for this source (a .jaibite loaded as source
     // must never overwrite itself).
     static std::filesystem::path jaibite_sibling_path(const std::string& sourcePath) {
@@ -2474,6 +2478,14 @@ class_registry& engine::get_class_registry() {
     return impl->class_registry_;
 }
 
+uint64_t engine::class_definition_epoch() const {
+    return impl->class_definition_epoch_;
+}
+
+void engine::bump_class_definition_epoch() {
+    ++impl->class_definition_epoch_;
+}
+
 bool engine::throw_on_overflow() const {
     return kCheckedOverflow;  // compile-time policy (interpreter.hpp)
 }
@@ -2545,6 +2557,14 @@ detail::parallel_engine_state& engine::parallel_state() {
 
 void engine::parallel_thread_count(size_t workers) {
     parallel_state().thread_count_override = workers;
+}
+
+void engine::allow_unsafe_parallel(bool allowed) {
+    parallel_state().allow_unsafe = allowed;
+}
+
+bool engine::allow_unsafe_parallel() const {
+    return impl->parallel_ && impl->parallel_->allow_unsafe;
 }
 
 size_t engine::parallel_thread_count() const {

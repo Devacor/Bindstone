@@ -644,6 +644,7 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
     this_object_ = script_value::make_null(nullptr);
     class_def_.reset();
     access_context_ = nullptr;
+    vm_pinned_scope_ = false;
     bound_method_storage_ = script_value::make_null(nullptr);
 }
 
@@ -667,6 +668,7 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
     this_object_ = std::move(this_obj);
     class_def_.reset();
     access_context_ = nullptr;
+    vm_pinned_scope_ = false;
     bound_method_storage_ = script_value::make_null(nullptr);
 }
 
@@ -690,6 +692,7 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
     this_object_ = script_value::make_null(nullptr);
     class_def_ = class_def;
     access_context_ = class_def_.get();
+    vm_pinned_scope_ = false;
     bound_method_storage_ = script_value::make_null(nullptr);
 }
 

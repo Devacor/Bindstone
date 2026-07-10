@@ -60,6 +60,12 @@ struct script_method_dispatch {
     // call (hot reload). mutable: filled through the const target<>() pointer.
     mutable std::shared_ptr<void> body_cache;
     mutable const void* body_cache_key = nullptr;
+    // vm sticky method scope: ONE persistent method env (parent = the engine's global
+    // env) reused across calls when the compiled body proves chunk::method_env_reusable
+    // and the env is idle (use_count()==1; recursion/reentry falls back to the pooled
+    // path). Function-value copies share the underlying dispatcher storage, so this slot
+    // is per-method like body_cache. The interpreter ignores it.
+    mutable std::shared_ptr<environment> backend_scope_env;
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
 };
 

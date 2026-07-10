@@ -147,6 +147,18 @@ namespace jai {
             bound_method_storage_ = script_value::make_null(static_cast<engine*>(nullptr));
         }
 
+        // Sticky method-scope rebind (vm fast path): swap the receiver on a persistent
+        // per-dispatch method env between calls. Deliberately NO epoch bump - 'this' is
+        // never memoized by the vm lookup caches (vm_storage_lookup marks it uncacheable)
+        // and nothing name-resolvable changed.
+        void rebind_method_this(script_value this_obj) { this_object_ = std::move(this_obj); }
+
+        // vm ip-cache pin: identity+epoch of this env are stable across calls (persistent
+        // method scope parented on the global env), so env_lookup_cached may memoize
+        // against it exactly like the global env itself.
+        bool vm_pinned_scope() const noexcept { return vm_pinned_scope_; }
+        void set_vm_pinned_scope(bool pinned) noexcept { vm_pinned_scope_ = pinned; }
+
         // Static method environment accessors (only valid when kind == static_method)
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
 
@@ -249,6 +261,7 @@ namespace jai {
         // pooled-env reset paths null it so a recycled env never leaks a stale context.
         class_definition* access_context_ = nullptr;
         uint64_t local_epoch_ = 0;   // generation serial; 0 = never cache (see local_epoch())
+        bool vm_pinned_scope_ = false;   // see vm_pinned_scope(); reset paths clear it
 
         // Storage for bound methods (used by method and static_method kinds)
         mutable script_value bound_method_storage_;
@@ -355,7 +368,13 @@ namespace jai {
         size_t local_count() const noexcept { return locals.size(); }
 
         void set_this(script_value this_obj) {
-            this_object_ptr = std::make_unique<script_value>(std::move(this_obj));
+            // Reused frames keep the allocation (the vm's pooled records null the VALUE on
+            // pop, not the pointer) - one heap round trip per method call saved
+            if (this_object_ptr) {
+                *this_object_ptr = std::move(this_obj);
+            } else {
+                this_object_ptr = std::make_unique<script_value>(std::move(this_obj));
+            }
             is_method = true;
         }
 

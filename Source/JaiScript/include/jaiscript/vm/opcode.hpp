@@ -131,6 +131,10 @@ namespace jai::vm {
     inline constexpr uint32_t store_flag_ref_alias = 4;  // target names a reference decl (ref param /
                                                          // auto& decl): a cell in the slot stores THROUGH
                                                          // instead of writing the cell as the variable
+    inline constexpr uint32_t store_flag_type_provable = 8; // parse-proven typed slot store
+                                                         // (assignment_expr::typed_store_provable):
+                                                         // exec_store may skip type enforcement after
+                                                         // its runtime type-tag guard confirms
 
     // op_compound_store c layout: low 3 bits = kind, upper bits = flags
     inline constexpr uint32_t compound_kind_mask = 0x7;

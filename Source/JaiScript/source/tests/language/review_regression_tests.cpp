@@ -837,6 +837,249 @@ public:
             )");
             check_eq(std::string("2|9|2"), r.as_string());
         });
+
+        // ---- Decl fast path (variable_decl::decl_fast_flags): slot decls of matching
+        // scalar payloads store without enforce/clone/homogeneity. These pin the
+        // semantics the fast path must preserve on BOTH backends; the mismatch shapes
+        // must keep falling through to the full path. ----
+        test("decl_fast_typed_conversion_still_applies", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)4, e->execute("auto f() { int d = 4.7; return d; } f();").as_int());
+            check_near(5.0, e->execute("auto g() { float x = 5; return x; } g();").as_float(), 1e-9);
+        });
+        test("decl_fast_typed_mismatch_still_errors", [this]() {
+            auto e = make_engine();
+            check_throws([&]() { e->execute(R"(auto f() { int x = "s"; return x; } f();)"); });
+        });
+        test("decl_fast_var_stays_dynamic", [this]() {
+            auto e = make_engine();
+            check_eq(std::string("str"), e->execute(R"(auto f() { var v = 5; v = "str"; return v; } f();)").as_string());
+            // var decl of a scalar must be tagged 'any', not the payload type
+            check_near(6.5, e->execute("auto g() { var q = 5; q = 6.5; return q; } g();").as_float(), 1e-9);
+        });
+        test("decl_fast_auto_locks_inferred_type", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)6, e->execute("auto f() { auto a = 5; a = 6; return a; } f();").as_int());
+            check_throws([&]() { e->execute(R"(auto f() { auto a = 5; a = "s"; return a; } f();)"); });
+        });
+        test("decl_fast_element_init_value_copies", [this]() {
+            auto e = make_engine();
+            // element read arrives as a reference wrapper: the decl must store the
+            // VALUE (fast path bails, full path derefs + clones), never alias
+            auto r = e->execute(R"(
+                auto f() {
+                    var arr = [1, 2, 3];
+                    int total = 0;
+                    for (int i = 0; i < 3; ++i) {
+                        int e = arr[i];
+                        e = e + 90;
+                        total += e;
+                    }
+                    return arr[0] + arr[1] + arr[2] + total;
+                }
+                f();
+            )");
+            check_eq((int64_t)282, r.as_int());   // elements unchanged (6) + 91+92+93
+        });
+        test("decl_fast_typed_from_local_no_alias", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)57, e->execute("auto f() { int a = 5; int b = a; b = 7; return a * 10 + b; } f();").as_int());
+        });
+        test("decl_fast_loop_decls", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() {
+                    int total = 0;
+                    for (int i = 0; i < 100; ++i) {
+                        int x = i + 1;
+                        var y = x * 2;
+                        total += y;
+                    }
+                    return total;
+                }
+                f();
+            )");
+            check_eq((int64_t)10100, r.as_int());
+        });
+        test("decl_fast_float_bool_char_decls", [this]() {
+            auto e = make_engine();
+            check_near(3.0, e->execute(R"(
+                auto f() {
+                    float acc = 0.0;
+                    for (int i = 0; i < 4; ++i) {
+                        float h = i * 0.5;
+                        acc += h;
+                    }
+                    return acc;
+                }
+                f();
+            )").as_float(), 1e-9);
+            // bool from comparison takes the fast path; bool from int still converts (truthy)
+            check_eq((int64_t)3, e->execute(R"(
+                auto g() {
+                    bool b = 1 == 1;
+                    bool c = 5;
+                    int r = 0;
+                    if (b) { r += 1; }
+                    if (c) { r += 2; }
+                    return r;
+                }
+                g();
+            )").as_int());
+            check(e->execute("auto h() { char c = 'x'; return c == 'x'; } h();").as_bool());
+            check_eq((int64_t)1, e->execute("auto k() { int a = true; return a; } k();").as_int());
+        });
+        test("decl_fast_shared_weak_decls_unaffected", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                class P { int v = 1; }
+                auto f() {
+                    shared_ptr<P> a = P();
+                    var b = a;
+                    b.v = 7;
+                    weak_ptr<P> w = a;
+                    int alive = 0;
+                    if (!w.expired()) { alive = 1; }
+                    return a.v * 10 + alive;
+                }
+                f();
+            )");
+            check_eq((int64_t)71, r.as_int());
+        });
+        test("decl_fast_ref_escaping_decl_still_boxed", [this]() {
+            auto e = make_engine();
+            // x is escape-marked (bare-identifier ref-param argument): the decl must
+            // still box into a cell so the callee's ref writes land in x - the decl
+            // fast path must bail on ref_escaping. (NOTE: `auto& r = <plain local>` and
+            // slot-local [&] captures are PRE-EXISTING gaps on the pre-fan-out engine -
+            // "Cannot take reference of undefined variable" / silent value capture, the
+            // latter a documented parked stage-D item - so the escape pin uses the
+            // ref-param shape, the one escape route that works for slot locals today.)
+            check_eq((int64_t)42, e->execute(
+                "function set42(int& t) { t = 42; } function f() -> int { int x = 1; set42(x); return x; } f();").as_int());
+        });
+    }
+};
+
+// Reference-capture semantics (Dev ruling 2026-07-09: C++ lambda semantics ARE the
+// contract - "[&] needs to work or all ref captures fail"). These were silently broken
+// for SLOT-resident function locals (pre-cells "capture by value, by-ref is UAF"
+// compromises that the cell model obsoleted): [&]/[&x] captured copies, and
+// `auto& r = <local>` errored "undefined variable" (escape marker boxes the SLOT, the
+// binder searched only the env).
+class ref_capture_semantics_tests : public suite {
+public:
+    ref_capture_semantics_tests() : suite("Ref Capture Semantics") {}
+
+    void forge_tests() override {
+        test("default_by_ref_capture_writes_through", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)42, e->execute(
+                "function f() -> int { int x = 1; auto g = [&]() { x = 42; }; g(); return x; } f();").as_int());
+        });
+
+        test("explicit_by_ref_capture_writes_through", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)42, e->execute(
+                "function f() -> int { int x = 1; auto g = [&x]() { x = 42; }; g(); return x; } f();").as_int());
+        });
+
+        test("by_value_capture_still_copies", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)1, e->execute(
+                "function f() -> int { int x = 1; auto g = [=]() { x = 42; }; g(); return x; } f();").as_int());
+            check_eq((int64_t)1, e->execute(
+                "function f2() -> int { int x = 1; auto g = [x]() { x = 42; }; g(); return x; } f2();").as_int());
+        });
+
+        test("mixed_capture_modes", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function f() -> int {
+                    int a = 1;
+                    int b = 10;
+                    auto g = [=, &a]() { a = 7; b = 70; };
+                    g();
+                    return a * 100 + b;   // a written through, b untouched
+                }
+                f();
+            )");
+            check_eq((int64_t)710, r.as_int());
+        });
+
+        test("ref_capture_reads_live_value", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function f() -> int {
+                    int x = 5;
+                    auto g = [&]() -> int { return x; };
+                    x = 9;
+                    return g();   // by-ref sees the CURRENT value, not creation-time
+                }
+                f();
+            )");
+            check_eq((int64_t)9, r.as_int());
+        });
+
+        test("escaping_ref_capture_outlives_frame", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function make() -> auto {
+                    int n = 0;
+                    return [&]() -> int { n = n + 1; return n; };
+                }
+                auto counter = make();
+                counter();
+                counter();
+                counter();
+            )");
+            check_eq((int64_t)3, r.as_int());
+        });
+
+        test("two_closures_share_one_ref_capture", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function f() -> int {
+                    int shared = 0;
+                    auto inc = [&]() { shared = shared + 1; };
+                    auto dec = [&]() { shared = shared - 10; };
+                    inc(); inc(); dec();
+                    return shared;
+                }
+                f();
+            )");
+            check_eq((int64_t)-8, r.as_int());
+        });
+
+        test("ref_decl_of_plain_local_binds", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function f() -> int {
+                    int x = 1;
+                    auto& r = x;
+                    r = 42;
+                    int seen = x;
+                    x = 7;
+                    return seen * 100 + r;   // alias wrote 42 into x; x's write shows through r
+                }
+                f();
+            )");
+            check_eq((int64_t)4207, r.as_int());
+        });
+
+        test("typed_ref_decl_of_local_converts_through", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                function f() -> int {
+                    int x = 1;
+                    auto& r = x;
+                    r = 6.9;         // store through the alias into an int-declared cell
+                    return x;
+                }
+                f();
+            )");
+            check_eq((int64_t)6, r.as_int());
+        });
     }
 };
 
@@ -1323,11 +1566,202 @@ public:
     }
 };
 
+// Typed-slot store proof (assignment_expr::typed_store_provable + store_flag_type_provable):
+// provably-matching int/float stores skip enforcement in both backends; everything these
+// tests pin is the OLD behavior that must survive the skip.
+class typed_store_proof_tests : public suite {
+public:
+    typed_store_proof_tests() : suite("Typed Store Proof") {}
+
+    void forge_tests() override {
+        // Provable store must not strip the slot's type lock: the float store AFTER the
+        // provable int store still converts.
+        test("provable_store_keeps_type_lock", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto {
+                    int x = 0;
+                    x = 5;
+                    x = 4.7;
+                    return x;
+                }
+                f();
+            )");
+            check_eq((int64_t)4, r.as_int());
+        });
+        test("float_slot_int_rhs_still_converts", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto {
+                    float v = 0.0;
+                    v = 2.5;
+                    v = 3;
+                    return v / 2;
+                }
+                f();
+            )");
+            check_near(1.5, r.as_float(), 0.0001);   // 3 stored as float, / stays float
+        });
+        test("typed_mismatch_still_errors", [this]() {
+            auto e = make_engine();
+            check_throws([&]() {
+                e->execute(R"(
+                    auto f() -> auto { int x = 0; x = 5; x = "nope"; return x; }
+                    f();
+                )");
+            });
+        });
+        test("provable_int_loop_correct", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto {
+                    int total = 0;
+                    for (int i = 0; i < 100; i = i + 1) { total = total + i; }
+                    return total;
+                }
+                f();
+            )");
+            check_eq((int64_t)4950, r.as_int());
+        });
+        test("provable_float_loop_correct", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto {
+                    float acc = 0.0;
+                    for (int i = 0; i < 10; i = i + 1) { acc = acc + 0.5; }
+                    return acc;
+                }
+                f();
+            )");
+            check_near(5.0, r.as_float(), 0.0001);
+        });
+        // Mixed int/float RHS is NOT provable: the truncating conversion still runs
+        // per iteration (x = trunc(x + 1.5) advances by exactly 1).
+        test("unprovable_mixed_rhs_converts_each_store", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto {
+                    int x = 0;
+                    for (int i = 0; i < 10; i = i + 1) { x = x + 1.5; }
+                    return x;
+                }
+                f();
+            )");
+            check_eq((int64_t)10, r.as_int());
+        });
+        // Comparison RHS is bool, never provable for an int slot: bool->int conversion holds.
+        test("bool_rhs_still_converts", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto { int x = 0; x = (1 < 2); return x; }
+                f();
+            )");
+            check_eq((int64_t)1, r.as_int());
+        });
+        // var/auto declarations never prove: var stays dynamic after an int store,
+        // auto stays locked to its inferred type.
+        test("var_stays_dynamic_after_int_store", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto { var v = 0; v = 1; v = "s"; return v; }
+                f();
+            )");
+            check_eq(std::string("s"), r.as_string());
+        });
+        test("auto_stays_locked_after_int_store", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto { auto a = 1; a = 2; a = 3.9; return a; }
+                f();
+            )");
+            check_eq((int64_t)3, r.as_int());
+        });
+        // Ref-alias stores (store_flag_ref_alias) keep store-through; provable stores
+        // through the escape-boxed cell stay alias-visible and keep the type lock.
+        test("ref_alias_and_cell_stores_unaffected", [this]() {
+            auto e = make_engine();
+            // Ref-PARAM alias (the working escape shape; `auto& r = <plain local>` is a
+            // pre-existing engine gap): typed stores through the alias and through the
+            // origin must interleave correctly, incl. the float->int conversion.
+            auto r = e->execute(R"(
+                function poke(int& t) -> int {
+                    t = 5;
+                    t = 6.9;
+                    return t;
+                }
+                auto f() -> auto {
+                    int x = 1;
+                    auto seen = poke(x);
+                    x = 42;
+                    return seen * 100 + x;
+                }
+                f();
+            )");
+            check_eq((int64_t)642, r.as_int());   // alias saw the converted 6; x ends 42
+        });
+        // §12.1: cpp-bound global targets keep write-through (globals have no slot, so
+        // stores to them are never stamped).
+        test("cpp_bound_global_write_through_unaffected", [this]() {
+            auto e = make_engine();
+            int64_t bound = 1;
+            e->add_global_ref("bound", bound);
+            e->execute(R"(
+                auto f() -> auto { bound = 7; return bound; }
+                f();
+            )");
+            check_eq((int64_t)7, bound);
+        });
+        // Scope exactness: after an inner block's `int x` expires, a same-named store
+        // targets the global var - which must stay dynamic (no stolen proof).
+        test("expired_block_shadow_never_locks_outer_var", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                var x = 0;
+                auto f() -> auto { { int x = 1; } x = 3; return 0; }
+                f();
+                auto after = x;
+                x = "s";
+                to_string(after) + x;
+            )");
+            check_eq(std::string("3s"), r.as_string());
+        });
+        // math:: intrinsic classifications: int-returning and float-returning stores.
+        test("math_intrinsic_classified_stores", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto {
+                    int i = 0;
+                    i = math::ifloor(2.9);
+                    float g = 0.0;
+                    g = math::sqrt(9.0);
+                    return i + g;
+                }
+                f();
+            )");
+            check_near(5.0, r.as_float(), 0.0001);
+        });
+        // Compound stores are untouched by the proof: += still converts the promoted result.
+        test("compound_store_conversion_unaffected", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                auto f() -> auto { int x = 1; x += 2.5; return x; }
+                f();
+            )");
+            check_eq((int64_t)3, r.as_int());
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 using review_regression_tests = jai::foundry::tests::review_regression_tests;
 FOUNDRY_REGISTER(review_regression_tests)
+using typed_store_proof_tests = jai::foundry::tests::typed_store_proof_tests;
+FOUNDRY_REGISTER(typed_store_proof_tests)
 using math_intrinsics_tests = jai::foundry::tests::math_intrinsics_tests;
 FOUNDRY_REGISTER(math_intrinsics_tests)
 using element_read_elision_tests = jai::foundry::tests::element_read_elision_tests;
 FOUNDRY_REGISTER(element_read_elision_tests)
+using ref_capture_semantics_tests = jai::foundry::tests::ref_capture_semantics_tests;
+FOUNDRY_REGISTER(ref_capture_semantics_tests)

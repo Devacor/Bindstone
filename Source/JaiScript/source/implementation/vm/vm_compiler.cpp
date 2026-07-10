@@ -143,6 +143,85 @@ namespace {
 		return false;
 	}
 
+	// Sticky-method-scope gate (chunk::method_env_reusable): the env stays semantically a
+	// real per-call method env, so ops may CONSULT it freely — what disqualifies a body is
+	// anything that parks state in it (unslotted decls, scope pushes, includes/class decls)
+	// or captures its identity beyond the call (closures, ref decls, try records, yields).
+	// Fail-closed like body_needs_frame_env; member-access ops are safe here because 'this'
+	// and the access context are re-stamped on every call.
+	bool method_body_env_reusable(const chunk& body) {
+		for (const auto& ins : body.code) {
+			switch (ins.op) {
+			case opcode::op_const:
+			case opcode::op_null:
+			case opcode::op_true:
+			case opcode::op_false:
+			case opcode::op_pop:
+			case opcode::op_dup:
+			case opcode::op_to_bool:
+			case opcode::op_load:
+			case opcode::op_store:
+			case opcode::op_compound_store:
+			case opcode::op_incdec:
+			case opcode::op_binary:
+			case opcode::op_binary_fused:
+			case opcode::op_index:
+			case opcode::op_index_assign:
+			case opcode::op_index_compound:
+			case opcode::op_index_store:
+			case opcode::op_index_compound_fused:
+			case opcode::op_math:
+			case opcode::op_unary:
+			case opcode::op_array:
+			case opcode::op_map:
+			case opcode::op_jump:
+			case opcode::op_jump_if_false:
+			case opcode::op_jump_if_true:
+			case opcode::op_fused_cmp_jump:
+			case opcode::op_compound_fused:
+			case opcode::op_loop_back:
+			case opcode::op_call:
+			case opcode::op_probe_callee:
+			case opcode::op_call_from_scratch:
+			case opcode::op_return:
+			case opcode::op_return_ident:
+			case opcode::op_return_binary:
+			case opcode::op_call_method:
+			case opcode::op_this:
+			case opcode::op_super:
+			case opcode::op_from_this:
+			case opcode::op_null_guard:
+			case opcode::op_throw:
+			case opcode::op_case_eq:
+			case opcode::op_cfor_prep:
+			case opcode::op_cfor_back:
+			case opcode::op_cfor_pop:
+			case opcode::op_halt:
+			case opcode::op_get_member:
+			case opcode::op_get_static:
+			case opcode::op_set_member:
+			case opcode::op_set_static:
+			case opcode::op_member_compound:
+			case opcode::op_new:
+				break;
+			case opcode::op_decl_var: {
+				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
+				if (decl->slot_index == SIZE_MAX) return false;
+				break;
+			}
+			case opcode::op_destructure: {
+				for (const auto& name : body.destructure_protos[ins.a].names) {
+					if (name.second == SIZE_MAX) return false;
+				}
+				break;
+			}
+			default:
+				return false;
+			}
+		}
+		return true;
+	}
+
 	inline uint32_t compound_kind_for(token_type op) {
 		switch (op) {
 		case token_type::plus_equal: return compound_plus;
@@ -401,6 +480,8 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	}
 	emit(opcode::op_halt);
 	result->needs_frame_env = body_needs_frame_env(*result);
+	// The lazy safe list is a strict subset of the sticky list, so env-free bodies qualify
+	result->method_env_reusable = !result->needs_frame_env || method_body_env_reusable(*result);
 	chunk_ = nullptr;
 	return result;
 }
@@ -1135,6 +1216,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 			uint32_t flags = store_flag_no_result;
 			if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
 			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
+			else if (assign->typed_store_provable) flags |= store_flag_type_provable;
 			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 		} else {
 			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
@@ -1384,6 +1466,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 		if (!compound) {
 			uint32_t flags = is_lvalue_shaped(expr->value.get()) ? store_flag_rhs_lvalue : 0;
 			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
+			else if (expr->typed_store_provable) flags |= store_flag_type_provable;
 			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 		} else {
 			uint32_t kind;

@@ -1449,11 +1449,12 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	if (cache_slot == SIZE_MAX) {
 		return nullptr;
 	}
-	// Top-level frames, or call frames running directly in the global env (lazy-elided
-	// plain functions - fib-style recursion): those environments are stable, so entries
-	// actually hit. Other call frames churn envs (binds/resets bump the epoch), which
-	// made the miss-path provenance work a pure tax on call-heavy code.
-	if (!f.top_level && environment_.get() != cached_global_env_) {
+	// Top-level frames, call frames running directly in the global env (lazy-elided
+	// plain functions - fib-style recursion), or a pinned sticky method scope (persistent
+	// per-dispatch env parented on the global env): those environments are stable, so
+	// entries actually hit. Other call frames churn envs (binds/resets bump the epoch),
+	// which made the miss-path provenance work a pure tax on call-heavy code.
+	if (!f.top_level && environment_.get() != cached_global_env_ && !environment_->vm_pinned_scope()) {
 		return nullptr;   // callers fall through to their original full lookup
 	}
 	auto& cache = f.code->env_lookup_cache;
@@ -2964,6 +2965,20 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 					storage = holder->cell();
 				} else {
 					JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
+					stack_.push_back(std::move(value));
+					return {};
+				}
+			}
+			// Parse-proven typed store: an IDENTICAL interned type tag (raw pointer
+			// compare - int/float tags are engine-canonical) makes enforcement a
+			// provable no-op, and a plain int/float payload makes the assignment
+			// kernel a plain copy. Guarded at runtime, so a mis-stamp just falls
+			// through. (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr.)
+			if (ins.c & store_flag_type_provable) {
+				const size_t vi = value.raw_storage_index();
+				if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) &&
+				    storage->get_type_info().get() == value.get_type_info().get()) {
+					*storage = value;
 					stack_.push_back(std::move(value));
 					return {};
 				}
@@ -5026,6 +5041,38 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 	const bool has_init = ins.b != 0;
 	const bool lvalue_init = ins.c != 0;
 
+	// Decl fast path (construction-stamped flags): a scalar payload whose storage
+	// index already matches the declared type stores straight into the slot -
+	// enforce/clone/homogeneity are provably identity for int/float/bool/char
+	// (clone of a scalar is a copy, so lvalue_init is irrelevant here). Anything
+	// else - references, mismatched payloads, env-resident decls, escape-boxed
+	// decls - falls through to the untouched full path below.
+	// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
+	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
+	    has_init && !decl->ref_escaping &&
+	    decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+		script_value& top = stack_.back();
+		const size_t vi = top.raw_storage_index();
+		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+		    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
+			const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
+			const bool matches = bt == script_value_type::jai_any_type ||
+				(vi == script_value::TYPEID_INT && bt == script_value_type::jai_int_type) ||
+				(vi == script_value::TYPEID_FLOAT && bt == script_value_type::jai_float_type) ||
+				(vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
+				(vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
+			if (matches) {
+				script_value value = std::move(top);
+				stack_.pop_back();
+				if (decl->type) {
+					value.set_type_info(decl->type);
+				}
+				frame_slot_set(f, decl->slot_index, std::move(value));
+				return {};
+			}
+		}
+	}
+
 	const bool is_weak_ptr = decl->type && decl->type->base_type == script_value_type::jai_weak_ptr_type;
 	const bool is_shared_ptr = decl->type && decl->type->base_type == script_value_type::jai_shared_ptr_type;
 
@@ -5277,8 +5324,20 @@ checked_result<void> vm_backend::exec_decl_ref_ident(frame& f, const vm_instruct
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	const uint64_t target_sym = f.code->symbols[ins.b];
 
-	// Env-only lookup (interpreter parity: reference decls never consult frame slots)
-	script_value* targetPtr = environment_->get_value_ptr(target_sym);
+	// SLOT-first resolution (Dev ruling 2026-07-09; KEEP BYTE-PARALLEL with the
+	// interpreter's ref-decl branch): plain function locals live in frame slots -
+	// the escape marker cell-boxes the SLOT, so an env-only lookup made
+	// `auto& r = x` error "undefined variable" for every slot-resident local.
+	script_value* targetPtr = nullptr;
+	if (decl->initializer && decl->initializer->get_type() == node_type::identifier_expr) {
+		const size_t target_slot = static_cast<identifier_expr*>(decl->initializer.get())->slot_index;
+		if (target_slot != SIZE_MAX && f.locals && !f.top_level) {
+			targetPtr = frame_slot(f, target_slot);
+		}
+	}
+	if (!targetPtr) {
+		targetPtr = environment_->get_value_ptr(target_sym);
+	}
 	if (!targetPtr) {
 		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
 	}
@@ -5842,8 +5901,15 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 						if (sym == var_id) {
 							script_value* slot_val = frame_slot(f, slot);
 							if (slot_val) {
-								// By-ref of a stack slot is lifetime-unsafe for escaping closures
-								captureEnv->define(var_id, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+								if (capture_by_ref_default) {
+									// Cell share (escape-legal, C++ [&] semantics): the slot
+									// boxes in place and the capture shares the cell - writes
+									// land in the original local, the cell outlives the frame
+									// (share_env_ref also demotes counted-for cached pointers)
+									captureEnv->define(var_id, share_env_ref(*slot_val));
+								} else {
+									captureEnv->define(var_id, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+								}
 							}
 							break;
 						}
@@ -5878,7 +5944,13 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 			}
 
 			if (capture_from_slot) {
-				captureEnv->define(capture.symbol_id, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+				if (capture.by_reference) {
+					// Cell share (escape-legal, C++ [&x] semantics): the slot boxes in
+					// place; the closure and the original local share the cell
+					captureEnv->define(capture.symbol_id, share_env_ref(*slot_val));
+				} else {
+					captureEnv->define(capture.symbol_id, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+				}
 			} else if (capture.by_reference) {
 				script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
 				if (targetPtr) {
@@ -5903,7 +5975,13 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 				}
 				script_value* slot_val = frame_slot(f, slot);
 				if (slot_val) {
-					captureEnv->define(sym, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+					if (capture_by_ref_default) {
+						// C++ [&] semantics: share the cell (slot boxes in place)
+						captureEnv->define(sym, share_env_ref(*slot_val));
+					} else {
+						// Automatic / [=] capture of a local: by value
+						captureEnv->define(sym, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+					}
 				}
 			}
 		}
@@ -9484,7 +9562,33 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		// definition_env with the receiver bound; the wrapper env and its define(this)
 		// are bypassed dead weight
 		rec.locals.set_this(receiver);
-		environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
+		// Sticky method scope: bodies that provably never park state in the env
+		// (chunk::method_env_reusable) run in ONE persistent env per dispatcher, re-bound
+		// to the receiver each call - no pool round trip, no reset/epoch churn, and the
+		// env's lookup caches stay warm across calls. Gated to global-parented dispatchers
+		// (global redefinition is in-place into stable deque storage, so cached pointers
+		// never go stale; workers null cached_global_env_ and never match) and an idle env
+		// (use_count > 1 = recursion/reentry within this dispatcher - pooled fallback).
+		// The pop path needs no special case: clear_this_on_frame_exit still nulls the
+		// receiver, and release_scope_env's use_count guard skips pooling (the dispatcher
+		// still holds the env).
+		if (body_chunk->method_env_reusable &&
+		    dispatch.definition_env.get() == cached_global_env_) {
+			auto& scope = dispatch.backend_scope_env;
+			if (scope && scope.use_count() == 1) {
+				scope->rebind_method_this(std::move(receiver));
+				environment_ = scope;
+			} else if (!scope) {
+				scope = std::make_shared<environment>(dispatch.definition_env, env_symbolizer_, std::move(receiver));
+				scope->set_access_context(dispatch.cls.get());
+				scope->set_vm_pinned_scope(true);
+				environment_ = scope;
+			} else {
+				environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
+			}
+		} else {
+			environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
+		}
 	} catch (...) {
 		rec.callee_pin = make_null();
 		rec.return_type = nullptr;
@@ -9587,8 +9691,10 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	}
 	// Scrub only what this frame actually dirtied (function frames leave method/static
 	// metadata untouched, and their callee pin lives on the stack, not the record)
-	if (rec.locals.this_object_ptr) {
-		rec.locals.this_object_ptr.reset();
+	if (rec.locals.is_method) {
+		// Null the receiver but KEEP the allocation: records are pooled and set_this
+		// reuses it (is_method stays the validity gate for get_this consumers)
+		*rec.locals.this_object_ptr = make_null();
 		rec.locals.is_method = false;
 	}
 	if (rec.locals.static_class_def) {

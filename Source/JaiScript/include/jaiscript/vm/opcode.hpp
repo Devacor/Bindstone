@@ -121,6 +121,15 @@ namespace jai::vm {
         op_parallel_for,    // a=node index (parallel_for_stmt); pops the container, runs the
                             // in-place fork-join region (detail::run_parallel_for)
 
+        op_binary_fused_decl,  // a=fused_binary_dst_protos index: BINARY_FUSED whose result
+                               // initializes a declaration directly (dest-addressed, flatstack
+                               // stage 6) - scalar slot decls land via frame_slot_set with no
+                               // push and no second dispatch; every other decl shape pushes and
+                               // runs exec_decl_var verbatim (semantics by construction)
+        op_binary_fused_store, // a=fused_binary_dst_protos index: BINARY_FUSED whose result
+                               // stores to an identifier - computes, then runs op_store's exact
+                               // post-pop tail (shared helper) with no push/pop round-trip
+
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
         op_halt,
     };
@@ -253,6 +262,8 @@ namespace jai::vm {
             case opcode::op_call_from_scratch: return "CALL_FROM_SCRATCH";
             case opcode::op_error: return "ERROR";
             case opcode::op_parallel_for: return "PARALLEL_FOR";
+            case opcode::op_binary_fused_decl: return "BINARY_FUSED_DECL";
+            case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

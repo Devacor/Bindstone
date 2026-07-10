@@ -154,6 +154,18 @@ namespace jai::vm {
         uint32_t kind_flags = 0;        // compound kind | compound_flag_*
     };
 
+    // op_binary_fused_decl / op_binary_fused_store: a fused binary whose result lands in
+    // a compile-time-known sink with no push and no second dispatch (dest-addressed,
+    // flatstack stage 6). decl mode uses node_index (the variable_decl); store mode uses
+    // symbol/slot/store flags exactly like op_store's instruction fields.
+    struct fused_binary_dst_proto {
+        uint32_t binary_proto = 0;      // fused_binary_protos index (the computation)
+        uint32_t node_index = k_invalid_u32;  // decl mode: chunk::nodes index of the variable_decl
+        uint32_t symbol = 0;            // store mode: chunk::symbols index
+        uint32_t slot = k_invalid_u32;  // store mode: target frame slot (k_invalid_u32 = env)
+        uint32_t flags = 0;             // store mode: store_flag_*; decl mode: b/c of op_decl_var
+    };
+
     struct chunk {
         std::vector<vm_instruction> code;
         // Lazily sized to 3*code.size(): role slots per ip (0=left/load, 1=fused right,
@@ -177,6 +189,7 @@ namespace jai::vm {
         std::vector<iter_proto> iter_protos;
         std::vector<fused_binary_proto> fused_binary_protos;
         std::vector<compound_fused_proto> compound_fused_protos;
+        std::vector<fused_binary_dst_proto> fused_binary_dst_protos;
         std::vector<counted_for_proto> counted_for_protos;
 
         // Default-argument expressions compiled per parameter (function-body chunks only)

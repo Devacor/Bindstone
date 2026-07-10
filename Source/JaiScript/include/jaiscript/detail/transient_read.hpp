@@ -292,11 +292,25 @@ namespace jai::detail {
                 case node_type::statement_decl:
                     walk_stmt(static_cast<statement_decl*>(s)->statement.get());
                     return;
-                case node_type::variable_decl:
-                    // Initializers stay unmarked: ref decls bind them, typed decls key off
-                    // the reference-init shape (interpreter/vm decl twins)
-                    walk_expr(static_cast<variable_decl*>(s)->initializer.get(), false);
+                case node_type::variable_decl: {
+                    // HARD-SCALAR declared types (int/float/bool/char - not auto/var)
+                    // consume the initializer as a VALUE in every outcome: a matching
+                    // scalar copies (copy IS clone), anything else converts to a fresh
+                    // value or errors before storing - no path can retain the un-cloned
+                    // payload, so the read is transient (the profiled dominant GLOOM
+                    // shape: `float d = ch[ci]` minted a holder the decl then dropped).
+                    // auto/var stay unmarked (they store heavy payloads as-is - an
+                    // un-cloned transient copy would alias the element); reference-typed
+                    // decls bind their initializer and compile via the decl_ref ops.
+                    auto* d = static_cast<variable_decl*>(s);
+                    const bool hard_scalar = d->type &&
+                        (d->type->base_type == script_value_type::jai_int_type ||
+                         d->type->base_type == script_value_type::jai_float_type ||
+                         d->type->base_type == script_value_type::jai_bool_type ||
+                         d->type->base_type == script_value_type::jai_char_type);
+                    walk_expr(d->initializer.get(), hard_scalar);
                     return;
+                }
                 case node_type::function_decl: {
                     auto* fd = static_cast<function_decl*>(s);
                     for (auto& p : fd->parameters) {

@@ -529,6 +529,16 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 		}
 		note_operand(p.rhs);   // bare-mode identifier rhs (binary-mode protos leave it invalid)
 	}
+	for (const auto& p : f->code->fused_binary_dst_protos) {
+		// dest-addressed binaries: decl mode names via the decl node, store mode via
+		// symbol+slot (their operands are fused_binary_protos entries, named above)
+		if (p.node_index != k_invalid_u32) {
+			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[p.node_index].get());
+			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
+		} else if (p.slot != k_invalid_u32 && p.symbol < f->code->symbols.size()) {
+			slot_names.emplace_back(p.slot, symbolizer_->get_string(f->code->symbols[p.symbol]));
+		}
+	}
 	for (const auto& p : f->code->iter_protos) {
 		if (p.slot != SIZE_MAX && p.var_symbol != UINT64_MAX) {
 			slot_names.emplace_back(p.slot, symbolizer_->get_string(p.var_symbol));
@@ -2877,10 +2887,17 @@ checked_result<void> vm_backend::exec_load(frame& f, const vm_instruction& ins) 
 }
 
 checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins) {
-	const uint64_t sym = f.code->symbols[ins.a];
-	const bool rhs_lvalue = (ins.c & store_flag_rhs_lvalue) != 0;
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
+	return store_popped_value(f, ins, std::move(value));
+}
+
+// The ONE identifier-store tail (everything op_store does after consuming its value),
+// shared verbatim by op_store and op_binary_fused_store (dest-addressed fused binaries)
+// so the two spellings cannot drift.
+checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
+	const uint64_t sym = f.code->symbols[ins.a];
+	const bool rhs_lvalue = (ins.c & store_flag_rhs_lvalue) != 0;
 
 	// Element/subscript reads arrive as reference wrappers (rhs-lvalue read shape);
 	// assignment consumes the VALUE - normalize like every other consumer
@@ -4050,7 +4067,15 @@ checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, 
 }
 
 checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
-	const fused_binary_proto& p = f.code->fused_binary_protos[ins.a];
+	return binary_fused_compute(f, ins.a, [this](script_value&& v) { stack_.push_back(std::move(v)); });
+}
+
+// The ONE fused-binary computation, sink-templated (flatstack stage 6): op_binary_fused
+// pushes; the dest-addressed variants land the result in a slot/decl with no push and
+// no second dispatch. One body, every sink - parity by construction.
+template <typename Sink>
+checked_result<void> vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink) {
+	const fused_binary_proto& p = f.code->fused_binary_protos[proto_index];
 	const token_type op = static_cast<token_type>(p.op);
 
 	std::optional<script_value> lscratch, rscratch;
@@ -4087,21 +4112,21 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 			const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
 			switch (op) {
-			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) return vm_int_overflow_v("Integer overflow in '+'"); stack_.push_back(script_value(rr, engine_)); return {}; }
-			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) return vm_int_overflow_v("Integer overflow in '-'"); stack_.push_back(script_value(rr, engine_)); return {}; }
-			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) return vm_int_overflow_v("Integer overflow in '*'"); stack_.push_back(script_value(rr, engine_)); return {}; }
+			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) return vm_int_overflow_v("Integer overflow in '+'"); sink(script_value(rr, engine_)); return {}; }
+			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) return vm_int_overflow_v("Integer overflow in '-'"); sink(script_value(rr, engine_)); return {}; }
+			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) return vm_int_overflow_v("Integer overflow in '*'"); sink(script_value(rr, engine_)); return {}; }
 			case token_type::slash:
 				if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-				{ script_int rr; if (!ints::try_div(a, b, rr)) return vm_int_overflow_v("Integer overflow in '/'"); stack_.push_back(script_value(rr, engine_)); return {}; }
+				{ script_int rr; if (!ints::try_div(a, b, rr)) return vm_int_overflow_v("Integer overflow in '/'"); sink(script_value(rr, engine_)); return {}; }
 			case token_type::percent:
 				if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-				stack_.push_back(script_value(ints::mod(a, b), engine_)); return {};
-			case token_type::less: stack_.push_back(script_value(a < b, engine_)); return {};
-			case token_type::less_equal: stack_.push_back(script_value(a <= b, engine_)); return {};
-			case token_type::greater: stack_.push_back(script_value(a > b, engine_)); return {};
-			case token_type::greater_equal: stack_.push_back(script_value(a >= b, engine_)); return {};
-			case token_type::equal_equal: stack_.push_back(script_value(a == b, engine_)); return {};
-			case token_type::bang_equal: stack_.push_back(script_value(a != b, engine_)); return {};
+				sink(script_value(ints::mod(a, b), engine_)); return {};
+			case token_type::less: sink(script_value(a < b, engine_)); return {};
+			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
+			case token_type::greater: sink(script_value(a > b, engine_)); return {};
+			case token_type::greater_equal: sink(script_value(a >= b, engine_)); return {};
+			case token_type::equal_equal: sink(script_value(a == b, engine_)); return {};
+			case token_type::bang_equal: sink(script_value(a != b, engine_)); return {};
 			default: break;
 			}
 		} else if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
@@ -4109,21 +4134,21 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 			const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(lp->unchecked_as_int()) : lp->unchecked_as_float();
 			const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(rp->unchecked_as_int()) : rp->unchecked_as_float();
 			switch (op) {
-			case token_type::plus: stack_.push_back(script_value(a + b, engine_)); return {};
-			case token_type::minus: stack_.push_back(script_value(a - b, engine_)); return {};
-			case token_type::star: stack_.push_back(script_value(a * b, engine_)); return {};
+			case token_type::plus: sink(script_value(a + b, engine_)); return {};
+			case token_type::minus: sink(script_value(a - b, engine_)); return {};
+			case token_type::star: sink(script_value(a * b, engine_)); return {};
 			case token_type::slash:
 				if (b == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-				stack_.push_back(script_value(a / b, engine_)); return {};
+				sink(script_value(a / b, engine_)); return {};
 			case token_type::percent:
 				if (b == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
-				stack_.push_back(script_value(std::fmod(a, b), engine_)); return {};
-			case token_type::less: stack_.push_back(script_value(a < b, engine_)); return {};
-			case token_type::less_equal: stack_.push_back(script_value(a <= b, engine_)); return {};
-			case token_type::greater: stack_.push_back(script_value(a > b, engine_)); return {};
-			case token_type::greater_equal: stack_.push_back(script_value(a >= b, engine_)); return {};
-			case token_type::equal_equal: stack_.push_back(script_value(a == b, engine_)); return {};
-			case token_type::bang_equal: stack_.push_back(script_value(a != b, engine_)); return {};
+				sink(script_value(std::fmod(a, b), engine_)); return {};
+			case token_type::less: sink(script_value(a < b, engine_)); return {};
+			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
+			case token_type::greater: sink(script_value(a > b, engine_)); return {};
+			case token_type::greater_equal: sink(script_value(a >= b, engine_)); return {};
+			case token_type::equal_equal: sink(script_value(a == b, engine_)); return {};
+			case token_type::bang_equal: sink(script_value(a != b, engine_)); return {};
 			default: break;
 			}
 		} else if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
@@ -4133,7 +4158,7 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 			if (!limits_->memory_charge(sizeof(script_value) + lp->unchecked_as_string().size() + rp->unchecked_as_string().size())) [[unlikely]] {
 				return detail::raise_memory_cap(*limits_);
 			}
-			stack_.push_back(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
+			sink(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
 			return {};
 		} else if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
 			// twin parity: bound operands keep this fused shape's zero-divisor error surface
@@ -4166,8 +4191,51 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 	if (!result) {
 		return result.error_value();
 	}
-	stack_.push_back(std::move(result.value()));
+	sink(std::move(result.value()));
 	return {};
+}
+
+checked_result<void> vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins) {
+	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
+	std::optional<script_value> computed;
+	JAISCRIPT_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
+	auto* decl = static_cast<variable_decl*>(f.code->nodes[dp.node_index].get());
+	// Scalar slot decls land directly - the exec_decl_var fast-path preconditions,
+	// KEPT IN SYNC with it. A fused-binary result is never a reference, so the
+	// deref leg is structurally absent here.
+	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
+	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+		const size_t vi = computed->raw_storage_index();
+		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+		    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
+			const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
+			const bool matches = bt == script_value_type::jai_any_type ||
+				(vi == script_value::TYPEID_INT && bt == script_value_type::jai_int_type) ||
+				(vi == script_value::TYPEID_FLOAT && bt == script_value_type::jai_float_type) ||
+				(vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
+				(vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
+			if (matches) {
+				if (decl->type) {
+					computed->set_type_info(decl->type);
+				}
+				frame_slot_set(f, decl->slot_index, std::move(*computed));
+				return {};
+			}
+		}
+	}
+	// Every other decl shape: push and run op_decl_var verbatim (semantics by
+	// construction; a fused-binary result is a temporary, so lvalue_init = 0)
+	stack_.push_back(std::move(*computed));
+	const vm_instruction decl_ins{opcode::op_decl_var, dp.node_index, 1, 0};
+	return exec_decl_var(f, decl_ins);
+}
+
+checked_result<void> vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& ins) {
+	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
+	std::optional<script_value> computed;
+	JAISCRIPT_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
+	const vm_instruction store_ins{opcode::op_store, dp.symbol, dp.slot, dp.flags};
+	return store_popped_value(f, store_ins, std::move(*computed));
 }
 
 // Cheap-shape operand resolver for exec_fused_cmp_jump: constants, frame slots and
@@ -8893,6 +8961,8 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
 		case opcode::op_math: return exec_math(f, ins);
 		case opcode::op_parallel_for: return exec_parallel_for(f, ins);
+		case opcode::op_binary_fused_decl: return exec_binary_fused_decl(f, ins);
+		case opcode::op_binary_fused_store: return exec_binary_fused_store(f, ins);
 		default: return {};
 	}
 }
@@ -9172,6 +9242,8 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			case opcode::op_index_compound_fused:
 			case opcode::op_math:
 			case opcode::op_parallel_for:
+			case opcode::op_binary_fused_decl:
+			case opcode::op_binary_fused_store:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

@@ -692,6 +692,15 @@ namespace jai::vm {
         checked_result<void> exec_decl_ref_value(frame& f, const vm_instruction& ins);
         checked_result<void> exec_binary(frame& f, const vm_instruction& ins);
         checked_result<void> exec_binary_fused(frame& f, const vm_instruction& ins);
+        // The ONE fused-binary computation, sink-templated (flatstack stage 6 dest-
+        // addressing): op_binary_fused pushes, the _decl/_store variants land the
+        // result without a push or a second dispatch. Defined in vm_backend.cpp.
+        template <typename Sink>
+        checked_result<void> binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink);
+        checked_result<void> exec_binary_fused_decl(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_binary_fused_store(frame& f, const vm_instruction& ins);
+        // op_store's exact post-pop tail, shared with op_binary_fused_store
+        checked_result<void> store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
         checked_result<void> exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
         const script_value* fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot);

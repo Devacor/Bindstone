@@ -1477,6 +1477,25 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			uint32_t flags = is_lvalue_shaped(expr->value.get()) ? store_flag_rhs_lvalue : 0;
 			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
 			else if (expr->typed_store_provable) flags |= store_flag_type_provable;
+			// Dest-addressed peephole (flatstack stage 6): a fused-binary rhs runs
+			// op_store's exact post-pop tail with no push/pop round-trip. In-place
+			// rewrite like emit_compound_store, so jump targets never shift.
+			auto& code = chunk_->code;
+			if (!code.empty() && code.back().op == opcode::op_binary_fused &&
+			    expr->value->get_type() == node_type::binary_expr) {
+				fused_binary_dst_proto dp;
+				dp.binary_proto = code.back().a;
+				dp.symbol = add_symbol(ident->symbol_id);
+				dp.slot = identifier_slot_operand(ident);
+				dp.flags = flags;
+				chunk_->fused_binary_dst_protos.push_back(dp);
+				vm_instruction& ins = code.back();
+				ins.op = opcode::op_binary_fused_store;
+				ins.a = static_cast<uint32_t>(chunk_->fused_binary_dst_protos.size() - 1);
+				ins.b = 0;
+				ins.c = 0;
+				return;
+			}
 			emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 		} else {
 			uint32_t kind;
@@ -1796,6 +1815,24 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 		compile_expression(decl->initializer);
 		has_init = 1;
 		lvalue_init = is_lvalue_shaped(decl->initializer.get()) ? 1u : 0u;
+		// Dest-addressed peephole (flatstack stage 6, same in-place rewrite shape as
+		// emit_compound_store): a fused-binary init lands straight in the decl - one
+		// dispatch, no push. The exec falls back to op_decl_var verbatim for every
+		// non-scalar decl shape, so this fuses unconditionally.
+		auto& code = chunk_->code;
+		if (!code.empty() && code.back().op == opcode::op_binary_fused &&
+		    decl->initializer->get_type() == node_type::binary_expr) {
+			fused_binary_dst_proto dp;
+			dp.binary_proto = code.back().a;
+			dp.node_index = add_node(decl);
+			chunk_->fused_binary_dst_protos.push_back(dp);
+			vm_instruction& ins = code.back();
+			ins.op = opcode::op_binary_fused_decl;
+			ins.a = static_cast<uint32_t>(chunk_->fused_binary_dst_protos.size() - 1);
+			ins.b = 0;
+			ins.c = 0;
+			return;
+		}
 	}
 	emit(opcode::op_decl_var, add_node(decl), has_init, lvalue_init);
 }

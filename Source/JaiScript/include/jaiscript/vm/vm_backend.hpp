@@ -32,6 +32,11 @@ namespace jai::vm {
         uint64_t profile_cycles_[256] = {};
         uint64_t profile_counts_[256] = {};
         std::map<std::string, uint64_t> profile_native_callees_;   // in-loop fast-path misses by name
+        // exec_decl_var / exec_store fast-path miss taxonomy (why the hot rows average
+        // hundreds of cycles): [0]=hit [1]=flags/slot gate [2]=reference top [3]=storage
+        // kind [4]=declared-type mismatch
+        uint64_t profile_decl_paths_[5] = {};
+        uint64_t profile_store_paths_[5] = {};
 #else
         ~vm_backend() override = default;
 #endif

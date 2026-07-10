@@ -2948,6 +2948,9 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 	// temp: assigning value.deref() straight into value destroys the holder that OWNS
 	// the deref target while the copy is still reading it.
 	if (value.is_reference()) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_store_paths_[2];
+#endif
 		script_value derefed = value.deref();
 		value = std::move(derefed);
 	}
@@ -2978,11 +2981,17 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 				const size_t vi = value.raw_storage_index();
 				if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) &&
 				    storage->get_type_info().get() == value.get_type_info().get()) {
+#ifdef JAISCRIPT_VM_PROFILE
+					++profile_store_paths_[0];
+#endif
 					*storage = value;
 					stack_.push_back(std::move(value));
 					return {};
 				}
 			}
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_store_paths_[(ins.c & store_flag_type_provable) ? 4 : 3];
+#endif
 			// Slot locals enforce their locked type like the env path below does
 			// (same-type fast guard keeps the hot store path call-free)
 			type_info_ptr slot_type = storage->get_type_info();
@@ -5052,7 +5061,17 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 	    has_init && !decl->ref_escaping &&
 	    decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
 		script_value& top = stack_.back();
-		const size_t vi = top.raw_storage_index();
+		size_t vi = top.raw_storage_index();
+		// Subscript-initialized decls (`float d = ch[ci]`) arrive as rhs-lvalue
+		// reference wrappers - the profiled DOMINANT shape (63% of GLOOM decls). The
+		// decl consumes the VALUE (the full path derefs identically), so a matching
+		// scalar pointee takes the same identity store: copy out BEFORE the pop (the
+		// stack holder OWNS the deref target).
+		const script_value* seen = &top;
+		if (vi == script_value::TYPEID_REFERENCE) {
+			seen = &top.deref();
+			vi = seen->raw_storage_index();
+		}
 		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
 		    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
 			const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
@@ -5062,7 +5081,10 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 				(vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
 				(vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
 			if (matches) {
-				script_value value = std::move(top);
+#ifdef JAISCRIPT_VM_PROFILE
+				++profile_decl_paths_[0];
+#endif
+				script_value value = seen == &top ? std::move(top) : script_value(*seen);
 				stack_.pop_back();
 				if (decl->type) {
 					value.set_type_info(decl->type);
@@ -5070,8 +5092,17 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 				frame_slot_set(f, decl->slot_index, std::move(value));
 				return {};
 			}
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_decl_paths_[4];
+#endif
 		}
+#ifdef JAISCRIPT_VM_PROFILE
+		else { ++profile_decl_paths_[3]; }
+#endif
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	else { ++profile_decl_paths_[1]; }
+#endif
 
 	const bool is_weak_ptr = decl->type && decl->type->base_type == script_value_type::jai_weak_ptr_type;
 	const bool is_shared_ptr = decl->type && decl->type->base_type == script_value_type::jai_shared_ptr_type;
@@ -8914,6 +8945,20 @@ void vm_backend::dump_opcode_profile() const {
 			fprintf(stderr, "  %-32s %10llu\n", name.c_str(), (unsigned long long)count);
 			if (++shown >= 20) break;
 		}
+	}
+	const uint64_t decl_total = profile_decl_paths_[0] + profile_decl_paths_[1] + profile_decl_paths_[2] +
+	                            profile_decl_paths_[3] + profile_decl_paths_[4];
+	if (decl_total) {
+		fprintf(stderr, "[vm-profile] DECL_VAR paths: hit %llu | flags/slot %llu | ref-top %llu | storage %llu | type %llu\n",
+			(unsigned long long)profile_decl_paths_[0], (unsigned long long)profile_decl_paths_[1],
+			(unsigned long long)profile_decl_paths_[2], (unsigned long long)profile_decl_paths_[3],
+			(unsigned long long)profile_decl_paths_[4]);
+	}
+	const uint64_t store_total = profile_store_paths_[0] + profile_store_paths_[3] + profile_store_paths_[4];
+	if (store_total) {
+		fprintf(stderr, "[vm-profile] STORE paths: provable-hit %llu | unproven-slot %llu | proven-missed %llu | ref-top %llu\n",
+			(unsigned long long)profile_store_paths_[0], (unsigned long long)profile_store_paths_[3],
+			(unsigned long long)profile_store_paths_[4], (unsigned long long)profile_store_paths_[2]);
 	}
 }
 #endif

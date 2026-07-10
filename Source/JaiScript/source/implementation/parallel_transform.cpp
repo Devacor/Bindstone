@@ -871,9 +871,14 @@ namespace {
 
 		// Per-worker copies of every callable the body needs: fresh script_defined_function
 		// objects (own parameters vector, own backend_body_cache, closure_env = the worker
-		// root) wrapped in invokers bound to THIS worker's backend. Region-scoped values —
-		// they die at the join, so binding the backend pointer is safe here.
-		execution_backend* backend_ptr = ctx->backend.get();
+		// root) minted as script_callable_thunks - the backends' call paths RECOVER the
+		// payload (target<script_callable_thunk>) and dispatch in-loop on the CALLING
+		// worker's own backend, exactly like any script function. (The old anonymous
+		// lambda was opaque: every worker call crossed the from-scratch native boundary,
+		// ~8.3k cycles per element vs an in-loop frame push - 62% of worker time in the
+		// particles region.) The thunk's operator() fallback would route to the ENGINE's
+		// backend - unreachable from admitted bodies: only direct calls to statically-
+		// known functions are admitted, and function VALUES cannot be captured or stored.
 		bool first_entry = true;
 		for (const auto& [name_id, source_fn] : adm.script_functions) {
 			// Deep parameter copy ON PURPOSE: parameter's mutable symbol_id/slot_index
@@ -890,10 +895,8 @@ namespace {
 				first_entry = false;
 			}
 			if (name_id != UINT64_MAX) {
-				script_function invoker = [backend_ptr, payload](const std::vector<script_value>& a) {
-					return backend_ptr->execute_callable(payload, a);
-				};
-				ctx->root_env->define(name_id, script_value::make_function(invoker, &eng));
+				ctx->root_env->define(name_id,
+					script_value::make_function(script_callable_thunk{ &eng, payload }, &eng));
 			}
 		}
 		for (const auto& [name_id, name] : adm.host_functions) {

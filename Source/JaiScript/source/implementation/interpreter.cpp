@@ -6021,7 +6021,16 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // full path below. (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
             if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
                 !decl->ref_escaping && decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                const size_t vi = value.raw_storage_index();
+                size_t vi = value.raw_storage_index();
+                // Subscript-initialized decls arrive as rhs-lvalue reference wrappers
+                // (the dominant profiled shape): the decl consumes the VALUE, so a
+                // matching scalar pointee takes the same identity store - copy out
+                // BEFORE overwriting `value` (its holder OWNS the deref target).
+                const script_value* seen = &value;
+                if (vi == script_value::TYPEID_REFERENCE) {
+                    seen = &value.deref();
+                    vi = seen->raw_storage_index();
+                }
                 if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
                     vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
                     const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
@@ -6031,6 +6040,10 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                         (vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
                         (vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
                     if (matches) {
+                        if (seen != &value) {
+                            script_value pointee(*seen);
+                            value = std::move(pointee);
+                        }
                         if (decl->type) {
                             value.set_type_info(decl->type);
                         }
@@ -6971,13 +6984,25 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     // The call-site context rides a single save/restored pointer: the next call_function
     // entered consumes it to bind reference parameters against the caller's variables
     // (the arg expressions outlive the call - they live in this frame).
+    // Own-trampoline fast path (vm invoke_callee parity): a plain script-function thunk
+    // dispatches straight into THIS backend's call machinery - skips std::function +
+    // the engine-backend hop, and keeps parallel-worker interpreters on their own
+    // instance (the thunk's operator() routes to the ENGINE's backend, which is the
+    // wrong one inside a provisioned worker).
     const script_function& func = callee.as_function();
+    const auto* callee_thunk = func.target<script_callable_thunk>();
+    const bool direct_script_call = callee_thunk && callee_thunk->eng == engine_ &&
+        callee_thunk->payload.kind == script_callable::kind_type::function && callee_thunk->payload.fn;
     detail::call_site_context ctx{&expr->arguments};
     const detail::call_site_context* saved_ctx = pending_call_ctx_;
     pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
     std::optional<checked_result<script_value>> callOutcome;
     try {
-        callOutcome.emplace(func(arguments));
+        if (direct_script_call) {
+            callOutcome.emplace(call_function(*callee_thunk->payload.fn, arguments));
+        } else {
+            callOutcome.emplace(func(arguments));
+        }
     } catch (const script_exception& e) {
         pending_call_ctx_ = saved_ctx;
         active_exception_value_ = make_value(std::string(e.what()));

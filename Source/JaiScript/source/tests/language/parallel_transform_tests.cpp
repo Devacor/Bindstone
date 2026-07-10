@@ -1023,6 +1023,25 @@ public:
 			check_matches_serial_at(e, src, {1, 2, 8});
 		});
 
+		// The GLOOM shape: an in-place helper taking the OWNED ELEMENT by reference
+		// (gloom_particle_step). Caught red by GLOOM tick 8 when worker invokers became
+		// thunks: the in-loop call path must bind the by-ref param to the element
+		// reference exactly like the opaque path did.
+		test("by_ref_helper_mutates_element", [this]() {
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				void bump(var& q) { q[1] = q[0] * 5; }
+				var a = [];
+				for (var i = 0; i < 64; i++) { a.push([i, 0]); }
+				parallel_for (auto& p : a) { bump(p); }
+				return [a[0][1], a[63][1]];
+			)");
+			const auto& vals = r.as_array();
+			check_eq((int64_t)0, vals[0].as_int());
+			check_eq((int64_t)315, vals[1].as_int());
+		});
+
 		test("helper_function_calls_in_body", [this]() {
 			auto e = make_engine();
 			const std::string src = R"(

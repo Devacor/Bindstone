@@ -27,7 +27,7 @@ public:
 	int mw = 0;
 	int mh = 0;
 	var tiles = [];
-	var mappack = [];      // 15 tiles per int64, 4-bit render kinds (raycast snapshot)
+	array<int> mappack = [];      // 15 tiles per int64, 4-bit render kinds (raycast snapshot)
 	int mapgen = 0;        // bumps with every mappack rebuild (ray workspaces re-seed on it)
 
 	// player
@@ -81,7 +81,7 @@ public:
 	// is the GLOBAL `PIX` (render.jai) so the glyph-row parallel bodies can
 	// capture-borrow it.
 	var bg = [];
-	var zbuf = [];
+	array<float> zbuf = [];
 	var rowparts = [];
 	var lutc = {};
 

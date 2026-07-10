@@ -4018,9 +4018,16 @@ checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, 
 		if (current->raw_storage_index() == script_value::TYPEID_ARRAY && index_ptr->is_int()) {
 			const script_int index = index_ptr->unchecked_as_int();
 			const script_array* node = current->unchecked_array_node();
-			// typed nodes have no element to point at in place - they take the replay
-			// (which materializes into scratch through the typed-aware op_index)
-			if (!node->is_typed() && index >= 0 && index < static_cast<script_int>(node->size())) {
+			if (index >= 0 && index < static_cast<script_int>(node->size())) {
+				if (node->is_typed()) {
+					// raw buffer read into scratch. Materialize into a LOCAL first:
+					// `current` may point INTO the old scratch, and emplace destroys it
+					// (which would drop the node's owning handle mid-read)
+					script_value elem = node->get(static_cast<size_t>(index), engine_);
+					scratch.emplace(std::move(elem));
+					current = &scratch.value();
+					continue;
+				}
 				current = &node->values()[static_cast<size_t>(index)].deref();
 				continue;
 			}
@@ -4880,8 +4887,22 @@ checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction
 		if (container_peek.raw_storage_index() == script_value::TYPEID_ARRAY && index_peek.is_int()) {
 			const script_int index = index_peek.unchecked_as_int();
 			auto storage = container_peek.get_array_storage();
-			// typed nodes take the replay (holder scratch + buffer commit); 2b gives
-			// them a raw-store fast path
+			// TYPED raw store: numeric rhs coerces into the buffer with no script_value
+			// element traffic; non-numeric rhs replays for the exact mismatch error
+			if (storage && storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
+				const script_value& rhs_peek = stack_[stack_.size() - 3].deref();
+				const size_t ri = rhs_peek.raw_storage_index();
+				if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {
+					stack_.pop_back();   // index (decoded above)
+					script_value container_local = std::move(stack_.back());
+					stack_.pop_back();
+					script_value value = std::move(stack_.back());
+					stack_.pop_back();
+					storage->set(static_cast<size_t>(index), value.deref());
+					stack_.push_back(std::move(value));   // assignment expression result
+					return {};
+				}
+			}
 			if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
 				auto container_type_info = container_peek.get_type_info();
 				type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
@@ -4939,7 +4960,36 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 		    container.raw_storage_index() == script_value::TYPEID_ARRAY && index_v.is_int()) {
 			const script_int index = index_v.unchecked_as_int();
 			auto storage = container.get_array_storage();
-			// typed nodes take the replay; 2b gives them a raw load-op-store fast path
+			// TYPED raw load-op-store: elements are int/float by construction; the node
+			// coerces the (always numeric) result back to the element kind on store
+			if (storage && storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
+				token_type op;
+				switch (ins.a & compound_kind_mask) {
+					case compound_plus: op = token_type::plus; break;
+					case compound_minus: op = token_type::minus; break;
+					case compound_star: op = token_type::star; break;
+					case compound_slash: op = token_type::slash; break;
+					case compound_percent: op = token_type::percent; break;
+					default: op = token_type::plus; break;
+				}
+				// Zero pre-checks keep INDEX_COMPOUND's exact error codes/texts
+				if (op == token_type::slash &&
+				    ((rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
+				     (rhs_idx == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) {
+					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+				}
+				if (op == token_type::percent && rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
+					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+				}
+				const script_value current = storage->get(static_cast<size_t>(index), engine_);
+				script_value resultValue = make_null();
+				JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(current, op, rhs));
+				storage->set(static_cast<size_t>(index), resultValue);
+				stack_.pop_back();   // rhs
+				stack_.pop_back();   // index
+				stack_.back() = std::move(resultValue);   // container slot becomes the result
+				return {};
+			}
 			if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
 				script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
 				const size_t elem_idx = target_ptr->raw_storage_index();

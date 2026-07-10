@@ -1405,6 +1405,71 @@ public:
             )", "20", "fused int fast path");
         });
 
+        // ===== TYPED CONTAINER BOUNDARIES ARE ELEMENT-CHECKED (typed-array stage 0) =====
+        // An array/map value crossing into a concretely-typed container binding (decl,
+        // assign, field write) validates every element with push's rules: exact match
+        // passes, int<->float converts, anything else raises. The stored value is
+        // retagged to the declared type so later pushes stay enforced. Pre-fix, the
+        // same-base fast path admitted ANY array into array<T> — a string could sit
+        // behind an array<int> tag (silently breaking the parallel all-primitive proof).
+
+        test("typed_array_decl_validates_elements", [this, both, check_both]() {
+            auto [i1, v1] = both("var a = [\"s\"]; array<int> b = a; b[0]");
+            check_eq(i1, v1, "string-into-array<int> parity");
+            check(i1.find("ERROR") == 0, "laundered string array into array<int> raises");
+            auto [i2, v2] = both("var a = [1, \"s\", 3]; array<int> b = a; b.size()");
+            check_eq(i2, v2, "mixed-into-array<int> parity");
+            check(i2.find("ERROR") == 0, "mixed elements into array<int> raises");
+            check_both("var a = [1.5, 2.5]; array<int> b = a; type_of(b[0]) + \":\" + to_string(b[0]) + \",\" + to_string(b[1])",
+                       "int:1,2", "float elements truncate into array<int>");
+            check_both("var a = [1, 2]; array<float> b = a; type_of(b[0]) + \":\" + to_string(b[0])",
+                       "float:1.000000", "int elements widen into array<float>");
+            check_both("var a = [1.5]; array<int> b = a; type_of(a[0]) + \":\" + to_string(a[0])",
+                       "float:1.500000", "source unchanged after converting decl");
+        });
+
+        test("typed_array_literal_init_converts_elements", [this, check_both]() {
+            // decl contract (see visit_variable_decl): typed decls convert their
+            // initializer exactly like assignment — element payloads included
+            check_both("array<float> a = [1, 2, 3]; type_of(a[0]) + \":\" + to_string(a[0])",
+                       "float:1.000000", "literal ints become float payloads");
+            check_both("array<int> a = [1.5]; type_of(a[0]) + \":\" + to_string(a[0])",
+                       "int:1", "literal float truncates into array<int>");
+        });
+
+        test("typed_array_assign_validates_elements", [this, both, check_both]() {
+            auto [i1, v1] = both("array<int> b = [1]; var a = [\"s\"]; b = a; b[0]");
+            check_eq(i1, v1, "assign parity");
+            check(i1.find("ERROR") == 0, "assigning string array into array<int> raises");
+            check_both("array<int> b = [1]; var a = [2.5]; b = a; to_string(b[0])", "2", "assign converts");
+        });
+
+        test("typed_array_field_validates_elements", [this, both, check_both]() {
+            auto [i1, v1] = both("class C { array<int> f = []; } auto c = C(); var a = [\"s\"]; c.f = a; c.f[0]");
+            check_eq(i1, v1, "field parity");
+            check(i1.find("ERROR") == 0, "string array into array<int> field raises");
+            // after a valid store the field's declared tag governs pushes (retag at the boundary)
+            auto [i2, v2] = both("class C { array<int> f = []; } auto c = C(); var a = [1, 2]; c.f = a; c.f.push(\"s\"); c.f.size()");
+            check_eq(i2, v2, "field push-after-store parity");
+            check(i2.find("ERROR") == 0, "push string into stored array<int> field raises");
+            check_both("class C { array<int> f = []; } auto c = C(); var a = [2.5]; c.f = a; to_string(c.f[0])", "2", "field store converts");
+        });
+
+        test("typed_map_decl_validates_values", [this, both, check_both]() {
+            auto [i1, v1] = both("var m = {\"k\": \"s\"}; map<string, int> t = m; t.size()");
+            check_eq(i1, v1, "map parity");
+            check(i1.find("ERROR") == 0, "string values into map<string,int> raises");
+            check_both("var m = {\"k\": 2.5}; map<string, int> t = m; to_string(t[\"k\"])", "2", "map value converts");
+        });
+
+        test("typed_array_var_ref_keeps_enforcement", [this, both]() {
+            // pin: var& shares and PRESERVES the array's tag — stores through the alias
+            // stay typed (the demote-on-stamp design leans on this)
+            auto [i1, v1] = both("array<int> b = [1]; var& r = b; r.push(\"s\"); b.size()");
+            check_eq(i1, v1, "var& push parity");
+            check(i1.find("ERROR") == 0, "push through var& alias stays enforced");
+        });
+
         // type_of on a shared-pointer-semantic instance must match a value instance: both "object".
         test("type_of_shared_and_value_instance_both_object", [this, check_both]() {
             const char* decl = "class P { int v = 0; } ";

@@ -10,6 +10,7 @@
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/container_enforce.hpp>   // typed-container boundary kernel (interp parity)
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
 #include <algorithm>
@@ -113,90 +114,15 @@ namespace {
 		return "unknown";
 	}
 
+	// Element compatibility/conversion live in the shared kernel
+	// (detail/container_enforce.hpp, used verbatim by both backends and the field
+	// kernel). These forwards keep the historical local names.
 	bool vm_is_element_type_compatible(const script_value& element, type_info_ptr element_type, script_value& /*array_owner*/) {
-		const script_value& actual_element = element.is_reference() ? element.deref() : element;
-
-		if (element_type && element_type->base_type == script_value_type::jai_any_type) {
-			return true;
-		}
-		if (!element_type) {
-			return true;
-		}
-
-		auto elem_type = actual_element.type();
-		auto target_type = element_type->base_type;
-
-		if (elem_type == target_type) {
-			if (target_type == script_value_type::jai_object_type) {
-				auto elem_type_info = actual_element.get_type_info();
-				if (elem_type_info && !element_type->type_name.empty()) {
-					return elem_type_info->type_name == element_type->type_name;
-				}
-			}
-			return true;
-		}
-
-		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
-			return true;
-		}
-		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
-			return true;
-		}
-
-		if (target_type == script_value_type::jai_array_type && elem_type == script_value_type::jai_array_type) {
-			auto inner_target = element_type->element_type();
-			auto elem_type_info = actual_element.get_type_info();
-			auto inner_elem = elem_type_info ? elem_type_info->element_type() : nullptr;
-			if (inner_target && inner_elem) {
-				return inner_target->base_type == inner_elem->base_type;
-			}
-			if (inner_target && !inner_elem) {
-				return false;
-			}
-			return true;
-		}
-
-		if (target_type == script_value_type::jai_map_type && elem_type == script_value_type::jai_map_type) {
-			auto target_key = element_type->key_type();
-			auto target_val = element_type->value_type();
-			auto elem_type_info = actual_element.get_type_info();
-			auto elem_key = elem_type_info ? elem_type_info->key_type() : nullptr;
-			auto elem_val = elem_type_info ? elem_type_info->value_type() : nullptr;
-			if (target_key && elem_key && target_key->base_type != elem_key->base_type) {
-				return false;
-			}
-			if (target_val && elem_val && target_val->base_type != elem_val->base_type) {
-				return false;
-			}
-			return true;
-		}
-
-		return false;
+		return detail::container_element_compatible(element, element_type);
 	}
 
 	script_value vm_convert_array_element(engine* eng, const script_value& element, type_info_ptr element_type) {
-		const script_value& actual_element = element.is_reference() ? element.deref() : element;
-
-		auto actual_type_info = actual_element.get_type_info();
-		if (actual_type_info && actual_type_info->base_type == script_value_type::jai_shared_ptr_type) {
-			return actual_element;
-		}
-
-		if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
-			return actual_element.clone();
-		}
-
-		auto elem_type = actual_element.type();
-		auto target_type = element_type->base_type;
-
-		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
-			return script_value(static_cast<script_int>(actual_element.unchecked_as_float()), eng);
-		}
-		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
-			return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
-		}
-
-		return actual_element.clone();
+		return detail::convert_container_element(eng, element, element_type);
 	}
 
 	script_value vm_clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {
@@ -2526,6 +2452,20 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 	auto target = target_type->base_type;
 
 	if (source_type == target && target != script_value_type::jai_object_type) {
+		// Typed-container boundary: array/map payloads are element-checked with push's
+		// rules before they may sit behind an array<T>/map<K,V> tag (shared kernel,
+		// KEEP BYTE-PARALLEL with interpreter::enforce_type_compatibility)
+		if (target == script_value_type::jai_array_type || target == script_value_type::jai_map_type) {
+			auto outcome = detail::enforce_container_boundary(std::move(value), target_type, engine_);
+			if (!outcome.value) {
+				auto* sym = engine_->get_symbolizer();
+				return checked_result<script_value>(
+					make_error_code(runtime_error_code::array_element_type_mismatch),
+					detail::container_boundary_mismatch_text,
+					sym->intern(outcome.offending), sym->intern(outcome.expected));
+			}
+			return std::move(*outcome.value);
+		}
 		return std::move(value);
 	}
 

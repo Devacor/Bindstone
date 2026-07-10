@@ -4,6 +4,7 @@
 #define __JAISCRIPT_CORE_CLASS_DEFINITION_HPP__
 
 #include "engine.hpp"
+#include <jaiscript/detail/container_enforce.hpp>
 #include <set>
 #include <algorithm>
 #include <optional>
@@ -1475,8 +1476,18 @@ inline std::optional<script_value> try_convert_field_value(const script_value& v
     auto source_type = value.type();
     auto target = target_type->base_type;
     if (source_type == target && target != script_value_type::jai_object_type) {
-        if (target == script_value_type::jai_array_type || target == script_value_type::jai_map_type ||
-            target == script_value_type::jai_shared_ptr_type || target == script_value_type::jai_weak_ptr_type) {
+        if (target == script_value_type::jai_array_type || target == script_value_type::jai_map_type) {
+            // Typed-container boundary (shared kernel): element-check with push's rules,
+            // coerce int<->float payloads, retag concrete targets so pushes through the
+            // field stay enforced; open targets (array<var>/untyped params) keep the
+            // value's own (possibly tighter) tag
+            auto outcome = detail::enforce_container_boundary(value, target_type, eng);
+            if (!outcome.value) {
+                return std::nullopt;
+            }
+            return std::move(*outcome.value);
+        }
+        if (target == script_value_type::jai_shared_ptr_type || target == script_value_type::jai_weak_ptr_type) {
             return value;   // keep the value's own tag
         }
         script_value tagged(value);

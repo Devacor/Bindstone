@@ -31,6 +31,7 @@ public:
 		: opt_(opt), eng_(jai::engine::make()) {
 		eng_->set_backend(backend == "vm" ? jai::backend_type::vm : jai::backend_type::interpreter);
 		eng_->execution_budget(0.0);
+		eng_->typed_array_storage(true);   // array<int>/array<float> grids on raw buffers (typed_array_design.md stage 3)
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
 		jai::stdlib::register_all(eng_);
 

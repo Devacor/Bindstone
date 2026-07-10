@@ -17,10 +17,10 @@ var PIXH = 2;        // pixels per cell vertically
 // all-primitive int array consumed only by subscript reads, so the region
 // borrows it - zero copies, raw element reads. VW/VH capture as scalars;
 // ROWIDX is the parallel_transform input (one element per glyph row).
-var PIX = [];
+array<int> PIX = [];
 var VW = 0;
 var VH = 0;
-var ROWIDX = [];
+array<int> ROWIDX = [];
 // Persistent ray-chunk pair workspaces (parallel_for v1): header + map snapshot
 // + preallocated out cells per record (layout in gloom_ray_chunk_step). Rebuilt
 // only when the map snapshot changes (WS_MAPGEN vs G.mapgen); the pose header

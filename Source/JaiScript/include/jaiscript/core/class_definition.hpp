@@ -99,6 +99,12 @@ public:
         return fields_;
     }
 
+    // Mutable field iteration for the parallel barrier's normalization pass (detaching
+    // shared string nodes inside an owned element, single-threaded at the barrier).
+    std::unordered_map<uint64_t, script_value>& get_fields_mutable() {
+        return fields_;
+    }
+
     class_definition* get_class_definition() const {
         return class_def_;
     }
@@ -409,19 +415,19 @@ public:
         }
     }
 
-    // TRUE when instances are provably alias-free by construction (parallel_for v1,
-    // Dev ruling 2026-07-09): a script class whose every instance field is
-    // store-enforced to a shape with no cross-instance sharing channel — primitive
-    // (int/float/bool/char), typed all-primitive container (array<prim> /
-    // map<prim,prim>), or a nested script class that is itself flat — with a flat
-    // parent chain and no C++ base/data. Because those stores all deep-clone, two
-    // live instances can never share reachable mutable structure, so a parallel
-    // worker owning an instance may mutate it in place without any alias walk.
-    // STRINGS ARE EXCLUDED: string assignment shares storage (clone() treats
-    // script_string as immutable), which would smuggle a shared node past the stamp.
-    // auto/var fields (no enforced declared type) exclude too. Cached against
-    // engine::class_definition_epoch (a nested field class redefining must invalidate
-    // containing classes). Defined out of line in class_registry.cpp.
+    // TRUE when instances are value-closed (parallel_for v1, Dev rulings 2026-07-09):
+    // a script class whose every instance field is store-enforced to a value-semantic
+    // shape — primitive (int/float/bool/char), STRING (engine value type, per-instance
+    // by ruling; the rare shared string node is detached by the region barrier's
+    // normalization pass, not banned here), typed primitive/string container, or a
+    // nested script class that is itself flat — with a flat parent chain and no C++
+    // base/data. Because those stores all deep-clone, two live instances can never
+    // share reachable mutable structure (strings excepted, hence the barrier detach),
+    // so a parallel worker owning an instance may mutate it in place with no alias
+    // walk. What excludes a class: shared_ptr/weak_ptr/function/reference fields
+    // (reference semantics IS sharing) and auto/var fields (no enforced shape).
+    // Cached against engine::class_definition_epoch (a nested field class redefining
+    // must invalidate containing classes). Defined out of line in class_registry.cpp.
     bool flat_value_semantics() const;
 
     type_info_ptr get_field_declared_type(uint64_t id) const {

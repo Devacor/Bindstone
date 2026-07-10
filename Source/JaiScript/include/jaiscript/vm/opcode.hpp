@@ -118,6 +118,9 @@ namespace jai::vm {
                             // array fast path skips mint + operator consult; other shapes
                             // replay INDEX(shape)+INDEX_COMPOUND); pushes the result
 
+        op_parallel_for,    // a=node index (parallel_for_stmt); pops the container, runs the
+                            // in-place fork-join region (detail::run_parallel_for)
+
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
         op_halt,
     };
@@ -249,6 +252,7 @@ namespace jai::vm {
             case opcode::op_probe_callee: return "PROBE_CALLEE";
             case opcode::op_call_from_scratch: return "CALL_FROM_SCRATCH";
             case opcode::op_error: return "ERROR";
+            case opcode::op_parallel_for: return "PARALLEL_FOR";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

@@ -135,8 +135,15 @@ namespace jai::vm {
             pending_site_ctx_ = {};
             external_site_stack_.clear();
             execution_budget_ = budget;
+            parallel_worker_ = true;
             arm_execution_deadline();
         }
+
+        // True on worker-configured instances only: the script-class method dispatch
+        // wall (methods aren't provisioned per worker - their shared body caches and
+        // arbitrary env reach are unsafe off-thread) checks this, gated by
+        // engine::allow_unsafe_parallel. Never set on the engine's own backend.
+        bool parallel_worker_ = false;
 
         // Compile a per-worker function copy's body on the MAIN thread at the region
         // barrier (compilation interns; workers must only ever hit) and pin the chunk on
@@ -701,6 +708,7 @@ namespace jai::vm {
         checked_result<void> exec_index_store(frame& f, const vm_instruction& ins);
         checked_result<void> exec_index_compound_fused(frame& f, const vm_instruction& ins);
         checked_result<void> exec_math(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_parallel_for(frame& f, const vm_instruction& ins);
         checked_result<const script_value*> fused_subscript_value(frame& f, const fused_operand& operand,
                                                                   std::optional<script_value>& scratch, size_t cache_slot);
         checked_result<void> exec_unary(frame& f, const vm_instruction& ins);

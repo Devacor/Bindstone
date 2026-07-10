@@ -3913,6 +3913,27 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
 }
 
 checked_result<void> interpreter::assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value) {
+    // Worker direct-field store (parallel_for v1): the setter probe below COPIES a
+    // shared method value (cross-worker count race); a backing field's enforce+set is
+    // exactly what the auto-setter does, on exclusively-owned instance storage. Any
+    // non-field member store needs method machinery - wall it.
+    if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT &&
+        !engine_->allow_unsafe_parallel()) [[unlikely]] {
+        auto& holder = const_cast<script_value&>(objectValue).unchecked_get_object_storage();
+        if (holder && holder->is_class_instance_wrapper && holder->data) {
+            auto* inst = static_cast<class_instance*>(holder->data.get());
+            if (memberExpr->member_id != UINT64_MAX && inst->find_field_value(memberExpr->member_id)) {
+                auto enforced = inst->enforce_field_write(memberExpr->member_id, clone_for_assignment(value));
+                if (!enforced) {
+                    return enforced.error_value();
+                }
+                inst->set_field_unchecked(memberExpr->member_id, std::move(enforced).value());
+                return {};
+            }
+            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                "only direct field stores on class instances are allowed in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+        }
+    }
     auto target = resolve_member_target(objectValue);
     if (!target) {
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
@@ -6639,6 +6660,14 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                         inst_raw = static_cast<class_instance*>(holder->data.get());
                         cls_raw = inst_raw->get_class_definition();
                     }
+                    // Worker wall (parallel_for v1): script-class method dispatch touches
+                    // SHARED class_definition state (overload/IC caches, dispatcher body
+                    // caches) that concurrent workers would race on, and method bodies
+                    // aren't provisioned per worker. Trusted scripts opt in.
+                    if (parallel_worker_ && cls_raw && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                            "cannot call script class methods in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+                    }
                     if (cls_raw && member->mcache_cls == cls_raw &&
                         member->mcache_epoch == cls_raw->method_epoch() &&
                         !((member->mcache_flags & 2) && objectValue.get_type_info() &&
@@ -7327,6 +7356,24 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         return {};
     }
 
+    // Worker direct-field read (parallel_for v1): probing getters/methods below
+    // COPIES shared method values out of class_definition state - a cross-worker
+    // count race on the non-atomic strong_ptr. Fields live on the (exclusively
+    // owned) instance; anything else needs method machinery - wall it.
+    if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT &&
+        !engine_->allow_unsafe_parallel()) [[unlikely]] {
+        auto& holder = objectValue.unchecked_get_object_storage();
+        if (holder && holder->is_class_instance_wrapper && holder->data) {
+            auto* inst = static_cast<class_instance*>(holder->data.get());
+            if (script_value* field = inst->find_field_value(expr->member_id)) {
+                push_value(field->is_reference() ? field->deref() : *field);
+                return {};
+            }
+            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                "only direct field access on class instances is allowed in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+        }
+    }
+
     // Handle coroutine_handle methods
     if (objectValue.is_object()) {
         auto objHolder = objectValue.get_object_holder();
@@ -7795,6 +7842,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 auto* rf = static_cast<range_for_stmt*>(s);
                 if (rf->container) find_identifiers(rf->container.get());
                 find_in_statement(rf->body.get());
+            } else if (s->get_type() == node_type::parallel_for_stmt) {
+                auto* pf = static_cast<parallel_for_stmt*>(s);
+                if (pf->container) find_identifiers(pf->container.get());
+                find_in_statement(pf->body.get());
             } else if (s->get_type() == node_type::switch_stmt) {
                 auto* sw = static_cast<switch_stmt*>(s);
                 if (sw->condition) find_identifiers(sw->condition.get());
@@ -8013,6 +8064,17 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 }
                 if (rf->container) collect_outer_slots_expr(rf->container.get());
                 collect_outer_slots_stmt(rf->body.get());
+                break;
+            }
+            case node_type::parallel_for_stmt: {
+                // Body identifiers carry the WORKER function's slot numbering (the
+                // parser's boundary keeps outer slots off them), so only the container
+                // can reference outer slots; the loop variable is body-declared.
+                auto* pf = static_cast<parallel_for_stmt*>(s);
+                if (pf->loop_param.symbol_id != UINT64_MAX) {
+                    lambda_declared.insert(pf->loop_param.symbol_id);
+                }
+                if (pf->container) collect_outer_slots_expr(pf->container.get());
                 break;
             }
             case node_type::return_stmt:
@@ -9442,6 +9504,14 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     }
 
     return {};
+}
+
+checked_result<void> interpreter::visit_parallel_for_stmt(parallel_for_stmt* stmt) {
+    // Container evaluates in the enclosing scope on this thread; the region kernel
+    // owns everything else (admission, element proof, capture provisioning, fork-join).
+    JAISCRIPT_TRY(dispatch_expr(stmt->container.get()));
+    script_value container = pop_value();
+    return detail::run_parallel_for(*engine_, stmt, container, environment_);
 }
 
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
@@ -11890,6 +11960,10 @@ static void collect_frame_slot_names(const statement* s,
         collect_frame_slot_names(rf->body.get(), out);
         break;
     }
+    case node_type::parallel_for_stmt:
+        // Body slots belong to the WORKER frame's own numbering - naming them here
+        // would alias this frame's slots
+        break;
     case node_type::switch_stmt: {
         auto* sw = static_cast<const switch_stmt*>(s);
         for (const auto& c : sw->cases)
@@ -12128,8 +12202,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             } else {
                 // No metadata: external (C++) invocation. Object values are handles, so a
                 // shallow copy aliases the same underlying object - reference semantics hold.
+                // A reference VALUE is already an lvalue: copying it shares the holder, so
+                // the parameter aliases the same storage (parallel_for binds each owned
+                // element this way; C++ callers can pass make_*_reference values too).
                 auto arg_type = arg.current_type();
-                if (arg_type == script_value_type::jai_object_type ||
+                if (arg.is_reference()) {
+                    call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
+                } else if (arg_type == script_value_type::jai_object_type ||
                     arg_type == script_value_type::jai_shared_ptr_type) {
                     call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
                 } else {
@@ -13092,6 +13171,8 @@ checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
             return visit_for_stmt(static_cast<for_stmt*>(stmt));
         case node_type::range_for_stmt:
             return visit_range_for_stmt(static_cast<range_for_stmt*>(stmt));
+        case node_type::parallel_for_stmt:
+            return visit_parallel_for_stmt(static_cast<parallel_for_stmt*>(stmt));
         case node_type::return_stmt:
             return visit_return_stmt(static_cast<return_stmt*>(stmt));
         case node_type::break_stmt:

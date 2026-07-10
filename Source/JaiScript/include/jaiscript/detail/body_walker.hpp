@@ -122,6 +122,15 @@ namespace jai::detail {
 				stmt(rf->body);
 				return;
 			}
+			case node_type::parallel_for_stmt: {
+				// Body names an enclosing lambda must still capture (workers resolve
+				// them through the provisioned env); the loop variable is body-local.
+				auto* pf = static_cast<parallel_for_stmt*>(s.get());
+				if (on_declared && pf->loop_param.symbol_id != UINT64_MAX) on_declared(pf->loop_param.symbol_id);
+				expr(pf->container);
+				stmt(pf->body);
+				return;
+			}
 			case node_type::return_stmt:
 				expr(static_cast<return_stmt*>(s.get())->value);
 				return;

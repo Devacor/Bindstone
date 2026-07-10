@@ -75,6 +75,7 @@ namespace jai {
         checked_result<statement_ptr> if_statement();
         checked_result<statement_ptr> while_statement();
         checked_result<statement_ptr> for_statement();
+        checked_result<statement_ptr> parallel_for_statement();
         checked_result<statement_ptr> return_statement();
         checked_result<statement_ptr> break_statement();
         checked_result<statement_ptr> continue_statement();
@@ -239,12 +240,19 @@ namespace jai {
             return slot;
         }
 
+        // Slot resolution floor: scopes BELOW this stack index are invisible to
+        // lookup_slot. parallel_for bodies raise it to their own scope — they execute
+        // as synthesized worker functions, so an enclosing function's slot stamped on
+        // a body identifier would read a foreign frame. Body names resolve by symbol
+        // through the worker environment instead (captures are provisioned there).
+        size_t slot_lookup_boundary_ = 0;
+
         // Look up a variable's slot index (SIZE_MAX if not found or not in function scope)
         size_t lookup_slot(uint64_t symbol_id) const {
-            // Search from innermost to outermost function scope
-            for (auto it = function_scope_stack_.rbegin(); it != function_scope_stack_.rend(); ++it) {
-                auto found = it->symbol_to_slot.find(symbol_id);
-                if (found != it->symbol_to_slot.end()) {
+            // Search from innermost to outermost visible function scope
+            for (size_t i = function_scope_stack_.size(); i-- > slot_lookup_boundary_;) {
+                auto found = function_scope_stack_[i].symbol_to_slot.find(symbol_id);
+                if (found != function_scope_stack_[i].symbol_to_slot.end()) {
                     return found->second;
                 }
             }

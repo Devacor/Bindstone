@@ -28,6 +28,7 @@ namespace jai {
         include_keyword, import_keyword,
         coroutine_keyword, yield_keyword,
         enum_keyword, new_keyword, protected_keyword,
+        parallel_for_keyword,
 
         plus, minus, star, slash, percent,
         plus_equal, minus_equal, star_equal, slash_equal, percent_equal,

@@ -1780,19 +1780,21 @@ public:
             e->execute("class P { int helper(int v) { return v * 2; } }");
             check_true(flat_of(e, "P"));
         });
-        test("string_field_not_flat", [this]() {
+        // Strings ARE value-closed (Dev ruling: a member string is an engine value
+        // type, per-instance; the barrier normalization detaches rare shared nodes)
+        test("string_field_flat", [this]() {
             auto e = make_engine();
             e->execute("class P { int a = 0; string s = \"\"; }");
-            check_false(flat_of(e, "P"));
+            check_true(flat_of(e, "P"));
         });
         test("var_field_not_flat", [this]() {
             auto e = make_engine();
             e->execute("class P { var v = 0; }");
             check_false(flat_of(e, "P"));
         });
-        test("typed_primitive_container_field_flat", [this]() {
+        test("typed_value_container_fields_flat", [this]() {
             auto e = make_engine();
-            e->execute("class P { array<int> xs = []; int n = 0; }");
+            e->execute("class P { array<int> xs = []; array<string> names = []; int n = 0; }");
             check_true(flat_of(e, "P"));
         });
         test("untyped_container_field_not_flat", [this]() {
@@ -1800,40 +1802,47 @@ public:
             e->execute("class P { var xs = []; }");
             check_false(flat_of(e, "P"));
         });
-        test("string_container_field_not_flat", [this]() {
+        // Transitive value-closure (Dev ruling): containers of containers, containers
+        // of flat classes - anything that cannot point at something else
+        test("nested_container_field_flat", [this]() {
             auto e = make_engine();
-            e->execute("class P { array<string> xs = []; }");
-            check_false(flat_of(e, "P"));
+            e->execute("class P { array<array<int>> grid = []; map<string, array<float>> table = {}; }");
+            check_true(flat_of(e, "P"));
         });
         test("nested_flat_class_field_flat", [this]() {
             auto e = make_engine();
             e->execute(R"(
-                class Inner { float x = 0.0; float y = 0.0; }
-                class Outer { Inner a = Inner(); int n = 0; }
+                class Vec2 { int x = 0; int y = 0; }
+                class Outer { Vec2 a = Vec2(); array<Vec2> pts = []; int n = 0; }
             )");
-            check_true(flat_of(e, "Inner"));
+            check_true(flat_of(e, "Vec2"));
             check_true(flat_of(e, "Outer"));
         });
-        test("nested_string_field_poisons_outer", [this]() {
+        test("nested_var_field_poisons_outer", [this]() {
             auto e = make_engine();
             e->execute(R"(
-                class Inner { string s = ""; }
+                class Inner { var anything = 0; }
                 class Outer { Inner a = Inner(); }
             )");
             check_false(flat_of(e, "Outer"));
         });
+        test("weak_ptr_field_not_flat", [this]() {
+            auto e = make_engine();
+            e->execute("class P { int a = 0; weak_ptr<P> other = null; }");
+            check_false(flat_of(e, "P"));
+        });
         test("flat_inheritance_chain_flat", [this]() {
             auto e = make_engine();
             e->execute(R"(
-                class Base { int hp = 10; }
+                class Base { int hp = 10; string name = ""; }
                 class Kid : Base { float speed = 1.0; }
             )");
             check_true(flat_of(e, "Kid"));
         });
-        test("string_parent_poisons_child", [this]() {
+        test("var_parent_poisons_child", [this]() {
             auto e = make_engine();
             e->execute(R"(
-                class Base { string name = ""; }
+                class Base { var payload = 0; }
                 class Kid : Base { int hp = 10; }
             )");
             check_false(flat_of(e, "Kid"));
@@ -1848,7 +1857,7 @@ public:
                 class Outer { Inner a = Inner(); }
             )");
             check_true(flat_of(e, "Outer"));
-            e->execute("class Inner { float x = 0.0; string tag = \"\"; }");
+            e->execute("class Inner { float x = 0.0; var tag = 0; }");
             check_false(flat_of(e, "Outer"));
         });
         test("cpp_class_not_flat", [this]() {

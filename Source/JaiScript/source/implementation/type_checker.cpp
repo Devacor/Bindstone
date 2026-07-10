@@ -1285,6 +1285,23 @@ private:
                 scopes_.pop_back();
                 break;
             }
+            case node_type::parallel_for_stmt: {
+                auto* f = static_cast<parallel_for_stmt*>(s);
+                infer(f->container.get());
+                scopes_.emplace_back();
+                var_entry entry;
+                entry.type = ctype_from_type_info(f->loop_param.type.get());
+                entry.dynamic = true;   // by-ref element: dynamic like ref range-for
+                entry.declared = f->loop_param.type.get();
+                entry.display = f->loop_param.type ? f->loop_param.type->canonical_name() : "auto";
+                entry.line = f->location.line;
+                entry.column = f->location.column;
+                warn_shadow("parallel_for variable", f->loop_param.name, f->location);
+                scopes_.back().emplace(std::string_view(f->loop_param.name), std::move(entry));
+                walk_stmt(f->body.get());
+                scopes_.pop_back();
+                break;
+            }
             case node_type::return_stmt:
                 check_return(static_cast<return_stmt*>(s));
                 break;
@@ -1776,6 +1793,13 @@ void static_checker::collect_names(const statement* node) {
         case node_type::range_for_stmt: {
             auto* f = static_cast<const range_for_stmt*>(node);
             all_names_.insert(f->variable_name);
+            collect_names_expr(f->container.get());
+            collect_names(f->body.get());
+            break;
+        }
+        case node_type::parallel_for_stmt: {
+            auto* f = static_cast<const parallel_for_stmt*>(node);
+            all_names_.insert(std::string_view(f->loop_param.name));
             collect_names_expr(f->container.get());
             collect_names(f->body.get());
             break;

@@ -57,21 +57,11 @@ bool class_definition::flat_value_semantics_impl(std::vector<const class_definit
     return flat;
 }
 
+// Transitive value-closure (Dev ruling: any type that cannot point at something else
+// qualifies - primitives, strings, containers OF value-closed types to any depth,
+// nested flat classes). What poisons: shared_ptr/weak_ptr/function/reference (their
+// semantics IS pointing elsewhere) and auto/var (no store-enforced shape).
 bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const {
-    auto primitive = [](const type_info_ptr& p) {
-        if (!p) {
-            return false;
-        }
-        switch (p->base_type) {
-        case script_value_type::jai_int_type:
-        case script_value_type::jai_float_type:
-        case script_value_type::jai_bool_type:
-        case script_value_type::jai_char_type:
-            return true;
-        default:
-            return false;
-        }
-    };
     if (!t) {
         return false;   // auto/untyped field: no store-enforced shape to lean on
     }
@@ -80,11 +70,13 @@ bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const
     case script_value_type::jai_float_type:
     case script_value_type::jai_bool_type:
     case script_value_type::jai_char_type:
+    case script_value_type::jai_string_type:
         return true;
     case script_value_type::jai_array_type:
-        return primitive(t->element_type());
+        return flat_field_type(t->element_type(), in_progress);
     case script_value_type::jai_map_type:
-        return primitive(t->key_type()) && primitive(t->value_type());
+        return flat_field_type(t->key_type(), in_progress) &&
+               flat_field_type(t->value_type(), in_progress);
     case script_value_type::jai_object_type: {
         if (!engine_ || t->type_name.empty()) {
             return false;
@@ -93,7 +85,7 @@ bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const
         return nested && nested->flat_value_semantics_impl(in_progress);
     }
     default:
-        return false;   // string (shared storage under assign), function, shared/weak, reference, var
+        return false;   // function, shared_ptr/weak_ptr (reference semantics), reference, var
     }
 }
 

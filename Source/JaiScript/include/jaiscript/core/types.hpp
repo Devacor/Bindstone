@@ -28,8 +28,22 @@ namespace jai {
     using script_char = char;       // 8-bit character
     using script_bool = bool;       // 1 byte boolean
     
-    // Container types
-    using script_array = std::vector<script_value>;
+    // Container types. script_array is the ONE array node behind TYPEID_ARRAY (the
+    // strong_ptr pointee — its address is the array's identity for ordering, borrows,
+    // and COW probes). Stage 1 of docs/typed_array_design.md: wraps the historical
+    // std::vector<script_value>; typed kinds (raw i64/f64 buffers) land behind this
+    // same node in stage 2, at which point values() asserts hetero and kind-dispatched
+    // accessors join it.
+    class script_array {
+    public:
+        script_array() = default;
+        std::vector<script_value>& values() noexcept { return values_; }
+        const std::vector<script_value>& values() const noexcept { return values_; }
+        size_t size() const noexcept { return values_.size(); }
+        bool empty() const noexcept { return values_.empty(); }
+    private:
+        std::vector<script_value> values_;
+    };
     using script_map = std::map<script_value, script_value>;
     
     // Function type for script functions

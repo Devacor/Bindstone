@@ -384,8 +384,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
         }
 
-        auto& arrayPtr = self.unchecked_get_array_storage();
-        arrayPtr->push_back(std::move(converted));
+        auto& arrayPtr = self.unchecked_get_array_storage()->values();
+        arrayPtr.push_back(std::move(converted));
         return ctx.make_value();
     }},
 
@@ -393,12 +393,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pop() takes no arguments");
         }
-        auto& arrayPtr = self.unchecked_get_array_storage();
-        if (arrayPtr->empty()) {
+        auto& arrayPtr = self.unchecked_get_array_storage()->values();
+        if (arrayPtr.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot pop from empty array");
         }
-        script_value last = arrayPtr->back();
-        arrayPtr->pop_back();
+        script_value last = arrayPtr.back();
+        arrayPtr.pop_back();
         return last;
     }},
 
@@ -413,8 +413,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
-        auto& arrayPtr = self.unchecked_get_array_storage();
-        arrayPtr->clear();
+        auto& arrayPtr = self.unchecked_get_array_storage()->values();
+        arrayPtr.clear();
         return ctx.make_value();
     }},
 
@@ -530,9 +530,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (start > end) start = end;
 
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
-        auto& resultPtr = result.unchecked_get_array_storage();
+        auto& resultPtr = result.unchecked_get_array_storage()->values();
         for (script_int i = start; i < end; ++i) {
-            resultPtr->push_back(arr[i].clone());
+            resultPtr.push_back(arr[i].clone());
         }
         return result;
     }},
@@ -550,7 +550,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         const std::vector<script_value> arr = self.unchecked_as_array();
         const auto& func = args[0].unchecked_as_function();
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
-        auto& resultPtr = result.unchecked_get_array_storage();
+        auto& resultPtr = result.unchecked_get_array_storage()->values();
 
         for (const auto& elem : arr) {
             auto call_result = func({elem});
@@ -558,7 +558,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return call_result.error_value();
             }
             if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
-                resultPtr->push_back(elem.clone());
+                resultPtr.push_back(elem.clone());
             }
         }
         return result;
@@ -569,14 +569,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "sort() takes zero or one argument");
         }
 
-        auto& arrPtr = self.unchecked_get_array_storage();
+        auto& arrPtr = self.unchecked_get_array_storage()->values();
 
         // Sort a SNAPSHOT, then write it back. The comparator (default or custom) can
         // run user script that mutates THIS array; sorting the live buffer while it
         // reallocates is undefined behavior / a crash. (A user-supplied comparator
         // that isn't a strict weak ordering is still the caller's responsibility, as
         // in C++ — but it can no longer corrupt the container.)
-        std::vector<script_value> tmp = *arrPtr;
+        std::vector<script_value> tmp = arrPtr;
 
         if (args.empty()) {
             // Default order: a strict weak ordering for ALL element types. Numerics
@@ -604,7 +604,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return result.value().is_bool() && result.value().unchecked_as_bool();
             });
         }
-        *arrPtr = std::move(tmp);
+        arrPtr = std::move(tmp);
         return ctx.make_value();
     }},
 
@@ -612,8 +612,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
         }
-        auto& arrPtr = self.unchecked_get_array_storage();
-        std::reverse(arrPtr->begin(), arrPtr->end());
+        auto& arrPtr = self.unchecked_get_array_storage()->values();
+        std::reverse(arrPtr.begin(), arrPtr.end());
         return ctx.make_value();
     }},
 
@@ -624,14 +624,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (!args[0].is_int()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove() argument must be an integer");
         }
-        auto& arrPtr = self.unchecked_get_array_storage();
+        auto& arrPtr = self.unchecked_get_array_storage()->values();
         script_int index = args[0].unchecked_as_int();
 
-        if (index < 0 || index >= static_cast<script_int>(arrPtr->size())) {
+        if (index < 0 || index >= static_cast<script_int>(arrPtr.size())) {
             return ctx.make_value(false);
         }
 
-        arrPtr->erase(arrPtr->begin() + index);
+        arrPtr.erase(arrPtr.begin() + index);
         return ctx.make_value(true);
     }},
 
@@ -643,7 +643,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_if() requires a function argument");
         }
 
-        auto& arrPtr = self.unchecked_get_array_storage();
+        auto& arrPtr = self.unchecked_get_array_storage()->values();
         const auto& predicate = args[0].unchecked_as_function();
         script_int removed_count = 0;
 
@@ -651,7 +651,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         // can mutate THIS array (arrays share strong_ptr storage), and a push/clear
         // would reallocate the buffer and dangle a live iterator. Evaluate against the
         // snapshot, collect survivors, then write them back.
-        std::vector<script_value> snapshot = *arrPtr;
+        std::vector<script_value> snapshot = arrPtr;
         std::vector<script_value> kept;
         kept.reserve(snapshot.size());
         for (auto& elem : snapshot) {
@@ -665,7 +665,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 kept.push_back(elem);     // survivor
             }
         }
-        *arrPtr = std::move(kept);
+        arrPtr = std::move(kept);
         return ctx.make_value(removed_count);
     }},
 
@@ -762,10 +762,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         const auto& map = self.unchecked_as_map();
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
-        auto& arrayPtr = result.unchecked_get_array_storage();
-        arrayPtr->reserve(map.size());
+        auto& arrayPtr = result.unchecked_get_array_storage()->values();
+        arrayPtr.reserve(map.size());
         for (const auto& [key, value] : map) {
-            arrayPtr->push_back(key.clone());
+            arrayPtr.push_back(key.clone());
         }
         return result;
     }},
@@ -776,10 +776,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         const auto& map = self.unchecked_as_map();
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
-        auto& arrayPtr = result.unchecked_get_array_storage();
-        arrayPtr->reserve(map.size());
+        auto& arrayPtr = result.unchecked_get_array_storage()->values();
+        arrayPtr.reserve(map.size());
         for (const auto& [key, value] : map) {
-            arrayPtr->push_back(value.clone());
+            arrayPtr.push_back(value.clone());
         }
         return result;
     }},
@@ -884,16 +884,16 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         const auto& map = self.unchecked_as_map();
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
-        auto& arrayPtr = result.unchecked_get_array_storage();
-        arrayPtr->reserve(map.size());
+        auto& arrayPtr = result.unchecked_get_array_storage()->values();
+        arrayPtr.reserve(map.size());
 
         // Return array of [key, value] pairs
         for (const auto& [key, value] : map) {
             script_value pair = script_value::make_array(nullptr, ctx.get_engine());
-            auto& pairPtr = pair.unchecked_get_array_storage();
-            pairPtr->push_back(key.clone());
-            pairPtr->push_back(value.clone());
-            arrayPtr->push_back(std::move(pair));
+            auto& pairPtr = pair.unchecked_get_array_storage()->values();
+            pairPtr.push_back(key.clone());
+            pairPtr.push_back(value.clone());
+            arrayPtr.push_back(std::move(pair));
         }
         return result;
     }}
@@ -4650,7 +4650,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             }
                             const script_value rhs_holder = pop_value();
                             const script_value& rhs = rhs_holder.deref();
-                            script_value* target_ptr = &(*storage)[static_cast<size_t>(*index)];
+                            script_value* target_ptr = &storage->values()[static_cast<size_t>(*index)];
                             const size_t ei = target_ptr->raw_storage_index();
                             const size_t ri = rhs.raw_storage_index();
                             const bool numeric = (ei == script_value::TYPEID_INT || ei == script_value::TYPEID_FLOAT) &&
@@ -9532,7 +9532,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 } else {
                     // Copy binding: values deep-copy per iteration, shared_ptr
                     // elements share (for (auto e : registry) e.hurt() mutates)
-                    *loop_var_ptr = clone_for_assignment((*array_storage)[i]);
+                    *loop_var_ptr = clone_for_assignment(array_storage->values()[i]);
                 }
 
                 // Execute loop body
@@ -12994,7 +12994,7 @@ checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* d
             "Destructuring requires an array on the right-hand side");
     }
 
-    auto& arr = *get_array_storage(source);
+    auto& arr = get_array_storage(source)->values();
 
     for (size_t i = 0; i < decl->names.size(); ++i) {
         script_value val = (i < arr.size()) ? clone_for_assignment(arr[i]) : make_value();

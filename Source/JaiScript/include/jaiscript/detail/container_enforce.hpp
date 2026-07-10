@@ -197,10 +197,10 @@ namespace jai::detail {
 				return out;
 			}
 			script_value rebuilt = script_value::make_array(element_type, eng);
-			auto& dest = rebuilt.get_array_storage();
-			dest->reserve(arr.size());
+			auto& dest = rebuilt.get_array_storage()->values();
+			dest.reserve(arr.size());
 			for (const auto& element : arr) {
-				dest->push_back(convert_container_element(eng, element, element_type));
+				dest.push_back(convert_container_element(eng, element, element_type));
 			}
 			rebuilt.set_type_info(target_type);
 			out.value = std::move(rebuilt);

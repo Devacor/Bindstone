@@ -756,7 +756,7 @@ namespace {
 			if (aliases_worker_state) { *aliases_worker_state = true; }
 			return true;
 		case script_value::TYPEID_ARRAY: {
-			if (worker_nodes && aliases_worker_state && worker_nodes->count(&v.unchecked_as_array())) {
+			if (worker_nodes && aliases_worker_state && worker_nodes->count(v.unchecked_array_node())) {
 				*aliases_worker_state = true;
 			}
 			for (const auto& elem : v.unchecked_as_array()) {
@@ -1083,7 +1083,7 @@ namespace {
 				v = v.parallel_detached_copy();
 				return normalize_element_inplace(v, eng);
 			}
-			for (auto& elem : *handle) {
+			for (auto& elem : handle->values()) {
 				if (!normalize_element_inplace(elem, eng)) { return false; }
 			}
 			return true;
@@ -1648,7 +1648,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	// would read racing content (borrow indexes any element, writes own chunks only) -
 	// contract A errors instead of silently demoting; snapshots of it stay legal
 	// (barrier-frozen copy, deterministic).
-	const std::vector<script_value>* source_node = &array_value.unchecked_as_array();
+	const script_array* source_node = array_value.unchecked_array_node();
 	std::vector<resolved_capture> captures;
 	state.last_captures.clear();
 	captures.reserve(adm->captures.size());
@@ -1685,7 +1685,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		case script_value::TYPEID_ARRAY:
 		case script_value::TYPEID_MAP: {
 			const bool same_container = cap.source->raw_storage_index() == script_value::TYPEID_ARRAY &&
-			                            &cap.source->unchecked_as_array() == source_node;
+			                            cap.source->unchecked_array_node() == source_node;
 			const bool borrowable = entry.borrow_eligible && !same_container &&
 			                        (statically_all_primitive(*cap.source) || parallel_content_all_primitive(*cap.source));
 			if (same_container && entry.borrow_eligible) {
@@ -1709,7 +1709,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	// mutable (shared strings detach in place - see normalize_element_inplace). Typed
 	// all-primitive containers prove statically; engine::allow_unsafe_parallel skips
 	// the walk entirely (trusted scripts).
-	auto& source = *const_cast<std::vector<script_value>*>(source_node);
+	auto& source = const_cast<script_array*>(source_node)->values();
 	const size_t n = source.size();
 	if (!eng.allow_unsafe_parallel() && !statically_all_primitive(array_value)) {
 		for (size_t i = 0; i < n; ++i) {
@@ -1950,7 +1950,7 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 			return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds),
 				"Array index out of bounds reading a captured array in a parallel body");
 		}
-		const script_value& elem = (*arr)[static_cast<size_t>(i)];
+		const script_value& elem = arr->values()[static_cast<size_t>(i)];
 		switch (elem.raw_storage_index()) {
 		case script_value::TYPEID_NULL:
 		case script_value::TYPEID_INT:

@@ -44,6 +44,11 @@
 #define VM_TRY(expr) 	do { 		if (vm_check((expr)) == op_status::failed) [[unlikely]] { 			return op_status::failed; 		} 	} while(0)
 #define VM_TRY_ASSIGN(var, expr) 	auto JAISCRIPT_CONCAT(__vm_result_, __LINE__) = (expr); 	if (!JAISCRIPT_CONCAT(__vm_result_, __LINE__)) [[unlikely]] { 		return raise_from(JAISCRIPT_CONCAT(__vm_result_, __LINE__)); 	} 	var = std::move(JAISCRIPT_CONCAT(__vm_result_, __LINE__).value());
 
+#ifdef JAISCRIPT_VM_PROFILE
+#define JAI_ENV_CENSUS(i) ++profile_scope_kinds_[i]
+#else
+#define JAI_ENV_CENSUS(i) ((void)0)
+#endif
 namespace jai::vm {
 
 namespace {
@@ -776,6 +781,9 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 		state.locals.function_name = function->name;
 
 		auto closure_env = handle.get_closure_env();
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_births_[3];
+#endif
 		state.entry_env = std::make_shared<environment>(closure_env ? closure_env : environment_, symbolizer_);
 		state.current_env = state.entry_env;
 
@@ -1260,6 +1268,9 @@ std::optional<script_value> vm_backend::object_arithmetic_via_method(const scrip
 }
 
 std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<environment> parent) {
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_env_births_[0];
+#endif
 	if (!scope_env_pool_.empty()) {
 		auto env = std::move(scope_env_pool_.back());
 		scope_env_pool_.pop_back();
@@ -1270,6 +1281,9 @@ std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<envir
 }
 
 std::shared_ptr<environment> vm_backend::acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx) {
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_env_births_[1];
+#endif
 	if (!scope_env_pool_.empty()) {
 		auto env = std::move(scope_env_pool_.back());
 		scope_env_pool_.pop_back();
@@ -1289,6 +1303,9 @@ std::shared_ptr<environment> vm_backend::acquire_static_scope_env(std::shared_pt
 		env->reset_as_static_method(std::move(parent), std::move(class_def));
 		return env;
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	++profile_env_births_[2];
+#endif
 	return std::make_shared<environment>(std::move(parent), env_symbolizer_, std::move(class_def));
 }
 
@@ -6079,6 +6096,9 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 							// pooled-env recycle hazard for escaping handles)
 							auto global = engine_ ? engine_->get_global_environment() : nullptr;
 							captureEnv = std::make_shared<environment>(global, symbolizer_);
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_births_[4];
+#endif
 						}
 						captureEnv->define(sym, vm_clone_for_capture(slot_val->deref(), symbolizer_));
 					}
@@ -6139,6 +6159,9 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	if (needs_capture_env) {
 		auto global = engine_ ? engine_->get_global_environment() : nullptr;
 		auto captureEnv = std::make_shared<environment>(global, symbolizer_);
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_births_[4];
+#endif
 
 		if (has_default_capture && !proto.used_variables.empty()) {
 			for (uint64_t var_id : proto.used_variables) {
@@ -8788,7 +8811,7 @@ op_status vm_backend::exec_iter_init(frame&, const vm_instruction&) {
 	script_value container = std::move(stack_.back());
 	stack_.pop_back();
 
-	environment_ = acquire_scope_env(environment_);
+	JAI_ENV_CENSUS(0); environment_ = acquire_scope_env(environment_);
 
 	iter_state state;
 	if (container.is_array()) {
@@ -9162,6 +9185,8 @@ checked_result<void> vm_backend::run(frame& entry) {
 // Diagnostic builds only (define JAISCRIPT_VM_PROFILE in this TU): sorted opcode
 // self-time histogram on backend teardown. Percentages are of total dispatched cycles.
 void vm_backend::dump_opcode_profile() const {
+	fprintf(stderr, "[vm-profile] scope kinds: iter %llu | scope_push %llu | call_closure %llu | call_plain %llu\n", (unsigned long long)profile_scope_kinds_[0], (unsigned long long)profile_scope_kinds_[1], (unsigned long long)profile_scope_kinds_[2], (unsigned long long)profile_scope_kinds_[3]);
+	fprintf(stderr, "[vm-profile] env births: scope %llu | method %llu | static %llu | coroutine %llu | capture %llu\n", (unsigned long long)profile_env_births_[0], (unsigned long long)profile_env_births_[1], (unsigned long long)profile_env_births_[2], (unsigned long long)profile_env_births_[3], (unsigned long long)profile_env_births_[4]);
 	uint64_t total = 0;
 	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];
 	if (total == 0) return;
@@ -9498,7 +9523,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			}
 
 			case opcode::op_scope_push:
-				environment_ = acquire_scope_env(environment_);
+				JAI_ENV_CENSUS(1); environment_ = acquire_scope_env(environment_);
 				break;
 
 			case opcode::op_scope_pop:
@@ -10308,10 +10333,10 @@ void vm_backend::setup_callee_env(const script_defined_function& function, call_
 			environment_ = acquire_static_scope_env(
 				function.closure_env->get_parent(), function.closure_env->get_class_definition());
 		} else {
-			environment_ = acquire_scope_env(function.closure_env);
+			JAI_ENV_CENSUS(2); environment_ = acquire_scope_env(function.closure_env);
 		}
 	} else {
-		environment_ = acquire_scope_env(prev_env);
+		JAI_ENV_CENSUS(3); environment_ = acquire_scope_env(prev_env);
 	}
 }
 

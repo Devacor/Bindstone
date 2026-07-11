@@ -37,6 +37,9 @@ namespace jai::vm {
         // kind [4]=declared-type mismatch
         uint64_t profile_decl_paths_[5] = {};
         uint64_t profile_store_paths_[5] = {};
+        // env production census: [0]=scope [1]=method [2]=static [3]=coroutine [4]=closure-capture
+        uint64_t profile_env_births_[5] = {};
+        uint64_t profile_scope_kinds_[4] = {};   // iter / scope_push / call_closure / call_plain
 #else
         ~vm_backend() override = default;
 #endif

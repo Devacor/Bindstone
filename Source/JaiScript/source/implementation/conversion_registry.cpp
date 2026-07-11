@@ -242,10 +242,10 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
     // Map<string, int> with smart down-conversion
     registry->register_conversion<std::map<std::string, int>>(
         [](const script_value& v) -> std::map<std::string, int> {
-            auto script_map = v.as<std::map<script_value, script_value>>();
+            auto local_map = v.as<script_map>();
             std::map<std::string, int> result;
             
-            for (const auto& [key, value] : script_map) {
+            for (const auto& [key, value] : local_map) {
                 if (!key.is_string()) {
                     throw std::runtime_error("Map key is not a string");
                 }
@@ -271,14 +271,14 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 throw std::runtime_error("Engine reference required for map conversion");
             }
             auto eng_ptr = eng;
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
+            auto& sm = const_cast<script_map&>(local_map.as_map());
             
             for (const auto& [key, value] : map) {
                 sm.insert_or_assign(script_value(key, eng_ptr), script_value(static_cast<int64_t>(value), eng_ptr));
             }
             
-            return script_map;
+            return local_map;
         }
     );
     
@@ -293,22 +293,22 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 throw std::runtime_error("Engine reference required for map conversion");
             }
             auto eng_ptr = eng;
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
+            auto& sm = const_cast<script_map&>(local_map.as_map());
             for (const auto& [key, value] : map) {
                 sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
-            return script_map;
+            return local_map;
         }
     );
     
     // Map<string, double> with int->double conversion
     registry->register_conversion<std::map<std::string, double>>(
         [](const script_value& v) -> std::map<std::string, double> {
-            auto script_map = v.as<std::map<script_value, script_value>>();
+            auto local_map = v.as<script_map>();
             std::map<std::string, double> result;
             
-            for (const auto& [key, value] : script_map) {
+            for (const auto& [key, value] : local_map) {
                 if (!key.is_string()) {
                     throw std::runtime_error("Map key is not a string");
                 }
@@ -333,22 +333,22 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 throw std::runtime_error("Engine reference required for map conversion");
             }
             auto eng_ptr = eng;
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
+            auto& sm = const_cast<script_map&>(local_map.as_map());
             for (const auto& [key, value] : map) {
                 sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
-            return script_map;
+            return local_map;
         }
     );
     
     // Map<string, float> with int->float conversion
     registry->register_conversion<std::map<std::string, float>>(
         [](const script_value& v) -> std::map<std::string, float> {
-            auto script_map = v.as<std::map<script_value, script_value>>();
+            auto local_map = v.as<script_map>();
             std::map<std::string, float> result;
             
-            for (const auto& [key, value] : script_map) {
+            for (const auto& [key, value] : local_map) {
                 if (!key.is_string()) {
                     throw std::runtime_error("Map key is not a string");
                 }
@@ -373,12 +373,12 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 throw std::runtime_error("Engine reference required for map conversion");
             }
             auto eng_ptr = eng;
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
+            auto& sm = const_cast<script_map&>(local_map.as_map());
             for (const auto& [key, value] : map) {
                 sm.insert_or_assign(script_value(key, eng_ptr), script_value(static_cast<double>(value), eng_ptr));
             }
-            return script_map;
+            return local_map;
         }
     );
     
@@ -393,22 +393,22 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 throw std::runtime_error("Engine reference required for map conversion");
             }
             auto eng_ptr = eng;
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
+            auto& sm = const_cast<script_map&>(local_map.as_map());
             for (const auto& [key, value] : map) {
                 sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
-            return script_map;
+            return local_map;
         }
     );
     
     // Map<string, bool> with int->bool conversion
     registry->register_conversion<std::map<std::string, bool>>(
         [](const script_value& v) -> std::map<std::string, bool> {
-            auto script_map = v.as<std::map<script_value, script_value>>();
+            auto local_map = v.as<script_map>();
             std::map<std::string, bool> result;
             
-            for (const auto& [key, value] : script_map) {
+            for (const auto& [key, value] : local_map) {
                 if (!key.is_string()) {
                     throw std::runtime_error("Map key is not a string");
                 }
@@ -433,22 +433,22 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 throw std::runtime_error("Engine reference required for map conversion");
             }
             auto eng_ptr = eng;
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
+            auto& sm = const_cast<script_map&>(local_map.as_map());
             for (const auto& [key, value] : map) {
                 sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
-            return script_map;
+            return local_map;
         }
     );
     
     // Map<int, string> with bounds checking
     registry->register_conversion<std::map<int, std::string>>(
         [](const script_value& v) -> std::map<int, std::string> {
-            auto script_map = v.as<std::map<script_value, script_value>>();
+            auto local_map = v.as<script_map>();
             std::map<int, std::string> result;
             
-            for (const auto& [key, value] : script_map) {
+            for (const auto& [key, value] : local_map) {
                 if (!key.is_int()) {
                     throw std::runtime_error("Map key is not an integer");
                 }
@@ -474,14 +474,14 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 throw std::runtime_error("Engine reference required for map conversion");
             }
             auto eng_ptr = eng;
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
+            auto& sm = const_cast<script_map&>(local_map.as_map());
             
             for (const auto& [key, value] : map) {
                 sm.insert_or_assign(script_value(static_cast<int64_t>(key), eng_ptr), script_value(value, eng_ptr));
             }
             
-            return script_map;
+            return local_map;
         }
     );
     
@@ -496,12 +496,12 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
                 throw std::runtime_error("Engine reference required for map conversion");
             }
             auto eng_ptr = eng;
-            auto script_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
+            auto& sm = const_cast<script_map&>(local_map.as_map());
             for (const auto& [key, value] : map) {
                 sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
             }
-            return script_map;
+            return local_map;
         }
     );
 }

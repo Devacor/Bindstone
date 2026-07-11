@@ -1113,7 +1113,7 @@ namespace jai {
             return const_cast<script_value&>(value).get_array_storage();
         }
 
-        static strong_ptr<std::map<script_value, script_value>>& get_map_storage(const script_value& value) {
+        static strong_ptr<script_map>& get_map_storage(const script_value& value) {
             return const_cast<script_value&>(value).get_map_storage();
         }
         

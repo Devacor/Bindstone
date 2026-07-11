@@ -90,7 +90,7 @@ public:
             
             // Test basic map conversion
             script_value map_val = engine->execute("{\"key1\": 1, \"key2\": 2, \"key3\": 3}");
-            auto map_ref = map_val.as<std::map<script_value, script_value>>();
+            auto map_ref = map_val.as<script_map>();
             check_eq(map_ref.size(), 3U);
             
             // Test accessing map values
@@ -168,7 +168,7 @@ public:
             auto engine = make_engine();
             
             // Test function that takes map<script_value, script_value> explicitly
-            engine->add_function("count_int_values", [](std::map<script_value, script_value> map) -> int {
+            engine->add_function("count_int_values", [](script_map map) -> int {
                 int count = 0;
                 for (const auto& pair : map) {
                     if (pair.second.is_int()) {

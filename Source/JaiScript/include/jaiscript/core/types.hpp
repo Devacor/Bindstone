@@ -95,7 +95,20 @@ namespace jai {
         std::vector<script_int> ints_;
         std::vector<script_float> floats_;
     };
-    using script_map = std::map<script_value, script_value>;
+    // Transparent probe for CONSTANT string keys: map lookups compare against the raw
+    // constant bytes instead of materializing a script_value per access (`rec["px"]`
+    // was one string allocation per read). Ordering is defined in value.cpp and MUST
+    // mirror script_value::operator<=> exactly (type rank first, then content).
+    struct map_string_key_probe {
+        std::string_view text;
+    };
+    struct script_value_map_less {
+        using is_transparent = void;
+        bool operator()(const script_value& a, const script_value& b) const;
+        bool operator()(const script_value& a, const map_string_key_probe& p) const;
+        bool operator()(const map_string_key_probe& p, const script_value& b) const;
+    };
+    using script_map = std::map<script_value, script_value, script_value_map_less>;
     
     // Function type for script functions
     // Returns checked_result to allow proper error propagation without exceptions

@@ -68,7 +68,11 @@ class engine;
                 requires std::is_copy_constructible_v<T> || is_specialization_v<T, std::vector> || is_specialization_v<T, std::map>
             {
                 // Handle containers explicitly to avoid infinite recursion
-                if constexpr (is_specialization_v<T, std::vector>) {
+                if constexpr (std::is_same_v<T, script_map>) {
+                    // Native map type (custom transparent comparator): copy out directly —
+                    // the generic std::map branch would rebuild with std::less
+                    return v.as_map();
+                } else if constexpr (is_specialization_v<T, std::vector>) {
                     using element_type = typename T::value_type;
                     return conversions::convert_script_array_to_vector<element_type>(v, eng);
                 } else if constexpr (is_specialization_v<T, std::map>) {
@@ -94,7 +98,12 @@ class engine;
             
             static script_value to(const T& t, engine* eng) {
                 // Handle standard containers explicitly since script_value doesn't have constructors for them
-                if constexpr (is_specialization_v<T, std::vector>) {
+                if constexpr (std::is_same_v<T, script_map>) {
+                    // Native map type (custom transparent comparator): wrap directly
+                    auto map_value = script_value::make_map(nullptr, nullptr, eng);
+                    const_cast<script_map&>(map_value.as_map()) = t;
+                    return map_value;
+                } else if constexpr (is_specialization_v<T, std::vector>) {
                     // For vectors, use the conversion utility with engine for registry access
                     using element_type = typename T::value_type;
                     return conversions::convert_vector_to_script_array<element_type>(t, eng);
@@ -297,7 +306,7 @@ class engine;
                     // Direct reference to stored array - ZERO COPY
                     return target.as_array();
                 }
-                else if constexpr (std::is_same_v<T, std::map<script_value, script_value>>) {
+                else if constexpr (std::is_same_v<T, script_map>) {
                     // Direct reference to stored map - ZERO COPY
                     return target.as_map();
                 }
@@ -332,8 +341,8 @@ class engine;
                 else if constexpr (std::is_same_v<T, std::vector<script_value>>) {
                     return v.as_array();
                 }
-                // For std::map<script_value, script_value> maps, return reference to avoid copy
-                else if constexpr (std::is_same_v<T, std::map<script_value, script_value>>) {
+                // For script_map maps, return reference to avoid copy
+                else if constexpr (std::is_same_v<T, script_map>) {
                     return v.as_map();
                 }
                 // For std::vector<T> containers, use conversion utility
@@ -480,8 +489,8 @@ class engine;
                 }
                 // Convert script map to std::map
                 std::map<K, V> result;
-                auto& script_map = v.as_map();
-                for (const auto& [key, value] : script_map) {
+                auto& local_map = v.as_map();
+                for (const auto& [key, value] : local_map) {
                     K converted_key = value_converter<K>::from(key, eng);
                     V converted_value = value_converter<V>::from(value, eng);
                     result[converted_key] = converted_value;

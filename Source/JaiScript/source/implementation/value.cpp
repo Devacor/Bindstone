@@ -205,7 +205,7 @@ script_value script_value::make_cell_reference(script_value&& boxed, engine* eng
     return v;
 }
 
-script_value script_value::make_map_entry_reference(const strong_ptr<std::map<script_value, script_value>>& map_storage,
+script_value script_value::make_map_entry_reference(const strong_ptr<script_map>& map_storage,
                                                     const script_value& key, engine* eng, type_info_ptr value_type) {
     if (!map_storage) {
         throw runtime_error("Cannot create reference to null map");
@@ -257,7 +257,7 @@ script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueTy
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_map(keyType, valueType);
-    v.storage_ = make_strong<std::map<script_value, script_value>>();
+    v.storage_ = make_strong<script_map>();
     return v;
 }
 
@@ -557,11 +557,11 @@ script_value script_value::clone() const {
             break;
         }
         case script_value_type::jai_map_type: {
-            auto& other_map = *std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
+            auto& other_map = *std::get<strong_ptr<script_map>>(storage_);
             // engine::memory_cap: count the fresh container storage (raised at the next
             // loop back-edge); key/value clones charge themselves recursively
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (other_map.size() + 1));
-            auto new_map = make_strong<std::map<script_value, script_value>>();
+            auto new_map = make_strong<script_map>();
             for (const auto& [key, value] : other_map) {
                 new_map->emplace(key.clone(), value.clone());
             }
@@ -730,10 +730,10 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             break;
         }
         case TYPEID_MAP: {
-            const auto& handle = std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
+            const auto& handle = std::get<strong_ptr<script_map>>(storage_);
             if (!handle) { break; }
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (handle->size() + 1));
-            auto fresh = make_strong<std::map<script_value, script_value>>();
+            auto fresh = make_strong<script_map>();
             for (const auto& [key, val] : *handle) {
                 fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes),
                                val.parallel_detached_copy(collected_types, collected_nodes));
@@ -765,7 +765,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
                 result.storage_ = fresh;
             } else if (const auto* map = parallel_borrow_map()) {
                 engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (map->size() + 1));
-                auto fresh = make_strong<std::map<script_value, script_value>>();
+                auto fresh = make_strong<script_map>();
                 for (const auto& [key, val] : *map) {
                     fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes),
                                    val.parallel_detached_copy(collected_types, collected_nodes));
@@ -799,7 +799,7 @@ script_value script_value::make_parallel_borrow(const script_value& source, engi
         const auto& handle = std::get<strong_ptr<script_array>>(v.storage_);
         tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get()));
     } else if (v.raw_storage_index() == TYPEID_MAP) {
-        const auto& handle = std::get<strong_ptr<std::map<script_value, script_value>>>(v.storage_);
+        const auto& handle = std::get<strong_ptr<script_map>>(v.storage_);
         tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get())) | parallel_borrow_tag::k_map_bit;
     } else {
         throw runtime_error("make_parallel_borrow: source must be an array or map");
@@ -817,10 +817,10 @@ const script_array* script_value::parallel_borrow_array() const noexcept {
     return nullptr;
 }
 
-const std::map<script_value, script_value>* script_value::parallel_borrow_map() const noexcept {
+const script_map* script_value::parallel_borrow_map() const noexcept {
     if (const auto* tag = std::get_if<TYPEID_PARALLEL_BORROW>(&storage_)) {
         if (tag->is_map_kind()) {
-            return static_cast<const std::map<script_value, script_value>*>(tag->pointer());
+            return static_cast<const script_map*>(tag->pointer());
         }
     }
     return nullptr;
@@ -1152,6 +1152,21 @@ bool script_value::operator==(const script_value& other) const {
         default:
             return false;
     }
+}
+
+// Transparent map-key ordering: MUST mirror operator<=> below exactly — type rank
+// first (a probe ranks as jai_string_type), then string content (std::string <=>
+// string_view is the same lexicographic order as string <=> string).
+bool script_value_map_less::operator()(const script_value& a, const script_value& b) const {
+    return a < b;
+}
+bool script_value_map_less::operator()(const script_value& a, const map_string_key_probe& p) const {
+    if (auto cmp = a.type() <=> script_value_type::jai_string_type; cmp != 0) { return cmp < 0; }
+    return a.unchecked_as_string() < p.text;
+}
+bool script_value_map_less::operator()(const map_string_key_probe& p, const script_value& b) const {
+    if (auto cmp = script_value_type::jai_string_type <=> b.type(); cmp != 0) { return cmp < 0; }
+    return p.text < b.unchecked_as_string();
 }
 
 std::strong_ordering script_value::operator<=>(const script_value& other) const {

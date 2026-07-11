@@ -224,8 +224,8 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
         value_type = eng->get_type_info_for_cpp_type<V>();
     }
 
-    auto script_map = script_value::make_map(key_type, value_type, eng);
-    auto& map = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
+    auto map_value = script_value::make_map(key_type, value_type, eng);
+    auto& map = const_cast<script_map&>(map_value.as_map());
 
     for (const auto& [key, value] : stdmap) {
         script_value converted_key = script_value(std::monostate{}, eng);
@@ -278,7 +278,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
         map.insert_or_assign(converted_key, converted_value);
     }
 
-    return script_map;
+    return map_value;
 }
 
 template<typename T>

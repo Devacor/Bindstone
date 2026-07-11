@@ -22,8 +22,8 @@ namespace detail {
         return const_cast<std::vector<script_value>&>(value.as_array());
     }
     
-    inline std::map<script_value, script_value>& get_mutable_map(const script_value& value) {
-        return const_cast<std::map<script_value, script_value>&>(value.as_map());
+    inline script_map& get_mutable_map(const script_value& value) {
+        return const_cast<script_map&>(value.as_map());
     }
 }
 

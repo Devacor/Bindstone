@@ -900,7 +900,7 @@ private:
                     throw runtime_error("Binary archive map size exceeds remaining data");
                 }
                 script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-                auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
+                auto& map = const_cast<script_map&>(map_val.as_map());
 
                 for (uint32_t i = 0; i < size; ++i) {
                     script_value key = read_value_internal();
@@ -1021,7 +1021,7 @@ private:
                 }
 
                 script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-                auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
+                auto& map = const_cast<script_map&>(map_val.as_map());
 
                 map.insert_or_assign(script_value("_type_", eng), script_value(type_name, eng));
 

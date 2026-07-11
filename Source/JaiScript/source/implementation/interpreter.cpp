@@ -3460,7 +3460,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             // For maps, we need to handle both assignment and read access
             // Try to get a mutable reference if possible
             try {
-                auto& map = const_cast<std::map<script_value, script_value>&>(left.as_map());
+                auto& map = const_cast<script_map&>(left.as_map());
 
                 // Check if the left side is an lvalue (variable, member access, or subscript)
                 bool is_lvalue = expr->left->get_type() == node_type::identifier_expr ||
@@ -8738,7 +8738,7 @@ checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr)
     script_value mapValue = script_value::make_map(keyType, valueType, engine_);
 
     // Get the internal map to populate
-    auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
+    auto& map = const_cast<script_map&>(mapValue.as_map());
 
     // Evaluate each key-value pair and add to map
     for (const auto& entry : expr->entries) {
@@ -13073,7 +13073,7 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
         engine_->get_type_info_string(),
         engine_->get_type_info_int(),
         engine_);
-    auto& map_ref = const_cast<std::map<script_value, script_value>&>(enum_map.as_map());
+    auto& map_ref = const_cast<script_map&>(enum_map.as_map());
 
     for (size_t i = 0; i < decl->values.size(); ++i) {
         auto key = script_value(std::string(decl->values[i].first), engine_);

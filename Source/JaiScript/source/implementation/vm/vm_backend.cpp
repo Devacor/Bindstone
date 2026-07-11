@@ -7279,6 +7279,60 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
+	// Field-store site IC (write-side twin of exec_get_member's): epoch-validated
+	// {class, slot} skips the resolve ladder AND the synthesized setter closure —
+	// the auto-setter body IS enforce_field_write + set_field_unchecked, replayed
+	// here verbatim through the slot. A CUSTOM _set_ method keeps the site negative;
+	// declared-but-absent cells materialize exactly like set_field_unchecked.
+	if (cached_global_env_ &&
+	    dereferenced.raw_storage_index() == script_value::TYPEID_OBJECT) {
+		auto& holder = dereferenced.unchecked_get_object_storage();
+		if (holder && holder->is_class_instance_wrapper && holder->data) {
+			auto* inst = static_cast<class_instance*>(holder->data.get());
+			if (class_definition* cd = inst->get_class_definition()) {
+				auto& code = *f.code;
+				if (code.member_ic.empty()) {
+					code.member_ic.resize(code.code.size());
+				}
+				auto& entry = code.member_ic[static_cast<size_t>(&ins - code.code.data())];
+				if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
+					if (entry.slot != UINT32_MAX) {
+						auto enforced = inst->enforce_field_write(member->member_id,
+						                                          clone_for_assignment(value));
+						if (!enforced) {
+							return raise_from(enforced);
+						}
+						inst->field_slot_write(entry.slot, std::move(enforced).value());
+						stack_.push_back(std::move(value));
+						return {};
+					}
+				} else {
+					uint32_t slot = UINT32_MAX;
+					if (member->member_id != UINT64_MAX && !cd->chain_has_nonpublic()) {
+						const uint32_t fslot = cd->field_slot(member->member_id);
+						if (fslot != class_definition::k_no_field_slot) {
+							auto [setter_id, setter_view] =
+								symbolizer_->get_setter_id_with_view(member->member_id);
+							bool custom_setter = false;
+							if (!cd->is_auto_accessor(setter_id)) {
+								const script_value setter = cd->get_method(setter_id, false);
+								custom_setter = !setter.is_null() && !setter.is_invalid() &&
+								                setter.is_function();
+							}
+							if (!custom_setter) {
+								slot = fslot;
+							}
+						}
+					}
+					entry.cd = cd;
+					entry.epoch = cd->method_epoch();
+					entry.slot = slot;
+					// resolve through the ladder this once; hits serve from here on
+				}
+			}
+		}
+	}
+
 	VM_TRY(assign_member(f, dereferenced, member, value));
 	if (is_unwinding_) {
 		stack_.push_back(make_null());
@@ -8389,7 +8443,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				return std::move(enforced.value());
 			};
 			auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(field_id);
-			class_def->add_method_by_id(setter_id, setter);
+			class_def->add_method_by_id(setter_id, setter, true);  // true = synthesized accessor
 		}
 	}
 

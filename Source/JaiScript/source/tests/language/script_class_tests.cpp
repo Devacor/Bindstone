@@ -1562,6 +1562,48 @@ public:
             }
         });
 
+        test("field_store_ic_reload_and_setter_shadow", [this]() {
+            // Write-side twin of field_read_ic: the vm SET_MEMBER site IC revalidates on
+            // method_epoch — a CUSTOM _set_ added by reload must fire at an already-hot
+            // store site, typed-store conversion errors stay backend-identical, and the
+            // auto-setter (synthesized accessor) never blocks the slot path.
+            std::array<std::string, 2> badstore;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class W { int x = 0; int log = 0; }
+                    var w = W();
+                    void hot(int v) { for (int i = 0; i < 5; ++i) { w.x = v + i; } }
+                )");
+                e->execute("hot(10);");
+                check_eq((int64_t)14, e->execute("w.x").as_int(), "hot store site writes the cell");
+                // Established contract (both backends): the SYNTHESIZED accessor
+                // re-registers after user methods, so a script _set_x for a DECLARED
+                // field is unreachable — the store stays a raw field write. The reload
+                // still bumps the epoch, so the hot site revalidates either way.
+                e->execute("class W { int x = 0; int log = 0; void _set_x(int v) { x = v; log = log + 1; } }");
+                e->execute("hot(20);");
+                check_eq((int64_t)24, e->execute("w.x").as_int(), "field store stays raw across reload");
+                check_eq((int64_t)0, e->execute("w.log").as_int(),
+                         use_vm ? "vm auto-accessor wins over user _set_x" : "interp auto-accessor wins over user _set_x");
+                // a custom setter for a NON-field name DOES fire (no auto competition,
+                // and the store site stays negative in the IC — no slot exists)
+                e->execute(R"(
+                    class V { int seen = 0; void _set_virt(int v) { seen = seen + v; } }
+                    var vv = V();
+                    void hotv(int v) { for (int i = 0; i < 3; ++i) { vv.virt = v; } }
+                )");
+                e->execute("hotv(7);");
+                check_eq((int64_t)21, e->execute("vv.seen").as_int(),
+                         use_vm ? "vm non-field custom setter at hot site" : "interp non-field custom setter at hot site");
+                // typed-store conversion error at a hot site: identical outcome both backends
+                badstore[use_vm ? 1 : 0] = e->execute(
+                    "var m = \"\"; try { w.x = [1,2]; m = \"stored\"; } catch (er) { m = er; } m").as<std::string>();
+            }
+            check_eq(badstore[0], badstore[1], "backends agree on typed-store mismatch outcome");
+        });
+
         test("member_access_hot_reload_and_host_api", [this]() {
             // Hot reload is permissive: enforcement consults the CURRENT class_definition
             // at access time — instances keep working, new accesses follow new labels.

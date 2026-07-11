@@ -2,6 +2,37 @@
 // G is a TYPED shared_ptr global (declared under the class): reference
 // semantics by construction — no accidental deep copy can fork the world.
 
+// one tick of intent, human or autopilot
+class Input {
+public:
+	bool fwd = false;
+	bool back = false;
+	bool sl = false;
+	bool sr = false;
+	bool tl = false;
+	bool tr = false;
+	bool run = false;
+	bool fire = false;
+	bool use = false;
+	int weapon = -1;
+	bool start = false;
+
+	Input(bool fwd_, bool back_, bool sl_, bool sr_, bool tl_, bool tr_, bool run_,
+			bool fire_, bool use_, int weapon_, bool start_) {
+		fwd = fwd_;
+		back = back_;
+		sl = sl_;
+		sr = sr_;
+		tl = tl_;
+		tr = tr_;
+		run = run_;
+		fire = fire_;
+		use = use_;
+		weapon = weapon_;
+		start = start_;
+	}
+}
+
 class Game {
 public:
 	// console + view geometry (sub-cell pixels: vw = w*PIXW, vh = rows*PIXH)
@@ -49,8 +80,8 @@ public:
 
 	// world
 	var enemies = [];      // shared_ptr<Enemy> registry
-	var items = [];        // [kind, x, y, taken]
-	var shots = [];        // [kind, x, y, vx, vy, ttl]
+	var items = [];        // Item handles (defs.jai)
+	var shots = [];        // Shot handles (combat.jai)
 	var fx = null;         // ParticlePool handle
 	int noise = 0;
 	bool warden_down = false;
@@ -87,7 +118,7 @@ public:
 
 	// the autopilot: a coroutine handle living in a field
 	var pilot = null;
-	var input = {};
+	var input = null;      // Input handle for the current tick
 
 	Game(int w_, int h_) {
 		w = w_;
@@ -161,25 +192,24 @@ public:
 			return pilot.resume();
 		}
 		var fire_edge = frame_key == " " || frame_key == "enter";
-		return {
-			"fwd": key_down("w") || key_down("up"),
-			"back": key_down("s") || key_down("down"),
-			"sl": key_down("a"),
-			"sr": key_down("d"),
-			"tl": key_down("left"),
-			"tr": key_down("right"),
-			"run": key_down("shift"),
-			"fire": key_down("space") || key_down("ctrl"),
-			"use": frame_key == "e",
-			"weapon": frame_key == "1" ? 0 : (frame_key == "2" ? 1 : (frame_key == "3" ? 2 : -1)),
-			"start": fire_edge || key_down("space") || key_down("ctrl")
-		};
+		return new Input(
+			key_down("w") || key_down("up"),
+			key_down("s") || key_down("down"),
+			key_down("a"),
+			key_down("d"),
+			key_down("left"),
+			key_down("right"),
+			key_down("shift"),
+			key_down("space") || key_down("ctrl"),
+			frame_key == "e",
+			frame_key == "1" ? 0 : (frame_key == "2" ? 1 : (frame_key == "3" ? 2 : -1)),
+			fire_edge || key_down("space") || key_down("ctrl"));
 	}
 
 	void run_tick() {
 		tick = tick + 1;
 		input = gather_input();
-		var start_pressed = input["start"];
+		bool start_pressed = input.start;
 		if (mode == 0) {
 			mode_t = mode_t + 1;
 			if (start_pressed && mode_t > 8) { start_episode(); }
@@ -209,18 +239,16 @@ public:
 		}
 
 		// --- play ---
-		int wsel = input["weapon"];
+		int wsel = input.weapon;
 		if (wsel >= 0 && have[wsel] == 1 && wsel != weapon) {
 			weapon = wsel;
 			cooldown = 8;
 			show_msg(`${WEAPONS[wsel]["name"]} ready`, "97");
 		}
 		if (frame_key == "m") { automap = !automap; }
-		var use_pressed = input["use"];
-		if (use_pressed) { player_use(); }
+		if (input.use) { player_use(); }
 		player_move(input);
-		var fire_held = input["fire"];
-		if (fire_held) { player_fire(); }
+		if (input.fire) { player_fire(); }
 
 		if (cooldown > 0) { cooldown = cooldown - 1; }
 		if (muzzle > 0) { muzzle = muzzle - 1; }
@@ -258,9 +286,9 @@ public:
 		hh = mix32(hh, acc);
 		var pacc = 0;
 		for (auto& p : fx.pool) {
-			int pk = p[0];
+			int pk = p.kind;
 			if (pk == 0) { continue; }
-			pacc = (pacc + pk * 131 + (math::itrunc(p[1] * 16.0) * 61 + math::itrunc(p[2] * 16.0)) * 17 + p[7]) & 0xFFFFFFFF;
+			pacc = (pacc + pk * 131 + (math::itrunc(p.x * 16.0) * 61 + math::itrunc(p.y * 16.0)) * 17 + p.life) & 0xFFFFFFFF;
 		}
 		hh = mix32(hh, pacc);
 		hh = mix32(hh, shots.size() * 8191 + kills * 127 + secrets * 31);
@@ -399,12 +427,7 @@ public:
 	}
 
 	function pilot_input(bool fwd, bool back, bool sl, bool sr, int turn, bool fire, bool use, int wsel, bool start) {
-		return {
-			"fwd": fwd, "back": back, "sl": sl, "sr": sr,
-			"tl": turn < 0, "tr": turn > 0,
-			"run": true, "fire": fire, "use": use,
-			"weapon": wsel, "start": start
-		};
+		return new Input(fwd, back, sl, sr, turn < 0, turn > 0, true, fire, use, wsel, start);
 	}
 
 	// goal priority: medkits when hurting -> live enemies -> loot -> unfound
@@ -441,10 +464,9 @@ public:
 		int bx = -1;
 		int by = -1;
 		float bd = 9999.0;
-		for (int i = 0; i < items.size(); ++i) {
-			var taken = items[i][3];
-			if (taken == 1) { continue; }
-			int k = items[i][0];
+		for (auto& it : items) {
+			if (it.taken) { continue; }
+			int k = it.kind;
 			bool wanted = false;
 			for (auto kk : kinds) { if (kk == k) { wanted = true; } }
 			if (!wanted) { continue; }
@@ -459,11 +481,11 @@ public:
 			// keys we already carry are not loot
 			if (k == 6 && key_r) { continue; }
 			if (k == 7 && key_b) { continue; }
-			float d = dist2(items[i][1], items[i][2], px, py);
+			float d = dist2(it.x, it.y, px, py);
 			if (d < bd) {
 				bd = d;
-				bx = math::ifloor(items[i][1]);
-				by = math::ifloor(items[i][2]);
+				bx = math::ifloor(it.x);
+				by = math::ifloor(it.y);
 			}
 		}
 		return [bx, by];

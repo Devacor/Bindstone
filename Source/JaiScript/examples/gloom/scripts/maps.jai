@@ -201,7 +201,7 @@ function load_map(int mi) -> void {
 			else if (ch == "W") { spawn_enemy(3, x, y); }
 			else {
 				var ik = item_kind_for(ch);
-				if (ik >= 0) { G.items.push([ik, x + 0.5, y + 0.5, 0]); }
+				if (ik >= 0) { G.items.push(new Item(ik, x + 0.5, y + 0.5)); }
 			}
 		}
 	}

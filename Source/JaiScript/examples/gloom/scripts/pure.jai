@@ -4,26 +4,24 @@
 // beyond the math whitelist. The same functions run serially when
 // HOST_WORKERS == 0, which is the 1-vs-N determinism check by construction.
 
-// A CHUNK of wall rays over a PERSISTENT pair workspace (parallel_for v1, SAFE
-// mode): input header + map snapshot + preallocated output cells live in ONE
-// boot-built record the body owns exclusively; per frame only the pose header
-// changes (main thread) and the body rewrites the out region in place. Element:
-//   [x0, x1, vw, posx, posy, dirx, diry, planex, planey, mw, out_base, pack0...,
-//    dist, side, kind, texcol, dist, ...]   (out region at t[10], 4 per column)
-// pack = tile snapshot, 15 cells x 4 bits per int64 (bits 60+ unused: no
-// sign-bit traps under checked overflow).
+// A CHUNK of wall rays over a PERSISTENT workspace (parallel_for v1, SAFE
+// mode): a WallChunk class record (render.jai) the body owns exclusively —
+// pose header + map snapshot + preallocated typed out columns; per frame only
+// the pose header changes (main thread) and the body rewrites the out arrays
+// in place. pack = tile snapshot, 15 cells x 4 bits per int64 (bits 60+
+// unused: no sign-bit traps under checked overflow).
 function gloom_ray_chunk_step(var& t) -> void {
-	int x0 = t[0];
-	int x1 = t[1];
-	int vw = t[2];
-	float posx = t[3];
-	float posy = t[4];
-	float dirx = t[5];
-	float diry = t[6];
-	float planex = t[7];
-	float planey = t[8];
-	int mw = t[9];
-	int ob = t[10];
+	int x0 = t.x0;
+	int x1 = t.x1;
+	int vw = t.vw;
+	float posx = t.posx;
+	float posy = t.posy;
+	float dirx = t.dirx;
+	float diry = t.diry;
+	float planex = t.planex;
+	float planey = t.planey;
+	int mw = t.mw;
+	int oi = 0;
 	float xstep = 2.0 / (vw - 1.0);
 	for (int x = x0; x < x1; ++x) {
 		float camx = x * xstep - 1.0;
@@ -47,7 +45,7 @@ function gloom_ray_chunk_step(var& t) -> void {
 			if (sdx < sdy) { sdx += ddx; mx += stepx; side = 0; }
 			else { sdy += ddy; my += stepy; side = 1; }
 			int cell = my * mw + mx;
-			int word = t[11 + cell / 15];
+			int word = t.pack[cell / 15];
 			int c = (word >> ((cell % 15) * 4)) & 15;
 			if (c != 0) {
 				hit = true;
@@ -60,11 +58,11 @@ function gloom_ray_chunk_step(var& t) -> void {
 		float wallx = side == 0 ? posy + pdist * rdy : posx + pdist * rdx;
 		wallx = wallx - math::floor(wallx);
 		int texcol = wallx * 64.0;
-		t[ob] = pdist;
-		t[ob + 1] = side;
-		t[ob + 2] = kind;
-		t[ob + 3] = texcol;
-		ob += 4;
+		t.odist[oi] = pdist;
+		t.oside[oi] = side;
+		t.okind[oi] = kind;
+		t.otex[oi] = texcol;
+		oi = oi + 1;
 	}
 }
 
@@ -113,25 +111,34 @@ function gloom_ray(var t) -> var {
 
 // One particle step at the fixed timestep (TICK baked in as a literal — the
 // admission walk forbids reading enclosing state, and the sim is fixed-step
-// anyway). Element: [kind, x, y, z, vx, vy, vz, life]
-//   kind 0 dead | 1 spark | 2 blood | 3 gib | 4 smoke | 5 flash | 6 hexmote
+// anyway). Element: a Particle class record (particles.jai).
 // z is height in [0..~1.2], 0 = floor. Pure ballistic/drag updates; collision
 // with WALLS is intentionally skipped (particles are garnish, walls clip them
 // visually via the z-buffer at render time).
 // IN PLACE (parallel_for v1, SAFE mode): mutates its owned element through the
 // by-ref parameter — no output array, no per-frame pool replacement.
 function gloom_particle_step(var& p) -> void {
-	int kind = p[0];
+	int kind = p.kind;
 	if (kind == 0) { return; }
-	float x = p[1];
-	float y = p[2];
-	float z = p[3];
-	float vx = p[4];
-	float vy = p[5];
-	float vz = p[6];
-	int life = p[7];
+	float x = p.x;
+	float y = p.y;
+	float z = p.z;
+	float vx = p.vx;
+	float vy = p.vy;
+	float vz = p.vz;
+	int life = p.life;
 	life = life - 1;
-	if (life <= 0) { p = [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]; return; }
+	if (life <= 0) {
+		p.kind = 0;
+		p.x = 0.0;
+		p.y = 0.0;
+		p.z = 0.0;
+		p.vx = 0.0;
+		p.vy = 0.0;
+		p.vz = 0.0;
+		p.life = 0;
+		return;
+	}
 	if (kind == 1) {                       // spark: fast, hard gravity
 		vz = vz - 0.30;
 		vx = vx * 0.90;
@@ -163,11 +170,11 @@ function gloom_particle_step(var& p) -> void {
 		else { vz = 0.0; }
 		if (kind == 1 || kind == 2) { life = life < 4 ? life : 4; }
 	}
-	p[1] = x;
-	p[2] = y;
-	p[3] = z;
-	p[4] = vx;
-	p[5] = vy;
-	p[6] = vz;
-	p[7] = life;
+	p.x = x;
+	p.y = y;
+	p.z = z;
+	p.vx = vx;
+	p.vy = vy;
+	p.vz = vz;
+	p.life = life;
 }

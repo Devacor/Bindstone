@@ -39,6 +39,21 @@ var ITEM_DEFS = [
 	{"name": "soul orb",    "art": "it_orb",    "size": 0.30}
 ];
 
+// a placed pickup in the world (per-frame billboard/automap/pickup scans)
+class Item {
+public:
+	int kind = 0;
+	float x = 0.0;
+	float y = 0.0;
+	bool taken = false;
+
+	Item(int kind_, float x_, float y_) {
+		kind = kind_;
+		x = x_;
+		y = y_;
+	}
+}
+
 // ------------------------------------------------------------- sprite art ---
 // Each entry: rows + a tiny palette. Kept chunky on purpose: at half-block
 // resolution a 14-wide sprite fills a third of the screen point-blank.

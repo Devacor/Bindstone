@@ -12,10 +12,8 @@ function spot_free(float x, float y, float r) -> bool {
 
 function player_move(var& input) -> void {
 	float turn = 0.0;
-	var tl = input["tl"];
-	var tr = input["tr"];
-	if (tl) { turn -= 1.0; }
-	if (tr) { turn += 1.0; }
+	if (input.tl) { turn -= 1.0; }
+	if (input.tr) { turn += 1.0; }
 	G.pang = G.pang + turn * 2.7 * TICK;
 	while (G.pang > 6.2831853) { G.pang -= 6.2831853; }
 	while (G.pang < 0.0) { G.pang += 6.2831853; }
@@ -24,17 +22,13 @@ function player_move(var& input) -> void {
 	float diry = math::sin(G.pang);
 	float wx = 0.0;
 	float wy = 0.0;
-	var fwd = input["fwd"];
-	var back = input["back"];
-	var sl = input["sl"];
-	var sr = input["sr"];
-	if (fwd) { wx += dirx; wy += diry; }
-	if (back) { wx -= dirx; wy -= diry; }
-	if (sl) { wx += diry; wy -= dirx; }
-	if (sr) { wx -= diry; wy += dirx; }
+	if (input.fwd) { wx += dirx; wy += diry; }
+	if (input.back) { wx -= dirx; wy -= diry; }
+	if (input.sl) { wx += diry; wy -= dirx; }
+	if (input.sr) { wx -= diry; wy += dirx; }
 	float wl = math::sqrt(wx * wx + wy * wy);
 	if (wl > 0.001) {
-		var run = input["run"];
+		bool run = input.run;
 		float speed = (run ? 5.0 : 3.4) * TICK;
 		wx = wx / wl * speed;
 		wy = wy / wl * speed;
@@ -112,13 +106,10 @@ function give_ammo(int t, int n) -> bool {
 }
 
 function check_pickups() -> void {
-	for (int i = 0; i < G.items.size(); ++i) {
-		var taken = G.items[i][3];
-		if (taken == 1) { continue; }
-		int kind = G.items[i][0];
-		float ix = G.items[i][1];
-		float iy = G.items[i][2];
-		if (dist2(G.px, G.py, ix, iy) > 0.36) { continue; }
+	for (auto& it : G.items) {
+		if (it.taken) { continue; }
+		int kind = it.kind;
+		if (dist2(G.px, G.py, it.x, it.y) > 0.36) { continue; }
 		bool got = false;
 		if (kind == 0) { if (G.hp < 100) { G.hp = imin(100, G.hp + 10); got = true; } }
 		else if (kind == 1) { if (G.hp < 100) { G.hp = imin(100, G.hp + 25); got = true; } }
@@ -146,7 +137,7 @@ function check_pickups() -> void {
 		}
 		else if (kind == 10) { G.hp = imin(150, G.hp + 40); got = true; G.face_grin = 20; }
 		if (got) {
-			G.items[i][3] = 1;
+			it.taken = true;
 			show_msg(`picked up ${ITEM_DEFS[kind]["name"]}`, "93");
 		}
 	}

@@ -21,10 +21,42 @@ array<int> PIX = [];
 var VW = 0;
 var VH = 0;
 array<int> ROWIDX = [];
-// Persistent ray-chunk pair workspaces (parallel_for v1): header + map snapshot
-// + preallocated out cells per record (layout in gloom_ray_chunk_step). Rebuilt
-// only when the map snapshot changes (WS_MAPGEN vs G.mapgen); the pose header
+// Persistent ray-chunk workspaces (parallel_for v1): typed-field class records
+// — pose header + map snapshot + preallocated typed out columns. Rebuilt only
+// when the map snapshot changes (WS_MAPGEN vs G.mapgen); the pose header
 // rewrites per frame, the region writes outputs in place.
+class WallChunk {
+public:
+	int x0 = 0;
+	int x1 = 0;
+	int vw = 0;
+	float posx = 0.0;
+	float posy = 0.0;
+	float dirx = 0.0;
+	float diry = 0.0;
+	float planex = 0.0;
+	float planey = 0.0;
+	int mw = 0;
+	array<int> pack = [];         // tile snapshot, 15 cells x 4 bits per int64
+	array<float> odist = [];      // per column: perp distance
+	array<int> oside = [];        // per column: 0 x-side, 1 y-side
+	array<int> okind = [];        // per column: wall kind
+	array<int> otex = [];         // per column: texture column 0..63
+
+	WallChunk(int x0_, int x1_, int vw_) {
+		x0 = x0_;
+		x1 = x1_;
+		vw = vw_;
+		mw = G.mw;
+		pack = G.mappack;
+		for (int k = 0; k < x1_ - x0_; ++k) {
+			odist.push(0.0);
+			oside.push(0);
+			okind.push(0);
+			otex.push(0);
+		}
+	}
+}
 var WALL_WS = [];
 var WS_MAPGEN = -1;
 
@@ -36,12 +68,7 @@ function build_wall_ws(int ncols) -> void {
 	while (bx0 < ncols) {
 		int bx1 = bx0 + per_chunk;
 		if (bx1 > ncols) { bx1 = ncols; }
-		var rec = [bx0, bx1, ncols, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, G.mw, 0];
-		for (auto wv : G.mappack) { rec.push(wv); }
-		rec[10] = rec.size();          // out_base: outputs start after the pack
-		int outn = (bx1 - bx0) * 4;
-		for (int k = 0; k < outn; ++k) { rec.push(0); }
-		WALL_WS.push(rec);
+		WALL_WS.push(new WallChunk(bx0, bx1, ncols));
 		bx0 = bx1;
 	}
 }
@@ -284,12 +311,12 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		WS_MAPGEN = G.mapgen;
 	}
 	for (auto& t : WALL_WS) {
-		t[3] = px;
-		t[4] = py;
-		t[5] = dirx;
-		t[6] = diry;
-		t[7] = planex;
-		t[8] = planey;
+		t.posx = px;
+		t.posy = py;
+		t.dirx = dirx;
+		t.diry = diry;
+		t.planex = planex;
+		t.planey = planey;
 	}
 	if (HOST_WORKERS == 0) {
 		for (auto& t : WALL_WS) { gloom_ray_chunk_step(t); }
@@ -302,14 +329,12 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 	int boost = G.muzzle > 0 ? 2 : 0;
 	int x = 0;
 	for (auto& ch : WALL_WS) {
-		int cn = ch.size();
-		int ci = ch[10];
-		while (ci < cn) {
-			float dist = ch[ci];
-			int side = ch[ci + 1];
-			int kind = ch[ci + 2];
-			int tx = ch[ci + 3] >> 1;             // 0..31
-			ci += 4;
+		int cols = ch.x1 - ch.x0;
+		for (int ci = 0; ci < cols; ++ci) {
+			float dist = ch.odist[ci];
+			int side = ch.oside[ci];
+			int kind = ch.okind[ci];
+			int tx = ch.otex[ci] >> 1;            // 0..31
 			int px0 = x * pxw;
 			zbuf[px0] = dist;
 			if (pxw == 2) { zbuf[px0 + 1] = dist; }
@@ -362,28 +387,24 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		collect_billboard(sp, e.x, e.y, enemy_art(e), ENEMY_DEFS[e.kind]["size"], 0.0,
 			e.flash > 0 ? 1 : 0, inv, dirx, diry, planex, planey);
 	}
-	for (int i = 0; i < G.items.size(); ++i) {
-		var taken = G.items[i][3];
-		if (taken == 1) { continue; }
-		int ik = G.items[i][0];
-		collect_billboard(sp, G.items[i][1], G.items[i][2], ITEM_DEFS[ik]["art"],
+	for (auto& it : G.items) {
+		if (it.taken) { continue; }
+		int ik = it.kind;
+		collect_billboard(sp, it.x, it.y, ITEM_DEFS[ik]["art"],
 			ITEM_DEFS[ik]["size"], 0.0, 0, inv, dirx, diry, planex, planey);
 	}
 	var shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
-	for (int i2 = 0; i2 < G.shots.size(); ++i2) {
-		var s = G.shots[i2];
-		int sk = s[0];
-		collect_billboard(sp, s[1], s[2], shot_art[sk], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
+	for (auto& s : G.shots) {
+		collect_billboard(sp, s.x, s.y, shot_art[s.kind], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
 	}
-	// insertion sort, far first (records: [depth, scx, name, size, zlift, flash])
+	// insertion sort, far first
 	for (int i3 = 1; i3 < sp.size(); ++i3) {
 		var rec = sp[i3];
+		float di = rec.depth;
 		int j = i3 - 1;
 		while (j >= 0) {
 			var cmp = sp[j];
-			float dj = cmp[0];
-			float di = rec[0];
-			if (dj >= di) { break; }
+			if (cmp.depth >= di) { break; }
 			sp[j + 1] = cmp;
 			j = j - 1;
 		}
@@ -397,10 +418,10 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 	int pxw = PIXW;
 	int pxh = PIXH;
 	for (auto& prt : G.fx.pool) {
-		int pk = prt[0];
+		int pk = prt.kind;
 		if (pk == 0) { continue; }
-		float rx = prt[1] - px;
-		float ry = prt[2] - py;
+		float rx = prt.x - px;
+		float ry = prt.y - py;
 		float depth = inv * (planex * ry - planey * rx);
 		if (depth < 0.15 || depth > 14.0) { continue; }
 		float ttx = inv * (diry * rx - dirx * ry);
@@ -409,8 +430,8 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		float zd = zbuf[scx];
 		if (depth >= zd) { continue; }
 		float span = 1.0 * vh / depth;
-		int pyx = half2 + span * 0.5 - prt[3] * span;
-		int life = prt[7];
+		int pyx = half2 + span * 0.5 - prt.z * span;
+		int life = prt.life;
 		int phase = 3 - imin(3, life / 5);
 		int color = pcols[pk * 4 + phase];
 		int psz = math::itrunc(0.07 * span) + 1;
@@ -631,7 +652,27 @@ function rows_sext(var& pix, var& parts) -> var {
 	return rows;
 }
 
-// world -> camera -> screen; appends [depth, scx, art, size, zlift, flash]
+// a sprite slice queued for the far-to-near paint
+class Billboard {
+public:
+	float depth = 0.0;
+	int scx = 0;
+	string art = "";
+	float size = 0.0;
+	float zlift = 0.0;
+	int flash = 0;
+
+	Billboard(float depth_, int scx_, string art_, float size_, float zlift_, int flash_) {
+		depth = depth_;
+		scx = scx_;
+		art = art_;
+		size = size_;
+		zlift = zlift_;
+		flash = flash_;
+	}
+}
+
+// world -> camera -> screen; appends a Billboard
 function collect_billboard(var& sp, float wx, float wy, string art, float size, float zlift,
 		int flash, float inv, float dirx, float diry, float planex, float planey) -> void {
 	float rx = wx - G.px;
@@ -641,16 +682,16 @@ function collect_billboard(var& sp, float wx, float wy, string art, float size, 
 	float ttx = inv * (diry * rx - dirx * ry);
 	int scx = (G.vw / 2.0) * (1.0 + ttx / depth);
 	if (scx < -G.vw || scx > G.vw * 2) { return; }
-	sp.push([depth, scx, art, size, zlift, flash]);
+	sp.push(new Billboard(depth, scx, art, size, zlift, flash));
 }
 
 function draw_billboard(var& rec, var& pix, var& zbuf) -> void {
-	float depth = rec[0];
-	int scx = rec[1];
-	string name = rec[2];
-	float size = rec[3];
-	float zlift = rec[4];
-	int flash = rec[5];
+	float depth = rec.depth;
+	int scx = rec.scx;
+	string name = rec.art;
+	float size = rec.size;
+	float zlift = rec.zlift;
+	int flash = rec.flash;
 	var& art = ARTS[name];
 	int aw = art["w"];
 	int ah = art["h"];
@@ -710,10 +751,9 @@ function draw_automap(var& pix, var& tiles) -> void {
 		}
 	}
 	// blips: items gold, live enemies red, you white (+ heading pixel)
-	for (int i = 0; i < G.items.size(); ++i) {
-		var taken = G.items[i][3];
-		if (taken == 1) { continue; }
-		blip(pix, ox + math::itrunc(G.items[i][1]) * sx, oy + math::itrunc(G.items[i][2]) * sy, AM_ITEM);
+	for (auto& it : G.items) {
+		if (it.taken) { continue; }
+		blip(pix, ox + math::itrunc(it.x) * sx, oy + math::itrunc(it.y) * sy, AM_ITEM);
 	}
 	for (auto& e : G.enemies) {
 		if (!e.alive) { continue; }

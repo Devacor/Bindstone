@@ -1113,6 +1113,14 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 	return target;
 }
 
+script_value vm_backend::make_bound_method_thunk(const script_value& this_val, script_value method) {
+	script_callable payload;
+	payload.kind = script_callable::kind_type::bound_method;
+	payload.this_obj = this_val;
+	payload.bound_dispatch = std::move(method);
+	return script_value::make_function(script_callable_thunk{engine_, std::move(payload)}, engine_);
+}
+
 bool vm_backend::object_to_bool_via_method(const script_value& value) {
 	auto target = resolve_member_target(value);
 	if (!target) {
@@ -2923,7 +2931,7 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 				}
 				script_value method = instance->get_method(sym, false);
 				if (!method.is_invalid()) {
-					stack_.push_back(make_bound_method(this_val, method));
+					stack_.push_back(make_bound_method_thunk(this_val, std::move(method)));
 					return {};
 				}
 				auto class_def = instance->get_class_definition();
@@ -4050,7 +4058,7 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 				}
 				script_value method = instance->get_method(sym, false);
 				if (!method.is_invalid()) {
-					scratch.emplace(make_bound_method(this_val, method));
+					scratch.emplace(make_bound_method_thunk(this_val, std::move(method)));
 					return &scratch.value();
 				}
 				auto class_def = instance->get_class_definition();
@@ -5861,11 +5869,20 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 
 	// Opaque / arity-window path: today's pooled invoke with the parked value
 #ifdef JAISCRIPT_VM_PROFILE
-	// Who misses the in-loop fast path: count native-boundary callees by site symbol
-	if (ins.b < f.code->call_sites.size() && site.callee.symbol != k_invalid_u32) {
-		profile_native_callees_[std::string(symbolizer_->get_string(f.code->symbols[site.callee.symbol]))]++;
-	} else {
-		profile_native_callees_["<unnamed-site>"]++;
+	// Who misses the in-loop fast path: count native-boundary callees by site symbol.
+	// Bound-method thunks are NOT misses (invoke_callee enters them in-loop below).
+	{
+		const auto* parked_thunk = pc.value.is_function()
+			? pc.value.as_function().target<script_callable_thunk>() : nullptr;
+		const bool parked_bound = parked_thunk &&
+			parked_thunk->payload.kind == script_callable::kind_type::bound_method;
+		if (!parked_bound) {
+			if (ins.b < f.code->call_sites.size() && site.callee.symbol != k_invalid_u32) {
+				profile_native_callees_[std::string(symbolizer_->get_string(f.code->symbols[site.callee.symbol]))]++;
+			} else {
+				profile_native_callees_["<unnamed-site>"]++;
+			}
+		}
 	}
 #endif
 	auto arguments = acquire_arg_vector(argc);
@@ -6070,6 +6087,36 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	const auto* thunk = func.target<script_callable_thunk>();
 	const bool direct = thunk && thunk->eng == engine_ &&
 	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
+	// Bound-method thunk (bare sibling calls; twin of invoke_callee's branch — this
+	// tail is inlined, it never reaches invoke_callee): enter the method IN-LOOP.
+	if (thunk && thunk->eng == engine_ &&
+	    thunk->payload.kind == script_callable::kind_type::bound_method &&
+	    thunk->payload.this_obj && thunk->payload.bound_dispatch &&
+	    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+#ifdef JAISCRIPT_VM_PROFILE
+		profile_bound_method_paths_[0]++;
+#endif
+		const auto* dispatch = thunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
+		if (dispatch && dispatch->eng == engine_) {
+			auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
+			if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+#ifdef JAISCRIPT_VM_PROFILE
+				profile_bound_method_paths_[1]++;
+#endif
+				script_value method_val = *thunk->payload.bound_dispatch;
+				script_value receiver = *thunk->payload.this_obj;
+				return enter_script_method(f, std::move(method_val), *dispatch,
+				                           resolved.value(), std::move(receiver), arguments, site);
+			}
+		}
+	}
+#ifdef JAISCRIPT_VM_PROFILE
+	if (thunk && thunk->payload.kind == script_callable::kind_type::bound_method) {
+		profile_bound_method_paths_[2]++;
+	} else if (!direct) {
+		profile_bound_method_paths_[3]++;
+	}
+#endif
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
@@ -6142,6 +6189,39 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	const bool direct = thunk && thunk->eng == engine_ &&
 	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
 	const bool in_loop = direct && arguments.size() == thunk->payload.fn->parameters().size();
+
+	// Bound-method thunk (the env method-fallback mint for bare sibling calls): enter
+	// the method IN-LOOP through the same machinery as op_call_method — no lambda hop,
+	// no per-call payload build, no execute_callable env acquire + native re-entry.
+	// The frame machinery replicates make_bound_method's keep-alive anchor
+	// (call_record::method_result_anchor). Coroutine methods, foreign engines, and
+	// parallel workers fall to the opaque path (identical behavior; the worker rules
+	// live there). A resolution decline falls through for the identical error.
+	if (thunk && thunk->eng == engine_ &&
+	    thunk->payload.kind == script_callable::kind_type::bound_method &&
+	    thunk->payload.this_obj && thunk->payload.bound_dispatch &&
+	    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+		const auto* dispatch = thunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
+		if (dispatch && dispatch->eng == engine_) {
+			auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
+			if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+#ifdef JAISCRIPT_VM_PROFILE
+				profile_bound_method_paths_[1]++;
+#endif
+				script_value method_val = *thunk->payload.bound_dispatch;
+				script_value receiver = *thunk->payload.this_obj;
+				return enter_script_method(f, std::move(method_val), *dispatch,
+				                           resolved.value(), std::move(receiver), arguments, site);
+			}
+		}
+	}
+#ifdef JAISCRIPT_VM_PROFILE
+	if (thunk && thunk->payload.kind == script_callable::kind_type::bound_method) {
+		profile_bound_method_paths_[2]++;
+	} else if (!direct) {
+		profile_bound_method_paths_[3]++;
+	}
+#endif
 
 	if (in_loop) {
 		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes switch_to_
@@ -9625,6 +9705,12 @@ void vm_backend::dump_opcode_profile() const {
 		fprintf(stderr, "[vm-profile] GET_MEMBER paths: ic-hit %llu | negative/absent %llu | non-instance %llu\n",
 			(unsigned long long)profile_get_member_paths_[0], (unsigned long long)profile_get_member_paths_[1],
 			(unsigned long long)profile_get_member_paths_[2]);
+	}
+	const uint64_t bm_total = profile_bound_method_paths_[0] + profile_bound_method_paths_[2] + profile_bound_method_paths_[3];
+	if (bm_total) {
+		fprintf(stderr, "[vm-profile] exec_call bound-method: entered %llu | in-loop %llu | bound-opaque %llu | other-opaque %llu\n",
+			(unsigned long long)profile_bound_method_paths_[0], (unsigned long long)profile_bound_method_paths_[1],
+			(unsigned long long)profile_bound_method_paths_[2], (unsigned long long)profile_bound_method_paths_[3]);
 	}
 	uint64_t total = 0;
 	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];

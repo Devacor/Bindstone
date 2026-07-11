@@ -4,6 +4,7 @@
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/execution_backend.hpp>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -188,7 +189,19 @@ checked_result<script_value> environment::get(uint64_t id) const {
                 // Try to get method (non-throwing)
                 script_value method = instance->get_method(id, false);
                 if (!method.is_invalid()) {
-                    bound_method_storage_ = make_bound_method(this_object_, method);
+                    // Typed thunk, not the anonymous make_bound_method lambda: hot vm
+                    // call paths recover the payload (kind bound_method) and enter the
+                    // method IN-LOOP — bare sibling calls stop paying the opaque
+                    // lambda → dispatcher → execute_callable → env-acquire recursion.
+                    // Opaque callers get make_bound_method's exact behavior from the
+                    // thunk's operator() (engine.cpp), keep-alive anchor included.
+                    script_callable payload;
+                    payload.kind = script_callable::kind_type::bound_method;
+                    payload.this_obj = this_object_;
+                    payload.bound_dispatch = std::move(method);
+                    bound_method_storage_ = script_value::make_function(
+                        script_callable_thunk{this_object_.get_engine(), std::move(payload)},
+                        this_object_.get_engine());
                     return bound_method_storage_;
                 }
 

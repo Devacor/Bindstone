@@ -24,14 +24,20 @@ namespace detail { class engine_operator_table; }
 // engine::get_execution_backend()->execute_callable(), so no callable ever holds a
 // backend or interpreter pointer.
 struct script_callable {
-    enum class kind_type : uint8_t { function, method, static_method, constructor };
+    // bound_method: a receiver-bound method VALUE (the env method-fallback mint for
+    // bare sibling calls) — this_obj + bound_dispatch (the class's methods_ dispatcher
+    // value, which carries the sticky-env/body-cache state and pins the class). The
+    // thunk's operator() replicates make_bound_method's exact behavior; the vm's call
+    // path recovers the payload and enters the method in-loop instead.
+    enum class kind_type : uint8_t { function, method, static_method, constructor, bound_method };
     kind_type kind = kind_type::function;
 
     std::shared_ptr<script_defined_function> fn;   // function (free functions, lambdas)
     std::shared_ptr<function_decl> ast;            // method / static_method (resolved overload)
     std::shared_ptr<class_definition> cls;         // method / static_method / constructor
     std::shared_ptr<environment> definition_env;   // method / static_method / constructor
-    std::optional<script_value> this_obj;          // method ('this' receiver; args exclude it)
+    std::optional<script_value> this_obj;          // method / bound_method ('this'; args exclude it)
+    std::optional<script_value> bound_dispatch;    // bound_method: the method value to invoke
 };
 
 // Named trampoline for script-defined callables. Backends mint function values through

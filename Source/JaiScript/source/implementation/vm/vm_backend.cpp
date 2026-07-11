@@ -7117,6 +7117,79 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value object = std::move(stack_.back());
 	stack_.pop_back();
+	// Field-read site IC (flat classes tier-1 stage B): epoch-validated {class, slot}
+	// per ip replaces the resolve ladder with one slot load. The fill probes mirror
+	// member_access_value's precedence EXACTLY (same_as, access, sp-builtin-name
+	// branch, per-member getter shadow — all epoch-covered); negative entries pin
+	// non-cacheable sites off the probes. A hit pushes the RAW cell copy (reference
+	// fields stay references, the ladder's field spelling); an absent cell falls to
+	// the ladder for chain-default materialization and errors.
+	if (cached_global_env_) {
+		script_value& objd = object.deref();
+		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
+			auto& holder = objd.unchecked_get_object_storage();
+			if (holder && holder->is_class_instance_wrapper && holder->data) {
+				auto* inst = static_cast<class_instance*>(holder->data.get());
+				if (class_definition* cd = inst->get_class_definition()) {
+					auto& code = *f.code;
+					if (code.member_ic.empty()) {
+						code.member_ic.resize(code.code.size());
+					}
+					auto& entry = code.member_ic[static_cast<size_t>(&ins - code.code.data())];
+					if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
+						if (entry.slot != UINT32_MAX) {
+							if (script_value* v = inst->field_slot_value(entry.slot)) {
+#ifdef JAISCRIPT_VM_PROFILE
+								profile_get_member_paths_[0]++;
+#endif
+								stack_.push_back(*v);
+								return {};
+							}
+						}
+#ifdef JAISCRIPT_VM_PROFILE
+						profile_get_member_paths_[1]++;
+#endif
+					} else {
+						uint32_t slot = UINT32_MAX;
+						if (expr->member_id != same_as_id_ && !cd->chain_has_nonpublic() &&
+						    builtins_.shared_ptr_methods.find(expr->member_id) ==
+						        builtins_.shared_ptr_methods.end()) {
+							const uint32_t fslot = cd->field_slot(expr->member_id);
+							if (fslot != class_definition::k_no_field_slot) {
+								bool getter_shadow = false;
+								if (cd->has_property_getters()) {
+									uint64_t getter_id = expr->getter_id;
+									if (getter_id == UINT64_MAX) {
+										auto [gid, _] = symbolizer_->get_getter_id_with_view(expr->member_id);
+										getter_id = gid;
+										expr->getter_id = getter_id;
+									}
+									// The SYNTHESIZED accessor is verbatim get_field — only a
+									// CUSTOM getter shadows the slot (stage-5a's has_field trick,
+									// field-read edition; registration reclaims overridden ids).
+									if (!cd->is_auto_accessor(getter_id)) {
+										const script_value getter = cd->get_method(getter_id, false);
+										getter_shadow = !getter.is_null() && !getter.is_invalid() &&
+										                getter.is_function();
+									}
+								}
+								if (!getter_shadow) {
+									slot = fslot;
+								}
+							}
+						}
+						entry.cd = cd;
+						entry.epoch = cd->method_epoch();
+						entry.slot = slot;
+						// resolve through the ladder this once; hits serve from here on
+					}
+				}
+			}
+		}
+	}
+#ifdef JAISCRIPT_VM_PROFILE
+	profile_get_member_paths_[2]++;
+#endif
 	script_value out = make_null();
 	VM_TRY(member_access_value(f, object, expr, out));
 	stack_.push_back(std::move(out));
@@ -9492,6 +9565,12 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_call_method_paths_[2], (unsigned long long)profile_call_method_paths_[3],
 			(unsigned long long)profile_call_method_paths_[4], (unsigned long long)profile_call_method_paths_[5],
 			(unsigned long long)profile_call_method_paths_[6]);
+	}
+	const uint64_t gm_total = profile_get_member_paths_[0] + profile_get_member_paths_[1] + profile_get_member_paths_[2];
+	if (gm_total) {
+		fprintf(stderr, "[vm-profile] GET_MEMBER paths: ic-hit %llu | negative/absent %llu | non-instance %llu\n",
+			(unsigned long long)profile_get_member_paths_[0], (unsigned long long)profile_get_member_paths_[1],
+			(unsigned long long)profile_get_member_paths_[2]);
 	}
 	uint64_t total = 0;
 	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];

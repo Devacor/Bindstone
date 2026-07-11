@@ -243,6 +243,17 @@ namespace jai::vm {
         // Compiler had the builtin registries: call_site bi_* indices are authoritative
         // (invalid = not a builtin). False (raw-compiler tests) keeps the find fallback.
         bool builtin_indexed = false;
+        // GET_MEMBER field-read site cache (flat classes tier-1 stage B): per-ip
+        // {receiver class, method_epoch, field slot}; slot UINT32_MAX = negative
+        // (same_as / nonpublic chain / sp-builtin name / getter shadow / no slot —
+        // the resolve ladder speaks). Lazily sized to code.size(); main-engine only
+        // (same cached_global_env_ gate as the caches above).
+        struct member_ic_entry {
+            const class_definition* cd = nullptr;
+            uint64_t epoch = 0;
+            uint32_t slot = UINT32_MAX;
+        };
+        mutable std::vector<member_ic_entry> member_ic;
         // Compile-time sticky-method-scope gate: true = no op parks per-call state in the
         // scope env or captures its identity beyond the call (closures/refs/try/scopes/env
         // decls), so a method body may run in ONE persistent per-dispatch method env

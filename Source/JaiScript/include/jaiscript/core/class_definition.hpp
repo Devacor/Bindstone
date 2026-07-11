@@ -67,6 +67,17 @@ public:
     script_value* find_field_value(uint64_t id);
     const script_value* find_field_value(uint64_t id) const;
 
+    // Slot fast path (vm site ICs, tier-1 stage B): present-cell lookup by a
+    // pre-resolved slot — no hash; absent (null cell / raw-invalid) returns null so
+    // the caller falls back to the resolve ladder (chain defaults, errors).
+    script_value* field_slot_value(uint32_t slot) {
+        if (slot >= flat_fields_.size()) {
+            return nullptr;
+        }
+        script_value* v = flat_fields_[slot].get();
+        return (v && v->raw_storage_index() != script_value::TYPEID_INVALID) ? v : nullptr;
+    }
+
     const std::string& get_class_name() const { return class_name_; }
 
     // Hot-reload field migration; defined out-of-line (needs class_definition + the
@@ -235,7 +246,28 @@ public:
         }
 
         methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
+        if (is_property_getter) {
+            auto_accessor_ids_.insert(name_id);
+        } else {
+            auto_accessor_ids_.erase(name_id);
+        }
         bump_method_epoch();
+    }
+
+    // TRUE when methods_[id] is the synthesized field accessor (the auto-getter body is
+    // verbatim get_field, so a field-read IC may treat it as non-shadowing); any
+    // unflagged registration of the same id (a CUSTOM getter) reclaims the name. Walks
+    // the chain like get_method.
+    bool is_auto_accessor(uint64_t id) const {
+        if (auto_accessor_ids_.find(id) != auto_accessor_ids_.end()) {
+            return true;
+        }
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->is_auto_accessor(id)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
@@ -310,6 +342,7 @@ public:
         } else {
             methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
         }
+        auto_accessor_ids_.erase(name_id);
         bump_method_epoch();
     }
 
@@ -1408,6 +1441,8 @@ private:
     std::vector<std::shared_ptr<class_definition>> parent_classes_;
     mutable std::unordered_map<uint64_t, script_value> all_field_defaults_cache_;
     mutable bool field_defaults_cache_valid_ = false;
+    // Ids whose methods_ entry is the SYNTHESIZED field accessor (see is_auto_accessor)
+    std::unordered_set<uint64_t> auto_accessor_ids_;
     // Flat-field slot registry (tier-1 flat classes): APPEND-ONLY — a field id keeps
     // its slot for the class's lifetime (re-added fields REUSE their retired slot), so
     // instance storage never re-indexes across hot reloads. Slot existence is NOT

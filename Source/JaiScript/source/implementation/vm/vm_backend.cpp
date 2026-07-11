@@ -6108,6 +6108,30 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+template <typename Call>
+op_status vm_backend::guarded_native_call(Call&& call) {
+	try {
+		auto result = call();
+		if (!result) {
+			return raise_from(result);
+		}
+		stack_.push_back(std::move(result.value()));
+		return {};
+	} catch (const script_exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = e;
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	} catch (const std::exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = script_exception(e.what());
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	}
+}
+
 op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site) {
 	const size_t argc = arguments.size();
 
@@ -7409,14 +7433,21 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	stack_.pop_back();
 
 	if (site.receiver_symbol != UINT64_MAX) {
-		auto ref_result = environment_->get_ref(site.receiver_symbol);
-		if (ref_result && ref_result.value().get().is_string()) {
-			auto methodIt = builtins_.string_methods.find(member->member_id);
-			if (methodIt != builtins_.string_methods.end()) {
+		// Name-first gate: the env walk only pays off when the member could be a string
+		// builtin at all (the registry is fixed after init), so probe the registry before
+		// resolving the receiver variable. Outcome-identical: the builtin fires iff the
+		// name is registered AND the variable is a string, same as the old order.
+		auto methodIt = builtins_.string_methods.find(member->member_id);
+		if (methodIt != builtins_.string_methods.end()) {
+			auto ref_result = environment_->get_ref(site.receiver_symbol);
+			if (ref_result && ref_result.value().get().is_string()) {
 				// Resolve through references (ref decls/cells): string builtins read
 				// self's storage RAW, and in-place mutation must land in the target
 				// (KEEP BYTE-PARALLEL with the interpreter's identifier-receiver path)
 				script_value& var_ref = ref_result.value().get().deref();
+#ifdef JAISCRIPT_VM_PROFILE
+				profile_call_method_paths_[3]++;
+#endif
 				auto result = methodIt->second(builtin_ctx(), var_ref, arguments);
 				if (!result) {
 					return raise_from(result);
@@ -7453,8 +7484,56 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				}
 				script_value method_val = pin->method_value;   // pin-private control block
 				const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
+#ifdef JAISCRIPT_VM_PROFILE
+				profile_call_method_paths_[4]++;
+#endif
 				return enter_script_method(f, std::move(method_val), *dispatch, pin->resolved,
 				                           std::move(objv), arguments, site);
+			}
+			// Monomorphic method IC hit (call_site in chunk.hpp): same receiver class at
+			// an unchanged method_epoch replays the cached ladder outcome. has_field is
+			// re-probed every hit (a runtime-added field shadows the method); non-static
+			// sites re-run single-overload resolution (typed params reject by arg type,
+			// and a decline falls to the full ladder for the identical error).
+			if (cached_global_env_ && site.mic_cd && holder && holder->is_class_instance_wrapper &&
+			    holder->data) {
+				auto* inst = static_cast<class_instance*>(holder->data.get());
+				if (inst->get_class_definition() == site.mic_cd &&
+				    site.mic_cd->method_epoch() == site.mic_epoch &&
+				    !inst->has_field(member->member_id)) {
+					if (site.mic_static) {
+						script_value method_val = site.mic_method;
+#ifdef JAISCRIPT_VM_PROFILE
+						profile_call_method_paths_[0]++;
+#endif
+						return enter_script_method(f, std::move(method_val), *site.mic_dispatch,
+						                           site.mic_resolved, std::move(objv), arguments, site);
+					}
+					auto resolved = site.mic_dispatch->cls->resolve_method_overload(
+						site.mic_dispatch->name_id, arguments);
+					if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+						script_value method_val = site.mic_method;
+#ifdef JAISCRIPT_VM_PROFILE
+						profile_call_method_paths_[1]++;
+#endif
+						return enter_script_method(f, std::move(method_val), *site.mic_dispatch,
+						                           resolved.value(), std::move(objv), arguments, site);
+					}
+				}
+			}
+			// Coroutine resume()/done() dispatch directly: the native branch mints a fresh
+			// closure + function value PER RESUME just to forward to the handle. Same
+			// handle call, same checked_result propagation; the minted lambdas ignore
+			// their arguments, so this drops them identically. Any other member falls
+			// through for member_access_value's coroutine error spelling.
+			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->data &&
+			    (member->member_id == resume_id_ || member->member_id == done_id_)) {
+				auto handle = std::static_pointer_cast<coroutine_handle>(holder->data);
+				if (member->member_id == resume_id_) {
+					return guarded_native_call([&] { return handle->resume(engine_); });
+				}
+				stack_.push_back(script_value(handle->done(), engine_));
+				return {};
 			}
 			// A user class method WINS over a same-named builtin handle method (Dev ruling
 			// 2026-07): the sp-builtin only applies when the class does NOT define it.
@@ -7500,6 +7579,32 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 								// Resolution failures (and coroutine methods) fall through to the
 								// native path, which re-resolves and reports the identical error
 								if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+									// IC fill (call_site in chunk.hpp): single-overload methods on
+									// all-public chains cache this outcome; mic_static marks sites
+									// whose resolution can't depend on arg types (every arg-bound
+									// param untyped — pick_best_overload's has_explicit_type test).
+									if (cached_global_env_ && target.instance &&
+									    target.instance->get_class_definition() &&
+									    !target.class_def->chain_has_nonpublic() &&
+									    dispatch->cls->single_method_overload(dispatch->name_id)) {
+										site.mic_cd = target.instance->get_class_definition();
+										site.mic_epoch = site.mic_cd->method_epoch();
+										site.mic_method = method_val;
+										site.mic_dispatch = site.mic_method.as_function().target<script_method_dispatch>();
+										site.mic_resolved = resolved.value();
+										bool arg_independent = true;
+										const auto& params = resolved.value()->parameters;
+										for (size_t i = 0; i < arguments.size() && arg_independent; ++i) {
+											const auto& p = params[i];
+											arg_independent = !(p.type && !p.type->type_name.empty() &&
+											                    p.type->type_name != "any" &&
+											                    p.type->base_type != script_value_type::jai_any_type);
+										}
+										site.mic_static = arg_independent;
+									}
+#ifdef JAISCRIPT_VM_PROFILE
+									profile_call_method_paths_[2]++;
+#endif
 									return enter_script_method(f, std::move(method_val), *dispatch,
 									                           resolved.value(), std::move(objv), arguments, site);
 								}
@@ -7508,6 +7613,55 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					}
 				}
 			}
+		}
+	}
+
+	// Array/map builtins dispatch DIRECTLY: the native path below mints a bound-method
+	// function value per call (member_access_value's move-captured receiver copy) just to
+	// invoke it once. Same registry fn, same receiver value it would have captured (node
+	// shared, so content mutation lands identically; the copy dies at op end either way),
+	// same checked_result propagation. A registry miss falls through so unknown members
+	// and the map KEY-sugar spelling keep member_access_value's one voice.
+	if (member->member_id != same_as_id_ &&
+	    !(member->object && member->object->get_type() == node_type::super_expr)) {
+		const builtin_method* direct = nullptr;
+		if (object.is_array()) {
+			auto methodIt = builtins_.array_methods.find(member->member_id);
+			if (methodIt != builtins_.array_methods.end()) {
+				direct = &methodIt->second;
+			}
+		} else if (object.is_map()) {
+			auto methodIt = builtins_.map_methods.find(member->member_id);
+			if (methodIt != builtins_.map_methods.end()) {
+				direct = &methodIt->second;
+			}
+		} else if (object.is_string()) {
+			// Only non-identifier string receivers reach here (identifier receivers whose
+			// variable is a string returned through the env path above); the native mint
+			// captures the same deref'd copy this passes.
+			auto methodIt = builtins_.string_methods.find(member->member_id);
+			if (methodIt != builtins_.string_methods.end()) {
+				direct = &methodIt->second;
+			}
+		}
+		if (direct) {
+#ifdef JAISCRIPT_VM_PROFILE
+			profile_call_method_paths_[6]++;
+#endif
+			// Deref'd COPY, exactly what member_access_value captures (line one of its
+			// body): builtins take self unchecked, and reference receivers (pairs[0])
+			// must resolve to the value; the node is shared so mutation lands the same.
+			script_value self = object.deref();
+			// Pending-site arming exactly as invoke_callee's opaque branch (callback
+			// builtins re-enter the vm); the boundary armor is guarded_native_call.
+			pending_call_site saved_pending = pending_site_ctx_;
+			pending_site_ctx_ = arguments.empty() ? saved_pending
+			                                      : pending_call_site{&site, &f, f.code};
+			struct pending_restore {
+				vm_backend* vm; pending_call_site saved;
+				~pending_restore() { vm->pending_site_ctx_ = saved; }
+			} restore_pending{this, saved_pending};
+			return guarded_native_call([&] { return (*direct)(builtin_ctx(), self, arguments); });
 		}
 	}
 
@@ -7524,6 +7678,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	if (!callee.is_function()) {
 		return raise_(make_error_code(runtime_error_code::not_a_function));
 	}
+#ifdef JAISCRIPT_VM_PROFILE
+	profile_call_method_paths_[5]++;
+#endif
 	return invoke_callee(f, std::move(callee), arguments, site);
 }
 
@@ -9311,6 +9468,16 @@ checked_result<void> vm_backend::run(frame& entry) {
 void vm_backend::dump_opcode_profile() const {
 	fprintf(stderr, "[vm-profile] scope kinds: iter %llu | scope_push %llu | call_closure %llu | call_plain %llu\n", (unsigned long long)profile_scope_kinds_[0], (unsigned long long)profile_scope_kinds_[1], (unsigned long long)profile_scope_kinds_[2], (unsigned long long)profile_scope_kinds_[3]);
 	fprintf(stderr, "[vm-profile] env births: scope %llu | method %llu | static %llu | coroutine %llu | capture %llu\n", (unsigned long long)profile_env_births_[0], (unsigned long long)profile_env_births_[1], (unsigned long long)profile_env_births_[2], (unsigned long long)profile_env_births_[3], (unsigned long long)profile_env_births_[4]);
+	const uint64_t cm_total = profile_call_method_paths_[0] + profile_call_method_paths_[1] + profile_call_method_paths_[2] +
+	                          profile_call_method_paths_[3] + profile_call_method_paths_[4] + profile_call_method_paths_[5] +
+	                          profile_call_method_paths_[6];
+	if (cm_total) {
+		fprintf(stderr, "[vm-profile] CALL_METHOD paths: mic-static %llu | mic-resolve %llu | ladder-fill %llu | string-builtin %llu | worker-pin %llu | native %llu | builtin-direct %llu\n",
+			(unsigned long long)profile_call_method_paths_[0], (unsigned long long)profile_call_method_paths_[1],
+			(unsigned long long)profile_call_method_paths_[2], (unsigned long long)profile_call_method_paths_[3],
+			(unsigned long long)profile_call_method_paths_[4], (unsigned long long)profile_call_method_paths_[5],
+			(unsigned long long)profile_call_method_paths_[6]);
+	}
 	uint64_t total = 0;
 	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];
 	if (total == 0) return;

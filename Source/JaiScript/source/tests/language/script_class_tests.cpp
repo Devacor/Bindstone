@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <array>
 #include <cmath>
 
 namespace jai::foundry::tests {
@@ -1373,6 +1374,126 @@ public:
                 check_eq((int64_t)7, e->execute("a2.z").as_int());
                 check_eq((int64_t)2, e->execute("b2.y").as_int());
             }
+        });
+
+        test("method_ic_reload_at_hot_call_site", [this]() {
+            // The vm's monomorphic method IC (call_site::mic_*) revalidates on
+            // method_epoch: a hot call site crossing a class redefinition must
+            // dispatch the NEW body immediately, on both backends.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class C { int f() { return 1; } }
+                    var c = C();
+                    int hot() { int s = 0; for (int i = 0; i < 5; ++i) { s += c.f(); } return s; }
+                )");
+                check_eq((int64_t)5, e->execute("hot()").as_int(), use_vm ? "vm pre-reload" : "interp pre-reload");
+                e->execute("class C { int f() { return 2; } }");
+                check_eq((int64_t)10, e->execute("hot()").as_int(),
+                         use_vm ? "vm hot site sees reloaded body" : "interp hot site sees reloaded body");
+            }
+        });
+
+        test("method_ic_base_reload_invalidates_derived_site", [this]() {
+            // Epoch propagation through derived_classes_: redefining the BASE must
+            // invalidate a hot site whose cached receiver class is the DERIVED.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class B { int f() { return 1; } }
+                    class D : B { int pad = 0; }
+                    var d = D();
+                    int hot() { int s = 0; for (int i = 0; i < 5; ++i) { s += d.f(); } return s; }
+                )");
+                check_eq((int64_t)5, e->execute("hot()").as_int());
+                e->execute("class B { int f() { return 2; } }");
+                check_eq((int64_t)10, e->execute("hot()").as_int(),
+                         use_vm ? "vm derived site sees base reload" : "interp derived site sees base reload");
+            }
+        });
+
+        test("method_ic_typed_param_site_stays_type_sensitive", [this]() {
+            // A cached single-overload method with TYPED params must keep rejecting
+            // by argument type at the same hot site, with backend-identical outcomes.
+            std::array<std::string, 2> outcomes;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class T { int f(int x) { return x + 1; } }
+                    var t = T();
+                    var hot(var v) { var msg = "ok"; try { msg = t.f(v); } catch (err) { msg = err; } return msg; }
+                )");
+                check_eq((int64_t)2, e->execute("hot(1)").as_int(), "int arg dispatches");
+                check_eq((int64_t)3, e->execute("hot(2)").as_int(), "site stays hot");
+                outcomes[use_vm ? 1 : 0] = e->execute("hot(\"s\")").as<std::string>();
+            }
+            check_eq(outcomes[0], outcomes[1], "backends agree on typed-param mismatch outcome");
+        });
+
+        test("method_ic_untyped_param_site_accepts_any_type", [this]() {
+            // Untyped (var) params make resolution arg-independent (mic_static): the
+            // hot site must accept a different arg type on every call, no lock-in.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class U { int n = 0; void f(var v) { n += 1; } }
+                    var u = U();
+                    int hot(var v) { u.f(v); return u.n; }
+                )");
+                check_eq((int64_t)1, e->execute("hot(1)").as_int());
+                check_eq((int64_t)2, e->execute("hot(2)").as_int());
+                check_eq((int64_t)3, e->execute("hot(\"s\")").as_int(), "string arg through the hot site");
+                check_eq((int64_t)4, e->execute("hot(2.5)").as_int(), "float arg through the hot site");
+                check_eq((int64_t)5, e->execute("hot([1,2])").as_int(), "array arg through the hot site");
+            }
+        });
+
+        test("method_ic_polymorphic_site", [this]() {
+            // One call site alternating receiver classes: the monomorphic cache must
+            // miss-and-refill without ever dispatching the wrong class's method.
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class A { int f() { return 1; } }
+                    class Z { int f() { return 10; } }
+                    var items = [new A(), new Z(), new A(), new Z()];
+                    int hot() { int s = 0; for (int i = 0; i < 4; ++i) { s += items[i].f(); } return s; }
+                )");
+                check_eq((int64_t)22, e->execute("hot()").as_int(), use_vm ? "vm alternating classes" : "interp alternating classes");
+                check_eq((int64_t)22, e->execute("hot()").as_int(), "second pass identical");
+            }
+        });
+
+        test("method_ic_host_added_field_shadows_method_at_hot_site", [this]() {
+            // Host C++ set_field can add an instance field named like a method
+            // (insert_or_assign contract); the hit path re-probes has_field, so the
+            // shadow must take effect at an already-hot site, backend-identically.
+            std::array<std::string, 2> outcomes;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class S { int f() { return 1; } }
+                    var s = S();
+                    var hot() { var msg = "ok"; try { msg = s.f(); } catch (err) { msg = err; } return msg; }
+                )");
+                check_eq((int64_t)1, e->execute("hot()").as_int());
+                check_eq((int64_t)1, e->execute("hot()").as_int(), "site hot before shadow");
+                auto sv = e->execute("s");
+                auto holder = sv.get_object_holder();
+                check_not_null(holder.get(), "instance holder");
+                auto instance = std::static_pointer_cast<jai::class_instance>(holder->data);
+                instance->set_field(e->symbolize("f"), jai::script_value((int64_t)42, e.get()));
+                auto after = e->execute("hot()");
+                outcomes[use_vm ? 1 : 0] = after.is_string() ? after.as<std::string>()
+                                                             : std::to_string(after.as_int());
+            }
+            check_eq(outcomes[0], outcomes[1], "backends agree on field-shadow outcome");
         });
 
         test("member_access_hot_reload_and_host_api", [this]() {

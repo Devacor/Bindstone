@@ -3,8 +3,9 @@
 Machine: MSI 18 Dragon (Intel Core Ultra 9 285HX, 8P+16E/24T, High Performance plan,
 AC). Tree: VM-perf @ clone-kernel commit (post worker-cap 630b9a7a + INDEX fusion
 e67dfc2e). All runs Release BENCHMARKS, quiet machine, sequential. GLOOM: 600 ticks,
-seed 666, `--smoke`; **every engine produced STATE_HASH 1503537018 + frame hash
-dfd969ed5a336dca — the cross-language conformance contract held on all rows.**
+seed 666, `--smoke`; **every engine produced STATE_HASH 1503537018 — the cross-language conformance
+contract held on all rows** (frame hash dfd969ed5a336dca byte-exact on all engines
+except ChaiScript; see footnote).
 Foundry µs rows are integer µs/iteration (±50% run variance; sub-µs not resolvable).
 
 ## GLOOM (whole-game workload), ms/tick — best of 2

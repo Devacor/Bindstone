@@ -750,6 +750,39 @@ public:
             check_eq(std::string("xc"), r.as_string());
         });
 
+        // ---- fuzz KD-CORO-RESUME-PAST-END (seeds 4/38/98/195/216/387/626/840/...):
+        // resuming past the final yield of a no-return coroutine: the interpreter
+        // replayed the stale last-yielded value (and a zero-yield METHOD coroutine
+        // returned its receiver via the implicit-'this' rule) while the vm completed
+        // with null. A finished body completes with null on both backends, like any
+        // function falling off the end; explicit returns are unaffected. ----
+        test("fuzz_coro_resume_past_end_yields_null", [this]() {
+            const char* src = R"(
+                coroutine int co() { yield 10; yield 11; }
+                auto h = co();
+                var a = to_string(h.resume()) + "|" + to_string(h.resume()) + "|" + to_string(h.resume());
+                class D { int v = 7; coroutine int g() { v = 8; } }
+                auto d = D();
+                auto hm = d.g();
+                var b = to_string(hm.resume()) + "|" + to_string(d.v);
+                class F { int q = 3; coroutine int g2() { yield 1; return this.q; } }
+                auto f = F();
+                auto hf = f.g2();
+                var c = to_string(hf.resume()) + "|" + to_string(hf.resume());
+                a + " / " + b + " / " + c;
+            )";
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                stdlib::register_all(*e);
+                out[idx++] = e->execute(src).as_string();
+            }
+            check_eq(std::string("10|11|null / null|8 / 1|3"), out[0], "interp: past-end resume completes null");
+            check_eq(out[0], out[1], "backends agree byte-identically");
+        });
+
         test("range_for_ref_realloc_no_corruption", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

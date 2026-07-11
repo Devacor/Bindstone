@@ -280,11 +280,6 @@ namespace jai::fuzz {
 		// Shapes observed and triaged in real campaigns; see known_divergences.md
 		// for the ledger (repro seeds, wrong-backend judgment, status).
 		static const std::vector<suppression> list = {
-			// Resuming a coroutine past its last yield (no return): interpreter
-			// repeats the last yielded value, VM yields null. In-flight coroutine
-			// final-return fix territory. Pilot seeds 4, 7, 38, 116, 195, 216.
-			{"KD-CORO-RESUME-PAST-END", "resume past final yield: interp repeats last value, vm nulls",
-				{"coroutine ", ".resume()"}, {"null"}},
 			// throw inside a class ordering operator swallowed by one backend
 			// (fix in flight; not observed since - matcher kept for the campaign).
 			{"KD-ORDERING-THROW", "throw inside operator< swallowed by one backend",

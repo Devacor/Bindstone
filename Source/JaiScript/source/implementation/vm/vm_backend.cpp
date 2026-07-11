@@ -13,6 +13,10 @@
 #include <jaiscript/detail/container_enforce.hpp>   // typed-container boundary kernel (interp parity)
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
+
+// Op-layer TRY twins: callees returning op_status pass through vm_check; fat-returning
+// helpers route their failure into pending_error_ (see raise_from).
+
 #include <algorithm>
 #endif
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
@@ -36,6 +40,9 @@
 #define JAI_MAX_CALL_DEPTH_MESSAGE \
 	"Maximum recursion depth (" JAI_STRINGIFY(JAI_MAX_CALL_DEPTH) ") exceeded - possible infinite recursion"
 #endif
+
+#define VM_TRY(expr) 	do { 		if (vm_check((expr)) == op_status::failed) [[unlikely]] { 			return op_status::failed; 		} 	} while(0)
+#define VM_TRY_ASSIGN(var, expr) 	auto JAISCRIPT_CONCAT(__vm_result_, __LINE__) = (expr); 	if (!JAISCRIPT_CONCAT(__vm_result_, __LINE__)) [[unlikely]] { 		return raise_from(JAISCRIPT_CONCAT(__vm_result_, __LINE__)); 	} 	var = std::move(JAISCRIPT_CONCAT(__vm_result_, __LINE__).value());
 
 namespace jai::vm {
 
@@ -1417,7 +1424,7 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	return ptr;
 }
 
-checked_result<void> vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell) {
+op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell) {
 	// Escape-marked declarations box into a cell (reference_holder cell mode): reference
 	// binding then shares the handle. Reference values pass through (ref decls alias).
 	if (box_cell && !value.is_reference()) {
@@ -2614,12 +2621,12 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 // Compound store-back: locked targets convert the promoted result like '=' does; var
 // targets keep the promoted result and re-tag it 'any' so the variable stays dynamic.
 // KEEP BYTE-PARALLEL with interpreter::compound_typed_store_back.
-checked_result<void> vm_backend::compound_typed_store_back(script_value& target, script_value promoted) {
+op_status vm_backend::compound_typed_store_back(script_value& target, script_value promoted) {
 	type_info_ptr tag = target.get_type_info();
 	if (tag && tag->base_type != script_value_type::jai_any_type) {
 		auto enforced = enforce_type_compatibility(std::move(promoted), tag);
 		if (!enforced) {
-			return enforced.error_value();
+			return raise_from(enforced);
 		}
 		promoted = std::move(enforced.value());
 		promoted.set_type_info(tag);
@@ -2828,7 +2835,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 // Opcode handlers
 // ============================================================
 
-checked_result<void> vm_backend::exec_load(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.b];
 	if (current_catch_var_id_ != 0 && sym == current_catch_var_id_) {
 		stack_.push_back(active_exception_value_.has_value() ? active_exception_value_.value() : make_null());
@@ -2883,11 +2890,11 @@ checked_result<void> vm_backend::exec_load(frame& f, const vm_instruction& ins) 
 			}
 		}
 	}
-	return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+	return raise_(make_error_code(runtime_error_code::undefined_variable),
 		"Undefined variable '{0}'", sym);
 }
 
-checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
 	return store_popped_value(f, ins, std::move(value));
@@ -2896,7 +2903,7 @@ checked_result<void> vm_backend::exec_store(frame& f, const vm_instruction& ins)
 // The ONE identifier-store tail (everything op_store does after consuming its value),
 // shared verbatim by op_store and op_binary_fused_store (dest-addressed fused binaries)
 // so the two spellings cannot drift.
-checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
+op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const bool rhs_lvalue = (ins.c & store_flag_rhs_lvalue) != 0;
 
@@ -2925,7 +2932,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 				if (holder && holder->has_cell && !(ins.c & store_flag_ref_alias)) {
 					storage = holder->cell();
 				} else {
-					JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
+					VM_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
 					stack_.push_back(std::move(value));
 					return {};
 				}
@@ -2957,7 +2964,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 			                  slot_type->base_type == script_value_type::jai_object_type)) {
 				auto enforced = enforce_type_compatibility(std::move(value), slot_type);
 				if (!enforced) {
-					return enforced.error_value();
+					return raise_from(enforced);
 				}
 				value = std::move(enforced.value());
 				// var slots keep a shared_ptr-tagged rhs's marker (decl parity;
@@ -2985,7 +2992,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 				currentVal = holder->cell();
 				boxed_cell = true;
 			} else {
-				JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_));
+				VM_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_));
 				stack_.push_back(std::move(value));
 				return {};
 			}
@@ -3008,9 +3015,9 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 			script_value result = value;
 			if (value.is_null()) {
 				auto type_info = currentVal->get_type_info();
-				JAISCRIPT_TRY(store_back(script_value::make_empty_weak_ptr(type_info, engine_)));
+				VM_TRY(store_back(script_value::make_empty_weak_ptr(type_info, engine_)));
 			} else if (value.is_weak_ptr()) {
-				JAISCRIPT_TRY(store_back(std::move(value)));
+				VM_TRY(store_back(std::move(value)));
 			} else if (value.type() == script_value_type::jai_shared_ptr_type) {
 				auto weak_type_info = currentVal->get_type_info();
 				auto expected_type = weak_type_info ? weak_type_info->element_type() : nullptr;
@@ -3028,7 +3035,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 							uint64_t actual_id = value_type_info->element_type()
 								? value_type_info->element_type()->id
 								: value_type_info->id;
-							return checked_result<void>(
+							return raise_(
 								make_error_code(runtime_error_code::type_mismatch),
 								"Cannot assign shared_ptr<{}> to weak_ptr<{}>: type must match or be a subclass",
 								actual_id, expected_id);
@@ -3037,14 +3044,14 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 				}
 				auto weak_result = script_value::make_weak_ptr(value, engine_);
 				if (!weak_result) {
-					return weak_result.error_value();
+					return raise_from(weak_result);
 				}
-				JAISCRIPT_TRY(store_back(std::move(weak_result.value())));
+				VM_TRY(store_back(std::move(weak_result.value())));
 			} else if (value.type() == script_value_type::jai_object_type) {
 				auto type_info = currentVal->get_type_info();
 				uint64_t weak_type_id = (type_info && !type_info->type_params.empty())
 					? type_info->type_params[0]->id : 0;
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Cannot assign value-semantic object to weak_ptr<{}>: use shared_ptr<T>",
 					weak_type_id);
 			} else {
@@ -3053,7 +3060,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 				auto weak_type_info = currentVal->get_type_info();
 				uint64_t weak_type_id = (weak_type_info && !weak_type_info->type_params.empty())
 					? weak_type_info->type_params[0]->id : 0;
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Cannot assign {} to weak_ptr<{}>: use shared_ptr<T>",
 					actual_type_id, weak_type_id);
 			}
@@ -3087,9 +3094,9 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 			}
 
 			if (value.is_null()) {
-				JAISCRIPT_TRY(store_back(std::move(value)));
+				VM_TRY(store_back(std::move(value)));
 			} else if (value.is_weak_ptr()) {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
 			} else if (value.get_type_info() &&
 			           value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
@@ -3102,7 +3109,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 					if (engine_ && value_element && !value_type_info->dynamic_pointee) {
 						value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value_element.get()));
 					}
-					JAISCRIPT_TRY(store_back(std::move(value)));
+					VM_TRY(store_back(std::move(value)));
 				} else {
 					std::string actual_type_name = value_element ? value_element->type_name : "";
 
@@ -3117,12 +3124,12 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 					if (!compatible) {
 						uint64_t actual_id = value_element ? value_element->id : 0;
 						uint64_t expected_id = expected_type ? expected_type->id : 0;
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+						return raise_(make_error_code(runtime_error_code::type_mismatch),
 							"Cannot assign shared_ptr<{0}> to shared_ptr<{1}>", actual_id, expected_id);
 					}
 
 					value.set_type_info(ptr_type_info);
-					JAISCRIPT_TRY(store_back(std::move(value)));
+					VM_TRY(store_back(std::move(value)));
 				}
 			} else if (ptr_type_info->dynamic_pointee && !dynamic_value_compatible) {
 				// var-held handle receiving an INCOMPATIBLE value or a primitive: REBIND
@@ -3137,11 +3144,11 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 						rebound.set_type_info(any_ti);
 					}
 				}
-				JAISCRIPT_TRY(store_back(std::move(rebound)));
+				VM_TRY(store_back(std::move(rebound)));
 			} else {
 				auto holder = currentVal->get_object_holder();
 				if (!holder || !holder->data) {
-					return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
+					return raise_(make_error_code(runtime_error_code::invalid_reference),
 						"Cannot assign to null shared_ptr");
 				}
 
@@ -3149,7 +3156,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 				if (!instance) {
 					auto type_info = value.get_type_info();
 					uint64_t type_id = type_info ? type_info->id : 0;
-					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+					return raise_(make_error_code(runtime_error_code::type_mismatch),
 						"Cannot assign {0} to shared_ptr - object is not a class instance", type_id);
 				}
 
@@ -3180,13 +3187,13 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 						args.push_back(std::move(value));
 						auto call_result = func(args);
 						if (!call_result) {
-							return checked_result<void>(call_result.error(), "operator= failed");
+							return raise_(call_result.error(), "operator= failed");
 						}
 					} else {
 						auto type_info = value.get_type_info();
 						uint64_t type_id = type_info ? type_info->id : 0;
 						uint64_t expected_id = expected_type ? expected_type->id : 0;
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+						return raise_(make_error_code(runtime_error_code::type_mismatch),
 							"Cannot assign {0} to shared_ptr<{1}>: no operator=({0}) defined", type_id, expected_id);
 					}
 				}
@@ -3217,7 +3224,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 							stack_.push_back(std::move(result_copy));
 							return {};
 						}
-						return checked_result<void>(call_result.error(), "operator= failed");
+						return raise_(call_result.error(), "operator= failed");
 					}
 				}
 			}
@@ -3225,7 +3232,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 
 		auto enforced = enforce_type_compatibility(std::move(value), target_type);
 		if (!enforced) {
-			return enforced.error_value();
+			return raise_from(enforced);
 		}
 		value = std::move(enforced.value());
 
@@ -3245,13 +3252,13 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 
 		if (rhs_lvalue) {
 			script_value assignValue = clone_for_assignment(value);
-			JAISCRIPT_TRY(store_back(std::move(assignValue)));
+			VM_TRY(store_back(std::move(assignValue)));
 			stack_.push_back(std::move(value));
 		} else if (boxed_cell) {
-			JAISCRIPT_TRY(store_back(std::move(value)));
+			VM_TRY(store_back(std::move(value)));
 			stack_.push_back(*currentVal);
 		} else {
-			JAISCRIPT_TRY(environment_->assign(sym, std::move(value)));
+			VM_TRY(environment_->assign(sym, std::move(value)));
 			script_value* stored = environment_->get_value_ptr(sym);
 			stack_.push_back(stored ? *stored : make_null());
 		}
@@ -3279,7 +3286,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 									std::vector<script_value> args = {this_val, value};
 									auto result = setter.as_function()(args);
 									if (!result) {
-										return result.error_value();
+										return raise_from(result);
 									}
 									assigned_to_member = true;
 								}
@@ -3296,13 +3303,13 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 						if (rhs_lvalue) {
 							auto enforced = instance->enforce_field_write(sym, clone_for_assignment(value));
 							if (!enforced) {
-								return enforced.error_value();
+								return raise_from(enforced);
 							}
 							instance->set_field_unchecked(sym, enforced.value());
 						} else {
 							auto enforced = instance->enforce_field_write(sym, std::move(value));
 							if (!enforced) {
-								return enforced.error_value();
+								return raise_from(enforced);
 							}
 							instance->set_field_unchecked(sym, enforced.value());
 							value = instance->get_field(sym);
@@ -3334,9 +3341,9 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 
 	if (!assigned_to_member) {
 		if (rhs_lvalue) {
-			JAISCRIPT_TRY(environment_->assign(sym, clone_for_assignment(value)));
+			VM_TRY(environment_->assign(sym, clone_for_assignment(value)));
 		} else {
-			JAISCRIPT_TRY(environment_->assign(sym, std::move(value)));
+			VM_TRY(environment_->assign(sym, std::move(value)));
 			script_value* stored = environment_->get_value_ptr(sym);
 			value = stored ? *stored : make_null();
 		}
@@ -3345,7 +3352,7 @@ checked_result<void> vm_backend::store_popped_value(frame& f, const vm_instructi
 	return {};
 }
 
-checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const uint32_t kind = ins.c & compound_kind_mask;
 	const bool result_needed = (ins.c & compound_flag_result_needed) != 0;
@@ -3375,7 +3382,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 						return evaluate_arithmetic(l, o, r);
 					});
 				if (!result) {
-					return result.error_value();
+					return raise_from(result);
 				}
 				if (!no_result) { stack_.push_back(std::move(result.value())); }
 				return {};
@@ -3404,7 +3411,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 					std::vector<script_value> args = {target.clone(), rightValue};
 					auto result = func(args);
 					if (!result) {
-						return result.error_value();
+						return raise_from(result);
 					}
 					target = std::move(result.value());
 					if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
@@ -3443,23 +3450,23 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 					if (target.is_int()) {
 						if (rIdx == script_value::TYPEID_INT) {
 							script_int rr;
-							if (!ints::try_add(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '+='");
+							if (!ints::try_add(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
 							target.assign_through(script_value(rr, engine_));
 						} else if (rIdx == script_value::TYPEID_FLOAT) {
 							target.assign_through(script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_));
 						} else {
-							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+							return raise_(make_error_code(runtime_error_code::type_mismatch));
 						}
 					} else if (target.is_float()) {
 						target.assign_through(script_value(target.unchecked_as_float() + derefRight.as_float(), engine_));
 					} else if (target.is_string() && rIdx == script_value::TYPEID_STRING) {
 						// engine::memory_cap chokepoint: deny the append before it exists
 						if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
-							return detail::raise_memory_cap(*limits_);
+							return raise_from(detail::raise_memory_cap(*limits_));
 						}
 						target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
 					} else {
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+						return raise_(make_error_code(runtime_error_code::type_mismatch));
 					}
 					break;
 				}
@@ -3467,17 +3474,17 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 					if (target.is_int()) {
 						if (rIdx == script_value::TYPEID_INT) {
 							script_int rr;
-							if (!ints::try_sub(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '-='");
+							if (!ints::try_sub(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
 							target.assign_through(script_value(rr, engine_));
 						} else if (rIdx == script_value::TYPEID_FLOAT) {
 							target.assign_through(script_value(target.unchecked_as_int() - derefRight.unchecked_as_float(), engine_));
 						} else {
-							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+							return raise_(make_error_code(runtime_error_code::type_mismatch));
 						}
 					} else if (target.is_float()) {
 						target.assign_through(script_value(target.unchecked_as_float() - derefRight.as_float(), engine_));
 					} else {
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+						return raise_(make_error_code(runtime_error_code::type_mismatch));
 					}
 					break;
 				}
@@ -3485,47 +3492,47 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 					if (target.is_int()) {
 						if (rIdx == script_value::TYPEID_INT) {
 							script_int rr;
-							if (!ints::try_mul(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '*='");
+							if (!ints::try_mul(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
 							target.assign_through(script_value(rr, engine_));
 						} else if (rIdx == script_value::TYPEID_FLOAT) {
 							target.assign_through(script_value(target.unchecked_as_int() * derefRight.unchecked_as_float(), engine_));
 						} else {
-							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+							return raise_(make_error_code(runtime_error_code::type_mismatch));
 						}
 					} else if (target.is_float()) {
 						target.assign_through(script_value(target.unchecked_as_float() * derefRight.as_float(), engine_));
 					} else {
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+						return raise_(make_error_code(runtime_error_code::type_mismatch));
 					}
 					break;
 				}
 				case compound_slash: {
 					if (rIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-						return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+						return raise_(make_error_code(runtime_error_code::division_by_zero));
 					}
 					if (rIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
-						return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+						return raise_(make_error_code(runtime_error_code::division_by_zero));
 					}
 					if (target.is_int()) {
 						if (rIdx == script_value::TYPEID_INT) {
 							script_int rr;
-							if (!ints::try_div(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '/='");
+							if (!ints::try_div(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '/='"));
 							target.assign_through(script_value(rr, engine_));
 						} else if (rIdx == script_value::TYPEID_FLOAT) {
 							target.assign_through(script_value(target.unchecked_as_int() / derefRight.unchecked_as_float(), engine_));
 						} else {
-							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+							return raise_(make_error_code(runtime_error_code::type_mismatch));
 						}
 					} else if (target.is_float()) {
 						target.assign_through(script_value(target.unchecked_as_float() / derefRight.as_float(), engine_));
 					} else {
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+						return raise_(make_error_code(runtime_error_code::type_mismatch));
 					}
 					break;
 				}
 				default:
 					// %= matches the interpreter's in-place switch, which has no percent case
-					return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+					return raise_(make_error_code(runtime_error_code::unknown_operator));
 			}
 			if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 			return {};
@@ -3539,20 +3546,20 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				if (bothInt) {
 					script_int& tref = target.unchecked_as_int_ref();
 					script_int rr;
-					if (!ints::try_add(tref, derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '+='");
+					if (!ints::try_add(tref, derefRight.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
 					tref = rr;
 				} else if (leftIdx == script_value::TYPEID_FLOAT) {
 					target.unchecked_as_float_ref() += derefRight.as_float();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					JAISCRIPT_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_)));
 				} else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
 					// engine::memory_cap chokepoint: deny the append before it exists
 					if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
-						return detail::raise_memory_cap(*limits_);
+						return raise_from(detail::raise_memory_cap(*limits_));
 					}
 					target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
 				} else {
-					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
 				break;
 			}
@@ -3560,14 +3567,14 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				if (bothInt) {
 					script_int& tref = target.unchecked_as_int_ref();
 					script_int rr;
-					if (!ints::try_sub(tref, derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '-='");
+					if (!ints::try_sub(tref, derefRight.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
 					tref = rr;
 				} else if (leftIdx == script_value::TYPEID_FLOAT) {
 					target.unchecked_as_float_ref() -= derefRight.as_float();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					JAISCRIPT_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() - derefRight.unchecked_as_float(), engine_)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() - derefRight.unchecked_as_float(), engine_)));
 				} else {
-					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
 				break;
 			}
@@ -3575,48 +3582,48 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				if (bothInt) {
 					script_int& tref = target.unchecked_as_int_ref();
 					script_int rr;
-					if (!ints::try_mul(tref, derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '*='");
+					if (!ints::try_mul(tref, derefRight.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
 					tref = rr;
 				} else if (leftIdx == script_value::TYPEID_FLOAT) {
 					target.unchecked_as_float_ref() *= derefRight.as_float();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					JAISCRIPT_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() * derefRight.unchecked_as_float(), engine_)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() * derefRight.unchecked_as_float(), engine_)));
 				} else {
-					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
 				break;
 			}
 			case compound_slash: {
 				if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+					return raise_(make_error_code(runtime_error_code::division_by_zero));
 				}
 				if (rightIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
-					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+					return raise_(make_error_code(runtime_error_code::division_by_zero));
 				}
 				if (bothInt) {
 					script_int& tref = target.unchecked_as_int_ref();
 					script_int rr;
-					if (!ints::try_div(tref, derefRight.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '/='");
+					if (!ints::try_div(tref, derefRight.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '/='"));
 					tref = rr;
 				} else if (leftIdx == script_value::TYPEID_FLOAT) {
 					target.unchecked_as_float_ref() /= derefRight.as_float();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					JAISCRIPT_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() / derefRight.unchecked_as_float(), engine_)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() / derefRight.unchecked_as_float(), engine_)));
 				} else {
-					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
 				break;
 			}
 			case compound_percent: {
 				if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 				}
-				JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight));
-				JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted)));
+				VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight));
+				VM_TRY(compound_typed_store_back(target, std::move(promoted)));
 				break;
 			}
 			default:
-				return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+				return raise_(make_error_code(runtime_error_code::unknown_operator));
 		}
 
 		if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
@@ -3626,7 +3633,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 	// Implicit this.member fallback
 	auto this_result = environment_->get(this_id_);
 	if (!this_result || !this_result.value().is_object()) {
-		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Undefined variable '{0}' (no 'this' in scope)", sym);
 	}
 
@@ -3634,7 +3641,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 	std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
 	if (!instance || !instance->has_field(sym)) {
-		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Undefined variable '{0}' (not a field of 'this')", sym);
 	}
 
@@ -3655,7 +3662,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 			if (custom_result.has_value()) {
 				auto enforced = instance->enforce_field_write(sym, clone_for_assignment(custom_result.value()));
 				if (!enforced) {
-					return enforced.error_value();
+					return raise_from(enforced);
 				}
 				instance->set_field_unchecked(sym, enforced.value());
 				if (!no_result) { stack_.push_back(std::move(custom_result.value())); }
@@ -3678,7 +3685,7 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 		case compound_plus:
 			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 				script_int rr;
-				if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '+='");
+				if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
 				resultValue = script_value(rr, engine_);
 			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
 			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
@@ -3688,17 +3695,17 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 			} else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
 				// engine::memory_cap chokepoint: deny the concat result before it exists
 				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
-					return detail::raise_memory_cap(*limits_);
+					return raise_from(detail::raise_memory_cap(*limits_));
 				}
 				resultValue = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+				return raise_(make_error_code(runtime_error_code::type_mismatch));
 			}
 			break;
 		case compound_minus:
 			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 				script_int rr;
-				if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '-='");
+				if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
 				resultValue = script_value(rr, engine_);
 			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
 			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
@@ -3706,13 +3713,13 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
 				resultValue = script_value(cf - rf, engine_);
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+				return raise_(make_error_code(runtime_error_code::type_mismatch));
 			}
 			break;
 		case compound_star:
 			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 				script_int rr;
-				if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '*='");
+				if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
 				resultValue = script_value(rr, engine_);
 			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
 			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
@@ -3720,12 +3727,12 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
 				resultValue = script_value(cf * rf, engine_);
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+				return raise_(make_error_code(runtime_error_code::type_mismatch));
 			}
 			break;
 		case compound_slash:
 			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+				return raise_(make_error_code(runtime_error_code::division_by_zero));
 			}
 			if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
 			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
@@ -3733,32 +3740,32 @@ checked_result<void> vm_backend::exec_compound_store(frame& f, const vm_instruct
 				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
 				resultValue = script_value(cf / rf, engine_);
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+				return raise_(make_error_code(runtime_error_code::type_mismatch));
 			}
 			break;
 		case compound_percent: {
 			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+				return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 			}
-			JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
 			break;
 		}
 		default:
-			return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+			return raise_(make_error_code(runtime_error_code::unknown_operator));
 	}
 
 	// Store the enforced (declared-type converted) value; the expression result stays the
 	// promoted value, matching member/element compound semantics
 	auto enforced = instance->enforce_field_write(sym, clone_for_assignment(resultValue));
 	if (!enforced) {
-		return enforced.error_value();
+		return raise_from(enforced);
 	}
 	instance->set_field_unchecked(sym, enforced.value());
 	if (!no_result) { stack_.push_back(std::move(resultValue)); }
 	return {};
 }
 
-checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const bool postfix = (ins.c & incdec_flag_postfix) != 0;
 	const bool isIncrement = (ins.c & incdec_flag_increment) != 0;
@@ -3778,9 +3785,9 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 				const script_int oldVal = target.unchecked_as_int();
 				script_int newVal;
 				if (isIncrement) {
-					if (!ints::try_add(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '++'");
+					if (!ints::try_add(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '++'"));
 				} else {
-					if (!ints::try_sub(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '--'");
+					if (!ints::try_sub(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '--'"));
 				}
 				target.assign_through(script_value(newVal, engine_));
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
@@ -3793,7 +3800,7 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
 				return {};
 			}
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+			return raise_(make_error_code(runtime_error_code::invalid_numeric_operand));
 		}
 		switch (target.type()) {
 			case script_value_type::jai_int_type: {
@@ -3803,9 +3810,9 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 				const script_int oldVal = tref;
 				script_int newVal;
 				if (isIncrement) {
-					if (!ints::try_add(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '++'");
+					if (!ints::try_add(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '++'"));
 				} else {
-					if (!ints::try_sub(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '--'");
+					if (!ints::try_sub(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '--'"));
 				}
 				tref = newVal;
 				if (typed_elem) [[unlikely]] { typed_elem->commit_typed_element_scratch(); }
@@ -3826,7 +3833,7 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 				return {};
 			}
 			default:
-				return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+				return raise_(make_error_code(runtime_error_code::invalid_numeric_operand));
 		}
 	}
 
@@ -3844,9 +3851,9 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 				script_int oldVal = currentVal.unchecked_as_int();
 				script_int newVal;
 				if (isIncrement) {
-					if (!ints::try_add(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '++'");
+					if (!ints::try_add(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '++'"));
 				} else {
-					if (!ints::try_sub(oldVal, 1, newVal)) return vm_int_overflow_v("Integer overflow in '--'");
+					if (!ints::try_sub(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '--'"));
 				}
 				instance->set_field(sym, script_value(newVal, engine_));
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
@@ -3858,15 +3865,15 @@ checked_result<void> vm_backend::exec_incdec(frame& f, const vm_instruction& ins
 				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
 				return {};
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));
+				return raise_(make_error_code(runtime_error_code::invalid_numeric_operand));
 			}
 		}
 	}
-	return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+	return raise_(make_error_code(runtime_error_code::undefined_variable),
 		"Undefined variable '{0}'", sym);
 }
 
-checked_result<void> vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 	script_value operand = std::move(stack_.back());
 	stack_.pop_back();
 
@@ -3889,13 +3896,13 @@ checked_result<void> vm_backend::exec_unary(frame& f, const vm_instruction& ins)
 			if (oi == script_value::TYPEID_INT) {
 				script_int neg;
 				if (!ints::try_neg(operand.unchecked_as_int(), neg)) {
-					return vm_int_overflow_v("Integer overflow in unary '-'");
+					return raise_from(vm_int_overflow_v("Integer overflow in unary '-'"));
 				}
 				stack_.push_back(script_value(neg, engine_));
 			} else if (oi == script_value::TYPEID_FLOAT) {
 				stack_.push_back(script_value(-operand.unchecked_as_float(), engine_));
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
+				return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
 			}
 			return {};
 		}
@@ -3904,16 +3911,16 @@ checked_result<void> vm_backend::exec_unary(frame& f, const vm_instruction& ins)
 			return {};
 		case token_type::tilde:
 			if (oi != script_value::TYPEID_INT) {
-				return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Bitwise NOT requires integer operand");
+				return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), "Bitwise NOT requires integer operand");
 			}
 			stack_.push_back(script_value(~operand.unchecked_as_int(), engine_));
 			return {};
 		default:
-			return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+			return raise_(make_error_code(runtime_error_code::unknown_operator));
 	}
 }
 
-checked_result<void> vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
 	script_value left_raw = std::move(stack_.back());
@@ -3926,7 +3933,7 @@ checked_result<void> vm_backend::exec_binary(frame& f, const vm_instruction& ins
 		std::optional<checked_result<script_value>> fast;
 		if (binary_fast_shape(op, ins.b, left, right, fast)) {
 			if (!*fast) {
-				return fast->error_value();
+				return raise_from(*fast);
 			}
 			stack_.push_back(std::move(fast->value()));
 			return {};
@@ -3935,7 +3942,7 @@ checked_result<void> vm_backend::exec_binary(frame& f, const vm_instruction& ins
 
 	auto result = binary_general(op, left, right);
 	if (!result) {
-		return result.error_value();
+		return raise_from(result);
 	}
 	stack_.push_back(std::move(result.value()));
 	return {};
@@ -4059,7 +4066,7 @@ checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, 
 		stack_.push_back(*index_ptr);
 		vm_instruction index_ins{opcode::op_index, index_flag_lvalue_shape | index_flag_transient_read, 0, 0};
 		auto indexed = exec_index(f, index_ins);
-		if (!indexed) return indexed.error_value();
+		if (indexed == op_status::failed) return pending_error_;
 		script_value element = std::move(stack_.back());
 		stack_.pop_back();
 		scratch.emplace(std::move(element));
@@ -4068,7 +4075,7 @@ checked_result<const script_value*> vm_backend::fused_subscript_value(frame& f, 
 	return current;
 }
 
-checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
 	return binary_fused_compute(f, ins.a, [this](script_value&& v) { stack_.push_back(std::move(v)); });
 }
 
@@ -4076,7 +4083,7 @@ checked_result<void> vm_backend::exec_binary_fused(frame& f, const vm_instructio
 // pushes; the dest-addressed variants land the result in a slot/decl with no push and
 // no second dispatch. One body, every sink - parity by construction.
 template <typename Sink>
-checked_result<void> vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink) {
+op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[proto_index];
 	const token_type op = static_cast<token_type>(p.op);
 
@@ -4088,22 +4095,22 @@ checked_result<void> vm_backend::binary_fused_compute(frame& f, uint32_t proto_i
 		lp = &f.code->constants[p.left.const_index];   // engine-less template: fast path reads raw
 	} else if (p.left.is_subscript()) {
 		auto resolved = fused_subscript_value(f, p.left, lscratch, f.ip * 3);
-		if (!resolved) return resolved.error_value();
+		if (!resolved) return raise_from(resolved);
 		lp = resolved.value();
 	} else {
 		auto resolved = fused_ident_value(f, p.left, lscratch, f.ip * 3);
-		if (!resolved) return resolved.error_value();
+		if (!resolved) return raise_from(resolved);
 		lp = resolved.value();
 	}
 	if (p.right.const_index != k_invalid_u32) {
 		rp = &f.code->constants[p.right.const_index];
 	} else if (p.right.is_subscript()) {
 		auto resolved = fused_subscript_value(f, p.right, rscratch, f.ip * 3 + 1);
-		if (!resolved) return resolved.error_value();
+		if (!resolved) return raise_from(resolved);
 		rp = resolved.value();
 	} else {
 		auto resolved = fused_ident_value(f, p.right, rscratch, f.ip * 3 + 1);
-		if (!resolved) return resolved.error_value();
+		if (!resolved) return raise_from(resolved);
 		rp = resolved.value();
 	}
 
@@ -4114,14 +4121,14 @@ checked_result<void> vm_backend::binary_fused_compute(frame& f, uint32_t proto_i
 		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 			const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
 			switch (op) {
-			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) return vm_int_overflow_v("Integer overflow in '+'"); sink(script_value(rr, engine_)); return {}; }
-			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) return vm_int_overflow_v("Integer overflow in '-'"); sink(script_value(rr, engine_)); return {}; }
-			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) return vm_int_overflow_v("Integer overflow in '*'"); sink(script_value(rr, engine_)); return {}; }
+			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+'")); sink(script_value(rr, engine_)); return {}; }
+			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-'")); sink(script_value(rr, engine_)); return {}; }
+			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*'")); sink(script_value(rr, engine_)); return {}; }
 			case token_type::slash:
-				if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-				{ script_int rr; if (!ints::try_div(a, b, rr)) return vm_int_overflow_v("Integer overflow in '/'"); sink(script_value(rr, engine_)); return {}; }
+				if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+				{ script_int rr; if (!ints::try_div(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '/'")); sink(script_value(rr, engine_)); return {}; }
 			case token_type::percent:
-				if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+				if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 				sink(script_value(ints::mod(a, b), engine_)); return {};
 			case token_type::less: sink(script_value(a < b, engine_)); return {};
 			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
@@ -4140,10 +4147,10 @@ checked_result<void> vm_backend::binary_fused_compute(frame& f, uint32_t proto_i
 			case token_type::minus: sink(script_value(a - b, engine_)); return {};
 			case token_type::star: sink(script_value(a * b, engine_)); return {};
 			case token_type::slash:
-				if (b == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
+				if (b == 0.0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
 				sink(script_value(a / b, engine_)); return {};
 			case token_type::percent:
-				if (b == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
+				if (b == 0.0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
 				sink(script_value(std::fmod(a, b), engine_)); return {};
 			case token_type::less: sink(script_value(a < b, engine_)); return {};
 			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
@@ -4158,14 +4165,14 @@ checked_result<void> vm_backend::binary_fused_compute(frame& f, uint32_t proto_i
 			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
 			// engine::memory_cap chokepoint: deny the concat result before it exists
 			if (!limits_->memory_charge(sizeof(script_value) + lp->unchecked_as_string().size() + rp->unchecked_as_string().size())) [[unlikely]] {
-				return detail::raise_memory_cap(*limits_);
+				return raise_from(detail::raise_memory_cap(*limits_));
 			}
 			sink(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
 			return {};
 		} else if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
 			// twin parity: bound operands keep this fused shape's zero-divisor error surface
 			if (auto z = bound_fastpath_zero_divisor(op, *lp, *rp, true, true)) {
-				return checked_result<void>(make_error_code(z->code), z->text);
+				return raise_(make_error_code(z->code), z->text);
 			}
 		}
 	}
@@ -4191,16 +4198,16 @@ checked_result<void> vm_backend::binary_fused_compute(frame& f, uint32_t proto_i
 	}
 	auto result = binary_general(op, lv->deref(), rv->deref());
 	if (!result) {
-		return result.error_value();
+		return raise_from(result);
 	}
 	sink(std::move(result.value()));
 	return {};
 }
 
-checked_result<void> vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins) {
 	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
 	std::optional<script_value> computed;
-	JAISCRIPT_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
+	VM_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[dp.node_index].get());
 	// Scalar slot decls land directly - the exec_decl_var fast-path preconditions,
 	// KEPT IN SYNC with it. A fused-binary result is never a reference, so the
@@ -4232,10 +4239,10 @@ checked_result<void> vm_backend::exec_binary_fused_decl(frame& f, const vm_instr
 	return exec_decl_var(f, decl_ins);
 }
 
-checked_result<void> vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& ins) {
 	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
 	std::optional<script_value> computed;
-	JAISCRIPT_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
+	VM_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
 	const vm_instruction store_ins{opcode::op_store, dp.symbol, dp.slot, dp.flags};
 	return store_popped_value(f, store_ins, std::move(*computed));
 }
@@ -4266,7 +4273,7 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 // retargeted (fall-through = ip+1, jump = ins.a); on error or script unwinding ip is
 // left on this instruction (and the unwinding case leaves the result pushed, exactly
 // like the unfused pair did before its jump executed).
-checked_result<void> vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[ins.b];
 	const token_type op = static_cast<token_type>(p.op);
 
@@ -4316,7 +4323,7 @@ checked_result<void> vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruct
 	vm_instruction fused = ins;
 	fused.a = ins.b;   // exec_binary_fused reads the proto index from a
 	auto result = exec_binary_fused(f, fused);
-	if (!result) {
+	if (result == op_status::failed) {
 		return result;
 	}
 	if (is_unwinding_) [[unlikely]] {
@@ -4337,7 +4344,7 @@ checked_result<void> vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruct
 // Anything else runs the pair's two exec bodies back to back (parity by construction).
 // Never touches f.ip: the dispatch case breaks, so the loop-bottom unwind check and
 // ++ip run as usual.
-checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 	const compound_fused_proto& cp = f.code->compound_fused_protos[ins.a];
 	const bool bare_rhs = cp.rhs_proto == k_invalid_u32;
 
@@ -4369,20 +4376,20 @@ checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruct
 					arithmetic = true;
 					switch (static_cast<token_type>(p.op)) {
 					case token_type::plus:
-						if (!ints::try_add(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '+'");
+						if (!ints::try_add(a, b, rhs)) return raise_from(vm_int_overflow_v("Integer overflow in '+'"));
 						break;
 					case token_type::minus:
-						if (!ints::try_sub(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '-'");
+						if (!ints::try_sub(a, b, rhs)) return raise_from(vm_int_overflow_v("Integer overflow in '-'"));
 						break;
 					case token_type::star:
-						if (!ints::try_mul(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '*'");
+						if (!ints::try_mul(a, b, rhs)) return raise_from(vm_int_overflow_v("Integer overflow in '*'"));
 						break;
 					case token_type::slash:
-						if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-						if (!ints::try_div(a, b, rhs)) return vm_int_overflow_v("Integer overflow in '/'");
+						if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+						if (!ints::try_div(a, b, rhs)) return raise_from(vm_int_overflow_v("Integer overflow in '/'"));
 						break;
 					case token_type::percent:
-						if (b == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+						if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
 						rhs = ints::mod(a, b);
 						break;
 					default:
@@ -4398,17 +4405,17 @@ checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruct
 				bool stored = true;
 				switch (kind) {
 				case compound_plus:
-					if (!ints::try_add(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '+='");
+					if (!ints::try_add(tref, rhs, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
 					break;
 				case compound_minus:
-					if (!ints::try_sub(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '-='");
+					if (!ints::try_sub(tref, rhs, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
 					break;
 				case compound_star:
-					if (!ints::try_mul(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '*='");
+					if (!ints::try_mul(tref, rhs, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
 					break;
 				case compound_slash:
-					if (rhs == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-					if (!ints::try_div(tref, rhs, rr)) return vm_int_overflow_v("Integer overflow in '/='");
+					if (rhs == 0) return raise_(make_error_code(runtime_error_code::division_by_zero));
+					if (!ints::try_div(tref, rhs, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '/='"));
 					break;
 				default:
 					stored = false;   // %=: the pair surfaces unknown_operator
@@ -4453,7 +4460,7 @@ checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruct
 			load_ins.b = cp.rhs.symbol;
 			load_ins.c = cp.rhs.load_flags;
 			auto load_result = exec_load(f, load_ins);
-			if (!load_result) {
+			if (load_result == op_status::failed) {
 				return load_result;
 			}
 		}
@@ -4461,7 +4468,7 @@ checked_result<void> vm_backend::exec_compound_fused(frame& f, const vm_instruct
 		vm_instruction rhs_ins = ins;
 		rhs_ins.a = cp.rhs_proto;
 		auto rhs_result = exec_binary_fused(f, rhs_ins);
-		if (!rhs_result) {
+		if (rhs_result == op_status::failed) {
 			return rhs_result;
 		}
 		if (is_unwinding_) [[unlikely]] {
@@ -4506,7 +4513,7 @@ bool vm_backend::resolve_cfor_int_operand(frame& f, const fused_operand& operand
 	return true;
 }
 
-checked_result<void> vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
 	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
 	counted_for_state st;
 	st.cmp = p.cmp;
@@ -4548,15 +4555,15 @@ checked_result<void> vm_backend::exec_cfor_prep(frame& f, const vm_instruction& 
 	return {};
 }
 
-checked_result<void> vm_backend::exec_cfor_back(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_cfor_back(frame& f, const vm_instruction& ins) {
 	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
 	if (cfor_states_.empty()) {
-		return checked_result<void>(make_error_code(runtime_error_code::internal_error), "counted-for state stack underflow");
+		return raise_(make_error_code(runtime_error_code::internal_error), "counted-for state stack underflow");
 	}
 	counted_for_state& st = cfor_states_.back();
 
 	if (execution_limit_exhausted()) [[unlikely]] {
-		return execution_limit_failure();
+		return raise_from(execution_limit_failure());
 	}
 	if (!st.fast) {
 		f.ip = p.generic_update_ip;
@@ -4572,9 +4579,9 @@ checked_result<void> vm_backend::exec_cfor_back(frame& f, const vm_instruction& 
 	const script_int step = st.step_ptr ? *st.step_ptr : st.step_val;
 	script_int next;
 	if (st.subtract) {
-		if (!ints::try_sub(i, step, next)) return vm_int_overflow_v(st.incdec ? "Integer overflow in '--'" : "Integer overflow in '-='");
+		if (!ints::try_sub(i, step, next)) return raise_from(vm_int_overflow_v(st.incdec ? "Integer overflow in '--'" : "Integer overflow in '-='"));
 	} else {
-		if (!ints::try_add(i, step, next)) return vm_int_overflow_v(st.incdec ? "Integer overflow in '++'" : "Integer overflow in '+='");
+		if (!ints::try_add(i, step, next)) return raise_from(vm_int_overflow_v(st.incdec ? "Integer overflow in '++'" : "Integer overflow in '+='"));
 	}
 	st.var->unchecked_as_int_ref() = next;
 	const script_int end = st.end_ptr ? *st.end_ptr : st.end_val;
@@ -4587,7 +4594,7 @@ checked_result<void> vm_backend::exec_cfor_back(frame& f, const vm_instruction& 
 	return {};
 }
 
-checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_index(frame& f, const vm_instruction& ins) {
 	const bool lvalue_shape = (ins.a & index_flag_lvalue_shape) != 0;
 	const bool lvalue_write = (ins.a & index_flag_lvalue_write) != 0;
 	// Transient read (transient_read.hpp): the consumer provably discards identity, so
@@ -4608,14 +4615,14 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 		// construction); writes hit the runtime write wall inside it. No element
 		// reference is ever minted into a borrowed container.
 		auto elem = detail::parallel_borrow_subscript_read(left, right, engine_, lvalue_write);
-		if (!elem) { return checked_result<void>(elem.error(), elem.static_message()); }
+		if (!elem) { return raise_(elem.error(), elem.static_message()); }
 		stack_.push_back(std::move(elem).value());
 		return {};
 	}
 
 	if (left.is_array()) {
 		if (!right.is_int()) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "Array index must be an integer");
+			return raise_(make_error_code(runtime_error_code::invalid_index_type), "Array index must be an integer");
 		}
 		script_int index = right.unchecked_as_int();
 		const script_array* node = left.unchecked_array_node();
@@ -4624,7 +4631,7 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 			// Numbers intern as symbols: the {0}/{1} machinery resolves symbol ids,
 			// so raw counts printed garbage names (KEEP BYTE-PARALLEL with the
 			// interpreter subscript path)
-			return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
+			return raise_(make_error_code(runtime_error_code::index_out_of_bounds),
 				"Array index {0} out of bounds for array of size {1}",
 				symbolizer_->intern(std::to_string(index)),
 				symbolizer_->intern(std::to_string(node->size())));
@@ -4662,7 +4669,7 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 				}
 				if (!value_ref.has_valid_engine()) {
 					if (!left.has_valid_engine()) {
-						return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+						return raise_(make_error_code(runtime_error_code::unsupported_operation),
 							"Invalid script_value: both map and new entry missing engine reference");
 					}
 					value_ref.set_engine(left.get_engine());
@@ -4720,16 +4727,16 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 		// copy-on-write - future work, a clear error instead of a silent trap.
 		// (KEEP BYTE-PARALLEL with the interpreter subscript path)
 		if (!right.is_int()) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
+			return raise_(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
 		}
 		if (lvalue_shape && lvalue_write) {
-			return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+			return raise_(make_error_code(runtime_error_code::unsupported_operation),
 				"Strings are read-only through subscript: use substr()/+ to build a new string");
 		}
 		const auto& str = left.unchecked_as_string();
 		script_int index = right.unchecked_as_int();
 		if (index < 0 || index >= static_cast<script_int>(str.size())) {
-			return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
+			return raise_(make_error_code(runtime_error_code::index_out_of_bounds),
 				"String index {0} out of bounds for string of size {1}",
 				symbolizer_->intern(std::to_string(index)),
 				symbolizer_->intern(std::to_string(str.size())));
@@ -4748,7 +4755,7 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 				std::vector<script_value> args = {left, right};
 				auto result = func(args);
 				if (!result) {
-					return result.error_value();
+					return raise_from(result);
 				}
 				stack_.push_back(std::move(result.value()));
 				return {};
@@ -4761,25 +4768,25 @@ checked_result<void> vm_backend::exec_index(frame& f, const vm_instruction& ins)
 				std::vector<script_value> args = {left, right};
 				auto result = func(args);
 				if (!result) {
-					return result.error_value();
+					return raise_from(result);
 				}
 				stack_.push_back(std::move(result.value()));
 				return {};
 			}
 		}
 	}
-	return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+	return raise_(make_error_code(runtime_error_code::unsupported_operation),
 		"Subscript can only be used on arrays, maps, or types with [] operator");
 }
 
-checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	script_value target_ref = std::move(stack_.back());
 	stack_.pop_back();
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
 
 	if (!target_ref.is_reference()) {
-		return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
+		return raise_(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
 	}
 
 	// Mode-based re-resolution (never a cached address): realloc/erase between mint
@@ -4791,13 +4798,13 @@ checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instructio
 	script_value* target_ptr;
 	if (typed_element) {
 		if (refHolder->container_index >= refHolder->container->size()) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+			return raise_(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 		}
 		target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
 	} else {
 		target_ptr = refHolder->resolve_target();
 		if (!target_ptr) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+			return raise_(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 		}
 	}
 
@@ -4808,7 +4815,7 @@ checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instructio
 			std::string expected_type = vm_type_info_name(element_type);
 			uint64_t value_type_id = symbolizer_->intern(value_type);
 			uint64_t expected_type_id = symbolizer_->intern(expected_type);
-			return checked_result<void>(
+			return raise_(
 				make_error_code(runtime_error_code::array_element_type_mismatch),
 				"Cannot assign '{0}' to element of type '{1}'",
 				value_type_id, expected_type_id);
@@ -4826,7 +4833,7 @@ checked_result<void> vm_backend::exec_index_assign(frame& f, const vm_instructio
 	return {};
 }
 
-checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 	script_value currentValue = std::move(stack_.back());
@@ -4851,7 +4858,7 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 		std::vector<script_value> args = {currentValue, rightValue};
 		auto result = func(args);
 		if (!result) {
-			return result.error_value();
+			return raise_from(result);
 		}
 		resultValue = std::move(result.value());
 	} else {
@@ -4864,42 +4871,42 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 				if (currentValue.is_string() || rightValue.is_string()) {
 					resultValue = script_value(currentValue.to_string() + rightValue.to_string(), engine_);
 				} else {
-					JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue));
+					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue));
 				}
 				break;
 			}
 			case token_type::minus: {
-				JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue));
 				break;
 			}
 			case token_type::star: {
-				JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue));
 				break;
 			}
 			case token_type::slash: {
 				const size_t ri = rightValue.raw_storage_index();
 				if ((ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) ||
 				    (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0)) {
-					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+					return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 				}
-				JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue));
 				break;
 			}
 			case token_type::percent: {
 				if (rightValue.raw_storage_index() == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 				}
-				JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
 				break;
 			}
 			default:
-				return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+				return raise_(make_error_code(runtime_error_code::unsupported_operation),
 					"Unknown compound assignment operator");
 		}
 	}
 
 	if (!currentValue.is_reference()) {
-		return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
+		return raise_(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
 	}
 	// Mode-based re-resolution (never a cached address): realloc/erase between mint
 	// and write can't corrupt the heap. TYPED elements: scratch target + buffer commit
@@ -4909,13 +4916,13 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 	script_value* target_ptr;
 	if (typed_element) {
 		if (refHolder->container_index >= refHolder->container->size()) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+			return raise_(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 		}
 		target_ptr = const_cast<script_value*>(&refHolder->materialize_typed_element(engine_));
 	} else {
 		target_ptr = refHolder->resolve_target();
 		if (!target_ptr) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
+			return raise_(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 		}
 	}
 	type_info_ptr element_type = refHolder->container_element_type;
@@ -4925,7 +4932,7 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 			std::string expected_type = vm_type_info_name(element_type);
 			uint64_t value_type_id = symbolizer_->intern(value_type);
 			uint64_t expected_type_id = symbolizer_->intern(expected_type);
-			return checked_result<void>(
+			return raise_(
 				make_error_code(runtime_error_code::array_element_type_mismatch),
 				"Cannot assign '{0}' to element of type '{1}'",
 				value_type_id, expected_type_id);
@@ -4947,7 +4954,7 @@ checked_result<void> vm_backend::exec_index_compound(frame& f, const vm_instruct
 // no holder re-resolve. Every other shape (map/object/string/borrow/temporary base/OOB)
 // replays the exact INDEX(lvalue_write)+INDEX_ASSIGN sequence, so semantics and error
 // text stay byte-identical by construction.
-checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 	// stack: [value, container, index]. Decision peeks are read-only; committed fast
 	// paths pop into locals first - conversions can run user code that grows the value
 	// stack (invariant 2b: never hold references into stack_ across a possible push).
@@ -4988,7 +4995,7 @@ checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction
 						std::string expected_type = vm_type_info_name(element_type);
 						uint64_t value_type_id = symbolizer_->intern(value_type);
 						uint64_t expected_type_id = symbolizer_->intern(expected_type);
-						return checked_result<void>(
+						return raise_(
 							make_error_code(runtime_error_code::array_element_type_mismatch),
 							"Cannot assign '{0}' to element of type '{1}'",
 							value_type_id, expected_type_id);
@@ -5007,7 +5014,7 @@ checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction
 	// Slow replay: identical to the old two-op sequence
 	vm_instruction index_ins{opcode::op_index, index_flag_lvalue_write | (ins.a & index_flag_lvalue_shape), 0, 0};
 	auto indexed = exec_index(f, index_ins);
-	if (!indexed) {
+	if (indexed == op_status::failed) {
 		return indexed;
 	}
 	return exec_index_assign(f, ins);
@@ -5017,7 +5024,7 @@ checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction
 // LOAD dispatches, no operand pushes). The inline path is exec_index's in-bounds array
 // branch VERBATIM; everything else (map/borrow/custom-[]/OOB/non-int index) pushes the
 // resolved operands and replays the unfused op, so every error keeps one spelling.
-checked_result<void> vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
 	std::optional<script_value> cscratch, iscratch;
 	const script_value* container_ptr;
@@ -5025,7 +5032,7 @@ checked_result<void> vm_backend::exec_index_fused(frame& f, const vm_instruction
 		container_ptr = &f.code->constants[p.container.const_index];
 	} else {
 		auto resolved = fused_ident_value(f, p.container, cscratch, f.ip * 3);
-		if (!resolved) return resolved.error_value();
+		if (!resolved) return raise_from(resolved);
 		container_ptr = resolved.value();
 	}
 	const script_value* index_ptr;
@@ -5033,7 +5040,7 @@ checked_result<void> vm_backend::exec_index_fused(frame& f, const vm_instruction
 		index_ptr = &f.code->constants[p.index.const_index];
 	} else {
 		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
-		if (!resolved) return resolved.error_value();
+		if (!resolved) return raise_from(resolved);
 		index_ptr = resolved.value();
 	}
 
@@ -5071,7 +5078,7 @@ checked_result<void> vm_backend::exec_index_fused(frame& f, const vm_instruction
 // Fused a[i] = v: container+index resolve as operands, value from the stack. The
 // committed paths mirror exec_index_store's fast paths verbatim; every other shape
 // pushes the operands above the value and replays the unfused sequence.
-checked_result<void> vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
 	std::optional<script_value> cscratch, iscratch;
 	const script_value* container_ptr;
@@ -5079,7 +5086,7 @@ checked_result<void> vm_backend::exec_index_store_fused(frame& f, const vm_instr
 		container_ptr = &f.code->constants[p.container.const_index];
 	} else {
 		auto resolved = fused_ident_value(f, p.container, cscratch, f.ip * 3);
-		if (!resolved) return resolved.error_value();
+		if (!resolved) return raise_from(resolved);
 		container_ptr = resolved.value();
 	}
 	const script_value* index_ptr;
@@ -5087,7 +5094,7 @@ checked_result<void> vm_backend::exec_index_store_fused(frame& f, const vm_instr
 		index_ptr = &f.code->constants[p.index.const_index];
 	} else {
 		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
-		if (!resolved) return resolved.error_value();
+		if (!resolved) return raise_from(resolved);
 		index_ptr = resolved.value();
 	}
 
@@ -5121,7 +5128,7 @@ checked_result<void> vm_backend::exec_index_store_fused(frame& f, const vm_instr
 					std::string expected_type = vm_type_info_name(element_type);
 					uint64_t value_type_id = symbolizer_->intern(value_type);
 					uint64_t expected_type_id = symbolizer_->intern(expected_type);
-					return checked_result<void>(
+					return raise_(
 						make_error_code(runtime_error_code::array_element_type_mismatch),
 						"Cannot assign '{0}' to element of type '{1}'",
 						value_type_id, expected_type_id);
@@ -5146,7 +5153,7 @@ checked_result<void> vm_backend::exec_index_store_fused(frame& f, const vm_instr
 // no registered operator override) reads, computes, and writes in place. Everything else
 // replays INDEX(shape)+INDEX_COMPOUND byte-identically (string concat routing, S8 bound
 // decode, object operator methods, rvalue-target errors).
-checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& ins) {
 	// stack: [container, index, rhs]. Numeric fast path: all peeks are read-only and
 	// evaluate_arithmetic on raw int/float runs no user code, so in-place refs are safe.
 	if ((ins.b & index_flag_lvalue_shape) != 0 && stack_.size() >= 3 &&
@@ -5175,14 +5182,14 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 				if (op == token_type::slash &&
 				    ((rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
 				     (rhs_idx == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) {
-					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+					return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 				}
 				if (op == token_type::percent && rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
-					return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 				}
 				const script_value current = storage->get(static_cast<size_t>(index), engine_);
 				script_value resultValue = make_null();
-				JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(current, op, rhs));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(current, op, rhs));
 				storage->set(static_cast<size_t>(index), resultValue);
 				stack_.pop_back();   // rhs
 				stack_.pop_back();   // index
@@ -5206,13 +5213,13 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 					if (op == token_type::slash &&
 					    ((rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
 					     (rhs_idx == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) {
-						return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+						return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 					}
 					if (op == token_type::percent && rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
-						return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+						return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 					}
 					script_value resultValue = make_null();
-					JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs));
+					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs));
 					auto container_type_info = container.get_type_info();
 					type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
 					if (element_type) {
@@ -5221,7 +5228,7 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 							std::string expected_type = vm_type_info_name(element_type);
 							uint64_t value_type_id = symbolizer_->intern(value_type);
 							uint64_t expected_type_id = symbolizer_->intern(expected_type);
-							return checked_result<void>(
+							return raise_(
 								make_error_code(runtime_error_code::array_element_type_mismatch),
 								"Cannot assign '{0}' to element of type '{1}'",
 								value_type_id, expected_type_id);
@@ -5245,7 +5252,7 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 	stack_.pop_back();
 	vm_instruction index_ins{opcode::op_index, (ins.b & index_flag_lvalue_shape), 0, 0};
 	auto indexed = exec_index(f, index_ins);
-	if (!indexed) {
+	if (indexed == op_status::failed) {
 		return indexed;
 	}
 	stack_.push_back(std::move(rhs));
@@ -5256,7 +5263,7 @@ checked_result<void> vm_backend::exec_index_compound_fused(frame& f, const vm_in
 // math:: language intrinsic: pops argc args, evaluates through the shared kernel
 // (detail/math_intrinsics.hpp - parity with the interpreter by construction), pushes
 // the result. Arg pointers are deref'd in place; the kernel copies nothing.
-checked_result<void> vm_backend::exec_math(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.b;
 	const size_t base = stack_.size() - argc;
 	const script_value* argp[8] = {};
@@ -5266,7 +5273,7 @@ checked_result<void> vm_backend::exec_math(frame& f, const vm_instruction& ins) 
 	auto result = detail::eval_math_intrinsic(static_cast<detail::math_fn>(ins.a), argp, argc,
 	                                          engine_, engine_->math_rng());
 	if (!result) {
-		return result.error_value();
+		return raise_from(result);
 	}
 	script_value out = std::move(result.value());
 	stack_.erase(stack_.begin() + base, stack_.end());
@@ -5274,7 +5281,7 @@ checked_result<void> vm_backend::exec_math(frame& f, const vm_instruction& ins) 
 	return {};
 }
 
-checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	const bool has_init = ins.b != 0;
 	const bool lvalue_init = ins.c != 0;
@@ -5373,7 +5380,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 						uint64_t actual_id = value_type_info->element_type()
 							? value_type_info->element_type()->id
 							: value_type_info->id;
-						return checked_result<void>(
+						return raise_(
 							make_error_code(runtime_error_code::type_mismatch),
 							"Cannot initialize weak_ptr<{}> from shared_ptr<{}>: type must match or be a subclass",
 							expected_id, actual_id);
@@ -5382,7 +5389,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 			}
 			auto weak_result = script_value::make_weak_ptr(value, engine_);
 			if (!weak_result) {
-				return weak_result.error_value();
+				return raise_from(weak_result);
 			}
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(weak_result.value()), decl->ref_escaping);
 		}
@@ -5390,7 +5397,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 			auto type_info = decl->type;
 			uint64_t weak_type_id = (type_info && !type_info->type_params.empty())
 				? type_info->type_params[0]->id : 0;
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+			return raise_(make_error_code(runtime_error_code::type_mismatch),
 				"Cannot initialize weak_ptr<{}> from value-semantic object: use shared_ptr<T>",
 				weak_type_id);
 		}
@@ -5399,7 +5406,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		auto weak_type_info = decl->type;
 		uint64_t weak_type_id = (weak_type_info && !weak_type_info->type_params.empty())
 			? weak_type_info->type_params[0]->id : 0;
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+		return raise_(make_error_code(runtime_error_code::type_mismatch),
 			"Cannot initialize weak_ptr<{}> with {}: use shared_ptr<T>",
 			weak_type_id, actual_type_id);
 	}
@@ -5411,7 +5418,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		const bool infer_pointee = decl->type && !decl->type->element_type();
 		if (!has_init) {
 			if (infer_pointee) {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Cannot infer shared_ptr<auto> pointee without an initializer - use var, or an explicit shared_ptr<T>");
 			}
 			script_value null_ptr = make_null();
@@ -5429,14 +5436,14 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		}
 		if (value.is_null()) {
 			if (infer_pointee) {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Cannot infer shared_ptr<auto> pointee from null - use var, or an explicit shared_ptr<T>");
 			}
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 		}
 		if (value.is_weak_ptr()) {
-			return checked_result<void>(make_error_code(runtime_error_code::invalid_weak_ptr_conversion), "Cannot initialize shared_ptr directly from weak_ptr");
+			return raise_(make_error_code(runtime_error_code::invalid_weak_ptr_conversion), "Cannot initialize shared_ptr directly from weak_ptr");
 		}
 		if (value.type() == script_value_type::jai_object_type ||
 		    value.type() == script_value_type::jai_shared_ptr_type) {
@@ -5455,7 +5462,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 					}
 				}
 				if (!inferred) {
-					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+					return raise_(make_error_code(runtime_error_code::type_mismatch),
 						"Cannot infer shared_ptr<auto> pointee from this initializer - use var, or an explicit shared_ptr<T>");
 				}
 				value.set_type_info(inferred);
@@ -5480,7 +5487,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 						is_subtype = actual_def && actual_def->is_subtype_of(expected_class);
 					}
 					if (!is_subtype) {
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+						return raise_(make_error_code(runtime_error_code::type_mismatch),
 							"Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
 							expected_type->id, symbolizer_->intern(actual_class));
 					}
@@ -5489,7 +5496,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 		}
-		return checked_result<void>(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
+		return raise_(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
 	}
 
 	script_value value = make_null();
@@ -5538,7 +5545,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 			}
 
 			if (requires_homogeneity) {
-				JAISCRIPT_TRY(vm_validate_container_homogeneous(value, ""));
+				VM_TRY(vm_validate_container_homogeneous(value, ""));
 			}
 		}
 	}
@@ -5552,7 +5559,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 		if (has_init) {
 			auto enforced = enforce_type_compatibility(std::move(value), decl->type);
 			if (!enforced) {
-				return enforced.error_value();
+				return raise_from(enforced);
 			}
 			value = std::move(enforced.value());
 		}
@@ -5580,7 +5587,7 @@ checked_result<void> vm_backend::exec_decl_var(frame& f, const vm_instruction& i
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
 }
 
-checked_result<void> vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	const uint64_t target_sym = f.code->symbols[ins.b];
 
@@ -5599,13 +5606,13 @@ checked_result<void> vm_backend::exec_decl_ref_ident(frame& f, const vm_instruct
 		targetPtr = environment_->get_value_ptr(target_sym);
 	}
 	if (!targetPtr) {
-		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
+		return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
 	}
 
 	if (targetPtr->is_reference()) {
 		auto aliased = vm_decl_ref_alias(*targetPtr, engine_);
 		if (!aliased) {
-			return aliased.error_value();
+			return raise_from(aliased);
 		}
 		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
 	}
@@ -5614,7 +5621,7 @@ checked_result<void> vm_backend::exec_decl_ref_ident(frame& f, const vm_instruct
 	return define_decl_value(f, decl->name_id, decl->slot_index, share_env_ref(*targetPtr));
 }
 
-checked_result<void> vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	script_value result = std::move(stack_.back());
 	stack_.pop_back();
@@ -5622,19 +5629,19 @@ checked_result<void> vm_backend::exec_decl_ref_value(frame& f, const vm_instruct
 	if (result.is_reference()) {
 		auto aliased = vm_decl_ref_alias(result, engine_);
 		if (!aliased) {
-			return aliased.error_value();
+			return raise_from(aliased);
 		}
 		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
 	}
-	return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Cannot take reference of non-lvalue expression");
+	return raise_(make_error_code(runtime_error_code::invalid_reference), "Cannot take reference of non-lvalue expression");
 }
 
-checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
 	script_value source = std::move(stack_.back());
 	stack_.pop_back();
 
 	if (!source.is_array()) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+		return raise_(make_error_code(runtime_error_code::type_mismatch),
 			"Destructuring requires an array on the right-hand side");
 	}
 
@@ -5645,7 +5652,7 @@ checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction
 		script_value val = i < node.size()
 			? (node.is_typed() ? node.get(i, engine_) : clone_for_assignment(node.values()[i]))
 			: make_null();
-		JAISCRIPT_TRY(define_decl_value(f, proto.names[i].first, proto.names[i].second, std::move(val)));
+		VM_TRY(define_decl_value(f, proto.names[i].first, proto.names[i].second, std::move(val)));
 	}
 	return {};
 }
@@ -5656,17 +5663,17 @@ checked_result<void> vm_backend::exec_destructure(frame& f, const vm_instruction
 // register stack - no value-stack copy. The not-callable check ALSO fires here, at
 // the ruled observation point (the interpreter always checked before args; the vm's
 // old post-args check was a latent divergence, pinned by callee_first_* tests).
-checked_result<void> vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins) {
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
 	std::optional<script_value> scratch;
 	auto resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3);
 	if (!resolved) {
-		return resolved.error_value();
+		return raise_from(resolved);
 	}
 	const script_value& calleeVal = *resolved.value();
 	if (!calleeVal.is_function()) {
-		return checked_result<void>(make_error_code(runtime_error_code::not_a_function));
+		return raise_(make_error_code(runtime_error_code::not_a_function));
 	}
 	pending_callee pc;
 	if (cached_global_env_ &&
@@ -5703,7 +5710,7 @@ checked_result<void> vm_backend::exec_probe_callee(frame& f, const vm_instructio
 	return {};
 }
 
-checked_result<void> vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	pending_callee pc = std::move(pending_callees_.back());
@@ -5753,18 +5760,18 @@ checked_result<void> vm_backend::exec_call_from_scratch(frame& f, const vm_instr
 // Zero-copy frame push for probe-called frames: no callee value below the window,
 // the record's direct_pin holds the callable (hot reload cannot kill the executing
 // function; the pin releases at pop exactly where the callee slot died).
-checked_result<void> vm_backend::push_script_frame_pinned(frame& caller,
+op_status vm_backend::push_script_frame_pinned(frame& caller,
                                                           const script_defined_function& function,
                                                           strong_ptr<script_function> pin,
                                                           size_t args_base, size_t argc,
                                                           const call_site* site) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		return checked_result<void>(
+		return raise_(
 			make_error_code(runtime_error_code::max_recursion_depth),
 			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
-		return execution_limit_failure();
+		return raise_from(execution_limit_failure());
 	}
 	assert(!has_return_value_);
 
@@ -5833,7 +5840,7 @@ checked_result<void> vm_backend::push_script_frame_pinned(frame& caller,
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);
 
-	checked_result<void> bound;
+	op_status bound{};
 	try {
 		bound = bind_parameters(function.parameters(), stack_.vec(), args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
@@ -5841,7 +5848,7 @@ checked_result<void> vm_backend::push_script_frame_pinned(frame& caller,
 		pop_script_frame_core(rec);
 		throw;
 	}
-	if (!bound) {
+	if (bound == op_status::failed) {
 		pop_script_frame_core(rec);
 		return bound;
 	}
@@ -5854,7 +5861,7 @@ checked_result<void> vm_backend::push_script_frame_pinned(frame& caller,
 	return {};
 }
 
-checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 
@@ -5934,7 +5941,7 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	stack_.pop_back();
 
 	if (!callee.is_function()) {
-		return checked_result<void>(make_error_code(runtime_error_code::not_a_function));
+		return raise_(make_error_code(runtime_error_code::not_a_function));
 	}
 
 	// Inline the invoke tail: an extra callee frame per script call would blow the
@@ -5974,14 +5981,14 @@ checked_result<void> vm_backend::exec_call(frame& f, const vm_instruction& ins) 
 	checked_result<script_value>& result_checked = *callOutcome;
 
 	if (!result_checked) {
-		return result_checked.error_value();
+		return raise_from(result_checked);
 	}
 
 	stack_.push_back(std::move(result_checked.value()));
 	return {};
 }
 
-checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site) {
+op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site) {
 	const size_t argc = arguments.size();
 
 	const script_function& func = callee.as_function();
@@ -6042,14 +6049,14 @@ checked_result<void> vm_backend::invoke_callee(frame& f, script_value&& callee, 
 	checked_result<script_value>& result_checked = *callOutcome;
 
 	if (!result_checked) {
-		return result_checked.error_value();
+		return raise_from(result_checked);
 	}
 
 	stack_.push_back(std::move(result_checked.value()));
 	return {};
 }
 
-checked_result<void> vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 	const function_proto& proto = f.code->function_protos[ins.a];
 	engine* eng = engine_;
 
@@ -6102,7 +6109,7 @@ checked_result<void> vm_backend::exec_func_decl(frame& f, const vm_instruction& 
 	return {};
 }
 
-checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	const closure_proto& proto = f.code->closure_protos[ins.a];
 	auto closure_env = environment_;
 
@@ -6201,7 +6208,7 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 			}
 
 			if (!can_capture) {
-				return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+				return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
 					"Cannot capture undefined variable '{0}'", capture.symbol_id);
 			}
 
@@ -6220,12 +6227,12 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 					// captured env dies
 					captureEnv->define(capture.symbol_id, share_env_ref(*targetPtr));
 				} else {
-					return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
+					return raise_(make_error_code(runtime_error_code::capture_reference_failed),
 						"Cannot capture variable '{0}' by reference", capture.symbol_id);
 				}
 			} else {
 				auto capture_result = environment_->get(capture.symbol_id);
-				if (!capture_result) return capture_result.error_value();
+				if (!capture_result) return raise_from(capture_result);
 				captureEnv->define(capture.symbol_id, vm_clone_for_capture(capture_result.value(), symbolizer_));
 			}
 		}
@@ -6251,7 +6258,7 @@ checked_result<void> vm_backend::exec_closure(frame& f, const vm_instruction& in
 		if (proto.captures_this) {
 			auto this_result = captureEnv->get(this_id_);
 			if (!this_result) {
-				return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
+				return raise_(make_error_code(runtime_error_code::capture_reference_failed),
 					"Failed to capture 'this' reference");
 			}
 			script_value this_obj = std::move(this_result.value());
@@ -6368,47 +6375,47 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 	return outcome;
 }
 
-checked_result<void> vm_backend::exec_this(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_this(frame& f, const vm_instruction& ins) {
 	auto this_result = environment_->get(symbolizer_->get_this_id());
 	if (!this_result) {
-		return checked_result<void>(make_error_code(runtime_error_code::this_outside_method),
+		return raise_(make_error_code(runtime_error_code::this_outside_method),
 			"'this' can only be used inside methods");
 	}
 	stack_.push_back(std::move(this_result.value()));
 	return {};
 }
 
-checked_result<void> vm_backend::exec_super(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_super(frame& f, const vm_instruction& ins) {
 	auto this_result = environment_->get(symbolizer_->get_this_id());
 	if (!this_result) {
-		return checked_result<void>(make_error_code(runtime_error_code::super_outside_method),
+		return raise_(make_error_code(runtime_error_code::super_outside_method),
 			"'super' can only be used inside methods");
 	}
 	script_value this_value = std::move(this_result.value());
 	if (this_value.is_null()) {
-		return checked_result<void>(make_error_code(runtime_error_code::super_outside_method),
+		return raise_(make_error_code(runtime_error_code::super_outside_method),
 			"'super' can only be used inside methods");
 	}
 	stack_.push_back(std::move(this_value));
 	return {};
 }
 
-checked_result<void> vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.b];
 	auto this_result = environment_->get(symbolizer_->get_this_id());
 	if (!this_result) {
-		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"{0}() can only be called from within a method", sym);
 	}
 	script_value this_val = std::move(this_result.value());
 	if (!this_val.is_object()) {
-		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"{0}() can only be called from within a method", sym);
 	}
 	if (ins.a) {
 		auto weak_result = script_value::make_weak_ptr(this_val, engine_);
 		if (!weak_result) {
-			return weak_result.error_value();
+			return raise_from(weak_result);
 		}
 		stack_.push_back(std::move(weak_result.value()));
 	} else {
@@ -6417,7 +6424,7 @@ checked_result<void> vm_backend::exec_from_this(frame& f, const vm_instruction& 
 	return {};
 }
 
-checked_result<void> vm_backend::member_access_value(const script_value& raw_object, member_expr* expr, script_value& out) {
+op_status vm_backend::member_access_value(const script_value& raw_object, member_expr* expr, script_value& out) {
 	script_value objectValue = raw_object.deref();
 
 	if (expr->null_safe && objectValue.is_null()) {
@@ -6439,33 +6446,33 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 				out = field->is_reference() ? field->deref() : *field;
 				return {};
 			}
-			return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+			return raise_(make_error_code(runtime_error_code::unsupported_operation),
 				"only direct field access on class instances is allowed in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
 		}
 	}
 
 	if (expr->object && expr->object->get_type() == node_type::super_expr) {
 		if (!objectValue.is_object()) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		auto objHolder = objectValue.get_object_holder();
 		if (!objHolder || !objHolder->data) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
 		if (!instance) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		auto class_def = instance->get_class_definition();
 		if (!class_def) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		auto parent_def = class_def->get_parent();
 		if (!parent_def) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		if (parent_def->chain_has_nonpublic()) [[unlikely]] {
-			JAISCRIPT_TRY(detail::enforce_member_access(parent_def.get(), expr->member_id,
+			VM_TRY(detail::enforce_member_access(parent_def.get(), expr->member_id,
 			                                            environment_->find_access_context()));
 		}
 		script_value method = make_null();
@@ -6477,7 +6484,7 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 			return {};
 		}
 		if (method.is_null()) {
-			return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"Parent class has no method '{0}'", expr->member_id);
 		}
 		out = make_bound_method(objectValue, method);
@@ -6506,7 +6513,7 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 				out = script_value::make_function(done_method, engine_);
 				return {};
 			}
-			return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"coroutine_handle has no member '{0}'", expr->member_id);
 		}
 	}
@@ -6562,7 +6569,7 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 				return {};
 			}
 		}
-		return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+		return raise_(make_error_code(runtime_error_code::member_not_found),
 			"Map has no method or key '{0}'", expr->member_id);
 	}
 
@@ -6576,7 +6583,7 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
 		}
-		return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
+		return raise_(make_error_code(runtime_error_code::member_not_found),
 			"weak_ptr has no method '{0}'", expr->member_id);
 	}
 
@@ -6659,18 +6666,18 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 	}
 
 	if (!objectValue.is_object()) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
 	auto target = resolve_member_target(objectValue);
 	if (!target) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
 	uint64_t member_id = expr->member_id;
 
 	if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
-		JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member_id,
+		VM_TRY(detail::enforce_member_access(target.class_def, member_id,
 		                                            environment_->find_access_context()));
 	}
 
@@ -6688,7 +6695,7 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 				std::vector<script_value> args = {objectValue};
 				auto result = func(args);
 				if (!result) {
-					return result.error_value();
+					return raise_from(result);
 				}
 				// Getter results referencing the receiver must keep the receiver's data alive
 				script_value& getterResult = result.value();
@@ -6743,7 +6750,7 @@ checked_result<void> vm_backend::member_access_value(const script_value& raw_obj
 	return {};
 }
 
-checked_result<void> vm_backend::static_member_value(member_expr* expr, script_value& out) {
+op_status vm_backend::static_member_value(member_expr* expr, script_value& out) {
 	identifier_expr* ident_expr = nullptr;
 	if (expr->object->get_type() == node_type::identifier_expr) {
 		ident_expr = static_cast<identifier_expr*>(expr->object.get());
@@ -6772,11 +6779,11 @@ checked_result<void> vm_backend::static_member_value(member_expr* expr, script_v
 		};
 		name = build_namespace_path(expr->object.get());
 		if (name.empty()) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		name_id = symbolizer_->intern(name);
 	} else {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
 	auto& namespaces = engine_->script_namespaces();
@@ -6898,7 +6905,7 @@ checked_result<void> vm_backend::static_member_value(member_expr* expr, script_v
 		if (class_it != ns_data->classes.end()) {
 			auto ctor_result = environment_->get(expr->member_id);
 			if (!ctor_result) {
-				return ctor_result.error_value();
+				return raise_from(ctor_result);
 			}
 			out = std::move(ctor_result.value());
 			return {};
@@ -6908,23 +6915,23 @@ checked_result<void> vm_backend::static_member_value(member_expr* expr, script_v
 	auto [class_var_id, class_var_view] = symbolizer_->get_class_var_id_with_view(name_id);
 	auto class_var_result = environment_->get(class_var_id);
 	if (!class_var_result) {
-		return class_var_result.error_value();
+		return raise_from(class_var_result);
 	}
 	script_value class_var = std::move(class_var_result.value());
 
 	if (!class_var.is_object()) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
 	auto objHolder = class_var.get_object_holder();
 	if (!objHolder || objHolder->type_name != "class_definition") {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
 	auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
 	if (class_def->chain_has_nonpublic()) [[unlikely]] {
-		JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), expr->member_id,
+		VM_TRY(detail::enforce_member_access(class_def.get(), expr->member_id,
 		                                            environment_->find_access_context()));
 	}
 
@@ -6947,35 +6954,35 @@ checked_result<void> vm_backend::static_member_value(member_expr* expr, script_v
 		std::vector<script_value> no_args;
 		auto result = func(no_args);
 		if (!result) {
-			return result.error_value();
+			return raise_from(result);
 		}
 		out = std::move(result.value());
 		return {};
 	}
 
-	return checked_result<void>(make_error_code(runtime_error_code::static_member_not_found),
+	return raise_(make_error_code(runtime_error_code::static_member_not_found),
 		"Class '{0}' has no static member '{1}'", name_id, expr->member_id);
 }
 
-checked_result<void> vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value object = std::move(stack_.back());
 	stack_.pop_back();
 	script_value out = make_null();
-	JAISCRIPT_TRY(member_access_value(object, expr, out));
+	VM_TRY(member_access_value(object, expr, out));
 	stack_.push_back(std::move(out));
 	return {};
 }
 
-checked_result<void> vm_backend::exec_get_static(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_get_static(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value out = make_null();
-	JAISCRIPT_TRY(static_member_value(expr, out));
+	VM_TRY(static_member_value(expr, out));
 	stack_.push_back(std::move(out));
 	return {};
 }
 
-checked_result<void> vm_backend::assign_member(const script_value& object_value, member_expr* member, const script_value& value) {
+op_status vm_backend::assign_member(const script_value& object_value, member_expr* member, const script_value& value) {
 	// Worker direct-field store (parallel_for v1): the setter probe below COPIES a
 	// shared method value (cross-worker count race); a backing field's enforce+set is
 	// exactly what the auto-setter does, on exclusively-owned instance storage. Any
@@ -6988,18 +6995,18 @@ checked_result<void> vm_backend::assign_member(const script_value& object_value,
 			if (member->member_id != UINT64_MAX && inst->find_field_value(member->member_id)) {
 				auto enforced = inst->enforce_field_write(member->member_id, clone_for_assignment(value));
 				if (!enforced) {
-					return enforced.error_value();
+					return raise_from(enforced);
 				}
 				inst->set_field_unchecked(member->member_id, std::move(enforced).value());
 				return {};
 			}
-			return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+			return raise_(make_error_code(runtime_error_code::unsupported_operation),
 				"only direct field stores on class instances are allowed in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
 		}
 	}
 	auto target = resolve_member_target(object_value);
 	if (!target) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+		return raise_(make_error_code(runtime_error_code::type_mismatch),
 			"Cannot assign property to non-object value");
 	}
 
@@ -7008,7 +7015,7 @@ checked_result<void> vm_backend::assign_member(const script_value& object_value,
 		: symbolizer_->intern(member->member);
 
 	if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
-		JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member_id,
+		VM_TRY(detail::enforce_member_access(target.class_def, member_id,
 		                                            environment_->find_access_context()));
 	}
 
@@ -7019,13 +7026,13 @@ checked_result<void> vm_backend::assign_member(const script_value& object_value,
 		std::vector<script_value> args = {object_value, clone_for_assignment(value)};
 		auto result = func(args);
 		if (!result) {
-			return result.error_value();
+			return raise_from(result);
 		}
 	} else if (target.has_field(member_id)) {
 		// Typed fields enforce like locals
 		auto enforced = target.instance->enforce_field_write(member_id, clone_for_assignment(value));
 		if (!enforced) {
-			return enforced.error_value();
+			return raise_from(enforced);
 		}
 		target.instance->set_field_unchecked(member_id, enforced.value());
 	} else {
@@ -7036,7 +7043,7 @@ checked_result<void> vm_backend::assign_member(const script_value& object_value,
 	return {};
 }
 
-checked_result<void> vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value objectValue = std::move(stack_.back());
 	stack_.pop_back();
@@ -7050,7 +7057,7 @@ checked_result<void> vm_backend::exec_set_member(frame& f, const vm_instruction&
 		return {};
 	}
 
-	JAISCRIPT_TRY(assign_member(dereferenced, member, value));
+	VM_TRY(assign_member(dereferenced, member, value));
 	if (is_unwinding_) {
 		stack_.push_back(make_null());
 		return {};
@@ -7059,13 +7066,13 @@ checked_result<void> vm_backend::exec_set_member(frame& f, const vm_instruction&
 	return {};
 }
 
-checked_result<void> vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
 
 	if (member->object->get_type() != node_type::identifier_expr) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+		return raise_(make_error_code(runtime_error_code::type_mismatch),
 			"Static member assignment requires a class name");
 	}
 	auto* ident_expr = static_cast<identifier_expr*>(member->object.get());
@@ -7074,31 +7081,31 @@ checked_result<void> vm_backend::exec_set_static(frame& f, const vm_instruction&
 	auto [class_var_id, class_var_name] = symbolizer_->get_class_var_id_with_view(class_name_id);
 	auto class_result = environment_->get(class_var_id);
 	if (!class_result) {
-		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Class '{0}' not found", class_name_id);
 	}
 	script_value class_var = std::move(class_result.value());
 
 	if (!class_var.is_object()) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+		return raise_(make_error_code(runtime_error_code::type_mismatch),
 			"'{0}' is not a class", class_name_id);
 	}
 
 	auto objHolder = class_var.get_object_holder();
 	if (!objHolder || objHolder->type_name != "class_definition") {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+		return raise_(make_error_code(runtime_error_code::type_mismatch),
 			"'{0}' is not a valid class", class_name_id);
 	}
 
 	auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
 	if (class_def->chain_has_nonpublic()) [[unlikely]] {
-		JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), member->member_id,
+		VM_TRY(detail::enforce_member_access(class_def.get(), member->member_id,
 		                                            environment_->find_access_context()));
 	}
 
 	if (!class_def->set_static_field(member->member_id, value.clone())) {
-		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Cannot assign to static member: field '{0}' not found", member->member_id);
 	}
 
@@ -7106,7 +7113,7 @@ checked_result<void> vm_backend::exec_set_static(frame& f, const vm_instruction&
 	return {};
 }
 
-checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const uint32_t kind = ins.c & compound_kind_mask;
 
@@ -7133,7 +7140,7 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 			if (custom_result.has_value()) {
 				script_value objectValue = objectValueRaw.deref();
 				if (objectValue.is_object()) {
-					JAISCRIPT_TRY(assign_member(objectValue, member, custom_result.value()));
+					VM_TRY(assign_member(objectValue, member, custom_result.value()));
 					if (is_unwinding_) {
 						stack_.push_back(make_null());
 						return {};
@@ -7160,7 +7167,7 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 		case compound_plus: {
 			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 				script_int rr;
-				if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '+='");
+				if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
 				resultValue = script_value(rr, engine_);
 			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
 			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
@@ -7170,11 +7177,11 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 			} else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
 				// engine::memory_cap chokepoint: deny the concat result before it exists
 				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
-					return detail::raise_memory_cap(*limits_);
+					return raise_from(detail::raise_memory_cap(*limits_));
 				}
 				resultValue = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Invalid operands for +=");
 			}
 			break;
@@ -7182,7 +7189,7 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 		case compound_minus: {
 			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 				script_int rr;
-				if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '-='");
+				if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
 				resultValue = script_value(rr, engine_);
 			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
 			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
@@ -7190,7 +7197,7 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
 				resultValue = script_value(cf - rf, engine_);
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Invalid operands for -=");
 			}
 			break;
@@ -7198,7 +7205,7 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 		case compound_star: {
 			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 				script_int rr;
-				if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return vm_int_overflow_v("Integer overflow in '*='");
+				if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
 				resultValue = script_value(rr, engine_);
 			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
 			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
@@ -7206,17 +7213,17 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
 				resultValue = script_value(cf * rf, engine_);
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Invalid operands for *=");
 			}
 			break;
 		}
 		case compound_slash: {
 			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+				return raise_(make_error_code(runtime_error_code::division_by_zero),
 					"Division by zero");
 			} else if (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0) {
-				return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+				return raise_(make_error_code(runtime_error_code::division_by_zero),
 					"Division by zero");
 			}
 			if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
@@ -7225,21 +7232,21 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
 				resultValue = script_value(cf / rf, engine_);
 			} else {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Invalid operands for /=");
 			}
 			break;
 		}
 		case compound_percent: {
 			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+				return raise_(make_error_code(runtime_error_code::division_by_zero),
 					"Modulo by zero");
 			}
-			JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
 			break;
 		}
 		default:
-			return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+			return raise_(make_error_code(runtime_error_code::unsupported_operation),
 				"Unsupported compound assignment operator");
 	}
 
@@ -7250,7 +7257,7 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 		return {};
 	}
 
-	JAISCRIPT_TRY(assign_member(objectValue, member, resultValue));
+	VM_TRY(assign_member(objectValue, member, resultValue));
 	if (is_unwinding_) {
 		stack_.push_back(make_null());
 		return {};
@@ -7260,7 +7267,7 @@ checked_result<void> vm_backend::exec_member_compound(frame& f, const vm_instruc
 	return {};
 }
 
-checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	auto* member = static_cast<member_expr*>(f.code->nodes[site.member_node].get());
@@ -7287,7 +7294,7 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 				script_value& var_ref = ref_result.value().get().deref();
 				auto result = methodIt->second(builtin_ctx(), var_ref, arguments);
 				if (!result) {
-					return result.error_value();
+					return raise_from(result);
 				}
 				stack_.push_back(std::move(result.value()));
 				return {};
@@ -7309,7 +7316,7 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 			// worker. Trusted scripts opt in.
 			if (parallel_worker_ && holder && holder->is_class_instance_wrapper && holder->data &&
 			    !engine_->allow_unsafe_parallel()) [[unlikely]] {
-				return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+				return raise_(make_error_code(runtime_error_code::unsupported_operation),
 					"cannot call script class methods in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
 			}
 			// A user class method WINS over a same-named builtin handle method (Dev ruling
@@ -7326,7 +7333,7 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 			if (holder && holder->type_id != coroutine_handle_type_id_ && !shared_ptr_builtin) {
 				auto target = resolve_member_target(objv);
 				if (target && target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
-					JAISCRIPT_TRY(detail::enforce_member_access(target.class_def, member->member_id,
+					VM_TRY(detail::enforce_member_access(target.class_def, member->member_id,
 					                                            environment_->find_access_context()));
 				}
 				if (target && target.class_def && !target.has_field(member->member_id)) {
@@ -7368,7 +7375,7 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 	}
 
 	script_value callee = make_null();
-	JAISCRIPT_TRY(member_access_value(object, member, callee));
+	VM_TRY(member_access_value(object, member, callee));
 	if (is_unwinding_) {
 		stack_.push_back(make_null());
 		return {};
@@ -7378,12 +7385,12 @@ checked_result<void> vm_backend::exec_call_method(frame& f, const vm_instruction
 		return {};
 	}
 	if (!callee.is_function()) {
-		return checked_result<void>(make_error_code(runtime_error_code::not_a_function));
+		return raise_(make_error_code(runtime_error_code::not_a_function));
 	}
 	return invoke_callee(f, std::move(callee), arguments, site);
 }
 
-checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<new_expr*>(f.code->nodes[ins.a].get());
 	const size_t argc = ins.b;
 
@@ -7396,7 +7403,7 @@ checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	stack_.erase(stack_.begin() + base, stack_.end());
 
 	if (!expr->type) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
 	if (expr->type->base_type == script_value_type::jai_array_type) {
@@ -7437,14 +7444,14 @@ checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			uint64_t expected_id = (expr->type && !expr->type->type_params.empty())
 				? expr->type->type_params[0]->id : 0;
 			if (obj.type() == script_value_type::jai_object_type) {
-				return checked_result<void>(
+				return raise_(
 					make_error_code(runtime_error_code::type_mismatch),
 					"Cannot create weak_ptr from value-semantic object. Use shared_ptr<T>.",
 					expected_id);
 			}
 			auto type_info = obj.get_type_info();
 			uint64_t actual_id = type_info ? type_info->id : 0;
-			return checked_result<void>(
+			return raise_(
 				make_error_code(runtime_error_code::type_mismatch),
 				"Cannot create weak_ptr from non-shared_ptr type. Use shared_ptr<T>.",
 				expected_id, actual_id);
@@ -7465,7 +7472,7 @@ checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 					uint64_t actual_id = obj_type_info->element_type()
 						? obj_type_info->element_type()->id
 						: obj_type_info->id;
-					return checked_result<void>(
+					return raise_(
 						make_error_code(runtime_error_code::type_mismatch),
 						"weak_ptr type mismatch: type must match or be a subclass",
 						expected_id, actual_id);
@@ -7475,7 +7482,7 @@ checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 
 		auto weak_result = script_value::make_weak_ptr(obj, engine_);
 		if (!weak_result) {
-			return weak_result.error_value();
+			return raise_from(weak_result);
 		}
 		stack_.push_back(std::move(weak_result.value()));
 		return {};
@@ -7491,14 +7498,14 @@ checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			std::string innerTypeName = inner_type->type_name;
 			auto ctor_result = environment_->get(innerTypeName);
 			if (!ctor_result || !ctor_result.value().is_function()) {
-				return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+				return raise_(make_error_code(runtime_error_code::undefined_variable),
 					"No constructor found for class '{0}'", inner_type->id);
 			}
 			script_value constructorFunc = std::move(ctor_result.value());
 			const script_function& func = constructorFunc.as_function();
 			auto result = func({});
 			if (!result) {
-				return result.error_value();
+				return raise_from(result);
 			}
 			script_value value = std::move(result.value());
 			if (value.type() == script_value_type::jai_object_type) {
@@ -7509,20 +7516,20 @@ checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		}
 
 		if (!inner_type) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+			return raise_(make_error_code(runtime_error_code::type_mismatch),
 				"shared_ptr requires a type parameter when called with arguments");
 		}
 		std::string innerTypeName = inner_type->type_name;
 		auto ctor_result = environment_->get(innerTypeName);
 		if (!ctor_result || !ctor_result.value().is_function()) {
-			return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+			return raise_(make_error_code(runtime_error_code::undefined_variable),
 				"No constructor found for class '{0}'", inner_type->id);
 		}
 		script_value constructorFunc = std::move(ctor_result.value());
 		const script_function& func = constructorFunc.as_function();
 		auto result = func(args);
 		if (!result) {
-			return result.error_value();
+			return raise_from(result);
 		}
 		script_value value = std::move(result.value());
 		if (value.type() == script_value_type::jai_object_type) {
@@ -7539,17 +7546,17 @@ checked_result<void> vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		const script_function& func = constructorFunc.as_function();
 		auto result = func(args);
 		if (!result) {
-			return result.error_value();
+			return raise_from(result);
 		}
 		stack_.push_back(std::move(result.value()));
 		return {};
 	}
 
-	return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+	return raise_(make_error_code(runtime_error_code::undefined_variable),
 		"No constructor found for class '{0}'", expr->type->id);
 }
 
-checked_result<void> vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<enum_decl*>(f.code->nodes[ins.a].get());
 	auto enum_map = script_value::make_map(
 		engine_->get_type_info_string(),
@@ -7566,14 +7573,14 @@ checked_result<void> vm_backend::exec_enum_decl(frame& f, const vm_instruction& 
 	return {};
 }
 
-checked_result<void> vm_backend::exec_parallel_for(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_parallel_for(frame& f, const vm_instruction& ins) {
 	auto* stmt = static_cast<parallel_for_stmt*>(f.code->nodes[ins.a].get());
 	script_value container = std::move(stack_.back());
 	stack_.pop_back();
-	return detail::run_parallel_for(*engine_, stmt, container, environment_);
+	return vm_check(detail::run_parallel_for(*engine_, stmt, container, environment_));
 }
 
-checked_result<void> vm_backend::exec_class_decl(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_class_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<class_decl*>(f.code->nodes[ins.a].get());
 	// Class machinery throws (override validation, field-init failures); the interpreter
 	// converts those to unwinding at its statement boundary - do the same here
@@ -7592,7 +7599,7 @@ checked_result<void> vm_backend::exec_class_decl(frame& f, const vm_instruction&
 	}
 }
 
-checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
+op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 	std::shared_ptr<script_class_definition> class_def;
 	bool is_redefinition = false;
 
@@ -7600,7 +7607,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 
 	auto global_env = engine_ ? engine_->get_global_environment() : nullptr;
 	if (!global_env) {
-		return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
+		return raise_(make_error_code(runtime_error_code::engine_destroyed));
 	}
 	auto existing_result = global_env->get(class_var_id);
 	if (existing_result) {
@@ -7655,7 +7662,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 				if (objHolder && objHolder->type_id == class_definition_type_id_) {
 					base_class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 				} else {
-					return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
 			} else {
 				if (class_lookup_) {
@@ -7663,18 +7670,18 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 					if (cpp_class_def) {
 						base_class_def = cpp_class_def;
 					} else if (environment_->contains(base_name_id)) {
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+						return raise_(make_error_code(runtime_error_code::type_mismatch),
 							"Constructor found for '{0}' but no class definition available", base_name_id);
 					} else {
-						return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
+						return raise_(make_error_code(runtime_error_code::class_not_found),
 							"Base class '{0}' not found", base_name_id);
 					}
 				} else {
 					if (environment_->contains(base_name_id)) {
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+						return raise_(make_error_code(runtime_error_code::type_mismatch),
 							"Script class inheriting from C++ class '{0}' requires engine integration", base_name_id);
 					} else {
-						return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
+						return raise_(make_error_code(runtime_error_code::class_not_found),
 							"Base class '{0}' not found", base_name_id);
 					}
 				}
@@ -7692,7 +7699,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 
 		if (!parent_defs.empty()) {
 			if (!class_def->set_parents(parent_defs)) {
-				return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+				return raise_(make_error_code(runtime_error_code::type_mismatch));
 			}
 		}
 	}
@@ -7725,7 +7732,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 
 		for (const auto& [field_id, sources] : field_sources) {
 			if (sources.size() > 1) {
-				return checked_result<void>(make_error_code(runtime_error_code::multiple_inheritance),
+				return raise_(make_error_code(runtime_error_code::multiple_inheritance),
 					"Field inherited from multiple parents", field_id, decl->name_id);
 			}
 		}
@@ -7768,7 +7775,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 				if (initializer_ast && !preserve_existing) {
 					auto init_result = eval_expression(initializer_ast, nullptr);
 					if (!init_result) {
-						return init_result.error_value();
+						return raise_from(init_result);
 					}
 					default_val = std::move(init_result.value());
 					if (!default_val.has_valid_engine() && engine_) {
@@ -7881,7 +7888,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 			if (initializer_ast) {
 				auto init_result = eval_expression(initializer_ast, nullptr);
 				if (!init_result) {
-					return init_result.error_value();
+					return raise_from(init_result);
 				}
 				evaluated_value = std::move(init_result.value());
 			}
@@ -8005,11 +8012,11 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 	}
 
 	if (!engine_) {
-		return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
+		return raise_(make_error_code(runtime_error_code::engine_destroyed));
 	}
 	auto register_result = engine_->get_class_registry().register_script_class(class_def);
 	if (!register_result) {
-		return register_result;
+		return raise_from(register_result);
 	}
 	engine_->bump_class_definition_epoch();
 	detail::warn_shadowed_handle_builtins(*engine_, *class_def);
@@ -8019,7 +8026,7 @@ checked_result<void> vm_backend::exec_class_decl_node(class_decl* decl) {
 	return {};
 }
 
-checked_result<void> vm_backend::exec_namespace_decl(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_namespace_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<namespace_decl*>(f.code->nodes[ins.a].get());
 	try {
 		return exec_namespace_decl_node(decl);
@@ -8036,13 +8043,13 @@ checked_result<void> vm_backend::exec_namespace_decl(frame& f, const vm_instruct
 	}
 }
 
-checked_result<void> vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
+op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 	if (decl->name_id == UINT64_MAX) {
 		decl->name_id = symbolizer_->intern(decl->name);
 	}
 
 	if (!engine_) {
-		return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
+		return raise_(make_error_code(runtime_error_code::engine_destroyed));
 	}
 	auto& ns_data = engine_->script_namespaces()[decl->name_id];
 	if (!ns_data) {
@@ -8060,7 +8067,7 @@ checked_result<void> vm_backend::exec_namespace_decl_node(namespace_decl* decl) 
 			for (auto it = overloads.begin(); it != overloads.end(); ++it) {
 				if ((*it)->parameters.size() == func_decl->parameters.size()) {
 					if (!func_decl->is_override) {
-						return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+						return raise_(make_error_code(runtime_error_code::type_mismatch),
 							"Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
 							func_decl->name_id, decl->name_id);
 					}
@@ -8078,7 +8085,7 @@ checked_result<void> vm_backend::exec_namespace_decl_node(namespace_decl* decl) 
 					if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
 						auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data);
 						if (class_def->has_static_method_with_arity(func_decl->name_id, func_decl->parameters.size())) {
-							return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+							return raise_(make_error_code(runtime_error_code::type_mismatch),
 								"Function '{0}' in namespace '{1}' collides with static method. Use 'override' to override.",
 								func_decl->name_id, decl->name_id);
 						}
@@ -8097,7 +8104,7 @@ checked_result<void> vm_backend::exec_namespace_decl_node(namespace_decl* decl) 
 			if (var_decl->initializer) {
 				auto init_result = eval_expression(var_decl->initializer, nullptr);
 				if (!init_result) {
-					return init_result.error_value();
+					return raise_from(init_result);
 				}
 				ns_data->variables[var_decl->name_id] = std::move(init_result.value());
 			} else {
@@ -8110,7 +8117,7 @@ checked_result<void> vm_backend::exec_namespace_decl_node(namespace_decl* decl) 
 				class_decl_ptr->name_id = symbolizer_->intern(class_decl_ptr->name);
 			}
 
-			JAISCRIPT_TRY(exec_class_decl_node(class_decl_ptr));
+			VM_TRY(exec_class_decl_node(class_decl_ptr));
 
 			auto [class_var_id, class_var_name] = symbolizer_->get_class_var_id_with_view(class_decl_ptr->name_id);
 			if (auto* class_def_var = environment_->get_value_ptr(class_var_id)) {
@@ -8140,7 +8147,7 @@ checked_result<void> vm_backend::exec_namespace_decl_node(namespace_decl* decl) 
 					stack_.erase(stack_.begin() + df.stack_base, stack_.end());
 				}
 				if (!r) {
-					return r.error_value();
+					return raise_from(r);
 				}
 			}
 			if (is_unwinding_) {
@@ -8589,7 +8596,7 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 // Exceptions, switch dispatch, range-for iteration
 // ============================================================
 
-checked_result<void> vm_backend::exec_throw(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_throw(frame& f, const vm_instruction& ins) {
 	const ast_node* node = ins.b != k_invalid_u32 ? f.code->nodes[ins.b].get() : nullptr;
 	if (ins.a) {
 		script_value val = std::move(stack_.back());
@@ -8608,7 +8615,7 @@ checked_result<void> vm_backend::exec_throw(frame& f, const vm_instruction& ins)
 	return {};
 }
 
-checked_result<void> vm_backend::exec_try_push(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_try_push(frame& f, const vm_instruction& ins) {
 	try_record rec;
 	rec.owner = &f;
 	rec.handler_ip = ins.a;
@@ -8636,18 +8643,18 @@ checked_result<void> vm_backend::exec_try_push(frame& f, const vm_instruction& i
 	return {};
 }
 
-checked_result<void> vm_backend::exec_try_pop(frame&, const vm_instruction&) {
+op_status vm_backend::exec_try_pop(frame&, const vm_instruction&) {
 	if (try_records_.empty()) {
-		return checked_result<void>(make_error_code(runtime_error_code::internal_error), "try record stack underflow");
+		return raise_(make_error_code(runtime_error_code::internal_error), "try record stack underflow");
 	}
 	current_catch_var_id_ = try_records_.back().saved_catch_var_id;
 	try_records_.pop_back();
 	return {};
 }
 
-checked_result<void> vm_backend::exec_catch_end(frame&, const vm_instruction&) {
+op_status vm_backend::exec_catch_end(frame&, const vm_instruction&) {
 	if (try_records_.empty()) {
-		return checked_result<void>(make_error_code(runtime_error_code::internal_error), "try record stack underflow");
+		return raise_(make_error_code(runtime_error_code::internal_error), "try record stack underflow");
 	}
 	try_record rec = std::move(try_records_.back());
 	try_records_.pop_back();
@@ -8723,8 +8730,8 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 	return false;
 }
 
-bool vm_backend::handle_op_error(frame*& fp, size_t records_base, const checked_result<void>& result) {
-	error_propagator failure = result.error_value();
+bool vm_backend::handle_op_error(frame*& fp, size_t records_base) {
+	error_propagator failure = pending_error_;
 	for (;;) {
 		if (unwind_to_handler(*fp, &failure)) {
 			return true;
@@ -8762,7 +8769,7 @@ bool vm_backend::handle_throw_unwind(frame*& fp, size_t records_base) {
 	}
 }
 
-checked_result<void> vm_backend::exec_case_eq(frame&, const vm_instruction&) {
+op_status vm_backend::exec_case_eq(frame&, const vm_instruction&) {
 	script_value case_value = std::move(stack_.back());
 	stack_.pop_back();
 	script_value switch_value = std::move(stack_.back());
@@ -8777,7 +8784,7 @@ checked_result<void> vm_backend::exec_case_eq(frame&, const vm_instruction&) {
 	return {};
 }
 
-checked_result<void> vm_backend::exec_iter_init(frame&, const vm_instruction&) {
+op_status vm_backend::exec_iter_init(frame&, const vm_instruction&) {
 	script_value container = std::move(stack_.back());
 	stack_.pop_back();
 
@@ -8797,12 +8804,12 @@ checked_result<void> vm_backend::exec_iter_init(frame&, const vm_instruction&) {
 			auto pair_result = environment_->get_ref(pair_id_);
 			if (!pair_result) {
 				pop_scope();
-				return pair_result.error_value();
+				return raise_from(pair_result);
 			}
 			const script_value& pair_ctor = pair_result.value().get();
 			if (!pair_ctor.is_function()) {
 				pop_scope();
-				return checked_result<void>(make_error_code(runtime_error_code::stdlib_not_loaded),
+				return raise_(make_error_code(runtime_error_code::stdlib_not_loaded),
 					"'pair' type not registered - make sure stdlib is loaded");
 			}
 			state.pair_ctor.emplace(pair_ctor);
@@ -8815,19 +8822,19 @@ checked_result<void> vm_backend::exec_iter_init(frame&, const vm_instruction&) {
 			return {};
 		}
 		pop_scope();
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	} else {
 		pop_scope();
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 	iter_states_.push_back(std::move(state));
 	return {};
 }
 
-checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 	const iter_proto& proto = f.code->iter_protos[ins.a];
 	if (iter_states_.empty()) {
-		return checked_result<void>(make_error_code(runtime_error_code::internal_error), "iteration state stack underflow");
+		return raise_(make_error_code(runtime_error_code::internal_error), "iteration state stack underflow");
 	}
 	iter_state& state = iter_states_.back();
 
@@ -8841,7 +8848,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 		}
 		auto resume_result = handle->resume(engine_);
 		if (!resume_result) {
-			return resume_result.error_value();
+			return raise_from(resume_result);
 		}
 		if (handle->done()) {
 			stack_.push_back(script_value(false, engine_));
@@ -8866,7 +8873,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 			return {};
 		}
 		if (execution_limit_exhausted()) [[unlikely]] {
-			return execution_limit_failure();
+			return raise_from(execution_limit_failure());
 		}
 		if (proto.is_reference) {
 			// Reallocation-safe container+index reference, never a raw element pointer.
@@ -8896,7 +8903,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 			return {};
 		}
 		if (execution_limit_exhausted()) [[unlikely]] {
-			return execution_limit_failure();
+			return raise_from(execution_limit_failure());
 		}
 		std::vector<script_value> args;
 		if (proto.is_reference) {
@@ -8912,7 +8919,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 		const script_function& pair_func = state.pair_ctor->as_function();
 		auto pair_result = pair_func(args);
 		if (!pair_result) {
-			return pair_result.error_value();
+			return raise_from(pair_result);
 		}
 		element = std::move(pair_result.value());
 		++state.map_it;
@@ -8927,7 +8934,7 @@ checked_result<void> vm_backend::exec_iter_next(frame& f, const vm_instruction& 
 	return {};
 }
 
-checked_result<void> vm_backend::exec_iter_pop(frame&, const vm_instruction&) {
+op_status vm_backend::exec_iter_pop(frame&, const vm_instruction&) {
 	if (!iter_states_.empty()) {
 		iter_states_.pop_back();
 	}
@@ -8935,32 +8942,32 @@ checked_result<void> vm_backend::exec_iter_pop(frame&, const vm_instruction&) {
 	return {};
 }
 
-checked_result<void> vm_backend::exec_include(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	std::string path;
 	if (ins.b) {
 		script_value path_value = std::move(stack_.back());
 		stack_.pop_back();
 		const script_value& resolved = path_value.deref();
 		if (resolved.type() != script_value_type::jai_string_type) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		path = resolved.as<std::string>();
 	} else {
 		path = std::string(f.code->messages[ins.a]);
 	}
 	if (!engine_) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
 	auto resolve_result = jai::resolve_include_path(path, engine_);
 	if (!resolve_result) {
-		return resolve_result.error_value();
+		return raise_from(resolve_result);
 	}
 	std::string resolved_path = std::move(resolve_result.value());
 
 	std::ifstream file(resolved_path);
 	if (!file.is_open()) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 	std::stringstream buffer;
 	buffer << file.rdbuf();
@@ -8986,26 +8993,26 @@ checked_result<void> vm_backend::exec_include(frame& f, const vm_instruction& in
 	return {};
 }
 
-checked_result<void> vm_backend::exec_import(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
 	std::string path;
 	if (ins.b) {
 		script_value path_value = std::move(stack_.back());
 		stack_.pop_back();
 		const script_value& resolved = path_value.deref();
 		if (resolved.type() != script_value_type::jai_string_type) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		path = resolved.as<std::string>();
 	} else {
 		path = std::string(f.code->messages[ins.a]);
 	}
 	if (!engine_) {
-		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
 	auto resolve_result = jai::resolve_include_path(path, engine_);
 	if (!resolve_result) {
-		return resolve_result.error_value();
+		return raise_from(resolve_result);
 	}
 	std::string resolved_path = std::move(resolve_result.value());
 
@@ -9029,7 +9036,7 @@ checked_result<void> vm_backend::exec_import(frame& f, const vm_instruction& ins
 // Ref-return producers (return_stmt::binds_reference): the return expression binds
 // as a reference instead of evaluating to a copy; convert_return_value passes the
 // handle through. KEEP semantics parallel with the interpreter's visit_return_stmt.
-checked_result<void> vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) {
 	const uint64_t symbol_id = f.code->symbols[ins.b];
 	script_value* storage = nullptr;
 	if (ins.a != k_invalid_u32 && f.locals) {
@@ -9039,19 +9046,19 @@ checked_result<void> vm_backend::exec_ref_return_bind(frame& f, const vm_instruc
 		storage = environment_->get_value_ptr(symbol_id);
 	}
 	if (!storage) {
-		return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Cannot take reference of undefined variable", symbol_id);
 	}
 	stack_.push_back(share_env_ref(*storage));
 	return {};
 }
 
-checked_result<void> vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins) {
 	auto resolved = detail::resolve_ref_lvalue(
 		static_cast<const expression*>(f.code->nodes[ins.a].get()),
 		caller_view(&f), environment_.get(), engine_, symbolizer_);
 	if (!resolved) {
-		return resolved.error_value();
+		return raise_from(resolved);
 	}
 	stack_.push_back(std::move(resolved.value()));
 	return {};
@@ -9061,7 +9068,7 @@ checked_result<void> vm_backend::exec_ref_return_lvalue(frame& f, const vm_instr
 // Dispatch loop
 // ============================================================
 
-checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 	switch (ins.op) {
 		case opcode::op_this: return exec_this(f, ins);
 		case opcode::op_super: return exec_super(f, ins);
@@ -9104,19 +9111,14 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 // resets f.ip) before propagating; `continue` re-enters the loop at the handler.
 // Same single-temp shape as JAISCRIPT_TRY so run()'s Debug frame stays flat.
 #define VM_TRY_OP(expr) \
-	{ auto __result = (expr); \
-	  if (!__result) [[unlikely]] { \
-	      if (!handle_op_error(fp, records_base, __result)) return __result.error_value(); \
+	{ if (vm_check((expr)) == op_status::failed) [[unlikely]] { \
+	      if (!handle_op_error(fp, records_base)) return op_status::failed; \
 	      continue; } }
 
 // Shared-slot variant for cases added after the frame-size ceiling was reached:
 // reuses one function-scope temp so run()'s Debug frame stays flat (see the
 // grouped exec_extended dispatch note below).
-#define VM_TRY_OP_SHARED(expr) \
-	{ shared_op_result_ = (expr); \
-	  if (!shared_op_result_) [[unlikely]] { \
-	      if (!handle_op_error(fp, records_base, shared_op_result_)) return shared_op_result_.error_value(); \
-	      continue; } }
+#define VM_TRY_OP_SHARED(expr) VM_TRY_OP(expr)
 
 // Thin exception boundary: C++ exceptions thrown while in-loop frames are live get
 // converted to script unwinding AT the failing logical frame (the native path converts
@@ -9127,7 +9129,10 @@ checked_result<void> vm_backend::run(frame& entry) {
 	const size_t records_base = call_records_top_;
 	for (;;) {
 		try {
-			return run_dispatch(fp, records_base);
+			if (run_dispatch(fp, records_base) == op_status::failed) {
+				return checked_result<void>(pending_error_);
+			}
+			return {};
 		} catch (const script_exception& e) {
 			if (ip_in_call_arg_zone(*fp)) {
 				convert_cpp_exception_in_frame(e);
@@ -9200,7 +9205,7 @@ void vm_backend::dump_opcode_profile() const {
 }
 #endif
 
-checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
+op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	checked_result<void> shared_op_result_;
 #ifdef JAISCRIPT_VM_PROFILE
 	// Self-time opcode histogram (diagnostic builds only; dumped by ~vm_backend).
@@ -9700,18 +9705,18 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 	return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");
 }
 
-checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&& callee,
+op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
                                                    const script_defined_function& function,
                                                    const std::vector<script_value>& args,
                                                    size_t args_base, size_t argc,
                                                    const call_site* site) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		return checked_result<void>(
+		return raise_(
 			make_error_code(runtime_error_code::max_recursion_depth),
 			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
-		return execution_limit_failure();
+		return raise_from(execution_limit_failure());
 	}
 	// In-loop dispatch invariant: results travel on stack_, never through return_value_
 	assert(!has_return_value_);
@@ -9801,7 +9806,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
-	checked_result<void> bound;
+	op_status bound{};
 	try {
 		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code);
@@ -9809,7 +9814,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 		pop_script_frame_core(rec);
 		throw;
 	}
-	if (!bound) {
+	if (bound == op_status::failed) {
 		pop_script_frame_core(rec);
 		return bound;
 	}
@@ -9827,7 +9832,7 @@ checked_result<void> vm_backend::push_script_frame(frame& caller, script_value&&
 	return {};
 }
 
-checked_result<void> vm_backend::enter_script_method(frame& caller, script_value&& method_val,
+op_status vm_backend::enter_script_method(frame& caller, script_value&& method_val,
                                                      const script_method_dispatch& dispatch,
                                                      const std::shared_ptr<function_decl>& ast,
                                                      script_value&& receiver,
@@ -9852,19 +9857,19 @@ checked_result<void> vm_backend::enter_script_method(frame& caller, script_value
 	}
 }
 
-checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&& method_val,
+op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val,
                                                    const script_method_dispatch& dispatch,
                                                    const std::shared_ptr<function_decl>& ast,
                                                    script_value&& receiver,
                                                    const std::vector<script_value>& arguments,
                                                    const call_site* site) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
-		return checked_result<void>(
+		return raise_(
 			make_error_code(runtime_error_code::max_recursion_depth),
 			JAI_MAX_CALL_DEPTH_MESSAGE);
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
-		return execution_limit_failure();
+		return raise_from(execution_limit_failure());
 	}
 	assert(!has_return_value_);
 
@@ -9958,7 +9963,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
-	checked_result<void> bound;
+	op_status bound{};
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
 		                        rec.prev_env, site, &caller, caller.code);
@@ -9966,7 +9971,7 @@ checked_result<void> vm_backend::push_method_frame(frame& caller, script_value&&
 		pop_script_frame_core(rec);
 		throw;
 	}
-	if (!bound) {
+	if (bound == op_status::failed) {
 		pop_script_frame_core(rec);
 		return bound;
 	}
@@ -10063,7 +10068,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	--call_records_top_;
 }
 
-checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {
+op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {
 	script_value result = ins.a ? std::move(stack_.back()) : make_null();
 	if (ins.a) {
 		stack_.pop_back();
@@ -10071,7 +10076,7 @@ checked_result<void> vm_backend::return_from_script_frame(frame*& fp, const vm_i
 	return return_with_result(fp, std::move(result));
 }
 
-checked_result<void> vm_backend::return_with_result(frame*& fp, script_value result) {
+op_status vm_backend::return_with_result(frame*& fp, script_value result) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	// The record's cached classification picks the epilogue without re-deriving it from
 	// type_info per return. none = convert_return_value's no-op route inline (deref only);
@@ -10124,7 +10129,7 @@ checked_result<void> vm_backend::return_with_result(frame*& fp, script_value res
 	if (!conv) {
 		pop_script_frame_core(rec);
 		fp = rec.caller;
-		return conv.error_value();
+		return raise_from(conv);
 	}
 	if (rec.method_result_anchor) {
 		anchor_method_result(conv.value(), rec.locals.get_this());
@@ -10139,7 +10144,7 @@ checked_result<void> vm_backend::return_with_result(frame*& fp, script_value res
 // Fused `return <ident>;` (stage 6): resolution mirrors op_load byte-for-byte via
 // fused_ident_value (same errors, same order - the fusion is adjacent, nothing is
 // reordered); the value takes ONE copy exactly like op_load's push did.
-checked_result<void> vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
+op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	frame& f = *fp;
 	fused_operand operand;
 	operand.slot = ins.a;
@@ -10148,12 +10153,12 @@ checked_result<void> vm_backend::exec_return_ident(frame*& fp, const vm_instruct
 	std::optional<script_value> scratch;
 	auto resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) {
-		return resolved.error_value();
+		return raise_from(resolved);
 	}
 	return return_with_result(fp, script_value(*resolved.value()));
 }
 
-checked_result<void> vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& ins) {
 	fused_operand operand;
 	operand.slot = ins.a;
 	operand.symbol = ins.b;
@@ -10161,7 +10166,7 @@ checked_result<void> vm_backend::exec_return_ident_entry(frame& f, const vm_inst
 	std::optional<script_value> scratch;
 	auto resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) {
-		return resolved.error_value();
+		return raise_from(resolved);
 	}
 	return_value_ = script_value(*resolved.value());
 	has_return_value_ = true;
@@ -10173,7 +10178,7 @@ checked_result<void> vm_backend::exec_return_ident_entry(frame& f, const vm_inst
 // push+pop round trip. A custom operator that THROWS leaves the result pushed and the
 // ip parked here so the dispatch loop's unwind handling sees the same state op_binary
 // would have produced one op earlier (same statement, same trace line).
-checked_result<void> vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) {
+op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) {
 	frame& f = *fp;
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
@@ -10187,7 +10192,7 @@ checked_result<void> vm_backend::exec_return_binary(frame*& fp, const vm_instruc
 		std::optional<checked_result<script_value>> fast;
 		if (binary_fast_shape(op, ins.b, left, right, fast)) {
 			if (!*fast) {
-				return fast->error_value();
+				return raise_from(*fast);
 			}
 			return return_with_result(fp, std::move(fast->value()));
 		}
@@ -10195,7 +10200,7 @@ checked_result<void> vm_backend::exec_return_binary(frame*& fp, const vm_instruc
 
 	auto result = binary_general(op, left, right);
 	if (!result) {
-		return result.error_value();
+		return raise_from(result);
 	}
 	if (is_unwinding_) [[unlikely]] {
 		// Custom-op script throw mid-compute: reproduce op_binary's post-op state
@@ -10206,7 +10211,7 @@ checked_result<void> vm_backend::exec_return_binary(frame*& fp, const vm_instruc
 	return return_with_result(fp, std::move(result.value()));
 }
 
-checked_result<void> vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& ins) {
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
 	script_value left_raw = std::move(stack_.back());
@@ -10219,7 +10224,7 @@ checked_result<void> vm_backend::exec_return_binary_entry(frame& f, const vm_ins
 		std::optional<checked_result<script_value>> fast;
 		if (binary_fast_shape(op, ins.b, left, right, fast)) {
 			if (!*fast) {
-				return fast->error_value();
+				return raise_from(*fast);
 			}
 			return_value_ = std::move(fast->value());
 			has_return_value_ = true;
@@ -10229,7 +10234,7 @@ checked_result<void> vm_backend::exec_return_binary_entry(frame& f, const vm_ins
 
 	auto result = binary_general(op, left, right);
 	if (!result) {
-		return result.error_value();
+		return raise_from(result);
 	}
 	if (is_unwinding_) [[unlikely]] {
 		stack_.push_back(std::move(result.value()));
@@ -10240,7 +10245,7 @@ checked_result<void> vm_backend::exec_return_binary_entry(frame& f, const vm_ins
 	return {};
 }
 
-checked_result<void> vm_backend::fall_off_script_frame(frame*& fp) {
+op_status vm_backend::fall_off_script_frame(frame*& fp) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	script_value result = implicit_result_for_record(rec);   // conversion skipped: fall-off parity
 	pop_script_frame_core(rec);
@@ -10413,9 +10418,9 @@ script_value vm_backend::share_env_ref(script_value& storage) {
 	return script_value(storage);
 }
 
-checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage, frame& callee, size_t param_slot) {
+op_status vm_backend::bind_reference_to_storage(script_value& storage, frame& callee, size_t param_slot) {
 	if (storage.is_reference() && !storage.get_reference_holder()) {
-		return checked_result<void>(
+		return raise_(
 			make_error_code(runtime_error_code::invalid_reference),
 			"Reference target is null");
 	}
@@ -10426,7 +10431,7 @@ checked_result<void> vm_backend::bind_reference_to_storage(script_value& storage
 	return {};
 }
 
-checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& parameters,
+op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const std::vector<script_value>& args,
                                                  size_t args_base, size_t argc,
                                                  frame& callee, chunk& body_chunk,
@@ -10449,7 +10454,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 			if (param.default_value) {
 				auto default_chunk = i < body_chunk.param_default_chunks.size() ? body_chunk.param_default_chunks[i] : nullptr;
 				if (!default_chunk) {
-					return checked_result<void>(make_error_code(runtime_error_code::internal_error), "Missing compiled default argument");
+					return raise_(make_error_code(runtime_error_code::internal_error), "Missing compiled default argument");
 				}
 				frame df;
 				df.code = default_chunk.get();
@@ -10466,7 +10471,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				df.top_level = false;
 				auto dr = run(df);
 				if (!dr) {
-					return dr;
+					return raise_from(dr);
 				}
 				if (is_unwinding_) {
 					// Uncaught throw inside the default expression: the stack may hold
@@ -10504,7 +10509,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				// walk to an unrelated same-named outer variable)
 				if (symbol_id != UINT64_MAX && slot != k_invalid_u32 && caller_frame) {
 					if (script_value* slotPtr = frame_slot(*caller_frame, slot)) {
-						JAISCRIPT_TRY(bind_reference_to_storage(*slotPtr, callee, param.slot_index));
+						VM_TRY(bind_reference_to_storage(*slotPtr, callee, param.slot_index));
 						continue;
 					}
 				}
@@ -10517,7 +10522,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 						static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
 						caller_view(caller_frame), caller_env.get(), engine_, symbolizer_);
 					if (!resolved) {
-						return resolved.error_value();
+						return raise_from(resolved);
 					}
 					frame_slot_set(callee, param.slot_index, std::move(resolved.value()));
 					continue;
@@ -10526,13 +10531,13 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				if (symbol_id != UINT64_MAX && caller_env) {
 					script_value* argPtr = caller_env->get_value_ptr(symbol_id);
 					if (!argPtr) {
-						return checked_result<void>(
+						return raise_(
 							make_error_code(runtime_error_code::undefined_variable),
 							"Cannot take reference of undefined variable");
 					}
-					JAISCRIPT_TRY(bind_reference_to_storage(*argPtr, callee, param.slot_index));
+					VM_TRY(bind_reference_to_storage(*argPtr, callee, param.slot_index));
 				} else {
-					return checked_result<void>(
+					return raise_(
 						make_error_code(runtime_error_code::invalid_reference),
 						"Cannot pass non-lvalue to reference parameter");
 				}
@@ -10547,7 +10552,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 				    arg_type == script_value_type::jai_shared_ptr_type) {
 					frame_slot_set(callee, param.slot_index, script_value(arg));
 				} else {
-					return checked_result<void>(
+					return raise_(
 						make_error_code(runtime_error_code::invalid_reference),
 						"Cannot pass non-lvalue to reference parameter");
 				}
@@ -10610,7 +10615,7 @@ checked_result<void> vm_backend::bind_parameters(const std::vector<parameter>& p
 
 			auto converted_result = try_convert_for_parameter(arg_shield, param.type);
 			if (!converted_result) {
-				return converted_result.error_value();
+				return raise_from(converted_result);
 			}
 			script_value converted_arg = std::move(converted_result.value());
 
@@ -10740,9 +10745,9 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	{
 		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), f, *body_chunk,
 	                                   previousEnv, site, caller_frame, caller_code);
-		if (!bind_result) {
+		if (bind_result == op_status::failed) {
 			cleanup();
-			return bind_result.error_value();
+			return pending_error_;
 		}
 	}
 	// Body slots exist behind window_live so operand temps start above the full window

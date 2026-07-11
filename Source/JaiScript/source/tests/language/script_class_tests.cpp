@@ -1604,6 +1604,40 @@ public:
             check_eq(badstore[0], badstore[1], "backends agree on typed-store mismatch outcome");
         });
 
+        test("bare_sibling_method_calls_in_loop", [this]() {
+            // Bare sibling calls (helper() instead of this.helper()) mint the typed
+            // bound_method thunk and enter the vm in-loop; behavior must stay identical
+            // to the old opaque lambda on both backends: dispatch, sibling calls inside
+            // a coroutine body, coroutine-method minting through a bare call, the thunk
+            // as a stored first-class value, and typed-arg decline error text.
+            std::array<std::string, 2> err;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute(R"(
+                    class S {
+                        int v = 3; var brain = null; int ticks = 0;
+                        int helper(int k) { return v * k; }
+                        int outer() { return helper(4) + helper(1); }
+                        int grab() { var fv = helper; return fv(3); }
+                        coroutine void steps() { while (true) { ticks = ticks + helper(1); yield; } }
+                        void tick() { if (brain == null || brain.done()) { brain = steps(); } brain.resume(); }
+                    }
+                    var s = S();
+                )");
+                check_eq((int64_t)15, e->execute("s.outer()").as_int(),
+                         use_vm ? "vm bare sibling dispatch" : "interp bare sibling dispatch");
+                e->execute("for (int i = 0; i < 5; ++i) { s.tick(); }");
+                check_eq((int64_t)15, e->execute("s.ticks").as_int(),
+                         use_vm ? "vm siblings inside coroutine body" : "interp siblings inside coroutine body");
+                check_eq((int64_t)9, e->execute("s.grab()").as_int(), "thunk as stored first-class value");
+                err[use_vm ? 1 : 0] = e->execute(
+                    "var m = \"\"; try { var t = s.v; class X {} var q = X(); m = \"pre\"; } catch (er0) { m = er0; } "
+                    "try { var t2 = s.outer(); s.helper([1]); m = \"ran\"; } catch (er) { m = er; } m").as<std::string>();
+            }
+            check_eq(err[0], err[1], "backends agree on typed-arg decline outcome");
+        });
+
         test("member_access_hot_reload_and_host_api", [this]() {
             // Hot reload is permissive: enforcement consults the CURRENT class_definition
             // at access time — instances keep working, new accesses follow new labels.

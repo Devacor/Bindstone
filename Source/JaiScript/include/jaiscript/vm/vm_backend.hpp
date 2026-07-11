@@ -47,6 +47,9 @@ namespace jai::vm {
         // exec_get_member composition: [0]=IC hit [1]=negative/absent -> ladder
         // [2]=non-instance receiver (map sugar, arrays, statics) -> ladder
         uint64_t profile_get_member_paths_[3] = {};
+        // exec_call bound-method routing: [0]=branch entered [1]=in-loop dispatch
+        // [2]=bound thunk seen but opaque [3]=other opaque callee
+        uint64_t profile_bound_method_paths_[4] = {};
 #else
         ~vm_backend() override = default;
 #endif
@@ -746,6 +749,11 @@ namespace jai::vm {
         op_status static_member_value(frame& f, member_expr* expr, script_value& out);
         op_status assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
+        // Typed bound-method mint for this-fallback identifier resolutions (bare
+        // sibling calls): call paths recover the payload (kind bound_method) and enter
+        // the method in-loop; every other caller gets make_bound_method's exact
+        // behavior from script_callable_thunk::operator().
+        script_value make_bound_method_thunk(const script_value& this_val, script_value method);
         // ONE native boundary for the direct dispatches (builtin methods, coroutine
         // resume): routine errors travel as checked_result -> raise_from; the catch is
         // last-ditch armor for callees that physically throw C++ (host-bound methods,

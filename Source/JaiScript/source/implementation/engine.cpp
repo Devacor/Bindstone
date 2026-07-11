@@ -40,6 +40,33 @@ namespace jai {
 std::unique_ptr<execution_backend> create_vm_backend();
 
 checked_result<script_value> script_callable_thunk::operator()(const std::vector<script_value>& args) const {
+    // bound_method: make_bound_method's EXACT opaque behavior (prepend the receiver,
+    // call the dispatch value, anchor a non-owning result on the receiver) — no
+    // host-boundary wrapping, matching the anonymous-lambda mint this replaces. Hot
+    // vm call paths never get here (they recover the payload and enter in-loop).
+    if (payload.kind == script_callable::kind_type::bound_method) {
+        const script_value& this_obj = *payload.this_obj;
+        std::vector<script_value> method_args;
+        method_args.reserve(args.size() + 1);
+        method_args.push_back(this_obj);
+        method_args.insert(method_args.end(), args.begin(), args.end());
+
+        const auto& method_func = payload.bound_dispatch->as_function();
+        auto result = method_func(method_args);
+
+        if (result && this_obj.is_object()) {
+            script_value& rv = result.value();
+            if (rv.is_non_owning_object()) {
+                auto rv_holder = rv.get_object_holder();
+                auto recv_holder = this_obj.get_object_holder();
+                if (rv_holder && recv_holder) {
+                    rv_holder->keep_alive = recv_holder->data ? recv_holder->data
+                                                              : recv_holder->keep_alive;
+                }
+            }
+        }
+        return result;
+    }
     execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");

@@ -166,6 +166,16 @@ namespace jai::vm {
         uint32_t flags = 0;             // store mode: store_flag_*; decl mode: b/c of op_decl_var
     };
 
+    // op_index_fused / op_index_store_fused: subscript read/store whose container and
+    // index resolve as fused operands (identifier slots/env or literals) instead of two
+    // LOAD dispatches + pushes. The in-bounds array+int shape runs inline; every other
+    // shape (map/OOB/borrow/custom-[]) pushes the resolved operands and replays the
+    // verbatim unfused op, so semantics and error text stay byte-identical.
+    struct fused_index_proto {
+        fused_operand container;
+        fused_operand index;
+    };
+
     struct chunk {
         std::vector<vm_instruction> code;
         // Lazily sized to 3*code.size(): role slots per ip (0=left/load, 1=fused right,
@@ -190,6 +200,7 @@ namespace jai::vm {
         std::vector<fused_binary_proto> fused_binary_protos;
         std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;
+        std::vector<fused_index_proto> fused_index_protos;
         std::vector<counted_for_proto> counted_for_protos;
 
         // Default-argument expressions compiled per parameter (function-body chunks only)

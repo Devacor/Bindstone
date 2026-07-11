@@ -529,6 +529,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 		}
 		note_operand(p.rhs);   // bare-mode identifier rhs (binary-mode protos leave it invalid)
 	}
+	for (const auto& p : f->code->fused_index_protos) { note_operand(p.container); note_operand(p.index); }
 	for (const auto& p : f->code->fused_binary_dst_protos) {
 		// dest-addressed binaries: decl mode names via the decl node, store mode via
 		// symbol+slot (their operands are fused_binary_protos entries, named above)
@@ -5011,6 +5012,135 @@ checked_result<void> vm_backend::exec_index_store(frame& f, const vm_instruction
 	return exec_index_assign(f, ins);
 }
 
+// Fused subscript read: container+index resolve as operands (slot in-place reads - no
+// LOAD dispatches, no operand pushes). The inline path is exec_index's in-bounds array
+// branch VERBATIM; everything else (map/borrow/custom-[]/OOB/non-int index) pushes the
+// resolved operands and replays the unfused op, so every error keeps one spelling.
+checked_result<void> vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
+	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
+	std::optional<script_value> cscratch, iscratch;
+	const script_value* container_ptr;
+	if (p.container.const_index != k_invalid_u32) {
+		container_ptr = &f.code->constants[p.container.const_index];
+	} else {
+		auto resolved = fused_ident_value(f, p.container, cscratch, f.ip * 3);
+		if (!resolved) return resolved.error_value();
+		container_ptr = resolved.value();
+	}
+	const script_value* index_ptr;
+	if (p.index.const_index != k_invalid_u32) {
+		index_ptr = &f.code->constants[p.index.const_index];
+	} else {
+		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
+		if (!resolved) return resolved.error_value();
+		index_ptr = resolved.value();
+	}
+
+	const script_value& left = *container_ptr;      // fused_ident_value hands back deref'd storage
+	const script_value& right = index_ptr->deref();
+	if (left.raw_storage_index() == script_value::TYPEID_ARRAY && right.is_int()) {
+		const script_int index = right.unchecked_as_int();
+		const script_array* node = left.unchecked_array_node();
+		if (index >= 0 && index < static_cast<script_int>(node->size())) {
+			const bool lvalue_shape = (ins.b & index_flag_lvalue_shape) != 0;
+			const bool transient_read = (ins.b & index_flag_transient_read) != 0 && !has_custom_binary_ops_;
+			if (lvalue_shape && !transient_read) {
+				auto array_type_info = left.get_type_info();
+				type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
+				// slot/env storage is mutable by nature; the resolver's constness is
+				// interface conservatism (same shape as exec_index's map const_cast)
+				stack_.push_back(script_value::make_element_reference(
+					const_cast<script_value&>(left).get_array_storage(), static_cast<size_t>(index), engine_, element_type));
+				return {};
+			}
+			if (node->is_typed()) {
+				stack_.push_back(node->get(static_cast<size_t>(index), engine_));   // raw buffer read
+				return {};
+			}
+			stack_.push_back(node->values()[index]);
+			return {};
+		}
+	}
+	stack_.push_back(*container_ptr);
+	stack_.push_back(*index_ptr);
+	const vm_instruction index_ins{opcode::op_index, ins.b, 0, 0};
+	return exec_index(f, index_ins);
+}
+
+// Fused a[i] = v: container+index resolve as operands, value from the stack. The
+// committed paths mirror exec_index_store's fast paths verbatim; every other shape
+// pushes the operands above the value and replays the unfused sequence.
+checked_result<void> vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins) {
+	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
+	std::optional<script_value> cscratch, iscratch;
+	const script_value* container_ptr;
+	if (p.container.const_index != k_invalid_u32) {
+		container_ptr = &f.code->constants[p.container.const_index];
+	} else {
+		auto resolved = fused_ident_value(f, p.container, cscratch, f.ip * 3);
+		if (!resolved) return resolved.error_value();
+		container_ptr = resolved.value();
+	}
+	const script_value* index_ptr;
+	if (p.index.const_index != k_invalid_u32) {
+		index_ptr = &f.code->constants[p.index.const_index];
+	} else {
+		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
+		if (!resolved) return resolved.error_value();
+		index_ptr = resolved.value();
+	}
+
+	script_value& container = const_cast<script_value&>(*container_ptr);
+	const script_value& index_v = index_ptr->deref();
+	if (!stack_.empty() && container.raw_storage_index() == script_value::TYPEID_ARRAY && index_v.is_int()) {
+		const script_int index = index_v.unchecked_as_int();
+		auto storage = container.get_array_storage();
+		// TYPED raw store (mirrors exec_index_store): numeric rhs coerces straight into
+		// the buffer; non-numeric rhs replays for the exact mismatch error
+		if (storage && storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
+			const script_value& rhs_peek = stack_.back().deref();
+			const size_t ri = rhs_peek.raw_storage_index();
+			if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {
+				script_value value = std::move(stack_.back());
+				stack_.pop_back();
+				storage->set(static_cast<size_t>(index), value.deref());
+				stack_.push_back(std::move(value));   // assignment expression result
+				return {};
+			}
+		}
+		if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
+			auto container_type_info = container.get_type_info();
+			type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
+			script_value value = std::move(stack_.back());
+			stack_.pop_back();
+			script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
+			if (element_type) {
+				if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
+					std::string value_type = vm_value_type_name(value);
+					std::string expected_type = vm_type_info_name(element_type);
+					uint64_t value_type_id = symbolizer_->intern(value_type);
+					uint64_t expected_type_id = symbolizer_->intern(expected_type);
+					return checked_result<void>(
+						make_error_code(runtime_error_code::array_element_type_mismatch),
+						"Cannot assign '{0}' to element of type '{1}'",
+						value_type_id, expected_type_id);
+				}
+				script_value converted = vm_convert_array_element(engine_, value, element_type);
+				*target_ptr = std::move(converted);
+			} else {
+				// No element type constraint - values deep-copy, shared_ptr handles share
+				*target_ptr = clone_for_assignment(value);
+			}
+			stack_.push_back(std::move(value));   // assignment expression result
+			return {};
+		}
+	}
+	stack_.push_back(*container_ptr);
+	stack_.push_back(*index_ptr);
+	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
+	return exec_index_store(f, store_ins);
+}
+
 // Fused a[i] op= v: the numeric plain-array shape (int/float element, raw int/float rhs,
 // no registered operator override) reads, computes, and writes in place. Everything else
 // replays INDEX(shape)+INDEX_COMPOUND byte-identically (string concat routing, S8 bound
@@ -8963,6 +9093,8 @@ checked_result<void> vm_backend::exec_extended(frame& f, const vm_instruction& i
 		case opcode::op_parallel_for: return exec_parallel_for(f, ins);
 		case opcode::op_binary_fused_decl: return exec_binary_fused_decl(f, ins);
 		case opcode::op_binary_fused_store: return exec_binary_fused_store(f, ins);
+		case opcode::op_index_fused: return exec_index_fused(f, ins);
+		case opcode::op_index_store_fused: return exec_index_store_fused(f, ins);
 		default: return {};
 	}
 }
@@ -9244,6 +9376,8 @@ checked_result<void> vm_backend::run_dispatch(frame*& fp, const size_t records_b
 			case opcode::op_parallel_for:
 			case opcode::op_binary_fused_decl:
 			case opcode::op_binary_fused_store:
+			case opcode::op_index_fused:
+			case opcode::op_index_store_fused:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

@@ -699,6 +699,10 @@ namespace jai::vm {
         checked_result<void> binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink);
         checked_result<void> exec_binary_fused_decl(frame& f, const vm_instruction& ins);
         checked_result<void> exec_binary_fused_store(frame& f, const vm_instruction& ins);
+        // Fused subscript read/store: container+index as operands (no LOAD dispatches);
+        // non-array shapes replay the verbatim unfused ops
+        checked_result<void> exec_index_fused(frame& f, const vm_instruction& ins);
+        checked_result<void> exec_index_store_fused(frame& f, const vm_instruction& ins);
         // op_store's exact post-pop tail, shared with op_binary_fused_store
         checked_result<void> store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)

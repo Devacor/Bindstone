@@ -130,6 +130,13 @@ namespace jai::vm {
                                // stores to an identifier - computes, then runs op_store's exact
                                // post-pop tail (shared helper) with no push/pop round-trip
 
+        op_index_fused,     // a=fused_index_protos index, b=index flags: subscript read whose
+                            // container+index resolve as fused operands (no LOAD dispatches);
+                            // non-array/OOB shapes replay the verbatim op_index
+        op_index_store_fused, // a=fused_index_protos index, b=index_flag_lvalue_shape?: a[i]=v
+                            // with fused container+index (value from the stack); other shapes
+                            // replay the verbatim op_index_store sequence
+
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
         op_halt,
     };
@@ -263,6 +270,8 @@ namespace jai::vm {
             case opcode::op_error: return "ERROR";
             case opcode::op_parallel_for: return "PARALLEL_FOR";
             case opcode::op_binary_fused_decl: return "BINARY_FUSED_DECL";
+            case opcode::op_index_fused: return "INDEX_FUSED";
+            case opcode::op_index_store_fused: return "INDEX_STORE_FUSED";
             case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
             case opcode::op_halt: return "HALT";
         }

@@ -16,7 +16,7 @@ CMake + Ninja, opened as a folder in Visual Studio (VS 18). Build dirs live unde
 
 ### Fast iteration: use the **Debug** build
 
-Debug has no LTCG, so it **links in ~1s** (Release links in ~115s due to `/GL`+`/LTCG`), and it
+Debug has no LTCG, so it **links in ~5s incremental** (Release links in ~165s due to `/GL`+`/LTCG` — measured 2026-07 on the MSI; the link grows with the test exe), and it
 defines `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` (catches env/closure cycles) plus MSVC's
 `0xDDDDDDDD` freed-memory fill (surfaces dangling-reference / use-after-free bugs that Release
 can mask). **Iterate in Debug; do a final Release pass for the shipped config.**

@@ -76,6 +76,14 @@ namespace {
 	// Lazy-env gate for function-body chunks: false only when EVERY op is on the explicit
 	// safe list (fail-closed: anything that can capture the frame env's identity — refs,
 	// closures, try records, scope pushes, decls into the env — keeps the eager env).
+#ifdef JAISCRIPT_VM_PROFILE
+	// Profile builds name each chunk's FIRST tripping opcode (compiles are ~once per
+	// function, so this is a bounded census, not per-call spam)
+	#define JAI_ENV_TRIP(op) fprintf(stderr, "[env-trip] %s: %.*s\n", \
+		body.function_name.c_str(), (int)opcode_name(op).size(), opcode_name(op).data())
+#else
+	#define JAI_ENV_TRIP(op)
+#endif
 	bool body_needs_frame_env(const chunk& body) {
 		for (const auto& ins : body.code) {
 			switch (ins.op) {
@@ -128,13 +136,13 @@ namespace {
 			case opcode::op_decl_var: {
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
 				assert(decl->slot_index != SIZE_MAX && "parser slots every function-body decl");
-				if (decl->slot_index == SIZE_MAX) return true;
+				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
 			}
 			case opcode::op_binary_fused_decl: {
 				const auto& dp = body.fused_binary_dst_protos[ins.a];
 				auto* decl = static_cast<const variable_decl*>(body.nodes[dp.node_index].get());
-				if (decl->slot_index == SIZE_MAX) return true;
+				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
 			}
 			case opcode::op_binary_fused_store:
@@ -147,16 +155,17 @@ namespace {
 				// range-for is frame-env-free when the loop var is slot-resident (the
 				// iter's own scope env covers block scoping); iter_next carries the
 				// proto index in a
-				if (ins.op == opcode::op_iter_next && body.iter_protos[ins.a].slot == SIZE_MAX) return true;
+				if (ins.op == opcode::op_iter_next && body.iter_protos[ins.a].slot == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
 			}
 			case opcode::op_destructure: {
 				for (const auto& name : body.destructure_protos[ins.a].names) {
-					if (name.second == SIZE_MAX) return true;
+					if (name.second == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				}
 				break;
 			}
 			default:
+				JAI_ENV_TRIP(ins.op);
 				return true;
 			}
 		}

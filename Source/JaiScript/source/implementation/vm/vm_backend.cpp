@@ -5085,6 +5085,28 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 	return exec_index_assign(f, ins);
 }
 
+// Constant operands re-materialize with the engine before ANY stack push: chunk
+// constants are engine-less parse-time templates whose string payload is the AST
+// literal's own block (KEEP BYTE-PARALLEL with run_dispatch's op_const case). A raw
+// copy would refcount that shared block — parallel workers touch it cross-thread,
+// and the non-atomic counts corrupt (found via JAISCRIPT_DIAG_XTHREAD_RC).
+script_value vm_backend::materialize_constant(const script_value& tmpl) {
+	const auto& storage = tmpl.get_storage();
+	switch (storage.index()) {
+		case script_value::TYPEID_INT: return script_value(std::get<script_int>(storage), engine_);
+		case script_value::TYPEID_FLOAT: return script_value(std::get<script_float>(storage), engine_);
+		case script_value::TYPEID_STRING: return script_value(*std::get<strong_ptr<script_string>>(storage), engine_);
+		case script_value::TYPEID_CHAR: return script_value(std::get<script_char>(storage), engine_);
+		case script_value::TYPEID_BOOL: return script_value(std::get<script_bool>(storage), engine_);
+		case script_value::TYPEID_NULL: return make_null();
+		default: {
+			script_value copy = tmpl;
+			copy.set_engine(engine_);
+			return copy;
+		}
+	}
+}
+
 // Fused subscript read: container+index resolve as operands (slot in-place reads - no
 // LOAD dispatches, no operand pushes). The inline path is exec_index's in-bounds array
 // branch VERBATIM; everything else (map/borrow/custom-[]/OOB/non-int index) pushes the
@@ -5134,8 +5156,10 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
-	stack_.push_back(*container_ptr);
-	stack_.push_back(*index_ptr);
+	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
+	else { stack_.push_back(*container_ptr); }
+	if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
+	else { stack_.push_back(*index_ptr); }
 	const vm_instruction index_ins{opcode::op_index, ins.b, 0, 0};
 	return exec_index(f, index_ins);
 }
@@ -5208,8 +5232,10 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			return {};
 		}
 	}
-	stack_.push_back(*container_ptr);
-	stack_.push_back(*index_ptr);
+	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
+	else { stack_.push_back(*container_ptr); }
+	if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
+	else { stack_.push_back(*index_ptr); }
 	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
 	return exec_index_store(f, store_ins);
 }

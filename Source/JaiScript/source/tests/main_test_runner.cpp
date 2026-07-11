@@ -4,6 +4,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #if defined(_MSC_VER) && !defined(NDEBUG)
+#include <atomic>
 #include <crtdbg.h>
 #include <csignal>
 #define WIN32_LEAN_AND_MEAN
@@ -117,6 +118,37 @@ struct test_filter_config {
     }
 };
 
+#if defined(_MSC_VER) && !defined(NDEBUG)
+static void print_native_backtrace() {
+    static std::atomic<bool> printing{false};
+    bool expected = false;
+    if (!printing.compare_exchange_strong(expected, true)) {
+        return;   // racing losers continue; the winner prints and terminates below
+    }
+    void* frames[62];
+    const USHORT n = CaptureStackBackTrace(0, 62, frames, nullptr);
+    HANDLE proc = GetCurrentProcess();
+    SymInitialize(proc, nullptr, TRUE);
+    alignas(SYMBOL_INFO) char buf[sizeof(SYMBOL_INFO) + 256];
+    auto* sym = reinterpret_cast<SYMBOL_INFO*>(buf);
+    sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+    sym->MaxNameLen = 255;
+    fprintf(stderr, "--- abort backtrace (%u frames) ---\n", n);
+    for (USHORT i = 0; i < n; ++i) {
+        DWORD64 disp = 0;
+        if (SymFromAddr(proc, reinterpret_cast<DWORD64>(frames[i]), &disp, sym)) {
+            fprintf(stderr, "  %02u %s +0x%llx\n", i, sym->Name, static_cast<unsigned long long>(disp));
+        } else {
+            fprintf(stderr, "  %02u %p\n", i, frames[i]);
+        }
+    }
+    fflush(stderr);
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+    TerminateProcess(GetCurrentProcess(), 3);   // canary hook owns termination
+#endif
+}
+#endif
+
 int main(int argc, char** argv) {
     using namespace jai::foundry;
 
@@ -127,27 +159,14 @@ int main(int argc, char** argv) {
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
     _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+    // Direct abort() calls must reach the SIGABRT handler below, not Watson fast-fail
+    _set_abort_behavior(0, _CALL_REPORTFAULT);
     // Symbolized native stack on abort: an assert in a headless run names its call path
-    signal(SIGABRT, [](int) {
-        void* frames[62];
-        const USHORT n = CaptureStackBackTrace(0, 62, frames, nullptr);
-        HANDLE proc = GetCurrentProcess();
-        SymInitialize(proc, nullptr, TRUE);
-        alignas(SYMBOL_INFO) char buf[sizeof(SYMBOL_INFO) + 256];
-        auto* sym = reinterpret_cast<SYMBOL_INFO*>(buf);
-        sym->SizeOfStruct = sizeof(SYMBOL_INFO);
-        sym->MaxNameLen = 255;
-        fprintf(stderr, "--- abort backtrace (%u frames) ---\n", n);
-        for (USHORT i = 0; i < n; ++i) {
-            DWORD64 disp = 0;
-            if (SymFromAddr(proc, reinterpret_cast<DWORD64>(frames[i]), &disp, sym)) {
-                fprintf(stderr, "  %02u %s +0x%llx\n", i, sym->Name, static_cast<unsigned long long>(disp));
-            } else {
-                fprintf(stderr, "  %02u %p\n", i, frames[i]);
-            }
-        }
-        fflush(stderr);
-    });
+    signal(SIGABRT, [](int) { print_native_backtrace(); });
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+    // Canary builds report directly at the racing touch (signals lose concurrent aborts)
+    jai::detail::diag_xthread_report = &print_native_backtrace;
+#endif
 #endif
 
     // Parse command line flags

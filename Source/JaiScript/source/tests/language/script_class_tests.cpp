@@ -1519,12 +1519,6 @@ public:
                 check_eq((int64_t)20, e->execute("hot()").as_int(),
                          use_vm ? "vm field wins at hot site across reload" : "interp field wins at hot site across reload");
                 e->execute("class P { int y = 1; }");
-                // Removed field at the hot site: a PLAIN read errors with proper text on
-                // BOTH backends (asserted below). Inside a function+loop the interpreter
-                // loses the catch-visible value (pre-existing divergence, probe-proven
-                // against a never-reloaded class too — see flat-classes memory; likely
-                // the suppressed fuzz family). Until that is fixed, the hot()-context
-                // check accepts the interp's empty spelling but pins the vm's exact text.
                 removed[use_vm ? 1 : 0] = e->execute(
                     "var msg = \"\"; try { var t = hot(); msg = \"ran\"; } catch (err) { msg = err; } msg").as<std::string>();
                 check_eq(std::string("V:Object has no member 'x'"), e->execute(
@@ -1533,8 +1527,39 @@ public:
             }
             check_eq(std::string("Object has no member 'x'"), removed[1],
                      "vm removed-field text at the hot site");
-            check_true(removed[0] == "Object has no member 'x'" || removed[0].empty(),
-                       "interp removed-field at hot site (empty = the known fn+loop error-value divergence)");
+            check_eq(removed[0], removed[1],
+                     "backends agree at the hot site (compound-RHS error fix)");
+        });
+
+        test("compound_rhs_error_surfaces_original_exception", [this]() {
+            // A compound assign whose RHS raises must surface the ORIGINAL exception,
+            // not a follow-on arithmetic error against the placeholder. The interpreter
+            // clobbered the catch value on three compound paths (slot target, member
+            // target, subscript target — the constrained-ref branch had the unwinding
+            // check, its siblings didn't); the vm was correct throughout. Every shape
+            // asserts the exact text on BOTH backends.
+            const char* expected = "V:Object has no member 'x'";
+            const std::pair<const char*, const char*> shapes[] = {
+                {"fn-only",
+                 "int f1() { return r2.x; } var m = \"\"; try { var t = f1(); m = \"ran\"; } catch (er) { m = \"V:\" + er; } m"},
+                {"counted-loop-in-fn compound slot target",
+                 "int f2() { int s = 0; for (int i = 0; i < 5; ++i) { s += r2.x; } return s; } var m = \"\"; try { var t = f2(); m = \"ran\"; } catch (er) { m = \"V:\" + er; } m"},
+                {"compound env target",
+                 "int gs = 0; var m = \"\"; try { gs += r2.x; m = \"ran\"; } catch (er) { m = \"V:\" + er; } m"},
+                {"compound member target",
+                 "int f5() { r2.y += r2.x; return 0; } var m = \"\"; try { var t = f5(); m = \"ran\"; } catch (er) { m = \"V:\" + er; } m"},
+                {"compound subscript target",
+                 "int f6() { var a = [1]; a[0] += r2.x; return 0; } var m = \"\"; try { var t = f6(); m = \"ran\"; } catch (er) { m = \"V:\" + er; } m"},
+            };
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execute("class R2 { int y = 1; } var r2 = R2();");
+                for (const auto& [label, src] : shapes) {
+                    check_eq(std::string(expected), e->execute(src).as<std::string>(),
+                             std::string(use_vm ? "vm: " : "interp: ") + label);
+                }
+            }
         });
 
         test("member_access_hot_reload_and_host_api", [this]() {

@@ -4116,6 +4116,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 // Evaluate the right-hand side (general path)
                 JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+                if (is_unwinding_) {
+                    // The RHS raised: surface the ORIGINAL exception instead of running the
+                    // compound arithmetic on the placeholder, whose follow-on type error
+                    // clobbered the catch value (KEEP BYTE-PARALLEL with the constrained-ref
+                    // branch above and the vm's compound store)
+                    push_value(make_value());
+                    return {};
+                }
                 script_value rightValue = pop_value();
                 // S8: a bound rhs decodes to a detached temp (the old shadow-index operand behavior)
                 if (rightValue.deref().raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
@@ -4519,6 +4527,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
             // Evaluate the right-hand side
             JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+            if (is_unwinding_) {
+                // RHS raised: surface the original exception, don't run the compound
+                // arithmetic on the placeholder (KEEP BYTE-PARALLEL with the vm)
+                push_value(make_value());
+                return {};
+            }
             script_value rightValue = pop_value();
 
             // Check for custom arithmetic operators on class instances
@@ -4773,8 +4787,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
             // Evaluate the right-hand side
             JAISCRIPT_TRY(dispatch_expr(expr->value.get()));
+            if (is_unwinding_) {
+                // RHS raised: surface the original exception, don't run the compound
+                // arithmetic on the placeholder (KEEP BYTE-PARALLEL with the vm)
+                push_value(make_value());
+                return {};
+            }
             script_value rightValue = pop_value();
-            
+
             // Perform the compound operation
             script_value resultValue = make_value();
             

@@ -2817,21 +2817,22 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         size_t pos = expr->name.find('<');
         std::string base_type(expr->name.substr(0, pos));
         
-        // Look up the constructor function for this type
-        auto ctor_result = environment_->get(base_type);
-        if (ctor_result && ctor_result.value().is_function()) {
-            push_value(std::move(ctor_result.value()));
+        // Look up the constructor function for this type (nullable-pointer probe,
+        // checked_result stage 1: same ladder as get(), null miss - KEEP BYTE-PARALLEL
+        // with vm_backend::exec_load)
+        if (script_value* ctor = environment_->get_value_ptr(string_symbolizer_->intern(base_type));
+            ctor && ctor->is_function()) {
+            push_value(*ctor);
             return checked_result<void>();
         }
         // Fall through to normal error handling if not found
     }
     
     // Use parser's pre-computed symbol ID (always set by parser)
-    // With lazy caching, environment_ will cache lookups automatically
-    auto ref_result = environment_->get_ref(expr->symbol_id);
-    if (ref_result) {
-        const script_value& val = ref_result.value().get();
-        push_value(val.deref());  // Automatically handles references
+    // With lazy caching, environment_ will cache lookups automatically.
+    // get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper.
+    if (script_value* env_val = environment_->get_value_ptr(expr->symbol_id)) {
+        push_value(env_val->deref());  // Automatically handles references
     } else {
         // If we're in a class method context, collect unresolved identifier
         if (current_class_context_ && current_class_context_->in_method) {
@@ -2843,10 +2844,10 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         }
 
 
-        // Variable not found - check if it's a member of 'this'
-        auto this_result = environment_->get(string_symbolizer_->get_this_id());
-        if (this_result) {
-            script_value this_val = std::move(this_result.value());
+        // Variable not found - check if it's a member of 'this' (pointer probe: no
+        // per-probe copy of the live this value)
+        if (script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id())) {
+            script_value& this_val = *this_ptr;
             if (this_val.is_object()) {
                 // Try to access as a member of 'this'
                 std::shared_ptr<class_instance> instance = this_val.get_class_instance();

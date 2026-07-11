@@ -2844,9 +2844,11 @@ checked_result<void> vm_backend::exec_load(frame& f, const vm_instruction& ins) 
 		std::string_view name = symbolizer_->get_string(sym);
 		size_t pos = name.find('<');
 		std::string base_type(name.substr(0, pos));
-		auto ctor_result = environment_->get(base_type);
-		if (ctor_result && ctor_result.value().is_function()) {
-			stack_.push_back(std::move(ctor_result.value()));
+		// nullable-pointer probe (checked_result stage 1): same ladder as get(), the
+		// miss is a null instead of a fat error result nobody reads
+		if (script_value* ctor = environment_->get_value_ptr(symbolizer_->intern(base_type));
+		    ctor && ctor->is_function()) {
+			stack_.push_back(*ctor);
 			return {};
 		}
 	}
@@ -2854,15 +2856,13 @@ checked_result<void> vm_backend::exec_load(frame& f, const vm_instruction& ins) 
 		stack_.push_back(cached->deref());
 		return {};
 	}
-	auto ref_result = environment_->get_ref(sym);
-	if (ref_result) {
-		const script_value& val = ref_result.value().get();
-		stack_.push_back(val.deref());
+	// get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper
+	if (script_value* env_val = environment_->get_value_ptr(sym)) {
+		stack_.push_back(env_val->deref());
 		return {};
 	}
-	auto this_result = environment_->get(this_id_);
-	if (this_result) {
-		script_value this_val = std::move(this_result.value());
+	if (script_value* this_ptr = environment_->get_value_ptr(this_id_)) {
+		script_value& this_val = *this_ptr;
 		if (this_val.is_object()) {
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 			if (instance) {
@@ -3958,22 +3958,23 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 		std::string_view name = symbolizer_->get_string(sym);
 		size_t pos = name.find('<');
 		std::string base_type(name.substr(0, pos));
-		auto ctor_result = environment_->get(base_type);
-		if (ctor_result && ctor_result.value().is_function()) {
-			scratch.emplace(std::move(ctor_result.value()));
+		// nullable-pointer probe (checked_result stage 1): same ladder, null miss
+		if (script_value* ctor = environment_->get_value_ptr(symbolizer_->intern(base_type));
+		    ctor && ctor->is_function()) {
+			scratch.emplace(*ctor);
 			return &scratch.value();
 		}
 	}
 	if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
 		return &cached->deref();
 	}
-	auto ref_result = environment_->get_ref(sym);
-	if (ref_result) {
-		return &ref_result.value().get().deref();
+	// get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper;
+	// env storage is deque-stable, so the pointer outlives this call like get_ref's did
+	if (script_value* env_val = environment_->get_value_ptr(sym)) {
+		return &env_val->deref();
 	}
-	auto this_result = environment_->get(this_id_);
-	if (this_result) {
-		script_value this_val = std::move(this_result.value());
+	if (script_value* this_ptr = environment_->get_value_ptr(this_id_)) {
+		script_value& this_val = *this_ptr;
 		if (this_val.is_object()) {
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 			if (instance) {

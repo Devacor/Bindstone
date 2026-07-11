@@ -12462,7 +12462,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     } else {
         // Check if this is a constructor (method with no explicit return)
         // Constructors implicitly return 'this'
-        if (call_stack_[frame_index].is_method) {
+        if (active_coroutine_ && active_coroutine_->get_function() &&
+            active_coroutine_->get_function()->body == function.body) {
+            // Coroutine body activation ran off the end: completes with null (vm
+            // run_fiber parity) - the implicit-'this' method rule must not apply.
+            result = make_value();
+        } else if (call_stack_[frame_index].is_method) {
             result = call_stack_[frame_index].get_this();
         } else {
             // Check environment for method context (for closures inside methods)
@@ -12975,7 +12980,10 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 state.saved_environment.reset();
                 state.saved_call_stack.clear();
             } else {
+                // Ran past the final yield: completion yields null (vm run_fiber parity),
+                // never a replay of the stale last-yielded value.
                 handle.set_status(coroutine_handle::status::completed);
+                handle.yield_value_ = make_value();
                 state.saved_environment.reset();
                 state.saved_call_stack.clear();
             }

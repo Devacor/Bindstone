@@ -2571,8 +2571,14 @@ size_t engine::parallel_thread_count() const {
     if (impl->parallel_ && impl->parallel_->thread_count_override) {
         return impl->parallel_->thread_count_override;
     }
+    // Auto is CAPPED, not hardware_concurrency: region entry pays a serial per-worker
+    // provisioning cost, and on high-core hybrid CPUs raw hw (24 on a 285HX) was
+    // measurably WORSE than serial (GLOOM 11.7 ms/tick at 24 vs 9.4 serial vs 7.0 at
+    // the sweep sweet spot). Callers that know their workload set an explicit count.
+    constexpr size_t k_auto_worker_cap = 6;
     const unsigned hw = std::thread::hardware_concurrency();
-    return hw ? hw : 1;
+    const size_t base = hw ? hw : 1;
+    return base < k_auto_worker_cap ? base : k_auto_worker_cap;
 }
 
 const std::vector<size_t>& engine::last_parallel_chunk_bounds() const {

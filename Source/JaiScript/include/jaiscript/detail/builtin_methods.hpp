@@ -50,6 +50,19 @@ namespace jai {
         std::unordered_map<uint64_t, builtin_method> string_methods;
         std::unordered_map<uint64_t, builtin_method> weak_ptr_methods;
         std::unordered_map<uint64_t, builtin_method> shared_ptr_methods;
+
+        // Dense dispatch tables, NAME-SORTED so indices are identical for every engine
+        // of the same binary (symbol ids are engine-local; names are not) — call sites
+        // bake indices into chunks that worker backends read through their own
+        // registries. The name→index maps are consulted at COMPILE time only; dispatch
+        // is one indexed load. Pointers into the maps are node-stable after init.
+        static constexpr uint16_t k_no_builtin = 0xFFFF;
+        std::vector<const builtin_method*> array_by_index;
+        std::vector<const builtin_method*> map_by_index;
+        std::vector<const builtin_method*> string_by_index;
+        std::unordered_map<uint64_t, uint16_t> array_index;
+        std::unordered_map<uint64_t, uint16_t> map_index;
+        std::unordered_map<uint64_t, uint16_t> string_index;
     };
 
     // ONE implementation shared by every backend (defined in interpreter.cpp)

@@ -2023,6 +2023,27 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         return ctx.make_value(same);
     }}
     };
+
+    auto build_index = [symbolizer](const std::unordered_map<uint64_t, builtin_method>& methods,
+                                    std::vector<const builtin_method*>& by_index,
+                                    std::unordered_map<uint64_t, uint16_t>& index) {
+        by_index.clear();
+        index.clear();
+        std::vector<std::pair<std::string_view, uint64_t>> names;
+        names.reserve(methods.size());
+        for (const auto& [id, fn] : methods) {
+            names.emplace_back(symbolizer->get_string(id), id);
+        }
+        std::sort(names.begin(), names.end());
+        by_index.reserve(names.size());
+        for (const auto& [name, id] : names) {
+            index.emplace(id, static_cast<uint16_t>(by_index.size()));
+            by_index.push_back(&methods.at(id));
+        }
+    };
+    build_index(out.array_methods, out.array_by_index, out.array_index);
+    build_index(out.map_methods, out.map_by_index, out.map_index);
+    build_index(out.string_methods, out.string_by_index, out.string_index);
 }
 
 namespace detail {

@@ -9,11 +9,17 @@
 #include <unordered_set>
 #include <vector>
 
+namespace jai {
+    struct builtin_method_registries;
+}
+
 namespace jai::vm {
 
     class vm_compiler {
     public:
-        explicit vm_compiler(string_symbolizer* symbolizer) : symbolizer_(symbolizer) {}
+        explicit vm_compiler(string_symbolizer* symbolizer,
+                             const builtin_method_registries* builtins = nullptr)
+            : symbolizer_(symbolizer), builtins_(builtins) {}
 
         std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations);
         std::shared_ptr<chunk> compile_callable(std::string_view name,
@@ -50,6 +56,7 @@ namespace jai::vm {
         };
 
         string_symbolizer* symbolizer_;
+        const builtin_method_registries* builtins_ = nullptr;   // compile-time bi_* fill
         chunk* chunk_ = nullptr;
         std::vector<loop_context> loops_;
         callable_context callable_;

@@ -1,5 +1,6 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
@@ -1737,6 +1738,16 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			if (member->object->get_type() == node_type::identifier_expr) {
 				site.receiver_symbol = static_cast<identifier_expr*>(member->object.get())->symbol_id;
 			}
+			if (builtins_) {
+				auto builtin_index_for = [&](const std::unordered_map<uint64_t, uint16_t>& index) -> uint16_t {
+					auto it = index.find(member->member_id);
+					return it != index.end() ? it->second : builtin_method_registries::k_no_builtin;
+				};
+				site.bi_array = builtin_index_for(builtins_->array_index);
+				site.bi_map = builtin_index_for(builtins_->map_index);
+				site.bi_string = builtin_index_for(builtins_->string_index);
+				chunk_->builtin_indexed = true;
+			}
 			site.arg_symbols.reserve(expr->arguments.size());
 			site.arg_slots.reserve(expr->arguments.size());
 			const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
@@ -1897,7 +1908,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 	}
 
 	{
-		vm_compiler body_compiler(symbolizer_);
+		vm_compiler body_compiler(symbolizer_, builtins_);
 		proto.body_chunk = body_compiler.compile_callable("<lambda>", expr->parameters, proto.body, expr->local_count);
 	}
 

@@ -2692,7 +2692,8 @@ checked_result<statement_ptr> parser::for_statement() {
     current_ = savedPosition;
 
 traditional_for:
-    // Init
+    // Init — the loop variable's slot stops resolving after the loop closes
+    block_scope_guard loop_var_scope(*this);
     declaration_ptr init = nullptr;
     if (match(token_type::semicolon)) {
         // No init
@@ -2721,7 +2722,11 @@ traditional_for:
             JAISCRIPT_TRY_ASSIGN(initializer, expression());
         }
 
-        init = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
+        auto var_init = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
+        if (in_function_scope() && var_init->name_id != UINT64_MAX) {
+            var_init->slot_index = allocate_slot(var_init->name_id);
+        }
+        init = var_init;
         // Note: NOT consuming semicolon here - the for loop will handle it
     } else {
         // Expression-only init (e.g., function call side effect) — wrap in expression_decl

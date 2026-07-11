@@ -403,6 +403,12 @@ public:
 			// poisoning every vm lookup cache) - the body is now lazy-eligible
 			check_false(body_needs_env("function scoped() -> int { { var t = 1; t = t + 1; } return 2; }"),
 				"slot-only block decl elides the scope AND the eager env");
+			// Slotted loop vars skip their loop-scope envs entirely, so both loop forms
+			// are lazy-eligible (unslotted vars keep the scope and the eager env)
+			check_false(body_needs_env("function sums(auto a) -> int { int t = 0; for (auto v : a) { t = t + v; } return t; }"),
+				"slotted range-for elides the iter scope AND the eager env");
+			check_false(body_needs_env("function csum(int n) -> int { int t = 0; for (int i = 0; i < n; ++i) { t = t + i; } return t; }"),
+				"slotted counted-for elides the loop scope AND the eager env");
 			// A block whose decl is env-resident (nested function decl) still scopes
 			check_true(body_needs_env("function outer() -> int { { function inner() -> int { return 1; } return inner(); } }"),
 				"env-defining block decl keeps scope + eager env");
@@ -449,8 +455,10 @@ public:
 				"reference decl - not sticky");
 			check_false(body_reusable("function tries() -> int { try { return 1; } catch (e) { return 0; } }"),
 				"try/catch - not sticky");
-			check_false(body_reusable("function iter(auto a) -> int { int t = 0; for (auto v : a) { t = t + v; } return t; }"),
-				"range-for (iter scope) - not sticky, fail closed");
+			check_true(body_reusable("function iter(auto a) -> int { int t = 0; for (auto v : a) { t = t + v; } return t; }"),
+				"slotted range-for consults the env only - sticky-eligible");
+			check_true(body_reusable("function fused(auto o) -> int { int t = o.x + 1; t = t * 2; return t; }"),
+				"member access + fused decl/store stays sticky (eager body, reusable env)");
 			check_false(body_reusable("function outer() -> int { { function inner() -> int { return 1; } return inner(); } }"),
 				"env-defining block decl - not sticky");
 		});

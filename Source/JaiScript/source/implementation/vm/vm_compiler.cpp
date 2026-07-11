@@ -131,6 +131,25 @@ namespace {
 				if (decl->slot_index == SIZE_MAX) return true;
 				break;
 			}
+			case opcode::op_binary_fused_decl: {
+				const auto& dp = body.fused_binary_dst_protos[ins.a];
+				auto* decl = static_cast<const variable_decl*>(body.nodes[dp.node_index].get());
+				if (decl->slot_index == SIZE_MAX) return true;
+				break;
+			}
+			case opcode::op_binary_fused_store:
+			case opcode::op_index_fused:
+			case opcode::op_index_store_fused:
+				break;
+			case opcode::op_iter_init:
+			case opcode::op_iter_next:
+			case opcode::op_iter_pop: {
+				// range-for is frame-env-free when the loop var is slot-resident (the
+				// iter's own scope env covers block scoping); iter_next carries the
+				// proto index in a
+				if (ins.op == opcode::op_iter_next && body.iter_protos[ins.a].slot == SIZE_MAX) return true;
+				break;
+			}
 			case opcode::op_destructure: {
 				for (const auto& name : body.destructure_protos[ins.a].names) {
 					if (name.second == SIZE_MAX) return true;
@@ -210,6 +229,21 @@ namespace {
 				if (decl->slot_index == SIZE_MAX) return false;
 				break;
 			}
+			case opcode::op_binary_fused_decl: {
+				const auto& dp = body.fused_binary_dst_protos[ins.a];
+				auto* decl = static_cast<const variable_decl*>(body.nodes[dp.node_index].get());
+				if (decl->slot_index == SIZE_MAX) return false;
+				break;
+			}
+			case opcode::op_binary_fused_store:
+			case opcode::op_index_fused:
+			case opcode::op_index_store_fused:
+				break;
+			case opcode::op_iter_init:
+			case opcode::op_iter_next:
+			case opcode::op_iter_pop:
+				if (ins.op == opcode::op_iter_next && body.iter_protos[ins.a].slot == SIZE_MAX) return false;
+				break;
 			case opcode::op_destructure: {
 				for (const auto& name : body.destructure_protos[ins.a].names) {
 					if (name.second == SIZE_MAX) return false;
@@ -810,8 +844,11 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 		return;
 	}
 
-	emit(opcode::op_scope_push);
-	++scope_depth_;
+	const bool loop_scope = declares_in_current_scope(stmt->initializer.get(), callable_.active);
+	if (loop_scope) {
+		emit(opcode::op_scope_push);
+		++scope_depth_;
+	}
 
 	if (stmt->initializer) {
 		compile_declaration(stmt->initializer, false);
@@ -850,8 +887,10 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	}
 	loops_.pop_back();
 
-	--scope_depth_;
-	emit(opcode::op_scope_pop);
+	if (loop_scope) {
+		--scope_depth_;
+		emit(opcode::op_scope_pop);
+	}
 }
 
 // Counting-loop codegen (mirrors the interpreter's visit_for_stmt fast path):
@@ -918,8 +957,11 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	}
 
 	// === Pattern matched: emit the counted form ===
-	emit(opcode::op_scope_push);
-	++scope_depth_;
+	const bool loop_scope = declares_in_current_scope(stmt->initializer.get(), callable_.active);
+	if (loop_scope) {
+		emit(opcode::op_scope_push);
+		++scope_depth_;
+	}
 
 	compile_declaration(stmt->initializer, false);
 
@@ -982,8 +1024,10 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	stored.generic_cond_ip = static_cast<uint32_t>(generic_cond);
 	stored.generic_update_ip = static_cast<uint32_t>(generic_update);
 
-	--scope_depth_;
-	emit(opcode::op_scope_pop);
+	if (loop_scope) {
+		--scope_depth_;
+		emit(opcode::op_scope_pop);
+	}
 	return true;
 }
 

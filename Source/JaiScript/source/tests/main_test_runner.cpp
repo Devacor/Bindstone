@@ -5,6 +5,11 @@
 #include <jaiscript/core/engine.hpp>
 #if defined(_MSC_VER) && !defined(NDEBUG)
 #include <crtdbg.h>
+#include <csignal>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
 #endif
 #include <iostream>
 #include <string>
@@ -122,6 +127,27 @@ int main(int argc, char** argv) {
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
     _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+    // Symbolized native stack on abort: an assert in a headless run names its call path
+    signal(SIGABRT, [](int) {
+        void* frames[62];
+        const USHORT n = CaptureStackBackTrace(0, 62, frames, nullptr);
+        HANDLE proc = GetCurrentProcess();
+        SymInitialize(proc, nullptr, TRUE);
+        alignas(SYMBOL_INFO) char buf[sizeof(SYMBOL_INFO) + 256];
+        auto* sym = reinterpret_cast<SYMBOL_INFO*>(buf);
+        sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+        sym->MaxNameLen = 255;
+        fprintf(stderr, "--- abort backtrace (%u frames) ---\n", n);
+        for (USHORT i = 0; i < n; ++i) {
+            DWORD64 disp = 0;
+            if (SymFromAddr(proc, reinterpret_cast<DWORD64>(frames[i]), &disp, sym)) {
+                fprintf(stderr, "  %02u %s +0x%llx\n", i, sym->Name, static_cast<unsigned long long>(disp));
+            } else {
+                fprintf(stderr, "  %02u %p\n", i, frames[i]);
+            }
+        }
+        fflush(stderr);
+    });
 #endif
 
     // Parse command line flags

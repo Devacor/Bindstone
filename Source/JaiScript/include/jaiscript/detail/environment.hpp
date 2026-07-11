@@ -288,6 +288,22 @@ namespace jai {
         // check sees the referent, not 'reference'. Copy-only consumption: safe to
         // use the bare-deref idiom (no move of the deref result back into value).
         const script_value& target = value.deref();
+        // clone() of a plain scalar/string IS `storage_ = storage_` (strings share
+        // storage by design) - return the copy inline instead of the out-of-line
+        // clone() call every store-shaped boundary otherwise pays. These raw indexes
+        // can't be borrow/bound/shared-marked, so no clone() special case is skipped.
+        switch (target.raw_storage_index()) {
+            case script_value::TYPEID_NULL:
+            case script_value::TYPEID_INT:
+            case script_value::TYPEID_FLOAT:
+            case script_value::TYPEID_STRING:
+            case script_value::TYPEID_CHAR:
+            case script_value::TYPEID_BOOL:
+                assert(target.has_valid_engine());   // clone() would throw; copies are for live values only
+                return target;
+            default:
+                break;
+        }
         auto type_info = target.get_type_info();
         if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
             return target;  // Share the handle, don't clone

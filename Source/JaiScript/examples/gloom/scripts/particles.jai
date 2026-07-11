@@ -1,10 +1,36 @@
-// Particle pool: a fixed-size VALUE array of [kind, x, y, z, vx, vy, vz, life]
-// records, stepped IN PLACE by the pure gloom_particle_step body (pure.jai)
-// through parallel_for (safe mode: all-primitive rows prove exclusive at the
+// Particle pool: a fixed-size array of typed-field Particle records, stepped
+// IN PLACE by the pure gloom_particle_step body (pure.jai) through
+// parallel_for (safe mode: all-primitive flat records prove exclusive at the
 // barrier). The pool object owns slot recycling; access labels keep the
 // cursor honest.
 
 var PART_MAX = 288;
+
+// kind 0 dead | 1 spark | 2 blood | 3 gib | 4 smoke | 5 flash | 6 hexmote
+class Particle {
+public:
+	int kind = 0;
+	float x = 0.0;
+	float y = 0.0;
+	float z = 0.0;
+	float vx = 0.0;
+	float vy = 0.0;
+	float vz = 0.0;
+	int life = 0;
+
+	Particle() {}
+
+	Particle(int kind_, float x_, float y_, float z_, float vx_, float vy_, float vz_, int life_) {
+		kind = kind_;
+		x = x_;
+		y = y_;
+		z = z_;
+		vx = vx_;
+		vy = vy_;
+		vz = vz_;
+		life = life_;
+	}
+}
 
 class ParticlePool {
 public:
@@ -19,13 +45,13 @@ public:
 	void reset_pool() {
 		pool = [];
 		for (int i = 0; i < PART_MAX; ++i) {
-			pool.push([0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]);
+			pool.push(new Particle());
 		}
 		cursor = 0;
 	}
 
 	void spawn(int kind, float x, float y, float z, float vx, float vy, float vz, int life) {
-		pool[cursor] = [kind, x, y, z, vx, vy, vz, life];
+		pool[cursor] = new Particle(kind, x, y, z, vx, vy, vz, life);
 		cursor = (cursor + 1) % PART_MAX;
 	}
 

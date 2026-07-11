@@ -82,30 +82,47 @@ function turret_shot(float tx, float ty) -> void {
 }
 
 // ------------------------------------------------------------ projectiles ---
-// value records: [kind, x, y, vx, vy, ttl]
-//   kind 1 spitter gob | 2 warden hollow fire | 3 player hex bolt
+// kind 1 spitter gob | 2 warden hollow fire | 3 player hex bolt
+class Shot {
+public:
+	int kind = 0;
+	float x = 0.0;
+	float y = 0.0;
+	float vx = 0.0;
+	float vy = 0.0;
+	int ttl = 0;
+
+	Shot(int kind_, float x_, float y_, float vx_, float vy_, int ttl_) {
+		kind = kind_;
+		x = x_;
+		y = y_;
+		vx = vx_;
+		vy = vy_;
+		ttl = ttl_;
+	}
+}
+
 function spawn_shot(int kind, float ax, float ay, float tx, float ty, float speed) -> void {
 	float dx = tx - ax;
 	float dy = ty - ay;
 	float len = math::sqrt(dx * dx + dy * dy);
 	if (len < 0.001) { return; }
-	G.shots.push([kind, ax + dx / len * 0.4, ay + dy / len * 0.4, dx / len * speed, dy / len * speed, 150]);
+	G.shots.push(new Shot(kind, ax + dx / len * 0.4, ay + dy / len * 0.4, dx / len * speed, dy / len * speed, 150));
 }
 
 function spawn_shot_dir(int kind, float ax, float ay, float dx, float dy, float speed) -> void {
-	G.shots.push([kind, ax + dx * 0.45, ay + dy * 0.45, dx * speed, dy * speed, 150]);
+	G.shots.push(new Shot(kind, ax + dx * 0.45, ay + dy * 0.45, dx * speed, dy * speed, 150));
 }
 
 function update_shots() -> void {
 	var kept = [];
-	for (int i = 0; i < G.shots.size(); ++i) {
-		var s = G.shots[i];
-		int kind = s[0];
-		float x = s[1];
-		float y = s[2];
-		float vx = s[3];
-		float vy = s[4];
-		int ttl = s[5] - 1;
+	for (auto& s : G.shots) {
+		int kind = s.kind;
+		float x = s.x;
+		float y = s.y;
+		float vx = s.vx;
+		float vy = s.vy;
+		int ttl = s.ttl - 1;
 		bool dead = ttl <= 0;
 		// 3 substeps so fast bolts don't tunnel tile corners
 		for (int sub = 0; sub < 3 && !dead; ++sub) {
@@ -138,16 +155,22 @@ function update_shots() -> void {
 				}
 			}
 		}
-		if (!dead) { kept.push([kind, x, y, vx, vy, ttl]); }
+		if (!dead) {
+			s.x = x;
+			s.y = y;
+			s.ttl = ttl;
+			kept.push(s);
+		}
 	}
 	G.shots = kept;
 	// glow trail
-	for (int i2 = 0; i2 < G.shots.size(); ++i2) {
-		var s2 = G.shots[i2];
-		int k2 = s2[0];
+	int i2 = 0;
+	for (auto& s2 : G.shots) {
+		int k2 = s2.kind;
 		if ((G.tick + i2) % 2 == 0) {
-			G.fx.spawn(k2 == 1 ? 6 : (k2 == 2 ? 1 : 6), s2[1], s2[2], 0.5, 0.0, 0.0, 0.0, 4);
+			G.fx.spawn(k2 == 1 ? 6 : (k2 == 2 ? 1 : 6), s2.x, s2.y, 0.5, 0.0, 0.0, 0.0, 4);
 		}
+		i2 = i2 + 1;
 	}
 }
 

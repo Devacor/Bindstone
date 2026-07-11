@@ -1599,9 +1599,9 @@ public:
                     auto inst = std::static_pointer_cast<class_instance>(obj_holder->data);
                     std::cerr << "[TEST] loaded is class instance: " << inst->get_class_name() << std::endl;
                     std::cerr << "[TEST] Instance fields: ";
-                    for (const auto& [fid, fval] : inst->get_fields()) {
+                    inst->for_each_field([&](uint64_t fid, const script_value&) {
                         std::cerr << fid << " ";
-                    }
+                    });
                     std::cerr << std::endl;
                 }
             } else if (loaded_val.type() == script_value_type::jai_map_type) {

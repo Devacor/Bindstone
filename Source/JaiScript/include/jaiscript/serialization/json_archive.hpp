@@ -322,17 +322,18 @@ public:
                             }
                         } else {
                             // Script-defined class or unregistered - serialize fields directly
-                            const auto& fields = instance->get_fields();
-                            for (const auto& [field_id, field_val] : fields) {
+                            // (slot order: deterministic, ≈ declaration order — the old map
+                            // walk was hash-order)
+                            instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
                                 // Skip the __cpp_object__ field - it's not serializable
                                 std::string field_name = std::string(eng->get_symbolizer()->get_string(field_id));
-                                if (field_name == "__cpp_object__") continue;
+                                if (field_name == "__cpp_object__") return;
 
                                 if (!first) oss_ << ',';
                                 first = false;
                                 oss_ << "\"" << escape_json_string_local(field_name) << "\":";
                                 write_value(field_val);
-                            }
+                            });
                         }
 
                         oss_ << '}';

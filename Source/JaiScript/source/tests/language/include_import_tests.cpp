@@ -652,6 +652,46 @@ public:
             }
         });
 
+        test("jaibite_cache_version_mismatch_reparses_and_rewrites", [&]() {
+            // Format-version stamp (Dev ruling 2026-07-11): a sibling from an older
+            // parser/format silently reparses + rewrites — stale parse-time semantics
+            // (e.g. slot assignment changes) must never load
+            for (bool use_vm : {false, true}) {
+                auto src = create_temp_file("cache_ver.jai", "42;");
+                {   // valid magic, WRONG version, then padding past the header minimum
+                    std::ofstream f(sibling_of(src), std::ios::binary | std::ios::trunc);
+                    const uint8_t magic[4] = { 'J', 'B', 'I', 'T' };
+                    const uint32_t bad_version = 0x7FFFFFFF;
+                    const uint32_t flags = 0;
+                    const uint64_t fingerprint = 0;
+                    f.write(reinterpret_cast<const char*>(magic), 4);
+                    f.write(reinterpret_cast<const char*>(&bad_version), 4);
+                    f.write(reinterpret_cast<const char*>(&flags), 4);
+                    f.write(reinterpret_cast<const char*>(&fingerprint), 8);
+                }
+                force_older_than(src, sibling_of(src));   // stale-version sibling looks "fresh"
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->add_include_path(std::filesystem::temp_directory_path().string());
+                check_eq((int64_t)42, eng->execute("var v = include \"cache_ver.jai\"; v;").as_int(),
+                         "version mismatch -> silent reparse");
+                check(starts_with_jbit(sibling_of(src)), "sibling rewritten");
+                // the rewrite carries the CURRENT version: clobber the source and reload
+                {
+                    std::ofstream f(src, std::ios::trunc);
+                    f << "%%%";
+                }
+                force_older_than(src, sibling_of(src));
+                auto eng2 = engine::make();
+                if (use_vm) { eng2->set_backend(jai::backend_type::vm); }
+                eng2->add_include_path(std::filesystem::temp_directory_path().string());
+                check_eq((int64_t)42, eng2->execute("var w = include \"cache_ver.jai\"; w;").as_int(),
+                         "rewritten sibling loads under the current version");
+                cleanup_temp_file(src);
+                std::filesystem::remove(sibling_of(src));
+            }
+        });
+
         test("jaibite_cache_disable_switch", [&]() {
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_off.jai", "5;");

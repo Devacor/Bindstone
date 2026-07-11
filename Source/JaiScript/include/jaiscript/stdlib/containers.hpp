@@ -34,7 +34,7 @@ namespace stdlib {
 
         // Create a new map with all entries from map1
         script_value result = map1.clone();
-        auto& resultMap = const_cast<std::map<script_value, script_value>&>(result.as_map());
+        auto& resultMap = const_cast<script_map&>(result.as_map());
         const auto& map2_data = map2.as_map();
 
         // Merge map2 into the result, overriding values for duplicate keys

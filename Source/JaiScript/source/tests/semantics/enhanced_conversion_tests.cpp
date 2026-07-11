@@ -144,7 +144,7 @@ public:
             try {
                 // Test map return value
                 script_value result = engine->execute("create_scores()");
-                auto map = result.as<std::map<script_value, script_value>>();
+                auto map = result.as<script_map>();
                 check_eq(map.size(), 3U);
                 std::cout << "    ✓ Map return value works!\n";
             } catch (const std::exception& e) {

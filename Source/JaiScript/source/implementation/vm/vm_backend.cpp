@@ -1381,7 +1381,7 @@ void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
 
 void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 	script_value mapValue = script_value::make_map(nullptr, nullptr, engine_);
-	auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
+	auto& map = const_cast<script_map&>(mapValue.as_map());
 	const size_t n = ins.a;
 	const size_t base = stack_.size() - n * 2;
 	// All-detach ruling (2026-07, #12): literal construction is a store boundary -
@@ -4712,7 +4712,7 @@ op_status vm_backend::exec_index(frame& f, const vm_instruction& ins) {
 
 	if (left.is_map()) {
 		try {
-			auto& map = const_cast<std::map<script_value, script_value>&>(left.as_map());
+			auto& map = const_cast<script_map&>(left.as_map());
 
 			if (lvalue_shape && lvalue_write) {
 				// Auto-insert so the assignment has somewhere to write through
@@ -5154,6 +5154,33 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 			}
 			stack_.push_back(node->values()[index]);
 			return {};
+		}
+	}
+	// Constant-string map READ (Dev ruling 2026-07-11): find on the raw constant
+	// bytes via the transparent comparator — no per-access key materialization.
+	// Plain read shape only; lvalue/write shapes replay (entry references and
+	// missing-key creation keep exec_index's one spelling). Mirrors exec_index's
+	// map-read branch: hit copies (engine stamped), miss pushes null.
+	if (left.raw_storage_index() == script_value::TYPEID_MAP &&
+	    p.index.const_index != k_invalid_u32 &&
+	    !(ins.b & (index_flag_lvalue_shape | index_flag_lvalue_write))) {
+		const script_value& itmpl = f.code->constants[p.index.const_index];
+		if (itmpl.raw_storage_index() == script_value::TYPEID_STRING) {
+			const auto& map_ptr = const_cast<script_value&>(left).get_map_storage();
+			if (map_ptr) {
+				auto it = map_ptr->find(map_string_key_probe{
+					*std::get<strong_ptr<script_string>>(itmpl.get_storage())});
+				if (it != map_ptr->end()) {
+					script_value val = it->second;
+					if (!val.has_valid_engine()) {
+						val.set_engine(engine_);
+					}
+					stack_.push_back(std::move(val));
+				} else {
+					stack_.push_back(make_null());
+				}
+				return {};
+			}
 		}
 	}
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
@@ -7672,7 +7699,7 @@ op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 		engine_->get_type_info_string(),
 		engine_->get_type_info_int(),
 		engine_);
-	auto& map_ref = const_cast<std::map<script_value, script_value>&>(enum_map.as_map());
+	auto& map_ref = const_cast<script_map&>(enum_map.as_map());
 
 	for (size_t i = 0; i < decl->values.size(); ++i) {
 		auto key = script_value(std::string(decl->values[i].first), engine_);

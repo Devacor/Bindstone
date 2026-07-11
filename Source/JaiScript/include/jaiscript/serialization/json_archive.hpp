@@ -897,7 +897,7 @@ private:
         const JNode& node = nodes_[idx];
         if (node.tag == JTag::Obj) {
             script_value mv = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-            auto& map = const_cast<std::map<script_value, script_value>&>(mv.as_map());
+            auto& map = const_cast<script_map&>(mv.as_map());
             for (uint32_t m = 0; m < node.u.agg.count; ++m) {
                 const JNode& k = nodes_[node.u.agg.first + 2 * m];
                 map.emplace(script_value(script_value::ast_literal_tag{},

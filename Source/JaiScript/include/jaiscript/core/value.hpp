@@ -198,7 +198,7 @@ namespace jai {
         // Viewed container accessors (nullptr when the borrow is of the other kind).
         // Arrays hand back the NODE (its address is the identity; kind dispatch in stage 2).
         const script_array* parallel_borrow_array() const noexcept;
-        const std::map<script_value, script_value>* parallel_borrow_map() const noexcept;
+        const script_map* parallel_borrow_map() const noexcept;
 
     public:
         // Engine-aware factory methods (preferred - ALWAYS use these)
@@ -227,7 +227,7 @@ namespace jai {
         // Map-entry reference: pins the owning map (strong) and re-resolves find(key) on
         // every deref/assign-through - an erased entry errors instead of dangling, and a
         // reference into a temporary map keeps the map alive.
-        static script_value make_map_entry_reference(const strong_ptr<std::map<script_value, script_value>>& map_storage,
+        static script_value make_map_entry_reference(const strong_ptr<script_map>& map_storage,
                                                      const script_value& key, engine* eng, type_info_ptr value_type);
         static script_value make_function(const script_function& func, engine* eng);
         // Rvalue mint: moves the std::function into its strong_ptr box (every backend
@@ -637,12 +637,12 @@ namespace jai {
         }
 
         // Unchecked map accessor - caller must verify is_map() first
-        inline const std::map<script_value, script_value>& unchecked_as_map() const noexcept {
+        inline const script_map& unchecked_as_map() const noexcept {
             return **std::get_if<TYPEID_MAP>(&storage_);
         }
 
         // Unchecked mutable map storage accessor - caller must verify is_map() first
-        inline strong_ptr<std::map<script_value, script_value>>& unchecked_get_map_storage() noexcept {
+        inline strong_ptr<script_map>& unchecked_get_map_storage() noexcept {
             return *std::get_if<TYPEID_MAP>(&storage_);
         }
 
@@ -670,7 +670,7 @@ namespace jai {
             return std::get<strong_ptr<script_array>>(storage_)->values();
         }
         
-        inline const std::map<script_value, script_value>& as_map() const {
+        inline const script_map& as_map() const {
             auto result = checked_as_map();
             if (!result) {
                 throw runtime_error(std::string(result.message()));
@@ -678,11 +678,11 @@ namespace jai {
             return *result.value();
         }
         
-        inline std::map<script_value, script_value>& as_map() {
+        inline script_map& as_map() {
             if (type() != script_value_type::jai_map_type) {
                 throw runtime_error("script_value is not a map");
             }
-            return *std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
+            return *std::get<strong_ptr<script_map>>(storage_);
         }
 
         const script_function& as_function() const;
@@ -800,7 +800,7 @@ namespace jai {
                         return as_string_ref();
                     } else if constexpr (std::is_same_v<base_type, std::vector<script_value>>) {
                         return as_array();
-                    } else if constexpr (std::is_same_v<base_type, std::map<script_value, script_value>>) {
+                    } else if constexpr (std::is_same_v<base_type, script_map>) {
                         return as_map();
                     } else if constexpr (std::is_same_v<base_type, script_value>) {
                         // For script_value&, just return a reference to the dereferenced value
@@ -882,14 +882,14 @@ namespace jai {
             return checked_result<const std::vector<script_value>*>(&std::get<strong_ptr<script_array>>(storage_)->values());
         }
 
-        inline checked_result<const std::map<script_value, script_value>*> checked_as_map() const {
+        inline checked_result<const script_map*> checked_as_map() const {
             if (type() != script_value_type::jai_map_type) {
-                return checked_result<const std::map<script_value, script_value>*>(
+                return checked_result<const script_map*>(
                     make_error_code(runtime_error_code::not_a_map),
                     "script_value is not a map"
                 );
             }
-            return checked_result<const std::map<script_value, script_value>*>(std::get<strong_ptr<std::map<script_value, script_value>>>(storage_).get());
+            return checked_result<const script_map*>(std::get<strong_ptr<script_map>>(storage_).get());
         }
 
         inline checked_result<script_int> checked_as_int() const {
@@ -1147,7 +1147,7 @@ namespace jai {
                             return arr_result.error_value();  // Preserves symbol IDs for formatting
                         }
                         return checked_result<T>(*arr_result.value());
-                    } else if constexpr (std::is_same_v<base_type, std::map<script_value, script_value>>) {
+                    } else if constexpr (std::is_same_v<base_type, script_map>) {
                         auto map_result = checked_as_map();
                         if (!map_result) {
                             return map_result.error_value();
@@ -1702,7 +1702,7 @@ namespace jai {
             alignas(8) unsigned char cell_storage[cell_storage_size];
             bool has_cell = false;      // inline storage holds the OWNED value
             bool has_map_key = false;   // inline storage holds the map KEY (container_map set)
-            strong_ptr<std::map<script_value, script_value>> container_map;
+            strong_ptr<script_map> container_map;
             script_value* cell() noexcept { return reinterpret_cast<script_value*>(cell_storage); }
             const script_value* cell() const noexcept { return reinterpret_cast<const script_value*>(cell_storage); }
 
@@ -1835,7 +1835,7 @@ namespace jai {
             script_char,                                  // 4 - script_char
             script_bool,                                  // 5 - script_bool
             strong_ptr<script_array>,                     // 6 - Array<T> (script_array node = identity)
-            strong_ptr<std::map<script_value, script_value>>, // 7 - Map<K,V>
+            strong_ptr<script_map>, // 7 - Map<K,V>
             strong_ptr<object_holder>,                    // 8 - Object<T>
             strong_ptr<script_function>,                  // 9 - Function (wrapped for cheap copies)
             strong_ptr<reference_holder>,                 // 10 - T&
@@ -1896,11 +1896,11 @@ namespace jai {
         }
 
         // Get raw map storage for interpreter operations
-        strong_ptr<std::map<script_value, script_value>>& get_map_storage() {
+        strong_ptr<script_map>& get_map_storage() {
             if (type() != script_value_type::jai_map_type) {
                 throw runtime_error("script_value is not a map");
             }
-            return std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
+            return std::get<strong_ptr<script_map>>(storage_);
         }
 
         // Get raw weak_ptr storage for interpreter operations
@@ -1958,7 +1958,7 @@ namespace jai {
                 const auto& ptr = std::get<strong_ptr<script_array>>(storage_);
                 return ptr.use_count() == 1;
             } else if (type() == script_value_type::jai_map_type) {
-                const auto& ptr = std::get<strong_ptr<std::map<script_value, script_value>>>(storage_);
+                const auto& ptr = std::get<strong_ptr<script_map>>(storage_);
                 return ptr.use_count() == 1;
             }
             return false;

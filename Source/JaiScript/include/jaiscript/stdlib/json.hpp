@@ -366,7 +366,7 @@ namespace stdlib {
             
             // Create an empty map value
             script_value mapValue = script_value::make_map(type_info::make_string(), nullptr);
-            auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
+            auto& map = const_cast<script_map&>(mapValue.as_map());
             
             if (peek() == '}') {
                 advance();
@@ -462,7 +462,7 @@ namespace stdlib {
     // Returns null if `type_name` is unregistered or construction fails (caller returns the map).
     inline script_value reconstruct_typed_object(
             engine* eng,
-            const std::map<script_value, script_value>& map,
+            const script_map& map,
             const std::string& type_name,
             const std::function<script_value(const script_value&)>& transform) {
         if (!eng->get_class_definition(type_name)) return script_value(std::monostate{}, eng);
@@ -556,7 +556,7 @@ namespace stdlib {
                     }
 
                     script_value mapValue = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-                    auto& resultMap = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
+                    auto& resultMap = const_cast<script_map&>(mapValue.as_map());
                     for (const auto& [k, v] : map) {
                         resultMap[k] = processValue(v);
                     }

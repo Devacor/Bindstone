@@ -218,7 +218,7 @@ public:
             // Test map return value
             try {
                 script_value result = engine->execute("create_string_int_map()");
-                auto map = result.as<std::map<script_value, script_value>>();
+                auto map = result.as<script_map>();
                 check_eq(map.size(), 3U);
                 
                 script_value first_key = engine->make_value("first");
@@ -236,7 +236,7 @@ public:
             try {
                 engine->execute("var original = create_string_int_map();");
                 script_value result = engine->execute("reverse_map(original)");
-                auto reversed = result.as<std::map<script_value, script_value>>();
+                auto reversed = result.as<script_map>();
                 check_eq(reversed.size(), 3U);
                 std::cout << "    ✓ Map transformation works" << std::endl;
             } catch (const std::exception& e) {
@@ -319,13 +319,13 @@ public:
             // Test nested map creation
             try {
                 script_value result = engine->execute("create_nested_map()");
-                auto nested = result.as<std::map<script_value, script_value>>();
+                auto nested = result.as<script_map>();
                 check_eq(nested.size(), 2U);
                 
                 script_value group1_key = engine->make_value("group1");
                 auto it = nested.find(group1_key);
                 if (it != nested.end()) {
-                    auto inner_map = it->second.as<std::map<script_value, script_value>>();
+                    auto inner_map = it->second.as<script_map>();
                     check_eq(inner_map.size(), 2U);
                 }
                 
@@ -378,7 +378,7 @@ public:
             // Test map with custom objects creation
             try {
                 script_value result = engine->execute("create_person_map()");
-                auto person_map = result.as<std::map<script_value, script_value>>();
+                auto person_map = result.as<script_map>();
                 check_eq(person_map.size(), 3U);
                 std::cout << "    ✓ Map with custom objects creation works" << std::endl;
             } catch (const std::exception& e) {
@@ -496,7 +496,7 @@ public:
             auto engine = make_engine();
             
             // Test function that takes map<script_value, script_value> explicitly
-            engine->add_function("count_map_types", [](std::map<script_value, script_value> map) -> int {
+            engine->add_function("count_map_types", [](script_map map) -> int {
                 int int_count = 0;
                 for (const auto& pair : map) {
                     if (pair.second.is_int()) {
@@ -516,8 +516,8 @@ public:
             }
             
             // Test function that returns map<script_value, script_value>
-            engine->add_function("create_mixed_map", [engine]() -> std::map<script_value, script_value> {
-                std::map<script_value, script_value> result;
+            engine->add_function("create_mixed_map", [engine]() -> script_map {
+                script_map result;
                 result.insert_or_assign(engine->make_value("int"), engine->make_value(42));
                 result.insert_or_assign(engine->make_value("string"), engine->make_value("hello"));
                 result.insert_or_assign(engine->make_value("float"), engine->make_value(3.14));
@@ -527,7 +527,7 @@ public:
             
             try {
                 script_value result = engine->execute("create_mixed_map()");
-                auto map = result.as<std::map<script_value, script_value>>();
+                auto map = result.as<script_map>();
                 check_eq(map.size(), 4U);
                 
                 script_value int_key = engine->make_value("int");

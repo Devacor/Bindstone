@@ -191,13 +191,29 @@ namespace jai::detail {
 					return slot_ptr;
 				}
 			}
+			uint64_t symbol_id = ident->symbol_id;
+			if (symbol_id == UINT64_MAX) {
+				symbol_id = symbolizer->intern(ident->name);
+				const_cast<identifier_expr*>(ident)->symbol_id = symbol_id;
+			}
 			if (caller_env) {
-				uint64_t symbol_id = ident->symbol_id;
-				if (symbol_id == UINT64_MAX) {
-					symbol_id = symbolizer->intern(ident->name);
-					const_cast<identifier_expr*>(ident)->symbol_id = symbol_id;
+				if (const script_value* env_ptr = caller_env->get_value_ptr(symbol_id)) {
+					return env_ptr;
 				}
-				return caller_env->get_value_ptr(symbol_id);
+			}
+			// Method-LAZY caller frames carry no method env: bare field names resolve
+			// through the frame's receiver (twin of environment::get_value_ptr's
+			// method-kind fallback — env-resolved eager frames never reach this)
+			if (const script_value* tp = caller.this_ptr()) {
+				if (tp->is_object() && !tp->is_null()) {
+					if (auto instance = const_cast<script_value*>(tp)->get_class_instance()) {
+						script_value& field_ref = instance->get_field(symbol_id, false);
+						if (!field_ref.is_invalid()) { return &field_ref; }
+						if (auto cd = instance->get_class_definition()) {
+							if (script_value* sp = cd->get_static_field_ptr(symbol_id)) { return sp; }
+						}
+					}
+				}
 			}
 			return nullptr;
 		};

@@ -2912,7 +2912,7 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 		stack_.push_back(env_val->deref());
 		return {};
 	}
-	if (script_value* this_ptr = environment_->get_value_ptr(this_id_)) {
+	if (script_value* this_ptr = current_this(f)) {
 		script_value& this_val = *this_ptr;
 		if (this_val.is_object()) {
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
@@ -3326,9 +3326,9 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 
 	// Variable not in environment: this-field / static-field fallback, then assign
 	bool assigned_to_member = false;
-	auto this_result = environment_->get(this_id_);
-	if (this_result) {
-		script_value this_val = std::move(this_result.value());
+	script_value* frame_this = current_this(f);
+	if (frame_this) {
+		script_value this_val = *frame_this;
 		if (this_val.is_object()) {
 			auto obj_holder = this_val.get_object_holder();
 			if (obj_holder && obj_holder->is_class_instance_wrapper) {
@@ -3690,13 +3690,13 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	}
 
 	// Implicit this.member fallback
-	auto this_result = environment_->get(this_id_);
-	if (!this_result || !this_result.value().is_object()) {
+	script_value* frame_this = current_this(f);
+	if (!frame_this || !frame_this->is_object()) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Undefined variable '{0}' (no 'this' in scope)", sym);
 	}
 
-	script_value this_val = std::move(this_result.value());
+	script_value this_val = *frame_this;
 	std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
 	if (!instance || !instance->has_field(sym)) {
@@ -3896,9 +3896,9 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		}
 	}
 
-	auto this_result = environment_->get(this_id_);
-	if (this_result && this_result.value().is_object()) {
-		script_value this_val = std::move(this_result.value());
+	script_value* frame_this = current_this(f);
+	if (frame_this && frame_this->is_object()) {
+		script_value this_val = *frame_this;
 		std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 		if (instance && instance->has_field(sym)) {
 			script_value currentVal = instance->get_field(sym);
@@ -4039,7 +4039,7 @@ checked_result<const script_value*> vm_backend::fused_ident_value(frame& f, cons
 	if (script_value* env_val = environment_->get_value_ptr(sym)) {
 		return &env_val->deref();
 	}
-	if (script_value* this_ptr = environment_->get_value_ptr(this_id_)) {
+	if (script_value* this_ptr = current_this(f)) {
 		script_value& this_val = *this_ptr;
 		if (this_val.is_object()) {
 			std::shared_ptr<class_instance> instance = this_val.get_class_instance();
@@ -5697,6 +5697,9 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		targetPtr = environment_->get_value_ptr(target_sym);
 	}
 	if (!targetPtr) {
+		targetPtr = frame_this_member_ptr(f, target_sym);   // method-lazy: bare field targets
+	}
+	if (!targetPtr) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
 	}
 
@@ -6472,22 +6475,21 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 }
 
 op_status vm_backend::exec_this(frame& f, const vm_instruction& ins) {
-	auto this_result = environment_->get(symbolizer_->get_this_id());
-	if (!this_result) {
-		return raise_(make_error_code(runtime_error_code::this_outside_method),
-			"'this' can only be used inside methods");
+	if (script_value* tp = current_this(f)) {
+		stack_.push_back(*tp);
+		return {};
 	}
-	stack_.push_back(std::move(this_result.value()));
-	return {};
+	return raise_(make_error_code(runtime_error_code::this_outside_method),
+		"'this' can only be used inside methods");
 }
 
 op_status vm_backend::exec_super(frame& f, const vm_instruction& ins) {
-	auto this_result = environment_->get(symbolizer_->get_this_id());
-	if (!this_result) {
+	script_value* tp = current_this(f);
+	if (!tp) {
 		return raise_(make_error_code(runtime_error_code::super_outside_method),
 			"'super' can only be used inside methods");
 	}
-	script_value this_value = std::move(this_result.value());
+	script_value this_value = *tp;
 	if (this_value.is_null()) {
 		return raise_(make_error_code(runtime_error_code::super_outside_method),
 			"'super' can only be used inside methods");
@@ -6498,12 +6500,12 @@ op_status vm_backend::exec_super(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.b];
-	auto this_result = environment_->get(symbolizer_->get_this_id());
-	if (!this_result) {
+	script_value* tp = current_this(f);
+	if (!tp) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"{0}() can only be called from within a method", sym);
 	}
-	script_value this_val = std::move(this_result.value());
+	script_value this_val = *tp;
 	if (!this_val.is_object()) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"{0}() can only be called from within a method", sym);
@@ -9161,6 +9163,9 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 		storage = environment_->get_value_ptr(symbol_id);
 	}
 	if (!storage) {
+		storage = frame_this_member_ptr(f, symbol_id);   // method-lazy: bare field targets
+	}
+	if (!storage) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Cannot take reference of undefined variable", symbol_id);
 	}
@@ -10032,13 +10037,23 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.cfor_base = cfor_states_.size();
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
-	rec.env_lazy = false;   // method envs never elide (env-kind fallbacks gate precedence)
+	// Method-lazy (flatstack stage 5, this-in-frame): a body whose ops never park
+	// state in an env runs with environment_ = the DEFINITION env (globals chain,
+	// lexically correct) and NO method env at all — 'this', fields, and the access
+	// context all resolve through the frame (current_this / frame_access_context).
+	// Nonpublic chains stay eager: their access enforcement needs the DECLARING
+	// class, which only the env-kind context carries.
+	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
+	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
 	rec.env_untouched = false;
 	try {
 		// Net effect of the native wrapper-env round trip: a method scope parented on
 		// definition_env with the receiver bound; the wrapper env and its define(this)
 		// are bypassed dead weight
 		rec.locals.set_this(receiver);
+		if (rec.env_lazy) {
+			environment_ = dispatch.definition_env;
+		} else
 		// Sticky method scope: bodies that provably never park state in the env
 		// (chunk::method_env_reusable) run in ONE persistent env per dispatcher, re-bound
 		// to the receiver each call - no pool round trip, no reset/epoch churn, and the
@@ -10081,7 +10096,8 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;   // frame-kind metadata (this/closure_env); slots live in the window
-	rec.f.entry_env = environment_;
+	// null entry_env = lazy marker: this/fields/access-context resolve from the frame
+	rec.f.entry_env = rec.env_lazy ? nullptr : environment_;
 	// Frame window built at the stack top during binding (pooled-vector args)
 	rec.f.window_backed = true;
 	rec.f.window_base = stack_.size();
@@ -10657,6 +10673,9 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 
 				if (symbol_id != UINT64_MAX && caller_env) {
 					script_value* argPtr = caller_env->get_value_ptr(symbol_id);
+					if (!argPtr && caller_frame) {
+						argPtr = frame_this_member_ptr(*caller_frame, symbol_id);   // method-lazy caller: bare field args
+					}
 					if (!argPtr) {
 						return raise_(
 							make_error_code(runtime_error_code::undefined_variable),

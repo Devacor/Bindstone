@@ -1,6 +1,8 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <atomic>
 #include <sstream>
+#include <thread>
 
 namespace jai {
 
@@ -110,8 +112,12 @@ struct script_value::reference_holder_pool {
 
     static constexpr size_t max_free_blocks = 256;
     std::vector<block*> free_blocks;
-    size_t outstanding = 0;      // checked-out blocks (live holders)
+    std::atomic<size_t> outstanding{0};   // checked-out blocks; atomic: see return_block
     bool engine_alive = true;
+    // Pool structure is owner-thread-only. A pooled holder released on a WORKER thread
+    // (future parallel flows; none today mint one) must not touch the free list — it
+    // heap-deletes instead, and the atomic count keeps teardown's orphan logic exact.
+    std::thread::id owner = std::this_thread::get_id();
 
     // Reserve up front: return_block runs inside ~strong_ptr (noexcept), so the
     // free-list push must never allocate
@@ -120,15 +126,16 @@ struct script_value::reference_holder_pool {
     static void return_block(jai::detail::control_block_base* base) {
         block* b = static_cast<block*>(static_cast<jai::detail::control_block<reference_holder>*>(base));
         reference_holder_pool* pool = b->home;
-        --pool->outstanding;
+        const size_t left = --pool->outstanding;
 #ifndef NDEBUG
         base->magic = jai::detail::cb_magic_dead;   // scrambled parked OR freed (use-after-free canary)
 #endif
-        if (pool->engine_alive && pool->free_blocks.size() < max_free_blocks) {
+        if (pool->engine_alive && std::this_thread::get_id() == pool->owner &&
+            pool->free_blocks.size() < max_free_blocks) {
             pool->free_blocks.push_back(b);
         } else {
             delete b;
-            if (!pool->engine_alive && pool->outstanding == 0) {
+            if (!pool->engine_alive && left == 0) {
                 delete pool;
             }
         }

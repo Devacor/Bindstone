@@ -1186,7 +1186,20 @@ std::string vm_backend::value_to_string_with_method(const script_value& val) {
 	return val.to_string();
 }
 
+bool vm_backend::object_defines_custom_equality(const script_value& v) const {
+	const script_value& d = v.is_reference() ? v.deref() : v;
+	if (!d.is_object()) { return false; }
+	auto holder = const_cast<script_value&>(d).get_object_holder();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return false; }
+	auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+	return cd && cd->defines_method(eq_method_id_);
+}
+
 std::optional<bool> vm_backend::object_equality_via_method(const script_value& left, const script_value& right) {
+	// Safe-mode workers never dispatch operator methods: the method-value copy and the
+	// bound-method invocation both race shared state (increment B; handle_equal raises
+	// the verdict before the structural fallback could silently diverge)
+	if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -1214,6 +1227,9 @@ std::optional<bool> vm_backend::object_equality_via_method(const script_value& l
 }
 
 std::optional<bool> vm_backend::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
+	// fallback is loud, so no divergence gate is needed here
+	if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -1241,6 +1257,9 @@ std::optional<bool> vm_backend::object_comparison_via_method(const script_value&
 }
 
 std::optional<script_value> vm_backend::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
+	// fallback is loud, so no divergence gate is needed here
+	if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -2066,6 +2085,14 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 		return script_value(left_map.get() == right_map.get(), engine_);
 	}
 
+	// Safe-mode workers: a custom op== would be skipped by the operator wall and the
+	// structural fallback below would silently DIVERGE from serial — verdict instead.
+	// KEEP BYTE-PARALLEL with the interpreter twin.
+	if (parallel_worker_ && !engine_->allow_unsafe_parallel() &&
+	    (object_defines_custom_equality(left) || object_defines_custom_equality(right))) [[unlikely]] {
+		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+			"custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+	}
 	auto custom_result = object_equality_via_method(left, right);
 	if (custom_result.has_value()) {
 		return script_value(custom_result.value(), engine_);
@@ -3196,6 +3223,14 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				}
 
 				if (!handled) {
+					// Safe-mode workers: operator= dispatch copies shared method values and
+					// escapes to the engine backend — verdict (increment B)
+					if (parallel_worker_ && !engine_->allow_unsafe_parallel() &&
+					    instance->get_class_definition() &&
+					    instance->get_class_definition()->defines_method(assign_operator_id_)) [[unlikely]] {
+						return raise_(make_error_code(runtime_error_code::unsupported_operation),
+							"custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+					}
 					script_value method = instance->get_method(assign_operator_id_, false);
 					if (method.is_function()) {
 						const script_function& func = method.as_function();
@@ -3229,6 +3264,13 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				auto instance_result = currentVal->checked_as<std::shared_ptr<class_instance>>();
 				if (instance_result) {
 					auto instance = instance_result.value();
+					// Safe-mode workers: verdict instead of a racing operator= (increment B)
+					if (parallel_worker_ && !engine_->allow_unsafe_parallel() &&
+					    instance->get_class_definition() &&
+					    instance->get_class_definition()->defines_method(assign_operator_id_)) [[unlikely]] {
+						return raise_(make_error_code(runtime_error_code::unsupported_operation),
+							"custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+					}
 					script_value method = instance->get_method(assign_operator_id_, false);
 					if (method.is_function()) {
 						const script_function& func = method.as_function();
@@ -4763,6 +4805,12 @@ op_status vm_backend::exec_index(frame& f, const vm_instruction& ins) {
 	}
 
 	if (left.is_object()) {
+		// Safe-mode workers: operator[]/global-operator dispatch copies shared method
+		// values and escapes to the engine backend — verdict (increment B)
+		if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+			return raise_(make_error_code(runtime_error_code::unsupported_operation),
+				"custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+		}
 		auto instance_result = left.checked_as<std::shared_ptr<class_instance>>();
 		if (instance_result) {
 			auto instance = instance_result.value();
@@ -9713,6 +9761,13 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	auto it = chunk_cache_.find(body.get());
 	if (it != chunk_cache_.end()) {
 		return it->second.compiled;
+	}
+	// In-region compiles (unsafe-mode dispatch; admitted paths precompile at the
+	// barrier) serialize engine-wide: compilation copies AST literal strong_ptrs
+	// whose counts are non-atomic
+	std::unique_lock<std::mutex> region_compile_guard;
+	if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
+		region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 	}
 	auto compiled = compiler_.compile_callable(name, params, body, local_count);
 	chunk_cache_.emplace(body.get(), chunk_cache_entry{compiled, body});

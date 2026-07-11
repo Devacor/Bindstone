@@ -412,6 +412,11 @@ namespace {
 				               "' has non-public members — its methods are not admitted in a parallel body (v1)");
 			}
 			if (!visited_methods.insert(decl.get()).second) { return true; }   // recursion / already admitted
+			// Pre-mint the shared parameter storage (a mutable lazy cache on the AST
+			// node): workers dispatching this method concurrently must only ever READ it
+			if (!decl->shared_params_cache) {
+				decl->shared_params_cache = std::make_shared<const std::vector<parameter>>(decl->parameters);
+			}
 			admitted_methods.push_back({ cls, name_id, name, decl });
 
 			const class_definition* saved_class = method_class;

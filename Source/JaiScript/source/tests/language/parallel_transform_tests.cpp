@@ -1181,6 +1181,22 @@ public:
 			check_true(msg.find("only single-overload methods defined on the element's own class") != std::string::npos);
 		});
 
+		test("custom_operator_denied_with_verdict", [this]() {
+			// Increment B: operator dispatch would race shared method values; a custom
+			// op== additionally must not silently fall back to structural equality
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				class Vec { int x = 0; function operator==(Vec other) { return x == other.x; } }
+				var a = [];
+				for (var i = 0; i < 32; i++) { auto v = Vec(); v.x = i % 2; a.push(v); }
+				auto probe = Vec();
+				try { parallel_for (auto& v : a) { if (v == v) { v.x = 1; } } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("custom operator dispatch on class instances is not admitted in a parallel body") != std::string::npos);
+		});
+
 		test("method_call_unsafe_override", [this]() {
 			// Trusted scripts keep the anything-goes path
 			auto e = make_engine();

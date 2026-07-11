@@ -13,6 +13,10 @@
 #ifdef JAISCRIPT_DIAG_ATOMIC_RC
 #include <atomic>
 #endif
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+#include <cstdlib>
+#include <thread>
+#endif
 
 namespace jai {
 
@@ -50,13 +54,27 @@ struct control_block_base {
 #ifndef NDEBUG
     uint32_t magic = cb_magic_live;  // asserted at every cb derivation, scrambled in dealloc (D8)
 #endif
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+    // Canary build: blocks tagged single-thread (AST literal strings) abort AT the
+    // cross-thread refcount touch — the abort backtrace names the racer, not the victim
+    std::thread::id diag_owner{};   // default = untagged
+    void diag_tag() noexcept { diag_owner = std::this_thread::get_id(); }
+    void diag_check() const noexcept {
+        if (diag_owner != std::thread::id{} && diag_owner != std::this_thread::get_id()) { std::abort(); }
+    }
+#endif
 
     control_block_base() = default;
     control_block_base(const control_block_base&) = delete;
     control_block_base& operator=(const control_block_base&) = delete;
 
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+    void add_strong() noexcept { diag_check(); ++strong_count; }
+    bool release_strong() noexcept { diag_check(); return --strong_count == 0; }
+#else
     void add_strong() noexcept { ++strong_count; }
     bool release_strong() noexcept { return --strong_count == 0; }
+#endif
     void add_weak() noexcept { ++weak_count; }
     bool release_weak() noexcept { return --weak_count == 0 && strong_count == 0; }
 

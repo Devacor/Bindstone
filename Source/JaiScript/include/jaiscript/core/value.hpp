@@ -316,6 +316,18 @@ namespace jai {
         // Use this in hot paths like is_truthy() to avoid type_info_ pointer dereference
         // PURE index read: bound primitives report TYPEID_CPP_BOUND (14), never their semantic type
         inline size_t raw_storage_index() const noexcept { return storage_.index(); }
+
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+        // Canary build: tag this value's string block single-thread (AST literals) so a
+        // cross-thread refcount touch aborts AT the racing site
+        void diag_tag_single_thread() {
+            if (storage_.index() == TYPEID_STRING) {
+                if (auto* s = std::get<strong_ptr<script_string>>(storage_).get()) {
+                    detail::cb_from_object(s)->diag_tag();
+                }
+            }
+        }
+#endif
         // Type checking methods use raw_storage_index() for fastest possible type checks
         // Deref-first, then translate the cpp_bound box through its semantic_index so bound
         // primitives (and refs to them) keep answering as their semantic type

@@ -16,6 +16,7 @@
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <unordered_set>
@@ -322,6 +323,12 @@ namespace jai {
         // fields-unchanged reload proves itself by migrating zero instances).
         size_t hot_reload_field_migrations() const { return hot_reload_field_migrations_; }
         void count_hot_reload_field_migration() { ++hot_reload_field_migrations_; }
+
+        // Serializes IN-REGION chunk compiles engine-wide (unsafe-mode method dispatch
+        // lazily compiles on worker threads; compilation copies AST literal strong_ptrs
+        // whose counts are non-atomic). Never taken outside an active parallel region.
+        // unique_ptr: the engine is movable, a mutex is not.
+        std::mutex& parallel_compile_mutex() { return *parallel_compile_mutex_; }
 
         // Chunk boundaries chosen by the most recent parallel_transform (n+1 bounds for n
         // chunks). Instrumentation for tests/benchmarks — never observable from script.
@@ -863,6 +870,7 @@ namespace jai {
         // SCAFFOLDING (typed_array_design.md stage 2): see typed_array_storage() above.
         bool typed_array_storage_ = false;
         size_t hot_reload_field_migrations_ = 0;
+        std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
 
         // Single post-parse execution pipeline shared by execute(string) and
         // execute(jaibite&): every string execute exercises the same machinery a

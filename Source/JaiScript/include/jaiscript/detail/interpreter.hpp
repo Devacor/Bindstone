@@ -751,6 +751,7 @@ namespace jai {
         uint64_t resume_id_;
         uint64_t done_id_;
         uint64_t same_as_id_;
+        uint64_t eq_method_id_ = 0;   // "==" interned at construction (worker probes must not intern)
 
         // Cached symbol IDs for operator overloading (initialized in constructor)
         uint64_t op_plus_id_;
@@ -966,6 +967,7 @@ namespace jai {
         std::string value_to_string_with_method(const script_value& val);
         // Helper function for object equality via operator== method (defined in interpreter.cpp)
         // Returns: nullopt if no custom equality, true/false if method found and returned a result
+        bool object_defines_custom_equality(const script_value& v) const;
         std::optional<bool> object_equality_via_method(const script_value& left, const script_value& right);
 
         // Generic helper for binary comparison operators (<, <=, >, >=) via custom methods

@@ -6612,6 +6612,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             const script_method_dispatch* dispatch = nullptr;
             std::shared_ptr<environment> def_env;
             std::shared_ptr<class_definition> cls_pin;
+            std::shared_ptr<function_decl> parallel_pin_decl;
             class_definition* cls_raw = nullptr;
             bool ic_route = false;
 
@@ -6623,15 +6624,26 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
                         inst_raw = static_cast<class_instance*>(holder->data.get());
                         cls_raw = inst_raw->get_class_definition();
                     }
-                    // Worker wall (parallel_for v1): script-class method dispatch touches
-                    // SHARED class_definition state (overload/IC caches, dispatcher body
-                    // caches) that concurrent workers would race on, and method bodies
-                    // aren't provisioned per worker. Trusted scripts opt in.
+                    // Worker method wall → admission verdict (parallel-method-admission
+                    // ruling): barrier-admitted methods dispatch through pinned
+                    // worker-private state (fresh dispatcher value, pre-resolved overload —
+                    // no shared count, cache, or IC is ever touched); anything unpinned
+                    // keeps the wall error. KEEP the verdict text BYTE-PARALLEL with vm
+                    // exec_call_method's twin.
                     if (parallel_worker_ && cls_raw && !engine_->allow_unsafe_parallel()) [[unlikely]] {
-                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                            "cannot call script class methods in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
-                    }
-                    if (cls_raw && member->mcache_cls == cls_raw &&
+                        const detail::parallel_method_pin* pin = parallel_method_pins_
+                            ? parallel_method_pins_->find(cls_raw, member->member_id) : nullptr;
+                        if (!pin) {
+                            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                                "method '{0}' was not admitted in this parallel body (admitted: single-overload "
+                                "public methods on the element's own class touching only element, local, or "
+                                "captured-read state; engine::allow_unsafe_parallel(true) overrides)", member->member_id);
+                        }
+                        dispatch = pin->method_value.as_function().target<script_method_dispatch>();
+                        def_env = dispatch->definition_env;
+                        cls_pin = dispatch->cls;
+                        parallel_pin_decl = pin->resolved;
+                    } else if (cls_raw && member->mcache_cls == cls_raw &&
                         member->mcache_epoch == cls_raw->method_epoch() &&
                         !((member->mcache_flags & 2) && objectValue.get_type_info() &&
                           objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) &&
@@ -6757,7 +6769,12 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
 
                 function_decl* direct_ast = nullptr;
                 std::shared_ptr<function_decl> resolved_pin;
-                if (ic_route && cls_raw && member->mcache_epoch == cls_raw->method_epoch()) {
+                if (parallel_pin_decl) {
+                    // Barrier-resolved: no overload resolution, no shared-cache touch
+                    resolved_pin = parallel_pin_decl;
+                    direct_ast = resolved_pin.get();
+                }
+                if (!direct_ast && ic_route && cls_raw && member->mcache_epoch == cls_raw->method_epoch()) {
                     // Post-args revalidation passed (an argument expression could have hot
                     // reloaded the class). The signature check replaces overload resolution:
                     // exact primitive/any match on a lone overload is what the scorer picks.

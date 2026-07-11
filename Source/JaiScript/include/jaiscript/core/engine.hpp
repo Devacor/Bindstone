@@ -317,6 +317,12 @@ namespace jai {
         void typed_array_storage(bool enabled) { typed_array_storage_ = enabled; }
         bool typed_array_storage() const { return typed_array_storage_; }
 
+        // Hot-reload work counter: per-instance field migrations performed since engine
+        // construction. Tests assert DELTAS of this instead of wall-clock ratios (a
+        // fields-unchanged reload proves itself by migrating zero instances).
+        size_t hot_reload_field_migrations() const { return hot_reload_field_migrations_; }
+        void count_hot_reload_field_migration() { ++hot_reload_field_migrations_; }
+
         // Chunk boundaries chosen by the most recent parallel_transform (n+1 bounds for n
         // chunks). Instrumentation for tests/benchmarks — never observable from script.
         const std::vector<size_t>& last_parallel_chunk_bounds() const;
@@ -856,6 +862,7 @@ namespace jai {
 
         // SCAFFOLDING (typed_array_design.md stage 2): see typed_array_storage() above.
         bool typed_array_storage_ = false;
+        size_t hot_reload_field_migrations_ = 0;
 
         // Single post-parse execution pipeline shared by execute(string) and
         // execute(jaibite&): every string execute exercises the same machinery a

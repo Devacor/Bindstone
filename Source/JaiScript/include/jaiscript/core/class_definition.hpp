@@ -361,6 +361,10 @@ public:
         auto it = method_overloads_.find(name_id);
         return (it != method_overloads_.end() && it->second.size() == 1) ? it->second[0].get() : nullptr;
     }
+    std::shared_ptr<function_decl> single_method_overload_ptr(uint64_t name_id) const {
+        auto it = method_overloads_.find(name_id);
+        return (it != method_overloads_.end() && it->second.size() == 1) ? it->second[0] : nullptr;
+    }
 
     void add_field(std::string_view name, const script_value& default_value) {
         auto eng = engine_;
@@ -1267,6 +1271,7 @@ public:
                 }
 
                 instance->migrate_fields(old_fields, new_field_defaults);
+                if (engine_) { engine_->count_hot_reload_field_migration(); }
             }
 
             try {
@@ -1309,6 +1314,7 @@ public:
         for (auto& weak_instance : instances_) {
             if (auto instance = weak_instance.lock()) {
                 instance->migrate_fields(dummy_old_fields, all_fields);
+                if (engine_) { engine_->count_hot_reload_field_migration(); }
             }
         }
 

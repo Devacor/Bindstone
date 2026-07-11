@@ -59,6 +59,10 @@ public:
         interpreter_->set_has_custom_numeric_ops(value);
     }
 
+    void set_parallel_method_pins(const detail::parallel_method_pin_table* pins) override {
+        interpreter_->set_parallel_method_pins(pins);
+    }
+
     void set_has_custom_binary_ops(bool value) override {
         interpreter_->set_has_custom_binary_ops(value);
     }

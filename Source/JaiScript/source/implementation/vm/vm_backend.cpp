@@ -7333,14 +7333,26 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 		script_value objv = object.deref();
 		if (objv.is_object()) {
 			auto holder = objv.get_object_holder();
-			// Worker wall (parallel_for v1): script-class method dispatch touches SHARED
-			// class_definition state (overload/IC caches, dispatcher body caches) that
-			// concurrent workers would race on, and method bodies aren't provisioned per
-			// worker. Trusted scripts opt in.
+			// Worker method wall → admission verdict (parallel-method-admission ruling):
+			// barrier-admitted methods dispatch on THIS worker's backend through pinned
+			// worker-private state (fresh dispatcher value, pre-resolved overload,
+			// pre-compiled chunk — no shared count or cache is ever touched); anything
+			// unpinned keeps the wall error. Trusted scripts still opt out entirely.
 			if (parallel_worker_ && holder && holder->is_class_instance_wrapper && holder->data &&
 			    !engine_->allow_unsafe_parallel()) [[unlikely]] {
-				return raise_(make_error_code(runtime_error_code::unsupported_operation),
-					"cannot call script class methods in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+				auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+				const detail::parallel_method_pin* pin = parallel_method_pins_ && cd
+					? parallel_method_pins_->find(cd, member->member_id) : nullptr;
+				if (!pin) {
+					return raise_(make_error_code(runtime_error_code::unsupported_operation),
+						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
+						"public methods on the element's own class touching only element, local, or "
+						"captured-read state; engine::allow_unsafe_parallel(true) overrides)", member->member_id);
+				}
+				script_value method_val = pin->method_value;   // pin-private control block
+				const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
+				return enter_script_method(f, std::move(method_val), *dispatch, pin->resolved,
+				                           std::move(objv), arguments, site);
 			}
 			// A user class method WINS over a same-named builtin handle method (Dev ruling
 			// 2026-07): the sp-builtin only applies when the class does NOT define it.
@@ -9688,6 +9700,10 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program) {
 		return out;
 	}
 	return make_null();
+}
+
+void vm_backend::precompile_parallel_method(const function_decl& decl) {
+	chunk_for_body(decl.name, decl.parameters, decl.body, decl.local_count);
 }
 
 std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,

@@ -69,6 +69,8 @@ struct script_method_dispatch {
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
 };
 
+namespace detail { struct parallel_method_pin_table; }
+
 /**
  * Abstract interface for script execution backends.
  * This allows us to have both interpreter and bytecode VM implementations.
@@ -76,6 +78,11 @@ struct script_method_dispatch {
 class execution_backend {
 public:
     virtual ~execution_backend() = default;
+
+    // Parallel workers: barrier-provisioned class-method pins for the active region
+    // (null outside regions and on engine backends). A worker method wall consults it —
+    // a hit dispatches on worker-private state, a miss is an admission verdict.
+    virtual void set_parallel_method_pins(const detail::parallel_method_pin_table*) {}
 
     // Debugger hook: engine::debugger() wires the controller here. Default no-op, so the
     // vm backend inherits it unchanged until phase 5 adds its statement-boundary hook.

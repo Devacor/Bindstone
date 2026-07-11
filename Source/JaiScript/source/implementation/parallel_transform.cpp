@@ -87,6 +87,11 @@ namespace jai::detail {
 		std::vector<uint64_t> capture_name_ids;
 		std::unordered_set<const void*> provisioned_nodes;
 
+		// Barrier-admitted class methods for THIS call: worker-private minted dispatcher
+		// values + pre-resolved overloads (parallel-method-admission ruling). Rebuilt per
+		// call (element classes are a runtime fact); cleared at the join.
+		detail::parallel_method_pin_table method_pins;
+
 		// Provisioning fingerprint: reuse is valid only while these match the current
 		// call. Script bodies are identity-compared (hot reload swaps bodies -> rebuild);
 		// host copies are refreshed on every reuse instead of fingerprinted.
@@ -198,6 +203,22 @@ namespace {
 			}
 		}
 
+		// Set while walking a script-class method body at the barrier: bare names that are
+		// the class's own fields root at the ELEMENT (chunk-exclusive — reads AND writes
+		// admitted, exactly as the same access spelled inline in the loop body would be).
+		const class_definition* method_class = nullptr;
+
+		bool self_field(uint64_t id) const {
+			return method_class && method_class->find_field_declaring_class(id) != nullptr;
+		}
+
+		void collect_element_method(const member_expr* m) {
+			for (const auto& rec : adm.element_method_calls) {
+				if (rec.name_id == m->member_id) { return; }
+			}
+			adm.element_method_calls.push_back({ m->member_id, m->member, m });
+		}
+
 		// In-place mode member access (read or store position): admitted iff the chain
 		// roots at a LOCAL identifier - the owned element or a worker-private local.
 		// Index expressions inside the chain walk under the normal rules. Every member
@@ -207,9 +228,14 @@ namespace {
 			std::vector<const expression_ptr*> indexes;
 			const expression* cur = m;
 			identifier_expr* root = nullptr;
+			bool rooted_at_self = false;
 			while (cur) {
 				if (cur->get_type() == node_type::identifier_expr) {
 					root = const_cast<identifier_expr*>(static_cast<const identifier_expr*>(cur));
+					break;
+				}
+				if (cur->get_type() == node_type::this_expr) {
+					rooted_at_self = true;   // method-body chain on the element itself
 					break;
 				}
 				if (cur->get_type() == node_type::member_expr) {
@@ -229,10 +255,13 @@ namespace {
 				}
 				break;
 			}
-			if (!root) {
+			if (rooted_at_self && !method_class) {
+				return fail(m, "'this' is not allowed in a parallel body");
+			}
+			if (!root && !rooted_at_self) {
 				return fail(m, std::string(what) + " must root at a local variable in a parallel body");
 			}
-			if (!is_local(root->symbol_id)) {
+			if (root && !is_local(root->symbol_id) && !self_field(root->symbol_id)) {
 				return fail(m, std::string(what) + " reaches captured state '" + std::string(root->name) +
 				               "' (captured reads are read-only, and objects cannot be captured)");
 			}
@@ -249,7 +278,8 @@ namespace {
 			while (cur) {
 				if (cur->get_type() == node_type::identifier_expr) {
 					auto* ident = static_cast<identifier_expr*>(const_cast<expression*>(cur));
-					return is_local(ident->symbol_id) ? nullptr : ident;
+					// Self fields are element-rooted, never enclosing state
+					return (is_local(ident->symbol_id) || self_field(ident->symbol_id)) ? nullptr : ident;
 				}
 				if (cur->get_type() == node_type::binary_expr &&
 				    static_cast<const binary_expr*>(cur)->op.type == token_type::left_bracket) {
@@ -338,6 +368,89 @@ namespace {
 			}
 			scopes.swap(saved);
 			return ok;
+		}
+
+		// ===== Barrier-time class-method admission (parallel-method-admission ruling) =====
+		// A method on the chunk-exclusive element is exactly as safe as the same accesses
+		// spelled inline in the loop body — the walk proves it: self fields read/write OK,
+		// captured global reads collect as ordinary captures, everything shared-mutating
+		// gets a verdict naming the violation. v1 admits single-overload non-coroutine
+		// methods defined on the element's own class.
+		struct admitted_method {
+			const class_definition* cls = nullptr;
+			uint64_t name_id = 0;
+			std::string_view name;   // symbolizer storage (permanent)
+			std::shared_ptr<function_decl> decl;
+		};
+		std::vector<admitted_method> admitted_methods;
+		std::unordered_set<const function_decl*> visited_methods;
+
+		bool admit_class_method(const class_definition* cls, uint64_t name_id, std::string_view name, const ast_node* site) {
+			auto decl = cls->single_method_overload_ptr(name_id);
+			if (!decl) {
+				return fail(site, "method '" + std::string(name) + "' on class '" + cls->get_name() +
+				               "' is not admitted in a parallel body (only single-overload methods defined on the element's own class)");
+			}
+			if (decl->is_coroutine) {
+				return fail(site, "coroutine method '" + std::string(name) + "' is not allowed in a parallel body");
+			}
+			if (!decl->body) {
+				return fail(site, "method '" + std::string(name) + "' has no body known at admission time");
+			}
+			// The pinned worker dispatch bypasses the getter-precedence probe and the
+			// access-context check — the barrier proves both moot instead
+			if (cls->find_field_declaring_class(name_id) != nullptr) {
+				return fail(site, "'" + std::string(name) + "' names both a field and a method on class '" +
+				               cls->get_name() + "' — not admitted in a parallel body (v1)");
+			}
+			if (cls->defines_method(sym.get_getter_id_with_view(name_id).first)) {
+				return fail(site, "method '" + std::string(name) + "' is shadowed by a property getter on class '" +
+				               cls->get_name() + "' — not admitted in a parallel body (v1)");
+			}
+			if (cls->chain_has_nonpublic()) {
+				return fail(site, "class '" + cls->get_name() +
+				               "' has non-public members — its methods are not admitted in a parallel body (v1)");
+			}
+			if (!visited_methods.insert(decl.get()).second) { return true; }   // recursion / already admitted
+			admitted_methods.push_back({ cls, name_id, name, decl });
+
+			const class_definition* saved_class = method_class;
+			method_class = cls;
+			std::vector<std::unordered_set<uint64_t>> saved;
+			saved.swap(scopes);
+			scopes.emplace_back();
+			bool ok = true;
+			for (const auto& p : decl->parameters) {
+				if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }   // warm (idempotent lazy fill)
+				declare(p.symbol_id);
+				collect_type(p.type);
+				if (p.default_value && !walk_expr(p.default_value)) { ok = false; break; }
+			}
+			if (ok) {
+				collect_type(decl->return_type);
+				for (const auto& d : decl->body->declarations) {
+					if (!walk_stmt(d)) { ok = false; break; }
+				}
+			}
+			scopes.swap(saved);
+			method_class = saved_class;
+			return ok;
+		}
+
+		// Barrier entry: resolve the body's collected element-method names against the
+		// live element classes. Names no class defines are builtins — ignored (runtime
+		// precedence is unchanged for them).
+		bool admit_element_methods(const std::vector<const class_definition*>& classes) {
+			// Index walk: admitting a method body collects ITS this.x() calls into the
+			// same worklist (transitive admission), so the vector grows under us
+			for (size_t i = 0; i < adm.element_method_calls.size(); ++i) {
+				const auto callrec = adm.element_method_calls[i];   // copy: push_back may reallocate
+				for (const class_definition* cls : classes) {
+					if (!cls->defines_method(callrec.name_id)) { continue; }
+					if (!admit_class_method(cls, callrec.name_id, callrec.name, callrec.site)) { return false; }
+				}
+			}
+			return true;
 		}
 
 		bool walk_stmt(const statement_ptr& s) {
@@ -473,6 +586,10 @@ namespace {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(e.get());
 				if (is_local(n->symbol_id)) { return true; }
+				if (self_field(n->symbol_id)) { return true; }   // element-rooted field read
+				if (method_class && method_class->defines_method(n->symbol_id)) {
+					return fail(n, "method '" + std::string(n->name) + "' cannot be captured as a value in a parallel body");
+				}
 				// Captured read (whole-value use): the barrier classifies and provisions
 				// it per worker; writes to it are rejected at walk_target / the wall
 				touch_capture(n, false);
@@ -516,6 +633,8 @@ namespace {
 			case node_type::new_expr:
 				return fail(e.get(), "'new' is not allowed in a parallel body");
 			case node_type::this_expr:
+				if (method_class) { return true; }   // self IS the chunk-exclusive element
+				return fail(e.get(), "'this'/'super' is not allowed in a parallel body");
 			case node_type::super_expr:
 				return fail(e.get(), "'this'/'super' is not allowed in a parallel body");
 			case node_type::ternary_expr: {
@@ -556,6 +675,7 @@ namespace {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(t.get());
 				if (is_local(n->symbol_id)) { return true; }
+				if (!aliasing && self_field(n->symbol_id)) { return true; }   // element field store (chunk-exclusive)
 				if (aliasing) {
 					return fail(n, std::string(what) + " would alias enclosing state '" + std::string(n->name) +
 					               "' (captured reads are read-only)");
@@ -618,8 +738,14 @@ namespace {
 					} else if (!walk_expr(m->object)) {
 						return false;   // subscript-chain receiver: subscript walk records the touch
 					}
-				} else if (!walk_expr(m->object)) {
-					return false;
+				} else {
+					// Element / worker-local receiver: record the name for the barrier's
+					// class-method admission (the receiver's class is a runtime fact; names
+					// no element class defines are builtins and simply never match)
+					collect_element_method(m);
+					if (!walk_expr(m->object)) {
+						return false;
+					}
 				}
 				for (const auto& a : call->arguments) {
 					if (!walk_expr(a)) { return false; }
@@ -633,6 +759,19 @@ namespace {
 			const std::string callee_name(callee->name);
 			if (is_local(callee->symbol_id)) {
 				return fail(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body (v0)");
+			}
+			// Bare sibling-method calls resolve through the env→bound-method seam at
+			// runtime (the engine-backend escape the pins exist to prevent); the
+			// 'this.' spelling routes through the pinned dispatch op instead
+			if (method_class && method_class->defines_method(callee->symbol_id)) {
+				return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
+				               "()' in a parallel body (bare sibling calls are not admitted, v1)");
+			}
+			// Method bodies stay within the element: global-function graphs from methods
+			// would mutate the cached admission per call — not admitted (v1)
+			if (method_class && !primitive_ctor_name(callee->name)) {
+				return fail(callee, "global function call '" + callee_name +
+				               "' from a parallel method body is not admitted (v1)");
 			}
 			// Resolve the callee BEFORE walking arguments so the caller sees the most
 			// useful violation first (e.g. a nested parallel_transform names itself,
@@ -1660,7 +1799,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	std::vector<resolved_capture> captures;
 	state.last_captures.clear();
 	captures.reserve(adm->captures.size());
-	for (const auto& entry : adm->captures) {
+	auto classify_and_add = [&](const parallel_admission::capture_entry& entry) -> checked_result<void> {
 		auto global = capture_env ? capture_env->get(entry.name_id)
 		                          : eng.get_global_environment()->get(entry.name_id);
 		if (!global) {
@@ -1711,6 +1850,11 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		}
 		state.last_captures.emplace_back(entry.name_id, cap.kind);
 		captures.push_back(std::move(cap));
+		return {};
+	};
+	for (const auto& entry : adm->captures) {
+		auto classified = classify_and_add(entry);
+		if (!classified) { return classified; }
 	}
 
 	// STAGE-2a BRIDGE (typed_array_design.md): a typed-node source demotes IN PLACE at
@@ -1727,6 +1871,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	// the walk entirely (trusted scripts).
 	auto& source = const_cast<script_array*>(source_node)->values();
 	const size_t n = source.size();
+	std::vector<const class_definition*> element_classes;
 	if (!eng.allow_unsafe_parallel() && !statically_all_primitive(array_value)) {
 		for (size_t i = 0; i < n; ++i) {
 			bool ok = false;
@@ -1741,10 +1886,45 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 				             " value containers, flat value-class instances - are provably exclusive;"
 				             " engine::allow_unsafe_parallel(true) overrides)");
 			}
+			if (!adm->element_method_calls.empty() && source[i].is_object()) {
+				auto holder = source[i].get_object_holder();
+				if (holder && holder->is_class_instance_wrapper && holder->data) {
+					auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+					if (cd && std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) {
+						element_classes.push_back(cd);
+					}
+				}
+			}
 		}
 	}
 	if (n == 0) {
 		return {};
+	}
+
+	// Barrier method admission (parallel-method-admission ruling): the body's collected
+	// element-method names resolve against the LIVE element classes — per-call state, so
+	// it lives outside the body-keyed admission cache. Admitted (class, method) pairs
+	// provision per-worker pins below; captures found inside method bodies classify and
+	// provision exactly like body captures.
+	admission_builder method_adm(eng);
+	method_adm.inplace_root = true;
+	method_adm.prefix = "parallel_for";
+	size_t method_capture_base = 0;
+	if (!element_classes.empty()) {
+		method_adm.adm.element_method_calls = adm->element_method_calls;
+		for (const auto& entry : adm->captures) {
+			method_adm.capture_index.emplace(entry.name_id, method_adm.adm.captures.size());
+			method_adm.adm.captures.push_back(entry);
+		}
+		method_capture_base = method_adm.adm.captures.size();
+		if (!method_adm.admit_element_methods(element_classes)) {
+			state.error_text = method_adm.adm.message;
+			return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
+		}
+		for (size_t ci = method_capture_base; ci < method_adm.adm.captures.size(); ++ci) {
+			auto classified = classify_and_add(method_adm.adm.captures[ci]);
+			if (!classified) { return classified; }
+		}
 	}
 
 	size_t worker_count = eng.parallel_thread_count();
@@ -1812,6 +1992,8 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 				slot->provisioned_nodes.clear();
 				slot->element_refs.clear();
 				slot->raw_input = nullptr;
+				slot->backend->set_parallel_method_pins(nullptr);
+				slot->method_pins.entries.clear();
 			}
 		}
 	} join_guard{ eng, pool->worker_slots, worker_count };
@@ -1874,6 +2056,30 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 			slot->root_env->define(cap.entry->name_id, std::move(provisioned));
 			slot->capture_name_ids.push_back(cap.entry->name_id);
 		}
+		// Admitted-method pins: a FRESH dispatcher value minted per worker (new control
+		// block — the pin's runtime copies never touch a shared count), overload
+		// pre-resolved, body chunk precompiled on this worker's own backend. All
+		// single-threaded, charged to the barrier.
+		slot->method_pins.entries.clear();
+		for (const auto& am : method_adm.admitted_methods) {
+			const script_value shared_method = am.cls->get_method(am.name_id, false);
+			const script_method_dispatch* src = shared_method.is_function()
+				? shared_method.as_function().target<script_method_dispatch>() : nullptr;
+			if (!src) {
+				return usage("parallel_for: method '" + std::string(am.name) + "' has no script dispatcher (internal)");
+			}
+			script_method_dispatch wd;
+			wd.eng = src->eng;
+			wd.cls = src->cls;
+			wd.name_id = src->name_id;
+			wd.definition_env = src->definition_env;
+			detail::parallel_method_pin pin;
+			pin.method_value = script_value::make_function(std::move(wd), &eng);
+			pin.resolved = am.decl;
+			slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
+			if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
+		}
+		slot->backend->set_parallel_method_pins(slot->method_pins.entries.empty() ? nullptr : &slot->method_pins);
 		contexts.push_back(slot.get());
 	}
 	prewarm_region_types(eng, [&] {

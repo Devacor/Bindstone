@@ -47,14 +47,7 @@ public:
     // Defined out-of-line (needs class_definition + the conversion kernel).
     void set_field(uint64_t id, const script_value& value);
 
-    void set_field_unchecked(uint64_t id, const script_value& value) {
-        auto it = fields_.find(id);
-        if (it != fields_.end() && it->second.is_reference()) {
-            it->second.deref() = value;
-        } else {
-            fields_.insert_or_assign(id, value);
-        }
-    }
+    void set_field_unchecked(uint64_t id, const script_value& value);
 
     // Script-write enforcement: declared-type fields convert like '=' on locals or error
     // with the locals-identical text; 'var' (any) fields pass through; undeclared ('auto')
@@ -67,21 +60,12 @@ public:
 
     bool has_field(uint64_t id) const;
 
-    bool has_field_value(uint64_t id) const {
-        return fields_.find(id) != fields_.end();
-    }
+    bool has_field_value(uint64_t id) const { return find_field_value(id) != nullptr; }
 
-    // Field node lookup WITHOUT lazy default insertion (field-reference resolution:
+    // Field storage lookup WITHOUT lazy default insertion (field-reference resolution:
     // a reload-removed field must error, not silently resurrect as a default)
-    script_value* find_field_value(uint64_t id) {
-        auto it = fields_.find(id);
-        return it != fields_.end() ? &it->second : nullptr;
-    }
-
-    const script_value* find_field_value(uint64_t id) const {
-        auto it = fields_.find(id);
-        return it != fields_.end() ? &it->second : nullptr;
-    }
+    script_value* find_field_value(uint64_t id);
+    const script_value* find_field_value(uint64_t id) const;
 
     const std::string& get_class_name() const { return class_name_; }
 
@@ -92,19 +76,14 @@ public:
 
     script_value get_method(uint64_t id, bool throw_if_missing = true) const;
 
-    void set_class_definition(std::shared_ptr<class_definition> class_def) {
-        class_def_ = class_def.get();
-    }
+    void set_class_definition(std::shared_ptr<class_definition> class_def);
 
-    const std::unordered_map<uint64_t, script_value>& get_fields() const {
-        return fields_;
-    }
-
-    // Mutable field iteration for the parallel barrier's normalization pass (detaching
-    // shared string nodes inside an owned element, single-threaded at the barrier).
-    std::unordered_map<uint64_t, script_value>& get_fields_mutable() {
-        return fields_;
-    }
+    // Field iteration, slot order (first build ≈ declaration order, base-first) then
+    // runtime-overflow entries; replaces get_fields()/get_fields_mutable() — flat
+    // storage has no map to hand out. fn(uint64_t id, script_value& value).
+    template <typename F> void for_each_field(F&& fn);
+    template <typename F> void for_each_field(F&& fn) const;
+    size_t field_value_count() const;
 
     class_definition* get_class_definition() const {
         return class_def_;
@@ -138,11 +117,7 @@ public:
 
     std::shared_ptr<class_instance> deep_copy() const;
 
-    void copy_fields_from(const class_instance& other) {
-        for (const auto& [id, value] : other.fields_) {
-            fields_.insert_or_assign(id, value.clone());
-        }
-    }
+    void copy_fields_from(const class_instance& other);
 
     uint64_t get_cpp_object_field_id() const;
 
@@ -164,7 +139,21 @@ public:
 
 private:
     std::string class_name_;
-    std::unordered_map<uint64_t, script_value> fields_;
+    // Tier-1 flat fields: slot-indexed per class_definition's append-only registry.
+    // unique_ptr pointees NEVER move (vector growth relocates the pointers only), so
+    // cached field addresses — suspended coroutines' env chains, this-capturing
+    // closures — survive resize AND hot-reload migration, matching the old map's
+    // node-stability contract. null pointer OR raw-invalid pointee = ABSENT (raw
+    // check, NOT is_invalid(): a reference field derefs). Runtime-added fields and
+    // pre-definition writes (deserialization) live in the lazily-built overflow map;
+    // set_class_definition re-homes them into slots.
+    std::vector<std::unique_ptr<script_value>> flat_fields_;
+    std::unique_ptr<std::unordered_map<uint64_t, script_value>> overflow_fields_;
+    // Store WITHOUT reference write-through (the old map's raw insert_or_assign shape:
+    // copy_fields_from and lazy-default materialization replace a held reference value
+    // itself); returns the stored cell. set_field_unchecked keeps write-through.
+    script_value& materialize_field(uint64_t id, script_value&& v);
+    void rehome_overflow_fields();
     class_definition* class_def_ = nullptr;
     engine* engine_ = nullptr;
     mutable uint64_t cpp_object_field_id_ = 0;
@@ -380,6 +369,7 @@ public:
             field_defaults_.insert_or_assign(name_id, default_value);
         }
         field_defaults_cache_valid_ = false;
+        field_slots_current_ = false;
     }
 
     void add_field(const std::string& name) {
@@ -389,6 +379,7 @@ public:
         uint64_t name_id = eng->symbolize(name);
         field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
         field_defaults_cache_valid_ = false;
+        field_slots_current_ = false;
     }
 
     // Declared field types (ruling 2026-07: typed fields enforce like locals). 'auto'
@@ -749,6 +740,37 @@ public:
         return all_field_defaults_cache_;
     }
 
+    // Flat-field slots (see registry members): base-first chain walk appends unseen
+    // ids; existing assignments never move. k_no_field_slot = never declared anywhere
+    // in the chain (runtime-added fields live in the instance overflow map).
+    static constexpr uint32_t k_no_field_slot = UINT32_MAX;
+    void ensure_field_slots() const {
+        if (field_slots_current_) return;
+        std::function<void(const class_definition&)> walk = [&](const class_definition& cd) {
+            for (const auto& parent : cd.parent_classes_) {
+                if (parent) walk(*parent);
+            }
+            for (const auto& [id, value] : cd.field_defaults_) {
+                if (field_slots_.find(id) == field_slots_.end()) {
+                    field_slots_.emplace(id, static_cast<uint32_t>(slot_to_field_.size()));
+                    slot_to_field_.push_back(id);
+                }
+            }
+        };
+        walk(*this);
+        field_slots_current_ = true;
+    }
+    uint32_t field_slot(uint64_t id) const {
+        ensure_field_slots();
+        auto it = field_slots_.find(id);
+        return it != field_slots_.end() ? it->second : k_no_field_slot;
+    }
+    uint64_t slot_field(uint32_t slot) const { return slot_to_field_[slot]; }
+    uint32_t field_slot_count() const {
+        ensure_field_slots();
+        return static_cast<uint32_t>(slot_to_field_.size());
+    }
+
     /// Class that DECLARED field `id` (own defaults first, then parents, then the C++
     /// base). Field-reference bindability needs the declarer's kind: a C++ .property()
     /// member keeps a dead fields_ placeholder whose truth lives in the C++ object.
@@ -779,6 +801,7 @@ public:
             }
         }
         field_defaults_cache_valid_ = false;
+        field_slots_current_ = false;
         refresh_access_chain_flag();
         bump_method_epoch();   // resolution chain changed
     }
@@ -794,6 +817,7 @@ public:
 
         parent_classes_.push_back(parent);
         field_defaults_cache_valid_ = false;
+        field_slots_current_ = false;
 
         if (has_diamond_inheritance()) {
             parent_classes_.pop_back();
@@ -813,6 +837,7 @@ public:
     [[nodiscard]] bool set_parents(const std::vector<std::shared_ptr<class_definition>>& parents) {
         parent_classes_ = parents;
         field_defaults_cache_valid_ = false;
+        field_slots_current_ = false;
 
         if (has_diamond_inheritance()) {
             parent_classes_.clear();
@@ -1149,6 +1174,7 @@ public:
                         engine* engine_ref,
                         bool structurally_identical = false) {
         field_defaults_cache_valid_ = false;
+        field_slots_current_ = false;
         if (engine_ref) { engine_ref->bump_class_definition_epoch(); }
 
         if (structurally_identical) {
@@ -1304,6 +1330,7 @@ public:
 
     void update_instances_from_base() {
         field_defaults_cache_valid_ = false;
+        field_slots_current_ = false;
         const auto& all_fields = get_all_field_defaults();
         std::set<uint64_t> dummy_old_fields;
 
@@ -1381,6 +1408,14 @@ private:
     std::vector<std::shared_ptr<class_definition>> parent_classes_;
     mutable std::unordered_map<uint64_t, script_value> all_field_defaults_cache_;
     mutable bool field_defaults_cache_valid_ = false;
+    // Flat-field slot registry (tier-1 flat classes): APPEND-ONLY — a field id keeps
+    // its slot for the class's lifetime (re-added fields REUSE their retired slot), so
+    // instance storage never re-indexes across hot reloads. Slot existence is NOT
+    // liveness (get_all_field_defaults is); ensure_field_slots walks the chain
+    // base-first, so first-build slot order ≈ declaration order.
+    mutable std::unordered_map<uint64_t, uint32_t> field_slots_;
+    mutable std::vector<uint64_t> slot_to_field_;
+    mutable bool field_slots_current_ = false;   // re-walk the chain on next query
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value null_field_value_;
 
@@ -1444,6 +1479,8 @@ private:
 
     void store_field_defaults(const std::unordered_map<uint64_t, script_value>& new_field_defaults, engine* engine_ref) {
         field_defaults_.clear();
+        field_defaults_cache_valid_ = false;
+        field_slots_current_ = false;
         for (const auto& [id, value] : new_field_defaults) {
             if (value.get_engine() == nullptr && engine_ref) {
                 script_value value_with_engine(value);
@@ -1461,6 +1498,133 @@ inline std::shared_ptr<class_definition> make_script_class_definition(const std:
 }
 
 // Out-of-line class_instance implementations (need class_definition to be complete)
+
+inline script_value* class_instance::find_field_value(uint64_t id) {
+    if (class_def_) {
+        const uint32_t slot = class_def_->field_slot(id);
+        if (slot != class_definition::k_no_field_slot) {
+            if (slot >= flat_fields_.size()) {
+                return nullptr;
+            }
+            script_value* v = flat_fields_[slot].get();
+            return (v && v->raw_storage_index() != script_value::TYPEID_INVALID) ? v : nullptr;
+        }
+    }
+    if (overflow_fields_) {
+        auto it = overflow_fields_->find(id);
+        if (it != overflow_fields_->end()) {
+            return &it->second;
+        }
+    }
+    return nullptr;
+}
+
+inline const script_value* class_instance::find_field_value(uint64_t id) const {
+    return const_cast<class_instance*>(this)->find_field_value(id);
+}
+
+inline script_value& class_instance::materialize_field(uint64_t id, script_value&& v) {
+    if (class_def_) {
+        const uint32_t slot = class_def_->field_slot(id);
+        if (slot != class_definition::k_no_field_slot) {
+            if (slot >= flat_fields_.size()) {
+                flat_fields_.resize((std::max)(static_cast<size_t>(class_def_->field_slot_count()),
+                                               static_cast<size_t>(slot) + 1));
+            }
+            auto& cell = flat_fields_[slot];
+            if (!cell) {
+                cell = std::make_unique<script_value>(std::move(v));
+            } else {
+                *cell = std::move(v);
+            }
+            return *cell;
+        }
+    }
+    if (!overflow_fields_) {
+        overflow_fields_ = std::make_unique<std::unordered_map<uint64_t, script_value>>();
+    }
+    return overflow_fields_->insert_or_assign(id, std::move(v)).first->second;
+}
+
+inline void class_instance::set_field_unchecked(uint64_t id, const script_value& value) {
+    if (script_value* existing = find_field_value(id); existing && existing->is_reference()) {
+        existing->deref() = value;
+        return;
+    }
+    materialize_field(id, script_value(value));
+}
+
+inline void class_instance::rehome_overflow_fields() {
+    // Declared ids written before the definition arrived (deserialization constructs,
+    // then classifies) move into their slots; runtime-only ids stay in overflow.
+    if (!class_def_ || !overflow_fields_) {
+        return;
+    }
+    for (auto it = overflow_fields_->begin(); it != overflow_fields_->end();) {
+        if (class_def_->field_slot(it->first) != class_definition::k_no_field_slot) {
+            materialize_field(it->first, std::move(it->second));
+            it = overflow_fields_->erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (overflow_fields_->empty()) {
+        overflow_fields_.reset();
+    }
+}
+
+inline void class_instance::set_class_definition(std::shared_ptr<class_definition> class_def) {
+    class_def_ = class_def.get();
+    rehome_overflow_fields();
+}
+
+template <typename F>
+inline void class_instance::for_each_field(F&& fn) {
+    if (class_def_) {
+        const size_t n = flat_fields_.size();
+        for (size_t slot = 0; slot < n; ++slot) {
+            script_value* v = flat_fields_[slot].get();
+            if (v && v->raw_storage_index() != script_value::TYPEID_INVALID) {
+                fn(class_def_->slot_field(static_cast<uint32_t>(slot)), *v);
+            }
+        }
+    }
+    if (overflow_fields_) {
+        for (auto& [id, value] : *overflow_fields_) {
+            fn(id, value);
+        }
+    }
+}
+
+template <typename F>
+inline void class_instance::for_each_field(F&& fn) const {
+    if (class_def_) {
+        const size_t n = flat_fields_.size();
+        for (size_t slot = 0; slot < n; ++slot) {
+            const script_value* v = flat_fields_[slot].get();
+            if (v && v->raw_storage_index() != script_value::TYPEID_INVALID) {
+                fn(class_def_->slot_field(static_cast<uint32_t>(slot)), *v);
+            }
+        }
+    }
+    if (overflow_fields_) {
+        for (const auto& [id, value] : *overflow_fields_) {
+            fn(id, value);
+        }
+    }
+}
+
+inline size_t class_instance::field_value_count() const {
+    size_t n = 0;
+    for_each_field([&](uint64_t, const script_value&) { ++n; });
+    return n;
+}
+
+inline void class_instance::copy_fields_from(const class_instance& other) {
+    other.for_each_field([&](uint64_t id, const script_value& value) {
+        materialize_field(id, value.clone());
+    });
+}
 
 namespace detail {
 
@@ -1681,14 +1845,15 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
 inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_ids,
                                            const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
     (void)old_field_ids;
-    // IN-PLACE per-id migration: kept fields keep their unordered_map NODE, so
-    // script_value addresses stay stable — suspended coroutines' env chains and
-    // this-capturing closures cache pointers to field nodes, and a wholesale map
-    // rebuild would dangle every one of them.
+    // IN-PLACE per-id migration: kept fields keep their storage CELL, so script_value
+    // addresses stay stable — suspended coroutines' env chains and this-capturing
+    // closures cache pointers to field cells, and a wholesale rebuild would dangle
+    // every one of them. (Flat slots are append-only per class lifetime; a unique_ptr
+    // pointee never moves.)
     for (const auto& [id, default_value] : new_field_defaults) {
-        auto it = fields_.find(id);
+        script_value* existing = find_field_value(id);
         type_info_ptr declared = class_def_ ? class_def_->get_field_declared_type(id) : nullptr;
-        if (it != fields_.end() && !it->second.is_reference() && !it->second.is_null() &&
+        if (existing && !existing->is_reference() && !existing->is_null() &&
             declared && declared->base_type != script_value_type::jai_any_type) {
             // Hot-reload retype ruling (2026-07): a declared-type change CONVERTS the live
             // value wherever the assignment table allows (float->int truncates, int->string
@@ -1696,10 +1861,10 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             // into int, string into int) falls back to the new initializer default. Reloads
             // stay permissive and never brick an instance. Same-type fields pass the
             // kernel's same-type fast path and keep their value.
-            if (auto converted = detail::try_convert_field_value(it->second, declared, engine_)) {
-                it->second = std::move(*converted);
+            if (auto converted = detail::try_convert_field_value(*existing, declared, engine_)) {
+                *existing = std::move(*converted);
             } else {
-                it->second = default_value.clone();
+                *existing = default_value.clone();
             }
             continue;
         }
@@ -1707,26 +1872,43 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
         // keep the existing runtime value, EXCEPT when a non-null new default's kind differs
         // from the held value (an auto field reloaded with a different-typed initializer), so
         // adopt the new default. A null default carries no type and never triggers a reset.
-        if (it != fields_.end()) {
+        if (existing) {
             bool retyped = !default_value.is_null() &&
-                it->second.deref().current_type() != default_value.deref().current_type();
+                existing->deref().current_type() != default_value.deref().current_type();
             if (retyped) {
-                it->second = default_value.clone();
+                *existing = default_value.clone();
             }
         } else {
-            fields_.emplace(id, default_value.clone());
+            materialize_field(id, default_value.clone());
         }
     }
 
     // Drop fields absent from the new definition — EXCEPT the runtime-only _cpp_object
     // field (the C++ base object never appears in the declared defaults; dropping it
     // would destruct the C++ object and leave inherited C++ methods uncallable).
+    // Slots drop IN PLACE (value overwritten with the invalid absent marker: the cell
+    // address survives, the dropped value's resources free NOW like the old map erase).
     uint64_t cpp_id = get_cpp_object_field_id();
-    for (auto it = fields_.begin(); it != fields_.end();) {
-        if (it->first != cpp_id && new_field_defaults.find(it->first) == new_field_defaults.end()) {
-            it = fields_.erase(it);
-        } else {
-            ++it;
+    if (class_def_) {
+        const size_t n = flat_fields_.size();
+        for (size_t slot = 0; slot < n; ++slot) {
+            script_value* v = flat_fields_[slot].get();
+            if (!v || v->raw_storage_index() == script_value::TYPEID_INVALID) {
+                continue;
+            }
+            const uint64_t id = class_def_->slot_field(static_cast<uint32_t>(slot));
+            if (id != cpp_id && new_field_defaults.find(id) == new_field_defaults.end()) {
+                *v = script_value::make_invalid(engine_);
+            }
+        }
+    }
+    if (overflow_fields_) {
+        for (auto it = overflow_fields_->begin(); it != overflow_fields_->end();) {
+            if (it->first != cpp_id && new_field_defaults.find(it->first) == new_field_defaults.end()) {
+                it = overflow_fields_->erase(it);
+            } else {
+                ++it;
+            }
         }
     }
 }
@@ -1763,7 +1945,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     auto new_instance = std::make_shared<class_instance>(class_name_, engine_);
 
     uint64_t cpp_obj_id = get_cpp_object_field_id();
-    for (const auto& [id, value] : fields_) {
+    for_each_field([&](uint64_t id, const script_value& value) {
         if (id == cpp_obj_id && !value.is_null()) {
             if (class_def_ && class_def_->has_copy_function()) {
                 auto cpp_obj = extract_cpp_object_impl(value);
@@ -1778,15 +1960,18 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                     auto eng_ref = value.get_engine();
                     new_instance->set_field(cpp_obj_id,
                         script_value::make_cpp_object(class_name_, class_def_->get_type_id(), new_cpp_obj, eng_ref));
-                    continue;
+                    return;
                 }
             }
         }
 
         new_instance->set_field(id, value.clone());
-    }
+    });
 
+    // The copies above landed in overflow (no definition yet, matching the old
+    // no-enforcement order); adopt the definition then slot them.
     new_instance->class_def_ = class_def_;
+    new_instance->rehome_overflow_fields();
 
     if (class_def_) {
         class_def_->register_instance(std::weak_ptr<class_instance>(new_instance));
@@ -1796,9 +1981,8 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
 }
 
 inline const script_value& class_instance::get_field(uint64_t id, bool throw_if_missing) const {
-    auto it = fields_.find(id);
-    if (it != fields_.end()) {
-        return it->second;
+    if (const script_value* v = find_field_value(id)) {
+        return *v;
     }
 
     if (class_def_) {
@@ -1842,17 +2026,15 @@ inline const script_value& class_instance::get_field(uint64_t id, bool throw_if_
 }
 
 inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missing) {
-    auto it = fields_.find(id);
-    if (it != fields_.end()) {
-        return it->second;
+    if (script_value* v = find_field_value(id)) {
+        return *v;
     }
 
     if (class_def_) {
         auto& field_defaults = class_def_->get_all_field_defaults();
         auto default_it = field_defaults.find(id);
         if (default_it != field_defaults.end()) {
-            auto [new_it, _] = fields_.emplace(id, default_it->second.clone());
-            return new_it->second;
+            return materialize_field(id, default_it->second.clone());
         }
 
         for (const auto& parent : class_def_->get_parent_classes()) {
@@ -1860,8 +2042,7 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
                 auto& parent_defaults = parent->get_all_field_defaults();
                 auto parent_it = parent_defaults.find(id);
                 if (parent_it != parent_defaults.end()) {
-                    auto [new_it, _] = fields_.emplace(id, parent_it->second.clone());
-                    return new_it->second;
+                    return materialize_field(id, parent_it->second.clone());
                 }
             }
         }
@@ -1871,8 +2052,7 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
             auto& cpp_defaults = cpp_base->get_all_field_defaults();
             auto cpp_it = cpp_defaults.find(id);
             if (cpp_it != cpp_defaults.end()) {
-                auto [new_it, _] = fields_.emplace(id, cpp_it->second.clone());
-                return new_it->second;
+                return materialize_field(id, cpp_it->second.clone());
             }
         }
     }
@@ -1900,7 +2080,7 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
 }
 
 inline bool class_instance::has_field(uint64_t id) const {
-    if (fields_.find(id) != fields_.end()) {
+    if (find_field_value(id) != nullptr) {
         return true;
     }
 

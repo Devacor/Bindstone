@@ -1283,11 +1283,11 @@ namespace {
 				auto& fresh = v.unchecked_get_object_storage();
 				inst = static_cast<class_instance*>(fresh->data.get());
 			}
-			for (auto& [field_id, field] : inst->get_fields_mutable()) {
-				(void)field_id;
-				if (!normalize_element_inplace(field, eng)) { return false; }
-			}
-			return true;
+			bool fields_ok = true;
+			inst->for_each_field([&](uint64_t, script_value& field) {
+				if (fields_ok && !normalize_element_inplace(field, eng)) { fields_ok = false; }
+			});
+			return fields_ok;
 		}
 		default:
 			return false;

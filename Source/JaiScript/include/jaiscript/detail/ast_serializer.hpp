@@ -25,10 +25,15 @@
 namespace jai::detail {
 
     inline constexpr uint8_t k_jaibite_magic[4] = { 'J', 'B', 'I', 'T' };
-    // Format-affecting enum edits (token_type / node_type values are serialized as raw
-    // u8) silently corrupt stale caches - pre-launch the fix is: delete the .jaibite
-    // sidecars and let them regen (Dev ruling; no version churn while private).
-    inline constexpr uint32_t k_jaibite_version = 1;
+    // BUMP THIS on ANY change to what a parse produces (Dev ruling 2026-07-11,
+    // reversing the earlier no-churn ruling): serialized bytes AND parse-time
+    // semantics baked into the AST — slot assignment, node/token enum values,
+    // capture plans. A stale sidecar is silently reparsed + rewritten (the loader's
+    // version check feeds the normal corrupt-fallback), so bumping is always safe
+    // and never bumping is how 2026-07-11's stale-slot_index caches happened.
+    //   v1: original format
+    //   v2: traditional-for initializer decls carry slot_index (parser slotting)
+    inline constexpr uint32_t k_jaibite_version = 2;
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.

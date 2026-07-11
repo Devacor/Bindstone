@@ -355,7 +355,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 			environment_ = global;
 			cached_global_env_ = global.get();   // stable for the engine's lifetime
 		}
-		compiler_ = vm_compiler(symbolizer_);
+		compiler_ = vm_compiler(symbolizer_, &builtins_);   // filled below; address stable
 
 		op_plus_id_ = symbolizer_->intern("+");
 		op_minus_id_ = symbolizer_->intern("-");
@@ -7434,11 +7434,22 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 
 	if (site.receiver_symbol != UINT64_MAX) {
 		// Name-first gate: the env walk only pays off when the member could be a string
-		// builtin at all (the registry is fixed after init), so probe the registry before
-		// resolving the receiver variable. Outcome-identical: the builtin fires iff the
-		// name is registered AND the variable is a string, same as the old order.
-		auto methodIt = builtins_.string_methods.find(member->member_id);
-		if (methodIt != builtins_.string_methods.end()) {
+		// builtin at all (the registry is fixed after init). Indexed chunks answer that
+		// with the baked bi_string (one compare); raw-compiler chunks keep the find.
+		// Outcome-identical: the builtin fires iff the name is registered AND the
+		// variable is a string, same as the old order.
+		const builtin_method* string_builtin = nullptr;
+		if (f.code->builtin_indexed) {
+			if (site.bi_string != builtin_method_registries::k_no_builtin) {
+				string_builtin = builtins_.string_by_index[site.bi_string];
+			}
+		} else {
+			auto methodIt = builtins_.string_methods.find(member->member_id);
+			if (methodIt != builtins_.string_methods.end()) {
+				string_builtin = &methodIt->second;
+			}
+		}
+		if (string_builtin) {
 			auto ref_result = environment_->get_ref(site.receiver_symbol);
 			if (ref_result && ref_result.value().get().is_string()) {
 				// Resolve through references (ref decls/cells): string builtins read
@@ -7448,7 +7459,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 				profile_call_method_paths_[3]++;
 #endif
-				auto result = methodIt->second(builtin_ctx(), var_ref, arguments);
+				auto result = (*string_builtin)(builtin_ctx(), var_ref, arguments);
 				if (!result) {
 					return raise_from(result);
 				}
@@ -7464,7 +7475,11 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	if (member->member_id != same_as_id_ &&
 	    !(member->object && member->object->get_type() == node_type::super_expr)) {
 		script_value objv = object.deref();
-		if (objv.is_object()) {
+		// ONE type query, integer compares after (each is_x re-derefs + re-reads the
+		// variant index): OBJECT + SHARED_PTR is exactly is_object()'s answer.
+		const size_t receiver_type = objv.raw_storage_index();
+		if (receiver_type == script_value::TYPEID_OBJECT ||
+		    receiver_type == script_value::TYPEID_SHARED_PTR) {
 			auto holder = objv.get_object_holder();
 			// Worker method wall → admission verdict (parallel-method-admission ruling):
 			// barrier-admitted methods dispatch on THIS worker's backend through pinned
@@ -7613,55 +7628,55 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					}
 				}
 			}
-		}
-	}
-
-	// Array/map builtins dispatch DIRECTLY: the native path below mints a bound-method
-	// function value per call (member_access_value's move-captured receiver copy) just to
-	// invoke it once. Same registry fn, same receiver value it would have captured (node
-	// shared, so content mutation lands identically; the copy dies at op end either way),
-	// same checked_result propagation. A registry miss falls through so unknown members
-	// and the map KEY-sugar spelling keep member_access_value's one voice.
-	if (member->member_id != same_as_id_ &&
-	    !(member->object && member->object->get_type() == node_type::super_expr)) {
-		const builtin_method* direct = nullptr;
-		if (object.is_array()) {
-			auto methodIt = builtins_.array_methods.find(member->member_id);
-			if (methodIt != builtins_.array_methods.end()) {
-				direct = &methodIt->second;
+		} else if (f.code->builtin_indexed) {
+			// Builtin methods dispatch DIRECTLY by one indexed load (bi_* baked at
+			// compile time, name-sorted = engine-independent): the native path below
+			// mints a bound-method function value per call just to invoke it once.
+			// Same registry fn, same receiver value it would have captured, same
+			// checked_result propagation. A miss (including exotic receivers like
+			// cpp_bound strings, which this integer switch deliberately excludes)
+			// falls through so unknown members, the map KEY-sugar spelling, and
+			// raw-compiler chunks keep member_access_value's one voice.
+			const builtin_method* direct = nullptr;
+			switch (receiver_type) {
+			case script_value::TYPEID_ARRAY:
+				if (site.bi_array != builtin_method_registries::k_no_builtin) {
+					direct = builtins_.array_by_index[site.bi_array];
+				}
+				break;
+			case script_value::TYPEID_MAP:
+				if (site.bi_map != builtin_method_registries::k_no_builtin) {
+					direct = builtins_.map_by_index[site.bi_map];
+				}
+				break;
+			case script_value::TYPEID_STRING:
+				// Only non-identifier string receivers reach here (identifier receivers
+				// whose variable is a string returned through the env path above).
+				if (site.bi_string != builtin_method_registries::k_no_builtin) {
+					direct = builtins_.string_by_index[site.bi_string];
+				}
+				break;
+			default:
+				break;
 			}
-		} else if (object.is_map()) {
-			auto methodIt = builtins_.map_methods.find(member->member_id);
-			if (methodIt != builtins_.map_methods.end()) {
-				direct = &methodIt->second;
-			}
-		} else if (object.is_string()) {
-			// Only non-identifier string receivers reach here (identifier receivers whose
-			// variable is a string returned through the env path above); the native mint
-			// captures the same deref'd copy this passes.
-			auto methodIt = builtins_.string_methods.find(member->member_id);
-			if (methodIt != builtins_.string_methods.end()) {
-				direct = &methodIt->second;
-			}
-		}
-		if (direct) {
+			if (direct) {
 #ifdef JAISCRIPT_VM_PROFILE
-			profile_call_method_paths_[6]++;
+				profile_call_method_paths_[6]++;
 #endif
-			// Deref'd COPY, exactly what member_access_value captures (line one of its
-			// body): builtins take self unchecked, and reference receivers (pairs[0])
-			// must resolve to the value; the node is shared so mutation lands the same.
-			script_value self = object.deref();
-			// Pending-site arming exactly as invoke_callee's opaque branch (callback
-			// builtins re-enter the vm); the boundary armor is guarded_native_call.
-			pending_call_site saved_pending = pending_site_ctx_;
-			pending_site_ctx_ = arguments.empty() ? saved_pending
-			                                      : pending_call_site{&site, &f, f.code};
-			struct pending_restore {
-				vm_backend* vm; pending_call_site saved;
-				~pending_restore() { vm->pending_site_ctx_ = saved; }
-			} restore_pending{this, saved_pending};
-			return guarded_native_call([&] { return (*direct)(builtin_ctx(), self, arguments); });
+				// objv IS the deref'd copy member_access_value captures (line one of its
+				// body): builtins take self unchecked, reference receivers (pairs[0])
+				// resolved above; the node is shared so mutation lands the same.
+				// Pending-site arming exactly as invoke_callee's opaque branch (callback
+				// builtins re-enter the vm); the boundary armor is guarded_native_call.
+				pending_call_site saved_pending = pending_site_ctx_;
+				pending_site_ctx_ = arguments.empty() ? saved_pending
+				                                      : pending_call_site{&site, &f, f.code};
+				struct pending_restore {
+					vm_backend* vm; pending_call_site saved;
+					~pending_restore() { vm->pending_site_ctx_ = saved; }
+				} restore_pending{this, saved_pending};
+				return guarded_native_call([&] { return (*direct)(builtin_ctx(), objv, arguments); });
+			}
 		}
 	}
 

@@ -59,6 +59,12 @@ namespace jai::vm {
         std::vector<uint32_t> arg_lvalue_nodes;
         uint32_t member_node = k_invalid_u32;      // op_call_method: member_expr node index
         uint64_t receiver_symbol = UINT64_MAX;     // op_call_method: identifier receiver symbol id
+        // Compile-time builtin dispatch indices (name-sorted, engine-independent — see
+        // builtin_method_registries): 0xFFFF = the member is not a builtin of that
+        // registry. Valid only when the owning chunk's builtin_indexed is set.
+        uint16_t bi_array = 0xFFFF;
+        uint16_t bi_map = 0xFFFF;
+        uint16_t bi_string = 0xFFFF;
         // Monomorphic in-loop callee cache (flat-stack stage 1): keyed on the address of
         // the loaded function value's shared script_function payload; ic_pin keeps that
         // object alive so a hit can never be a recycled address (ABA) — a redefined name
@@ -234,6 +240,9 @@ namespace jai::vm {
         // Compile-time lazy-env gate: false = every op proven not to need the per-call
         // scope environment, so plain in-loop callees skip creating it (fail-closed default)
         bool needs_frame_env = true;
+        // Compiler had the builtin registries: call_site bi_* indices are authoritative
+        // (invalid = not a builtin). False (raw-compiler tests) keeps the find fallback.
+        bool builtin_indexed = false;
         // Compile-time sticky-method-scope gate: true = no op parks per-call state in the
         // scope env or captures its identity beyond the call (closures/refs/try/scopes/env
         // decls), so a method body may run in ONE persistent per-dispatch method env

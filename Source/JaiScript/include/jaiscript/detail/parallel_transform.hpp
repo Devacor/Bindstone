@@ -24,8 +24,10 @@
 #include <vector>
 
 namespace jai {
+    class ast_node;
     class engine;
     class environment;
+    class function_decl;
     class parallel_for_stmt;
     class type_info;
     struct script_defined_function;
@@ -92,6 +94,45 @@ namespace jai::detail {
             bool borrow_eligible = true;   // every touch was a subscript read root
         };
         std::vector<capture_entry> captures;
+
+        // Method names called on element/worker-local receivers. Admission only collects
+        // (the receiver's class is a runtime fact); the barrier resolves each name against
+        // the live element classes and admits or rejects the (class, method) pair — see
+        // admit_element_methods. Builtin names that no element class defines are ignored.
+        struct element_method_call {
+            uint64_t name_id = 0;
+            std::string_view name;
+            const ast_node* site = nullptr;   // pinned transitively via script_functions
+        };
+        std::vector<element_method_call> element_method_calls;
+    };
+
+    // One barrier-admitted script-class method, provisioned per worker. The method value
+    // is a worker-private copy (its strong_ptr counts never cross threads), the overload
+    // is pre-resolved (workers never touch shared resolution caches), and the body chunk
+    // is precompiled on the worker's own backend at the barrier (no in-region compiles).
+    struct parallel_method_pin {
+        script_value method_value{std::monostate{}, nullptr};
+        std::shared_ptr<function_decl> resolved;
+    };
+
+    // (class_definition*, method name id) -> pin. Consulted by both backends' worker
+    // method walls: a hit dispatches on the pinned worker-private state; a miss keeps
+    // the wall error (now an admission verdict). Exact linear table: a region admits a
+    // handful of methods, and the key must never collide (wrong-method dispatch).
+    struct parallel_method_pin_table {
+        struct entry {
+            const void* cls = nullptr;
+            uint64_t name_id = 0;
+            parallel_method_pin pin;
+        };
+        std::vector<entry> entries;
+        const parallel_method_pin* find(const void* cls, uint64_t name_id) const noexcept {
+            for (const auto& e : entries) {
+                if (e.cls == cls && e.name_id == name_id) { return &e.pin; }
+            }
+            return nullptr;
+        }
     };
 
     // A reusable worker execution context (definition private to parallel_transform.cpp:

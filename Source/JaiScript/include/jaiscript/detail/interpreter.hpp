@@ -1164,6 +1164,13 @@ namespace jai {
         // arbitrary env reach are unsafe off-thread) checks this, gated by
         // engine::allow_unsafe_parallel. Never set on the engine's own backend.
         bool parallel_worker_ = false;
+        // Barrier-provisioned method pins for the active region (worker instances only;
+        // interpreter_backend forwards the execution_backend virtual here)
+        const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;
+
+        void set_parallel_method_pins(const detail::parallel_method_pin_table* pins) {
+            parallel_method_pins_ = pins;
+        }
 
         // Environment pooling functions (public: scoped_method_environment uses them)
         std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);

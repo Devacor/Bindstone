@@ -152,12 +152,23 @@ namespace jai::vm {
         // arbitrary env reach are unsafe off-thread) checks this, gated by
         // engine::allow_unsafe_parallel. Never set on the engine's own backend.
         bool parallel_worker_ = false;
+        // Barrier-provisioned method pins for the active region (worker instances only)
+        const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;
 
         // Compile a per-worker function copy's body on the MAIN thread at the region
         // barrier (compilation interns; workers must only ever hit) and pin the chunk on
         // the copy's own backend_body_cache.
         void precompile_parallel_function(const script_defined_function& fn) {
             fn.backend_body_cache = chunk_for_body(fn.name, fn.parameters(), fn.body, fn.local_count);
+        }
+
+        // Same barrier discipline for an admitted class method: warm THIS worker
+        // backend's chunk cache so the region never compiles (compilation copies AST
+        // literal strong_ptrs — main-thread-only traffic).
+        void precompile_parallel_method(const function_decl& decl);
+
+        void set_parallel_method_pins(const detail::parallel_method_pin_table* pins) override {
+            parallel_method_pins_ = pins;
         }
 
     private:

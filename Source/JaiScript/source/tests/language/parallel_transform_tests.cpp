@@ -1110,22 +1110,85 @@ public:
 			check_true(msg.find("cannot be mutated in place") != std::string::npos);
 		});
 
-		test("method_call_wall_and_unsafe_override", [this]() {
+		test("admitted_self_method_call", [this]() {
+			// parallel-method-admission ruling: a single-overload public method touching
+			// only element state is admitted in SAFE mode and dispatches via pinned
+			// worker-private state (no wall error)
 			auto e = make_engine();
-			// Small n -> one worker chunk, so the trusted run is genuinely single-threaded
 			auto r = e->execute(R"(
 				class Cell { int v = 0; int doubled() { return v * 2; } }
 				var a = [];
-				for (var i = 0; i < 8; i++) { auto c = Cell(); c.v = i; a.push(c); }
-				try { parallel_for (auto& c : a) { c.v = c.doubled(); } } catch (err) { return err; }
+				for (var i = 0; i < 32; i++) { auto c = Cell(); c.v = i; a.push(c); }
+				parallel_for (auto& c : a) { c.v = c.doubled(); }
+				return a[3].v * 1000 + a[31].v;
+			)");
+			check_eq((int64_t)6062, r.as_int());
+		});
+
+		test("admitted_method_deterministic_across_worker_counts", [this]() {
+			int64_t first = 0;
+			bool have_first = false;
+			for (size_t workers : {1, 2, 4, 8}) {
+				auto e = make_engine();
+				e->parallel_thread_count(workers);
+				auto r = e->execute(R"(
+					class Acc {
+						int v = 0; int extra = 0;
+						void bump(int by) { v = v + by; extra = this.helper(); }
+						int helper() { return v * 3; }
+					}
+					var a = [];
+					for (var i = 0; i < 100; i++) { auto c = Acc(); c.v = i; a.push(c); }
+					parallel_for (auto& c : a) { c.bump(7); c.bump(1); }
+					var t = 0;
+					for (auto c : a) { t = t + c.v * 31 + c.extra; }
+					return t;
+				)");
+				const int64_t s = r.as_int();
+				if (!have_first) { first = s; have_first = true; }
+				check_eq(first, s);
+			}
+		});
+
+		test("method_shared_write_denied_with_verdict", [this]() {
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				var total = 0;
+				class Cell { int v = 0; void sink() { total = total + v; } }
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(Cell()); }
+				try { parallel_for (auto& c : a) { c.sink(); } } catch (err) { return err; }
 				return "no-error";
 			)");
 			auto msg = r.as<std::string>();
-			check_true(msg.find("cannot call script class methods in a parallel body") != std::string::npos);
+			check_true(msg.find("body writes enclosing state 'total'") != std::string::npos);
+		});
+
+		test("overloaded_method_denied_with_verdict", [this]() {
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				class Cell {
+					int v = 0;
+					void set(int x) { v = x; }
+					void set(int x, int y) { v = x + y; }
+				}
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(Cell()); }
+				try { parallel_for (auto& c : a) { c.set(1); } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("only single-overload methods defined on the element's own class") != std::string::npos);
+		});
+
+		test("method_call_unsafe_override", [this]() {
+			// Trusted scripts keep the anything-goes path
+			auto e = make_engine();
 			e->allow_unsafe_parallel(true);
 			auto r2 = e->execute(R"(
+				class Cell2 { int v = 0; int doubled() { return v * 2; } }
 				var a2 = [];
-				for (var i = 0; i < 8; i++) { auto c = Cell(); c.v = i; a2.push(c); }
+				for (var i = 0; i < 8; i++) { auto c = Cell2(); c.v = i; a2.push(c); }
 				parallel_for (auto& c : a2) { c.v = c.doubled(); }
 				return a2[3].v;
 			)");

@@ -887,8 +887,9 @@ public:
                 }
             )");
             
+            const size_t migrations_before_unchanged = engine->hot_reload_field_migrations();
             auto start_optimized = std::chrono::high_resolution_clock::now();
-            
+
             engine->execute(R"(
                 class DataPoint {
                     auto x = 0.0;          // Same fields
@@ -899,19 +900,20 @@ public:
                     auto active = true;
                     auto category = 0;
                     auto priority = 1.0;
-                    
+
                     void process() {       // Changed method
                         x = x + 2.0;
                         y = y + 1.0;
                     }
-                    
+
                     void analyze() {       // New method
                         return x * y;
                     }
                 }
             )");
-            
+
             auto end_optimized = std::chrono::high_resolution_clock::now();
+            const size_t migrations_after_unchanged = engine->hot_reload_field_migrations();
             auto duration_optimized = std::chrono::duration_cast<std::chrono::microseconds>(
                 end_optimized - start_optimized).count();
             
@@ -924,8 +926,9 @@ public:
                 dp500.analyze(); // New method should work
             )");
             
+            const size_t migrations_before_changed = engine->hot_reload_field_migrations();
             auto start_unoptimized = std::chrono::high_resolution_clock::now();
-            
+
             engine->execute(R"(
                 class DataPoint {
                     auto x = 0.0;
@@ -937,29 +940,34 @@ public:
                     auto category = 0;
                     auto priority = 1.0;
                     auto weight = 1.0;     // NEW FIELD - forces migration
-                    
+
                     void process() {
                         x = x + 3.0;
                     }
                 }
             )");
+            const size_t migrations_after_changed = engine->hot_reload_field_migrations();
             
             auto end_unoptimized = std::chrono::high_resolution_clock::now();
             auto duration_unoptimized = std::chrono::duration_cast<std::chrono::microseconds>(
                 end_unoptimized - start_unoptimized).count();
-            
-            double speedup = static_cast<double>(duration_unoptimized) / duration_optimized;
 
-            std::cerr << "\nHot reload performance comparison (1000 instances):" << std::endl;
-            std::cerr << "  Fields unchanged (optimized): " << duration_optimized << " uS" << std::endl;
-            std::cerr << "  Fields changed (full migration): " << duration_unoptimized << " uS" << std::endl;
-            std::cerr << "  Speedup: " << std::fixed << std::setprecision(2) << speedup << "x" << std::endl;
-            std::cerr << std::endl;
-            
-            check_true(duration_optimized < duration_unoptimized,
-                      "Optimized hot reload should be faster than full migration");
-            check_true(speedup > 2.0,
-                      "Should see at least 2x speedup when fields unchanged");
+            // Counts are the assertion (load-immune); wall-clock is report-only context.
+            // The fields-unchanged reload proves its fast path by migrating ZERO of the
+            // 1000 instances; the field-adding reload proves the full walk by migrating
+            // every live one (instances[] holds all 1000, plus the two loose handles).
+            const size_t unchanged_migrations = migrations_after_unchanged - migrations_before_unchanged;
+            const size_t changed_migrations = migrations_after_changed - migrations_before_changed;
+            std::cerr << "\nHot reload work comparison (1000 instances):" << std::endl;
+            std::cerr << "  Fields unchanged: " << unchanged_migrations << " migrations, "
+                      << duration_optimized << " uS (report-only)" << std::endl;
+            std::cerr << "  Fields changed: " << changed_migrations << " migrations, "
+                      << duration_unoptimized << " uS (report-only)" << std::endl;
+
+            check_eq((size_t)0, unchanged_migrations,
+                      "Fields-unchanged reload must not migrate any instance");
+            check_true(changed_migrations >= 1000,
+                      "Field-adding reload must migrate every live instance");
         });
 
         test("identical_class_structural_identity", [this]() {

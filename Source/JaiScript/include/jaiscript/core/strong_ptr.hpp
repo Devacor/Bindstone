@@ -55,13 +55,12 @@ struct control_block_base {
     uint32_t magic = cb_magic_live;  // asserted at every cb derivation, scrambled in dealloc (D8)
 #endif
 #ifdef JAISCRIPT_DIAG_XTHREAD_RC
-    // Canary build: blocks tagged single-thread (AST literal strings) abort AT the
-    // cross-thread refcount touch — the abort backtrace names the racer, not the victim
+    // Canary build: blocks tagged single-thread (AST literal strings) report AT the
+    // cross-thread refcount touch — the hook (installed by the test runner) prints the
+    // racer's backtrace directly; signal-based capture loses concurrent aborts
     std::thread::id diag_owner{};   // default = untagged
     void diag_tag() noexcept { diag_owner = std::this_thread::get_id(); }
-    void diag_check() const noexcept {
-        if (diag_owner != std::thread::id{} && diag_owner != std::this_thread::get_id()) { std::abort(); }
-    }
+    void diag_check() const noexcept;
 #endif
 
     control_block_base() = default;
@@ -136,6 +135,18 @@ inline control_block_base* cb_from_object(T* p) noexcept {
     assert(cb->magic == cb_magic_live && "strong_ptr control-block derivation hit a dead or foreign block");
     return cb;
 }
+
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+// The hook owns termination: the winning reporter prints and aborts; racing losers
+// RETURN and continue (parking them deadlocks — they abort mid-CRT-operation holding
+// locks the winner's printer needs). Without a hook, plain abort.
+inline void (*diag_xthread_report)() = nullptr;
+inline void control_block_base::diag_check() const noexcept {
+    if (diag_owner != std::thread::id{} && diag_owner != std::this_thread::get_id()) {
+        if (diag_xthread_report) { diag_xthread_report(); } else { std::abort(); }
+    }
+}
+#endif
 
 struct adopt_tag {};
 

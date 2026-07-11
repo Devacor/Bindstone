@@ -594,6 +594,7 @@ namespace jai::vm {
         bool is_truthy(const script_value& value);
         bool object_to_bool_via_method(const script_value& value);
         std::string value_to_string_with_method(const script_value& val);
+        script_value materialize_constant(const script_value& tmpl);
         bool object_defines_custom_equality(const script_value& v) const;
         std::optional<bool> object_equality_via_method(const script_value& left, const script_value& right);
         std::optional<bool> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);

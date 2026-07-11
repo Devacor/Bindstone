@@ -683,6 +683,25 @@ namespace jai::vm {
         checked_result<void> exec_class_decl_node(class_decl* decl);
         checked_result<void> exec_namespace_decl_node(namespace_decl* decl);
 
+        // Op failures write details here (only via raise_); returns carry op_status.
+        error_propagator pending_error_{};
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status raise_(std::error_code ec, std::string_view msg, uint64_t sym = 0, uint64_t sym2 = 0) {
+            pending_error_ = error_propagator{ec, msg, sym, sym2};
+            return op_status::failed;
+        }
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status raise_from(const checked_result<void>& r) {
+            pending_error_ = r.error_value();
+            return op_status::failed;
+        }
+        op_status vm_check(op_status s) { return s; }
+        op_status vm_check(const checked_result<void>& r) { return r ? op_status::ok : raise_from(r); }
+
         checked_result<void> exec_load(frame& f, const vm_instruction& ins);
         checked_result<void> exec_store(frame& f, const vm_instruction& ins);
         checked_result<void> exec_compound_store(frame& f, const vm_instruction& ins);

@@ -478,6 +478,13 @@ inline std::string format_error(const error_propagator& err, Symbolizer& symboli
     return std::string(err.static_msg);
 }
 
+// Op-layer status: failure details ride the owning backend's pending_error slot,
+// not the return value. ok == value-initialization, so `return {};` stays valid.
+enum class [[nodiscard]] op_status : uint32_t {
+    ok = 0,
+    failed = 1,
+};
+
 // Convenience macro for propagating errors in visitor methods
 // Usage: JAISCRIPT_TRY(expr->left->accept(this));
 #define JAISCRIPT_TRY(expr) \

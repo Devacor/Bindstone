@@ -42,7 +42,98 @@ public:
         // Optional: Clean up after each test if needed
     }
 
+    // Real-world macro bench: one script, BOTH backends, deterministic int result as
+    // the parity tripwire, wall ms reported per backend (chrono, not the uS harness).
+    void run_macro_bench(const char* name, const char* src) {
+        double ms[2] = {0, 0};
+        int64_t hash[2] = {0, 0};
+        for (bool use_vm : {false, true}) {
+            auto e = jai::engine::make();
+            if (use_vm) { e->set_backend(jai::backend_type::vm); }
+            jai::stdlib::register_all(e);
+            e->execution_budget(0);
+            auto t0 = std::chrono::steady_clock::now();
+            auto r = e->execute(src);
+            auto t1 = std::chrono::steady_clock::now();
+            ms[use_vm ? 1 : 0] = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            hash[use_vm ? 1 : 0] = r.as_int();
+        }
+        check_eq(hash[0], hash[1], std::string(name) + " backend hash parity");
+        std::cerr << "[bench] " << name << ": interp " << ms[0] << " ms | vm " << ms[1]
+                  << " ms | ratio " << (ms[1] > 0 ? ms[0] / ms[1] : 0) << " | hash " << hash[1] << std::endl;
+    }
+
     void forge_tests() override {
+        // Real-world shaped macro benches (2026-07-11, the GLOOM lessons): entity_tick
+        // = the game-loop shape (class instances, method calls, field read/write ICs);
+        // brains = the call-boundary shape (coroutine resumes + bare sibling method
+        // calls — the CALL_FROM_SCRATCH heat, the campaign yardstick).
+        test("bench_entity_tick", [this]() {
+            run_macro_bench("entity_tick", R"(
+                class Entity {
+                    int id = 0; float x = 0.0; float y = 0.0; float vx = 0.0; float vy = 0.0;
+                    int hp = 100; int state = 0; int anim = 0;
+                    Entity(int id_) {
+                        id = id_; x = id_ * 3.7; y = id_ * 1.3;
+                        vx = 0.5 + (id_ % 7) * 0.1; vy = 0.25;
+                    }
+                    void tick(float dt) {
+                        x = x + vx * dt; y = y + vy * dt;
+                        anim = anim + 1;
+                        if (x > 100.0) { x = x - 100.0; state = state + 1; }
+                        if (y > 50.0) { y = y - 50.0; }
+                        if (anim % 60 == 0) { hp = hp - 1; if (hp <= 0) { hp = 100; state = 0; } }
+                    }
+                    int fold() { return (id * 31 + anim) * 7 + state * 3 + hp; }
+                }
+                var ents = [];
+                for (int i = 0; i < 200; ++i) { ents.push(new Entity(i)); }
+                int acc = 0;
+                for (int t = 0; t < 500; ++t) {
+                    for (int i = 0; i < 200; ++i) { var& e = ents[i]; e.tick(0.016); }
+                    if (t % 25 == 0) {
+                        for (int i = 0; i < 200; ++i) { var& e = ents[i]; acc = (acc * 33 + e.fold()) % 1000000007; }
+                    }
+                }
+                acc;
+            )");
+        });
+
+        test("bench_brains", [this]() {
+            run_macro_bench("brains", R"(
+                class Bot {
+                    int id = 0; float x = 0.0; float tgt = 0.0; int mood = 0; var brain = null;
+                    Bot(int id_) { id = id_; x = id_ * 1.0; tgt = ((id_ * 37) % 100) * 1.0; }
+                    float dist() { if (tgt > x) { return tgt - x; } return x - tgt; }
+                    bool near() { return dist() < 1.5; }
+                    void step_toward() { if (x < tgt) { x = x + 1.0; } else { x = x - 1.0; } }
+                    coroutine void think() {
+                        while (true) {
+                            while (!near()) { step_toward(); mood = mood + 1; yield; }
+                            tgt = ((mood + id * 13) % 100) * 1.0;
+                            mood = mood + 100;
+                            yield;
+                        }
+                    }
+                    void tick() {
+                        if (brain == null || brain.done()) { brain = think(); }
+                        brain.resume();
+                    }
+                    int fold() { return id * 31 + mood; }
+                }
+                var bots = [];
+                for (int i = 0; i < 100; ++i) { bots.push(new Bot(i)); }
+                int acc = 0;
+                for (int t = 0; t < 500; ++t) {
+                    for (int i = 0; i < 100; ++i) { var& b = bots[i]; b.tick(); }
+                    if (t % 25 == 0) {
+                        for (int i = 0; i < 100; ++i) { var& b = bots[i]; acc = (acc * 33 + b.fold()) % 1000000007; }
+                    }
+                }
+                acc;
+            )");
+        });
+
         // Note: Foundry's benchmark() runs 1000 iterations by default
         // Now we're measuring actual execution performance, not engine creation
 

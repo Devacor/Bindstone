@@ -497,24 +497,24 @@ namespace jai::vm {
                                               size_t local_count);
 
         checked_result<void> run(frame& entry);
-        checked_result<void> run_dispatch(frame*& fp, const size_t records_base);
+        op_status run_dispatch(frame*& fp, const size_t records_base);
         // In-loop call machinery: push/pop of call_records_ without native recursion.
         // args may alias stack_ (zero-copy slice [args_base, args_base+argc) with the
         // callee slot at args_base-1); the pooled-vector path passes (vec, 0, vec.size()).
-        checked_result<void> push_script_frame(frame& caller, script_value&& callee,
+        op_status push_script_frame(frame& caller, script_value&& callee,
                                                const script_defined_function& function,
                                                const std::vector<script_value>& args,
                                                size_t args_base, size_t argc,
                                                const call_site* site);
         // Method-call flattening: a script-class instance method enters the dispatch loop
         // directly (no bound-method mint, no arg re-copies, no native run() recursion)
-        checked_result<void> enter_script_method(frame& caller, script_value&& method_val,
+        op_status enter_script_method(frame& caller, script_value&& method_val,
                                                  const script_method_dispatch& dispatch,
                                                  const std::shared_ptr<function_decl>& ast,
                                                  script_value&& receiver,
                                                  const std::vector<script_value>& arguments,
                                                  const call_site& site);
-        checked_result<void> push_method_frame(frame& caller, script_value&& method_val,
+        op_status push_method_frame(frame& caller, script_value&& method_val,
                                                const script_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast,
                                                script_value&& receiver,
@@ -522,19 +522,19 @@ namespace jai::vm {
                                                const call_site* site);
         void anchor_method_result(script_value& result, script_value& receiver);
         void pop_script_frame_core(call_record& rec);
-        checked_result<void> return_from_script_frame(frame*& fp, const vm_instruction& ins);
+        op_status return_from_script_frame(frame*& fp, const vm_instruction& ins);
         // Shared return epilogue (classification switch + pop + result push); the
         // return superinstructions feed it a result they resolved without the stack
         // round trip. KEEP the exact order: convert while the callee frame is live.
-        checked_result<void> return_with_result(frame*& fp, script_value result);
+        op_status return_with_result(frame*& fp, script_value result);
         // Fused `return <ident>;` / `return <a op b>;` (stage 6): record-frame and
         // native-entry variants (the entry twins set return_value_ like op_return's
         // entry branch)
-        checked_result<void> exec_return_ident(frame*& fp, const vm_instruction& ins);
-        checked_result<void> exec_return_ident_entry(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_return_binary(frame*& fp, const vm_instruction& ins);
-        checked_result<void> exec_return_binary_entry(frame& f, const vm_instruction& ins);
-        checked_result<void> fall_off_script_frame(frame*& fp);
+        op_status exec_return_ident(frame*& fp, const vm_instruction& ins);
+        op_status exec_return_ident_entry(frame& f, const vm_instruction& ins);
+        op_status exec_return_binary(frame*& fp, const vm_instruction& ins);
+        op_status exec_return_binary_entry(frame& f, const vm_instruction& ins);
+        op_status fall_off_script_frame(frame*& fp);
         void convert_cpp_exception_at_frame(frame*& fp, const script_exception& e);
         // Interpreter parity: arg-eval throws convert at the frame MAKING the call
         bool ip_in_call_arg_zone(const frame& f) const;
@@ -549,7 +549,7 @@ namespace jai::vm {
         // Shared between call_script_function and the in-loop call path (single source of truth)
         void setup_callee_env(const script_defined_function& function, call_frame& locals,
                               const std::shared_ptr<environment>& prev_env);
-        checked_result<void> bind_parameters(const std::vector<parameter>& parameters,
+        op_status bind_parameters(const std::vector<parameter>& parameters,
                                              const std::vector<script_value>& args,
                                              size_t args_base, size_t argc,
                                              frame& callee, chunk& body_chunk,
@@ -559,7 +559,7 @@ namespace jai::vm {
         // Ref-param bind against the caller's variable storage: shares an existing
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark
-        checked_result<void> bind_reference_to_storage(script_value& storage, frame& callee, size_t param_slot);
+        op_status bind_reference_to_storage(script_value& storage, frame& callee, size_t param_slot);
         // Kernel caller-view over a frame: window frames hand the resolver their raw
         // window span (lawful: resolve_ref_lvalue never runs script, so the stack
         // cannot grow mid-resolve); fiber/legacy frames keep the call_frame read.
@@ -627,12 +627,12 @@ namespace jai::vm {
         // would; nullptr = caller must run its original full lookup (fallback tails).
         script_value* env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id);
         // box_cell: escape-marked decls wrap the value into a cell (see reference_holder)
-        checked_result<void> define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell = false);
+        op_status define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell = false);
 
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type);
         // Compound-assignment store-back (x op= rhs ≡ x = T(x op rhs)); interpreter twin:
         // interpreter::compound_typed_store_back
-        checked_result<void> compound_typed_store_back(script_value& target, script_value promoted);
+        op_status compound_typed_store_back(script_value& target, script_value promoted);
         checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type);
         checked_result<script_value> evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in);
 
@@ -675,63 +675,65 @@ namespace jai::vm {
                                          bool skip_parent_recursion = false);
 
         // Mirrors visit_member_expr's non-static path; unwinding cases leave out null
-        checked_result<void> member_access_value(const script_value& raw_object, member_expr* expr, script_value& out);
-        checked_result<void> static_member_value(member_expr* expr, script_value& out);
-        checked_result<void> assign_member(const script_value& object_value, member_expr* member, const script_value& value);
-        checked_result<void> invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
+        op_status member_access_value(const script_value& raw_object, member_expr* expr, script_value& out);
+        op_status static_member_value(member_expr* expr, script_value& out);
+        op_status assign_member(const script_value& object_value, member_expr* member, const script_value& value);
+        op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
 
-        checked_result<void> exec_class_decl_node(class_decl* decl);
-        checked_result<void> exec_namespace_decl_node(namespace_decl* decl);
+        op_status exec_class_decl_node(class_decl* decl);
+        op_status exec_namespace_decl_node(namespace_decl* decl);
 
         // Op failures write details here (only via raise_); returns carry op_status.
         error_propagator pending_error_{};
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
-        op_status raise_(std::error_code ec, std::string_view msg, uint64_t sym = 0, uint64_t sym2 = 0) {
+        op_status raise_(std::error_code ec, std::string_view msg = {}, uint64_t sym = 0, uint64_t sym2 = 0) {
             pending_error_ = error_propagator{ec, msg, sym, sym2};
             return op_status::failed;
         }
-#if defined(_MSC_VER)
-        __declspec(noinline)
-#endif
-        op_status raise_from(const checked_result<void>& r) {
+        op_status raise_from(const error_propagator& prop) {
+            pending_error_ = prop;
+            return op_status::failed;
+        }
+        template <typename T>
+        op_status raise_from(const checked_result<T>& r) {
             pending_error_ = r.error_value();
             return op_status::failed;
         }
         op_status vm_check(op_status s) { return s; }
         op_status vm_check(const checked_result<void>& r) { return r ? op_status::ok : raise_from(r); }
 
-        checked_result<void> exec_load(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_store(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_compound_store(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_incdec(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_decl_var(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_decl_ref_ident(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_decl_ref_value(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_binary(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_binary_fused(frame& f, const vm_instruction& ins);
+        op_status exec_load(frame& f, const vm_instruction& ins);
+        op_status exec_store(frame& f, const vm_instruction& ins);
+        op_status exec_compound_store(frame& f, const vm_instruction& ins);
+        op_status exec_incdec(frame& f, const vm_instruction& ins);
+        op_status exec_decl_var(frame& f, const vm_instruction& ins);
+        op_status exec_decl_ref_ident(frame& f, const vm_instruction& ins);
+        op_status exec_decl_ref_value(frame& f, const vm_instruction& ins);
+        op_status exec_binary(frame& f, const vm_instruction& ins);
+        op_status exec_binary_fused(frame& f, const vm_instruction& ins);
         // The ONE fused-binary computation, sink-templated (flatstack stage 6 dest-
         // addressing): op_binary_fused pushes, the _decl/_store variants land the
         // result without a push or a second dispatch. Defined in vm_backend.cpp.
         template <typename Sink>
-        checked_result<void> binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink);
-        checked_result<void> exec_binary_fused_decl(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_binary_fused_store(frame& f, const vm_instruction& ins);
+        op_status binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink);
+        op_status exec_binary_fused_decl(frame& f, const vm_instruction& ins);
+        op_status exec_binary_fused_store(frame& f, const vm_instruction& ins);
         // Fused subscript read/store: container+index as operands (no LOAD dispatches);
         // non-array shapes replay the verbatim unfused ops
-        checked_result<void> exec_index_fused(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_index_store_fused(frame& f, const vm_instruction& ins);
+        op_status exec_index_fused(frame& f, const vm_instruction& ins);
+        op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
         // op_store's exact post-pop tail, shared with op_binary_fused_store
-        checked_result<void> store_popped_value(frame& f, const vm_instruction& ins, script_value value);
+        op_status store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
-        checked_result<void> exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
+        op_status exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
         const script_value* fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot);
         // Superinstruction: fused binary RHS + identifier compound store
-        checked_result<void> exec_compound_fused(frame& f, const vm_instruction& ins);
+        op_status exec_compound_fused(frame& f, const vm_instruction& ins);
         // Counted-for ops: both always retarget f.ip (run() must `continue` after them)
-        checked_result<void> exec_cfor_prep(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_cfor_back(frame& f, const vm_instruction& ins);
+        op_status exec_cfor_prep(frame& f, const vm_instruction& ins);
+        op_status exec_cfor_back(frame& f, const vm_instruction& ins);
         bool resolve_cfor_int_operand(frame& f, const fused_operand& operand, script_int*& ptr, script_int& val);
         // Resolves an identifier operand exactly like exec_load (catch var, frame slot,
         // type-ctor names, env, this-field/bound-method/static) without pushing;
@@ -739,42 +741,42 @@ namespace jai::vm {
         checked_result<const script_value*> fused_ident_value(frame& f, const fused_operand& operand,
                                                               std::optional<script_value>& scratch,
                                                               size_t cache_slot);
-        checked_result<void> exec_index(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_index_assign(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_index_compound(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_index_store(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_index_compound_fused(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_math(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_parallel_for(frame& f, const vm_instruction& ins);
+        op_status exec_index(frame& f, const vm_instruction& ins);
+        op_status exec_index_assign(frame& f, const vm_instruction& ins);
+        op_status exec_index_compound(frame& f, const vm_instruction& ins);
+        op_status exec_index_store(frame& f, const vm_instruction& ins);
+        op_status exec_index_compound_fused(frame& f, const vm_instruction& ins);
+        op_status exec_math(frame& f, const vm_instruction& ins);
+        op_status exec_parallel_for(frame& f, const vm_instruction& ins);
         checked_result<const script_value*> fused_subscript_value(frame& f, const fused_operand& operand,
                                                                   std::optional<script_value>& scratch, size_t cache_slot);
-        checked_result<void> exec_unary(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_call(frame& f, const vm_instruction& ins);
+        op_status exec_unary(frame& f, const vm_instruction& ins);
+        op_status exec_call(frame& f, const vm_instruction& ins);
         // Callee-first probe pair (op_probe_callee / op_call_from_scratch)
-        checked_result<void> exec_probe_callee(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_call_from_scratch(frame& f, const vm_instruction& ins);
-        checked_result<void> push_script_frame_pinned(frame& caller,
+        op_status exec_probe_callee(frame& f, const vm_instruction& ins);
+        op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
+        op_status push_script_frame_pinned(frame& caller,
                                                const script_defined_function& function,
                                                strong_ptr<script_function> pin,
                                                size_t args_base, size_t argc,
                                                const call_site* site);
-        checked_result<void> exec_func_decl(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_closure(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_destructure(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_extended(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_throw(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_try_push(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_try_pop(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_catch_end(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_case_eq(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_iter_init(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_iter_next(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_iter_pop(frame& f, const vm_instruction& ins);
+        op_status exec_func_decl(frame& f, const vm_instruction& ins);
+        op_status exec_closure(frame& f, const vm_instruction& ins);
+        op_status exec_destructure(frame& f, const vm_instruction& ins);
+        op_status exec_extended(frame& f, const vm_instruction& ins);
+        op_status exec_throw(frame& f, const vm_instruction& ins);
+        op_status exec_try_push(frame& f, const vm_instruction& ins);
+        op_status exec_try_pop(frame& f, const vm_instruction& ins);
+        op_status exec_catch_end(frame& f, const vm_instruction& ins);
+        op_status exec_case_eq(frame& f, const vm_instruction& ins);
+        op_status exec_iter_init(frame& f, const vm_instruction& ins);
+        op_status exec_iter_next(frame& f, const vm_instruction& ins);
+        op_status exec_iter_pop(frame& f, const vm_instruction& ins);
         void exec_yield(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_include(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_import(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_ref_return_bind(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_ref_return_lvalue(frame& f, const vm_instruction& ins);
+        op_status exec_include(frame& f, const vm_instruction& ins);
+        op_status exec_import(frame& f, const vm_instruction& ins);
+        op_status exec_ref_return_bind(frame& f, const vm_instruction& ins);
+        op_status exec_ref_return_lvalue(frame& f, const vm_instruction& ins);
 
         vm_coroutine_state& coroutine_fiber_state(coroutine_handle& handle);
         // Runs (or continues) the fiber; returns the yield value, the final return value on the
@@ -783,21 +785,21 @@ namespace jai::vm {
         // Walks try records innermost-out: false = no handler in this frame, propagate
         bool unwind_to_handler(frame& f, const error_propagator* failure);
         // Both walk outward over in-loop frames down to records_base, popping as they go
-        bool handle_op_error(frame*& fp, size_t records_base, const checked_result<void>& result);
+        bool handle_op_error(frame*& fp, size_t records_base);
         bool handle_throw_unwind(frame*& fp, size_t records_base);
-        checked_result<void> exec_this(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_super(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_from_this(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_get_member(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_get_static(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_set_member(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_set_static(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_member_compound(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_call_method(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_new(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_class_decl(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_namespace_decl(frame& f, const vm_instruction& ins);
-        checked_result<void> exec_enum_decl(frame& f, const vm_instruction& ins);
+        op_status exec_this(frame& f, const vm_instruction& ins);
+        op_status exec_super(frame& f, const vm_instruction& ins);
+        op_status exec_from_this(frame& f, const vm_instruction& ins);
+        op_status exec_get_member(frame& f, const vm_instruction& ins);
+        op_status exec_get_static(frame& f, const vm_instruction& ins);
+        op_status exec_set_member(frame& f, const vm_instruction& ins);
+        op_status exec_set_static(frame& f, const vm_instruction& ins);
+        op_status exec_member_compound(frame& f, const vm_instruction& ins);
+        op_status exec_call_method(frame& f, const vm_instruction& ins);
+        op_status exec_new(frame& f, const vm_instruction& ins);
+        op_status exec_class_decl(frame& f, const vm_instruction& ins);
+        op_status exec_namespace_decl(frame& f, const vm_instruction& ins);
+        op_status exec_enum_decl(frame& f, const vm_instruction& ins);
     };
 
 } // namespace jai::vm

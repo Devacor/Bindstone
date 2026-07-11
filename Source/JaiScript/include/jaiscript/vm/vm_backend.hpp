@@ -695,9 +695,45 @@ namespace jai::vm {
         // Lexical access context for member enforcement: an env-untouched frame
         // (f.entry_env == nullptr) is a plain non-closure function — lexically
         // top-level, NO class context; its environment_ is the CALLER's chain,
-        // whose context must not leak into it
+        // whose context must not leak into it. Lazy METHOD frames answer with the
+        // receiver's class (their lazy gate excludes nonpublic chains, where the
+        // declaring-vs-dynamic class distinction could matter).
         const class_definition* frame_access_context(const frame& f) const {
-            return f.entry_env ? environment_->find_access_context() : nullptr;
+            if (f.entry_env) { return environment_->find_access_context(); }
+            if (f.locals && f.locals->is_method && f.locals->this_object_ptr) {
+                if (auto inst = f.locals->get_this().get_class_instance()) {
+                    return inst->get_class_definition();
+                }
+            }
+            return nullptr;
+        }
+
+        // Frame-first 'this': method frames carry the receiver on the record
+        // (identical to the method env's copy by construction); the env-kind lookup
+        // stays as the fallback for closure/coroutine frames whose 'this' flows
+        // through the captured chain
+        script_value* current_this(frame& f) {
+            if (f.locals && f.locals->is_method && f.locals->this_object_ptr) {
+                return &f.locals->get_this();
+            }
+            return environment_->get_value_ptr(this_id_);
+        }
+
+        // Frame-twin of environment::get_value_ptr's method-kind fallback (receiver
+        // fields, then class statics) for method-lazy frames — env-resolved eager
+        // frames never miss into this. KEEP BYTE-PARALLEL with environment.cpp.
+        script_value* frame_this_member_ptr(frame& f, uint64_t sym) {
+            if (!f.locals || !f.locals->is_method || !f.locals->this_object_ptr) { return nullptr; }
+            script_value& this_val = f.locals->get_this();
+            if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
+            auto instance = this_val.get_class_instance();
+            if (!instance) { return nullptr; }
+            script_value& field_ref = instance->get_field(sym, false);
+            if (!field_ref.is_invalid()) { return &field_ref; }
+            if (auto class_def = instance->get_class_definition()) {
+                return class_def->get_static_field_ptr(sym);
+            }
+            return nullptr;
         }
         op_status member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out);
         op_status static_member_value(frame& f, member_expr* expr, script_value& out);

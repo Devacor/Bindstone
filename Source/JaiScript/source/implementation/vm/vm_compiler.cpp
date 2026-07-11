@@ -1386,12 +1386,24 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	}
 
 	if (expr->op.type == token_type::left_bracket) {
-		compile_expression(expr->left);
-		compile_expression(expr->right);
 		uint32_t flags = is_lvalue_shaped(expr->left.get()) ? index_flag_lvalue_shape : 0;
 		if (expr->transient_element_read) {
 			flags |= index_flag_transient_read;
 		}
+		// Fused shape: ident container + ident/literal index resolve as operands in-op
+		// (kills both LOAD dispatches; subscript-chain containers stay unfused in v1)
+		if (expr->left->get_type() == node_type::identifier_expr &&
+		    (expr->right->get_type() == node_type::identifier_expr ||
+		     expr->right->get_type() == node_type::literal_expr)) {
+			fused_index_proto p;
+			p.container = make_fused_operand(expr->left.get());
+			p.index = make_fused_operand(expr->right.get());
+			chunk_->fused_index_protos.push_back(p);
+			emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
+			return;
+		}
+		compile_expression(expr->left);
+		compile_expression(expr->right);
 		emit(opcode::op_index, flags);
 		return;
 	}
@@ -1521,9 +1533,21 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			// Fused store: the array fast path writes in place (no reference mint);
 			// other shapes replay the INDEX(lvalue_write)+INDEX_ASSIGN semantics inside
 			compile_expression(expr->value);
-			compile_expression(sub->left);
-			compile_expression(sub->right);
-			emit(opcode::op_index_store, shape);
+			// Operand-fused shape: ident container + ident/literal index (kills both
+			// LOAD dispatches; the exec replays op_index_store for non-array shapes)
+			if (sub->left->get_type() == node_type::identifier_expr &&
+			    (sub->right->get_type() == node_type::identifier_expr ||
+			     sub->right->get_type() == node_type::literal_expr)) {
+				fused_index_proto p;
+				p.container = make_fused_operand(sub->left.get());
+				p.index = make_fused_operand(sub->right.get());
+				chunk_->fused_index_protos.push_back(p);
+				emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape);
+			} else {
+				compile_expression(sub->left);
+				compile_expression(sub->right);
+				emit(opcode::op_index_store, shape);
+			}
 		} else {
 			compile_expression(sub->left);
 			compile_expression(sub->right);

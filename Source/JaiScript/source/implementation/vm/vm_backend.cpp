@@ -5919,11 +5919,10 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;
-	if (rec.env_lazy) {
-		rec.f.entry_env = nullptr;
-	} else {
-		rec.f.entry_env = environment_;
-	}
+	// entry_env doubles as the lexical-context marker: null ONLY for env-untouched
+	// frames (plain non-closure functions are lexically top-level - no class context,
+	// no closure chain); closure-lazy frames carry their closure env (chain is correct)
+	rec.f.entry_env = rec.env_untouched ? nullptr : environment_;
 	rec.f.window_backed = true;
 	rec.f.window_base = args_base;
 	rec.f.window_live = static_cast<uint32_t>(argc);
@@ -6521,7 +6520,7 @@ op_status vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-op_status vm_backend::member_access_value(const script_value& raw_object, member_expr* expr, script_value& out) {
+op_status vm_backend::member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out) {
 	script_value objectValue = raw_object.deref();
 
 	if (expr->null_safe && objectValue.is_null()) {
@@ -6570,7 +6569,7 @@ op_status vm_backend::member_access_value(const script_value& raw_object, member
 		}
 		if (parent_def->chain_has_nonpublic()) [[unlikely]] {
 			VM_TRY(detail::enforce_member_access(parent_def.get(), expr->member_id,
-			                                            environment_->find_access_context()));
+			                                            frame_access_context(f)));
 		}
 		script_value method = make_null();
 		try {
@@ -6775,7 +6774,7 @@ op_status vm_backend::member_access_value(const script_value& raw_object, member
 
 	if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
 		VM_TRY(detail::enforce_member_access(target.class_def, member_id,
-		                                            environment_->find_access_context()));
+		                                            frame_access_context(f)));
 	}
 
 	if (target.class_def && target.class_def->has_property_getters()) {
@@ -6847,7 +6846,7 @@ op_status vm_backend::member_access_value(const script_value& raw_object, member
 	return {};
 }
 
-op_status vm_backend::static_member_value(member_expr* expr, script_value& out) {
+op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_value& out) {
 	identifier_expr* ident_expr = nullptr;
 	if (expr->object->get_type() == node_type::identifier_expr) {
 		ident_expr = static_cast<identifier_expr*>(expr->object.get());
@@ -6932,7 +6931,7 @@ op_status vm_backend::static_member_value(member_expr* expr, script_value& out) 
 			uint64_t namespace_id = name_id;
 			uint64_t member_id = expr->member_id;
 			engine* eng = engine_;
-			auto mint_env = environment_;
+			auto mint_env = f.entry_env ? environment_ : engine_->get_global_environment();
 			script_function namespace_func = [eng, mint_env, overloads, namespace_id, fallback_class, member_id](const std::vector<script_value>& args) -> checked_result<script_value> {
 				execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
 				if (!backend) {
@@ -7029,7 +7028,7 @@ op_status vm_backend::static_member_value(member_expr* expr, script_value& out) 
 
 	if (class_def->chain_has_nonpublic()) [[unlikely]] {
 		VM_TRY(detail::enforce_member_access(class_def.get(), expr->member_id,
-		                                            environment_->find_access_context()));
+		                                            frame_access_context(f)));
 	}
 
 	script_value static_method = class_def->get_static_method(expr->member_id, false);
@@ -7066,7 +7065,7 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	script_value object = std::move(stack_.back());
 	stack_.pop_back();
 	script_value out = make_null();
-	VM_TRY(member_access_value(object, expr, out));
+	VM_TRY(member_access_value(f, object, expr, out));
 	stack_.push_back(std::move(out));
 	return {};
 }
@@ -7074,12 +7073,12 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_get_static(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value out = make_null();
-	VM_TRY(static_member_value(expr, out));
+	VM_TRY(static_member_value(f, expr, out));
 	stack_.push_back(std::move(out));
 	return {};
 }
 
-op_status vm_backend::assign_member(const script_value& object_value, member_expr* member, const script_value& value) {
+op_status vm_backend::assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value) {
 	// Worker direct-field store (parallel_for v1): the setter probe below COPIES a
 	// shared method value (cross-worker count race); a backing field's enforce+set is
 	// exactly what the auto-setter does, on exclusively-owned instance storage. Any
@@ -7113,7 +7112,7 @@ op_status vm_backend::assign_member(const script_value& object_value, member_exp
 
 	if (target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
 		VM_TRY(detail::enforce_member_access(target.class_def, member_id,
-		                                            environment_->find_access_context()));
+		                                            frame_access_context(f)));
 	}
 
 	auto [setter_id, setter_view] = symbolizer_->get_setter_id_with_view(member_id);
@@ -7154,7 +7153,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
-	VM_TRY(assign_member(dereferenced, member, value));
+	VM_TRY(assign_member(f, dereferenced, member, value));
 	if (is_unwinding_) {
 		stack_.push_back(make_null());
 		return {};
@@ -7198,7 +7197,7 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 
 	if (class_def->chain_has_nonpublic()) [[unlikely]] {
 		VM_TRY(detail::enforce_member_access(class_def.get(), member->member_id,
-		                                            environment_->find_access_context()));
+		                                            frame_access_context(f)));
 	}
 
 	if (!class_def->set_static_field(member->member_id, value.clone())) {
@@ -7237,7 +7236,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 			if (custom_result.has_value()) {
 				script_value objectValue = objectValueRaw.deref();
 				if (objectValue.is_object()) {
-					VM_TRY(assign_member(objectValue, member, custom_result.value()));
+					VM_TRY(assign_member(f, objectValue, member, custom_result.value()));
 					if (is_unwinding_) {
 						stack_.push_back(make_null());
 						return {};
@@ -7354,7 +7353,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 		return {};
 	}
 
-	VM_TRY(assign_member(objectValue, member, resultValue));
+	VM_TRY(assign_member(f, objectValue, member, resultValue));
 	if (is_unwinding_) {
 		stack_.push_back(make_null());
 		return {};
@@ -7443,7 +7442,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				auto target = resolve_member_target(objv);
 				if (target && target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
 					VM_TRY(detail::enforce_member_access(target.class_def, member->member_id,
-					                                            environment_->find_access_context()));
+					                                            frame_access_context(f)));
 				}
 				if (target && target.class_def && !target.has_field(member->member_id)) {
 					// Per-member getter probe (stage 5a, method-cost agent handoff): every
@@ -7484,7 +7483,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	}
 
 	script_value callee = make_null();
-	VM_TRY(member_access_value(object, member, callee));
+	VM_TRY(member_access_value(f, object, member, callee));
 	if (is_unwinding_) {
 		stack_.push_back(make_null());
 		return {};
@@ -9919,11 +9918,10 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;   // frame-kind metadata (closure_env/this); slots live in the window
-	if (rec.env_lazy) {
-		rec.f.entry_env = nullptr;
-	} else {
-		rec.f.entry_env = environment_;
-	}
+	// entry_env doubles as the lexical-context marker: null ONLY for env-untouched
+	// frames (plain non-closure functions are lexically top-level - no class context,
+	// no closure chain); closure-lazy frames carry their closure env (chain is correct)
+	rec.f.entry_env = rec.env_untouched ? nullptr : environment_;
 	// Frame window (stage 2): zero-copy callers' args ARE slots 0..argc-1 in place;
 	// pooled-vector callers build the window at the stack top during binding. stack_base
 	// is the callee slot (zero-copy) / the window base (pooled), so every pop/unwind

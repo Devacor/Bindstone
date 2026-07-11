@@ -692,9 +692,16 @@ namespace jai::vm {
                                          bool skip_parent_recursion = false);
 
         // Mirrors visit_member_expr's non-static path; unwinding cases leave out null
-        op_status member_access_value(const script_value& raw_object, member_expr* expr, script_value& out);
-        op_status static_member_value(member_expr* expr, script_value& out);
-        op_status assign_member(const script_value& object_value, member_expr* member, const script_value& value);
+        // Lexical access context for member enforcement: an env-untouched frame
+        // (f.entry_env == nullptr) is a plain non-closure function — lexically
+        // top-level, NO class context; its environment_ is the CALLER's chain,
+        // whose context must not leak into it
+        const class_definition* frame_access_context(const frame& f) const {
+            return f.entry_env ? environment_->find_access_context() : nullptr;
+        }
+        op_status member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out);
+        op_status static_member_value(frame& f, member_expr* expr, script_value& out);
+        op_status assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
 
         op_status exec_class_decl_node(class_decl* decl);

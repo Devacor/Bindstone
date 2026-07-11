@@ -68,8 +68,22 @@ namespace {
 		case node_type::variable_decl:
 			return !slot_decls_env_free ||
 			       static_cast<const variable_decl*>(node)->slot_index == SIZE_MAX;
+		case node_type::switch_stmt: {
+			auto* sw = static_cast<const switch_stmt*>(node);
+			for (const auto& c : sw->cases) {
+				for (const auto& st : c->body) {
+					if (declares_in_current_scope(st.get(), slot_decls_env_free)) { return true; }
+				}
+			}
+			if (sw->default_case) {
+				for (const auto& st : sw->default_case->body) {
+					if (declares_in_current_scope(st.get(), slot_decls_env_free)) { return true; }
+				}
+			}
+			return false;
+		}
 		default:
-			return true;   // class/function decls, include/import, switch/try: keep the scope
+			return true;   // class/function decls, include/import, try: keep the scope
 		}
 	}
 
@@ -132,6 +146,16 @@ namespace {
 			case opcode::op_cfor_back:
 			case opcode::op_cfor_pop:
 			case opcode::op_halt:
+			// Member/static access + construction consult the env only for the lexical
+			// access context, which frame_access_context derives from entry_env (null
+			// for env-untouched frames = no class context, exactly a plain function's
+			// lexical truth); exec_new never touches environment_
+			case opcode::op_get_member:
+			case opcode::op_set_member:
+			case opcode::op_member_compound:
+			case opcode::op_get_static:
+			case opcode::op_set_static:
+			case opcode::op_new:
 				break;
 			case opcode::op_decl_var: {
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
@@ -1222,13 +1246,21 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 		if (ft_to_body != SIZE_MAX) {
 			patch_jump(ft_to_body, chunk_->code.size());
 		}
-		emit(opcode::op_scope_push);
-		++scope_depth_;
+		bool case_scope = false;
+		for (const auto& body_stmt : case_node->body) {
+			if (declares_in_current_scope(body_stmt.get(), callable_.active)) { case_scope = true; break; }
+		}
+		if (case_scope) {
+			emit(opcode::op_scope_push);
+			++scope_depth_;
+		}
 		for (const auto& body_stmt : case_node->body) {
 			compile_statement(body_stmt);
 		}
-		--scope_depth_;
-		emit(opcode::op_scope_pop);
+		if (case_scope) {
+			--scope_depth_;
+			emit(opcode::op_scope_pop);
+		}
 
 		current_stmt_ = case_node.get();
 		prev_ft_jump = emit(opcode::op_jump_if_true, k_invalid_u32, 1);
@@ -1242,13 +1274,21 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 		if (prev_test_fail != SIZE_MAX) patch_jump(prev_test_fail, default_entry);
 		if (prev_ft_jump != SIZE_MAX) patch_jump(prev_ft_jump, default_entry);
 		emit(opcode::op_false);
-		emit(opcode::op_scope_push);
-		++scope_depth_;
+		bool default_scope = false;
+		for (const auto& body_stmt : stmt->default_case->body) {
+			if (declares_in_current_scope(body_stmt.get(), callable_.active)) { default_scope = true; break; }
+		}
+		if (default_scope) {
+			emit(opcode::op_scope_push);
+			++scope_depth_;
+		}
 		for (const auto& body_stmt : stmt->default_case->body) {
 			compile_statement(body_stmt);
 		}
-		--scope_depth_;
-		emit(opcode::op_scope_pop);
+		if (default_scope) {
+			--scope_depth_;
+			emit(opcode::op_scope_pop);
+		}
 		current_stmt_ = stmt;
 		emit(opcode::op_pop);
 		emit(opcode::op_pop);

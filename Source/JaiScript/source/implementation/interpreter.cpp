@@ -10954,7 +10954,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 return std::move(enforced.value());
             };
             auto [setter_id, _2] = string_symbolizer_->get_setter_id_with_view(field_id);
-            class_def->add_method_by_id(setter_id, setter);
+            class_def->add_method_by_id(setter_id, setter, true);  // true = synthesized accessor
         }
     }
     

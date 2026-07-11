@@ -78,6 +78,22 @@ public:
         return (v && v->raw_storage_index() != script_value::TYPEID_INVALID) ? v : nullptr;
     }
 
+    // Slot store (write-side IC): set_field_unchecked's exact semantics through a
+    // pre-resolved slot — writes through a held reference, materializes absent cells.
+    void field_slot_write(uint32_t slot, script_value&& v) {
+        if (slot >= flat_fields_.size()) {
+            flat_fields_.resize(static_cast<size_t>(slot) + 1);
+        }
+        auto& cell = flat_fields_[slot];
+        if (!cell) {
+            cell = std::make_unique<script_value>(std::move(v));
+        } else if (cell->is_reference()) {
+            cell->deref() = std::move(v);
+        } else {
+            *cell = std::move(v);
+        }
+    }
+
     const std::string& get_class_name() const { return class_name_; }
 
     // Hot-reload field migration; defined out-of-line (needs class_definition + the
@@ -237,16 +253,20 @@ public:
 
     void set_type_info(type_info_ptr type_info) { type_info_ = type_info; }
 
-    void add_method_by_id(uint64_t name_id, script_function func, bool is_property_getter = false) {
+    // is_auto_accessor: the registration is a SYNTHESIZED field accessor (_get_/_set_
+    // minted by class build — verbatim get_field / enforce+set_field), which the
+    // member site ICs may bypass. The only callers are the two backends' class-build
+    // accessor loops; everything else registers unflagged and reclaims the id.
+    void add_method_by_id(uint64_t name_id, script_function func, bool is_auto_accessor = false) {
         auto eng = engine_;
         if (!eng) return;
 
-        if (is_property_getter) {
+        if (is_auto_accessor) {
             has_property_getters_ = true;
         }
 
         methods_.insert_or_assign(name_id, script_value::make_function(func, engine_));
-        if (is_property_getter) {
+        if (is_auto_accessor) {
             auto_accessor_ids_.insert(name_id);
         } else {
             auto_accessor_ids_.erase(name_id);

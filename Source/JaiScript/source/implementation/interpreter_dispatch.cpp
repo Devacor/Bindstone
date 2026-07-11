@@ -690,6 +690,14 @@ checked_result<script_value> interpreter::handle_equal(const script_value& left,
 
     // Object/class instance equality
     // First check for custom operator== or equals() method
+    // Safe-mode workers: a custom op== would be skipped by the operator wall and the
+    // structural fallback below would silently DIVERGE from serial — verdict instead.
+    // KEEP BYTE-PARALLEL with the vm twin.
+    if (parallel_worker_ && !engine_->allow_unsafe_parallel() &&
+        (object_defines_custom_equality(left) || object_defines_custom_equality(right))) [[unlikely]] {
+        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+            "custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+    }
     auto custom_result = object_equality_via_method(left, right);
     if (custom_result.has_value()) {
         return make_value(custom_result.value());

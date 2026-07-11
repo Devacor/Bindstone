@@ -184,7 +184,11 @@ namespace jai {
         script_value value;
 
         literal_expr(const source_location& loc, const script_value& val)
-            : expression(loc, node_type::literal_expr), value(val) {}    };
+            : expression(loc, node_type::literal_expr), value(val) {
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+            value.diag_tag_single_thread();
+#endif
+        }    };
     
     // identifier expression
     class identifier_expr : public expression {

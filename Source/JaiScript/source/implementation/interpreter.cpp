@@ -2185,7 +2185,19 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
 
 // Helper for handle_equal() to check for operator== or equals() method on objects
 // Returns: nullopt if no custom equality method, true/false if method found and returned valid result
+bool interpreter::object_defines_custom_equality(const script_value& v) const {
+    const script_value& d = v.is_reference() ? v.deref() : v;
+    if (!d.is_object()) { return false; }
+    auto holder = const_cast<script_value&>(d).get_object_holder();
+    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return false; }
+    auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+    return cd && cd->defines_method(eq_method_id_);
+}
+
 std::optional<bool> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
+    // Safe-mode workers never dispatch operator methods (increment B twin of the vm's
+    // gate; handle_equal raises the verdict before the structural fallback diverges)
+    if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) {
         return std::nullopt;
@@ -2222,6 +2234,8 @@ std::optional<bool> interpreter::object_equality_via_method(const script_value& 
 
 // Generic helper for comparison operators (<, <=, >, >=) via custom methods
 std::optional<bool> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+    // Safe-mode workers: no operator dispatch (increment B; type-mismatch fallback is loud)
+    if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) {
         return std::nullopt;
@@ -2256,6 +2270,8 @@ std::optional<bool> interpreter::object_comparison_via_method(const script_value
 
 // Generic helper for arithmetic operators (+, -, *, /, %) via custom methods
 std::optional<script_value> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+    // Safe-mode workers: no operator dispatch (increment B; type-mismatch fallback is loud)
+    if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) {
         return std::nullopt;
@@ -2315,6 +2331,7 @@ interpreter::interpreter()
     resume_id_ = string_symbolizer_->intern("resume");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
+    eq_method_id_ = string_symbolizer_->intern("==");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2381,6 +2398,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     resume_id_ = string_symbolizer_->intern("resume");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
+    eq_method_id_ = string_symbolizer_->intern("==");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -2447,6 +2465,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     resume_id_ = string_symbolizer_->intern("resume");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
+    eq_method_id_ = string_symbolizer_->intern("==");
 
     // Initialize cached operator symbol IDs for fast operator overload lookup
     op_plus_id_ = string_symbolizer_->intern("+");
@@ -3553,6 +3572,12 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             push_value(script_value(static_cast<script_char>(str[static_cast<size_t>(index)]), engine_));
         } else {
             if (left.is_object()) {
+                // Safe-mode workers: operator[]/global-operator dispatch copies shared
+                // method values — verdict (increment B; KEEP BYTE-PARALLEL with the vm)
+                if (parallel_worker_ && !engine_->allow_unsafe_parallel()) [[unlikely]] {
+                    return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                        "custom operator dispatch on class instances is not admitted in a parallel body (engine::allow_unsafe_parallel(true) overrides)");
+                }
                 // First, try to find operator[] as a method on the object (for class instances)
                 auto instance_result = left.checked_as<std::shared_ptr<class_instance>>();
                 if (instance_result) {

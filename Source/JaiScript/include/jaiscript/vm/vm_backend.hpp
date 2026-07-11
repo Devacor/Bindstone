@@ -44,6 +44,9 @@ namespace jai::vm {
         // [2]=ladder enter (fill) [3]=string builtin [4]=worker pin [5]=native fallthrough
         // [6]=builtin direct (array/map)
         uint64_t profile_call_method_paths_[7] = {};
+        // exec_get_member composition: [0]=IC hit [1]=negative/absent -> ladder
+        // [2]=non-instance receiver (map sugar, arrays, statics) -> ladder
+        uint64_t profile_get_member_paths_[3] = {};
 #else
         ~vm_backend() override = default;
 #endif

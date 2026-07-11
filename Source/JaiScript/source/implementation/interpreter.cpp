@@ -3780,9 +3780,9 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                 } else {
                     // Fallback: identifier is an implicit this.member access
                     // Check if 'this' exists and has this field
-                    auto this_result = environment_->get(string_symbolizer_->get_this_id());
-                    if (this_result && this_result.value().is_object()) {
-                        script_value this_val = std::move(this_result.value());
+                    script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+                    if (this_ptr && this_ptr->is_object()) {
+                        script_value& this_val = *this_ptr;
                         std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
                         if (instance && instance->has_field(identifier->symbol_id)) {
@@ -4335,13 +4335,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                 // Fallback: identifier is an implicit this.member access
                 // Check if 'this' exists and has this field
-                auto this_result = environment_->get(string_symbolizer_->get_this_id());
-                if (!this_result || !this_result.value().is_object()) {
+                script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+                if (!this_ptr || !this_ptr->is_object()) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                         "Undefined variable '{0}' (no 'this' in scope)", identifier->symbol_id);
                 }
 
-                script_value this_val = std::move(this_result.value());
+                script_value& this_val = *this_ptr;
                 std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 
                 if (!instance || !instance->has_field(identifier->symbol_id)) {
@@ -5304,9 +5304,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
                 }
 
-                auto this_result = environment_->get(string_symbolizer_->get_this_id());
-                if (this_result) {
-                    script_value this_val = std::move(this_result.value());
+                script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+                if (this_ptr) {
+                    script_value& this_val = *this_ptr;
                     if (this_val.is_object()) {
                         auto obj_holder = this_val.get_object_holder();
                         if (obj_holder->is_class_instance_wrapper) {
@@ -6521,12 +6521,12 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             }
 
             // Get 'this' from the current environment
-            auto this_result = environment_->get(string_symbolizer_->get_this_id());
-            if (!this_result) {
+            script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+            if (!this_ptr) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                     "{0}() can only be called from within a method", ident_expr->symbol_id);
             }
-            script_value this_val = std::move(this_result.value());
+            script_value this_val = *this_ptr;
             if (!this_val.is_object()) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                     "{0}() can only be called from within a method", ident_expr->symbol_id);
@@ -8221,8 +8221,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             script_value* slot_val = nullptr;
 
             if (!can_capture && capture.symbol_id == this_id) {
-                auto this_test_result = environment_->get(this_id);
-                if (this_test_result) can_capture = true;
+                if (environment_->get_value_ptr(this_id)) can_capture = true;
             }
 
             if (!can_capture && !call_stack_.empty()) {
@@ -8736,13 +8735,13 @@ checked_result<void> interpreter::visit_this_expr(this_expr* expr) {
 
     // Try to get 'this' from the current environment
     // Use the symbolizer's cached ID (not interpreter's this_id_ which may be stale)
-    auto this_result = environment_->get(string_symbolizer_->get_this_id());
-    if (!this_result) {
+    script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+    if (!this_ptr) {
         // 'this' can only be used inside methods
         return checked_result<void>(make_error_code(runtime_error_code::this_outside_method),
             "'this' can only be used inside methods");
     }
-    push_value(std::move(this_result.value()));
+    push_value(*this_ptr);
     return {};
 }
 
@@ -8752,13 +8751,13 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
 
     // Get 'this' from the environment - super only makes sense in instance methods
     // Use the symbolizer's cached ID (not interpreter's this_id_ which may be stale)
-    auto this_result = environment_->get(string_symbolizer_->get_this_id());
-    if (!this_result) {
+    script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+    if (!this_ptr) {
         // 'this' not found - super used outside of class method
         return checked_result<void>(make_error_code(runtime_error_code::super_outside_method),
             "'super' can only be used inside methods");
     }
-    script_value this_value = std::move(this_result.value());
+    script_value this_value = *this_ptr;
     if (this_value.is_null()) {
         // 'this' is null - super used outside of class method
         return checked_result<void>(make_error_code(runtime_error_code::super_outside_method),

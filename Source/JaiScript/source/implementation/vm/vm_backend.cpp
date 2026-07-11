@@ -8807,13 +8807,16 @@ op_status vm_backend::exec_case_eq(frame&, const vm_instruction&) {
 	return {};
 }
 
-op_status vm_backend::exec_iter_init(frame&, const vm_instruction&) {
+op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	script_value container = std::move(stack_.back());
 	stack_.pop_back();
 
-	JAI_ENV_CENSUS(0); environment_ = acquire_scope_env(environment_);
-
+	const iter_proto& proto = f.code->iter_protos[ins.a];
 	iter_state state;
+	state.env_pushed = proto.slot == SIZE_MAX || !f.locals || f.top_level;
+	if (state.env_pushed) {
+		JAI_ENV_CENSUS(0); environment_ = acquire_scope_env(environment_);
+	}
 	if (container.is_array()) {
 		state.container.emplace(std::move(container));
 		state.index = 0;
@@ -8826,12 +8829,12 @@ op_status vm_backend::exec_iter_init(frame&, const vm_instruction&) {
 		if (!map_storage->empty()) {
 			auto pair_result = environment_->get_ref(pair_id_);
 			if (!pair_result) {
-				pop_scope();
+				if (state.env_pushed) pop_scope();
 				return raise_from(pair_result);
 			}
 			const script_value& pair_ctor = pair_result.value().get();
 			if (!pair_ctor.is_function()) {
-				pop_scope();
+				if (state.env_pushed) pop_scope();
 				return raise_(make_error_code(runtime_error_code::stdlib_not_loaded),
 					"'pair' type not registered - make sure stdlib is loaded");
 			}
@@ -8844,10 +8847,10 @@ op_status vm_backend::exec_iter_init(frame&, const vm_instruction&) {
 			iter_states_.push_back(std::move(state));
 			return {};
 		}
-		pop_scope();
+		if (state.env_pushed) pop_scope();
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	} else {
-		pop_scope();
+		if (state.env_pushed) pop_scope();
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 	iter_states_.push_back(std::move(state));
@@ -8958,10 +8961,14 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_iter_pop(frame&, const vm_instruction&) {
+	bool env_pushed = true;
 	if (!iter_states_.empty()) {
+		env_pushed = iter_states_.back().env_pushed;
 		iter_states_.pop_back();
 	}
-	pop_scopes_pooled(1);
+	if (env_pushed) {
+		pop_scopes_pooled(1);
+	}
 	return {};
 }
 

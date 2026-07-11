@@ -408,6 +408,7 @@ namespace jai::vm {
             size_t index = 0;
             script_map::iterator map_it{};
             bool is_map = false;
+            bool env_pushed = false;   // slotted loop vars skip the iteration scope env
             std::shared_ptr<coroutine_handle> coroutine;   // set = coroutine-driven range-for
         };
         std::vector<iter_state> iter_states_;

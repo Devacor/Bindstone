@@ -10,6 +10,9 @@
 #include <new>
 #include <type_traits>
 #include <utility>
+#ifdef JAISCRIPT_DIAG_ATOMIC_RC
+#include <atomic>
+#endif
 
 namespace jai {
 
@@ -34,8 +37,15 @@ inline constexpr uint32_t cb_magic_dead = 0x0DEADCB0;
  * only when the last weak reference is released (cold path).
  */
 struct control_block_base {
+#ifdef JAISCRIPT_DIAG_ATOMIC_RC
+    // Diagnostic build: atomic counts. If a flaky corruption VANISHES under this flag,
+    // it is a cross-thread refcount race; if it persists, look for a wild write.
+    std::atomic<size_t> strong_count{1};
+    std::atomic<size_t> weak_count{1};
+#else
     size_t strong_count = 1;
     size_t weak_count = 1;  // Strong family's collective weak ref prevents premature CB deletion
+#endif
     void (*dealloc_fn)(control_block_base*) = nullptr;
 #ifndef NDEBUG
     uint32_t magic = cb_magic_live;  // asserted at every cb derivation, scrambled in dealloc (D8)

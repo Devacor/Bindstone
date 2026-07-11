@@ -8968,6 +8968,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
         uint64_t update_var_id = UINT64_MAX;
         script_int step_value = 1;  // Default for ++i
         uint64_t step_var_id = UINT64_MAX;  // For dynamic step (i += j)
+        size_t step_var_slot = SIZE_MAX;
         bool valid_update = false;
         // Overflow attribution: the update error names the SOURCE operator (vm cfor parity)
         const char* update_overflow_msg = "Integer overflow in '+='";
@@ -9006,10 +9007,10 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 // Check if step is an identifier (i += j where j is int)
                 else if (update_assign->value->get_type() == node_type::identifier_expr) {
                     auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
-                    // Look up step variable in current environment
-                    script_value* step_ptr = environment_->get_value_ptr(step_id->symbol_id);
+                    script_value* step_ptr = resolve_local_or_env(step_id->slot_index, step_id->symbol_id);
                     if (step_ptr && step_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                         step_var_id = step_id->symbol_id;
+                        step_var_slot = step_id->slot_index;
                         step_value = step_ptr->unchecked_as_int();  // Initial value
                         valid_update = true;
                     }
@@ -9033,9 +9034,10 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 // Check if step is an identifier (i -= j where j is int)
                 else if (update_assign->value->get_type() == node_type::identifier_expr) {
                     auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
-                    script_value* step_ptr = environment_->get_value_ptr(step_id->symbol_id);
+                    script_value* step_ptr = resolve_local_or_env(step_id->slot_index, step_id->symbol_id);
                     if (step_ptr && step_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
                         step_var_id = step_id->symbol_id;
+                        step_var_slot = step_id->slot_index;
                         step_value = step_ptr->unchecked_as_int();  // Initial value
                         valid_update = true;
                     }
@@ -9065,6 +9067,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 // End value can be literal OR variable
                 script_int end_literal = 0;
                 uint64_t end_var_id = UINT64_MAX;
+                size_t end_var_slot = SIZE_MAX;
                 bool has_end = false;
 
                 if (cond_binary->right->get_type() == node_type::literal_expr) {
@@ -9077,6 +9080,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                     auto* cond_end_id = static_cast<identifier_expr*>(cond_binary->right.get());
                     // End is a variable - we'll bind to its pointer
                     end_var_id = cond_end_id->symbol_id;
+                    end_var_slot = cond_end_id->slot_index;
                     has_end = true;
                 }
 
@@ -9106,9 +9110,17 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             if (init_var->type) {
                                 init_val.set_type_info(init_var->type);
                             }
-                            environment_->define(var_id, std::move(init_val));
-
-                            script_value* var_ptr = environment_->get_value_ptr(var_id);
+                            // Slotted counters (function scope) live in the frame local, not
+                            // the loop env — body identifiers resolve slot-first to the same
+                            // storage. Env define stays for top-level counters.
+                            script_value* var_ptr = nullptr;
+                            if (init_var->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                                call_stack_.back().set_local(init_var->slot_index, std::move(init_val));
+                                var_ptr = call_stack_.back().get_local(init_var->slot_index);
+                            } else {
+                                environment_->define(var_id, std::move(init_val));
+                                var_ptr = environment_->get_value_ptr(var_id);
+                            }
 
                             // Bind end value pointer (if variable) AFTER environment setup.
                             // Resolve through references at prep (escape-boxed vars: the
@@ -9118,7 +9130,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             script_value* end_target = nullptr;
                             script_int end_val = end_literal;
                             if (end_var_id != UINT64_MAX) {
-                                script_value* end_sv = environment_->get_value_ptr(end_var_id);
+                                script_value* end_sv = resolve_local_or_env(end_var_slot, end_var_id);
                                 if (end_sv) { end_target = &end_sv->deref(); }
                                 if (!end_target || end_target->raw_storage_index() != script_value::TYPEID_INT ||
                                     end_target->is_cpp_bound()) {
@@ -9132,7 +9144,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                             // Bind step value pointer (if variable)
                             script_value* step_target = nullptr;
                             if (step_var_id != UINT64_MAX) {
-                                script_value* step_sv = environment_->get_value_ptr(step_var_id);
+                                script_value* step_sv = resolve_local_or_env(step_var_slot, step_var_id);
                                 if (step_sv) { step_target = &step_sv->deref(); }
                                 if (!step_target || step_target->raw_storage_index() != script_value::TYPEID_INT ||
                                     step_target->is_cpp_bound()) {

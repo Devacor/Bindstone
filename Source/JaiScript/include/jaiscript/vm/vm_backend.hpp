@@ -40,6 +40,10 @@ namespace jai::vm {
         // env production census: [0]=scope [1]=method [2]=static [3]=coroutine [4]=closure-capture
         uint64_t profile_env_births_[5] = {};
         uint64_t profile_scope_kinds_[4] = {};   // iter / scope_push / call_closure / call_plain
+        // exec_call_method composition: [0]=mic static hit [1]=mic resolve hit
+        // [2]=ladder enter (fill) [3]=string builtin [4]=worker pin [5]=native fallthrough
+        // [6]=builtin direct (array/map)
+        uint64_t profile_call_method_paths_[7] = {};
 #else
         ~vm_backend() override = default;
 #endif
@@ -739,6 +743,17 @@ namespace jai::vm {
         op_status static_member_value(frame& f, member_expr* expr, script_value& out);
         op_status assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
+        // ONE native boundary for the direct dispatches (builtin methods, coroutine
+        // resume): routine errors travel as checked_result -> raise_from; the catch is
+        // last-ditch armor for callees that physically throw C++ (host-bound methods,
+        // legacy throwing accessors), converting exactly like invoke_callee's opaque
+        // branch. Out-of-line + noinline so opcode bodies stay EH-free; dies once the
+        // engine no-throw conversion starves it.
+        template <typename Call>
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status guarded_native_call(Call&& call);
 
         op_status exec_class_decl_node(class_decl* decl);
         op_status exec_namespace_decl_node(namespace_decl* decl);

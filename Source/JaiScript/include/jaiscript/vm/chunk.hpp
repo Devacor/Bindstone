@@ -12,6 +12,11 @@
 #include <string>
 #include <vector>
 
+namespace jai {
+    class class_definition;
+    struct script_method_dispatch;
+}
+
 namespace jai::vm {
 
     struct chunk;
@@ -67,6 +72,23 @@ namespace jai::vm {
         mutable const script_defined_function* ic_fn = nullptr;
         mutable strong_ptr<script_function> ic_pin;
         mutable uint32_t ic_argc = 0;
+        // Monomorphic method-dispatch cache (flat-classes increment 1): validated on
+        // (class identity, method_epoch) per class_definition::bump_method_epoch's
+        // contract (derived-propagating; definitions engine-lifetime pinned, no ABA).
+        // Caches the resolve ladder's outcome for one receiver class: the pre-minted
+        // dispatcher value, its dispatch payload, the resolved single overload.
+        // Instances can grow fields at runtime and a field shadows the method, so a
+        // hit re-probes has_field; typed-parameter methods stay arg-type-sensitive
+        // (pick_best_overload can reject a single overload), so a hit re-runs
+        // resolve_method_overload unless mic_static proved resolution
+        // arg-independent (every arg-bound param untyped). Same cached_global_env_
+        // gate as the caches above.
+        mutable const class_definition* mic_cd = nullptr;
+        mutable uint64_t mic_epoch = 0;
+        mutable script_value mic_method{std::monostate{}, nullptr};
+        mutable const script_method_dispatch* mic_dispatch = nullptr;
+        mutable std::shared_ptr<function_decl> mic_resolved;
+        mutable bool mic_static = false;
     };
 
     struct function_proto {

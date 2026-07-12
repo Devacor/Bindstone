@@ -1569,9 +1569,24 @@ namespace jai {
         // Used by checked_as<T>() to automatically unwrap wrapper types
         script_value try_unwrap_transparent_wrapper() const;
 
-        // Dereference method - returns this for non-references, dereferences for references
-        const script_value& deref() const;
-        script_value& deref();
+        // Dereference method - returns this for non-references, dereferences for
+        // references. The non-reference fast path is INLINE (one raw index compare):
+        // WPR showed the out-of-line call and the current_type() it made per call as
+        // two of the vm's hottest rows. Reference resolution stays in value.cpp.
+        const script_value& deref() const {
+            if (storage_.index() != TYPEID_REFERENCE) [[likely]] {
+                return *this;
+            }
+            return deref_slow();
+        }
+        script_value& deref() {
+            if (storage_.index() != TYPEID_REFERENCE) [[likely]] {
+                return *this;
+            }
+            return deref_slow();
+        }
+        const script_value& deref_slow() const;
+        script_value& deref_slow();
         
         // Assignment through reference - assigns to target if this is a reference
         void assign_through(const script_value& value);

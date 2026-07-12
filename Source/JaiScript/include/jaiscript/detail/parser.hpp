@@ -265,4 +265,13 @@ namespace jai {
         }
     };
 
+    namespace detail {
+        // The parse-tail AST marking passes (ref-escape/value-decl/typed-store-proof
+        // flags + transient-read classification), re-runnable on DESERIALIZED trees:
+        // jaibite does not carry the parser-pass flags, so loads must re-derive them
+        // from the one source of truth — the passes themselves.
+        void run_ast_marking_passes(const std::vector<declaration_ptr>& declarations,
+                                    string_symbolizer* symbolizer);
+    }
+
 } // namespace jai

@@ -844,6 +844,10 @@ struct engine::implementation {
             if (savedFingerprint != self.registration_fingerprint()) {
                 return nullptr;   // registration surface moved: stale, reparse + rewrite
             }
+            // jaibite carries structure, not the parser-pass flags (ref-escape,
+            // value-decl naming, typed-store proofs, transient reads) — re-derive
+            // them exactly like the parse tail does
+            detail::run_ast_marking_passes(declarations, &string_symbolizer_);
             auto entry = store_cached_script(sourcePath, source, std::move(declarations));
             if (flags & detail::k_jaibite_flag_checked_clean) {
                 // Trusted stamp (fingerprint matched): skip the re-check exactly like a
@@ -1593,6 +1597,9 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size) {
     uint64_t saved_fingerprint = 0;
     uint32_t flags = 0;
     auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags);
+    // jaibite carries structure, not the parser-pass flags — re-derive them (see
+    // try_load_jaibite_entry's twin)
+    detail::run_ast_marking_passes(declarations, get_symbolizer());
     jai::jaibite bite(weak_from_this(), std::move(declarations));
     bite.registration_mismatch_ = (saved_fingerprint != registration_fingerprint());
     // Trust the checked-clean stamp only when the registration surface matches the

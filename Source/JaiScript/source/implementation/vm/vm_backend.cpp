@@ -3044,6 +3044,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			}
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_store_paths_[(ins.c & store_flag_type_provable) ? 4 : 3];
+			++profile_builtin_direct_names_[std::string("st:") + std::string(symbolizer_->get_string(sym))];
 #endif
 			// Slot locals enforce their locked type like the env path below does
 			// (same-type fast guard keeps the hot store path call-free)

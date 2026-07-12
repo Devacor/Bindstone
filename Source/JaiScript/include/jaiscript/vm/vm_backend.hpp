@@ -77,6 +77,15 @@ namespace jai::vm {
         // [3]=fill cacheable [4]=fill uncacheable [5]=full get_value_ptr walk
         // [6]=fast-head hit (env identity + engine serial) [7]=fast-head arm
         uint64_t profile_env_resolve_[8] = {};
+        // exec_call_from_scratch decomposition (the 38%-row honesty check): brackets the
+        // EXEC BODY only, so [0]/[1] are pure call machinery (in-loop callee bodies run
+        // after return) while [2] swallows the whole native execution — region waits,
+        // fiber slices, builtin bodies — exactly what the op row double-counts.
+        // [0]=pinned in-loop entry [1]=sliced bound-method entry [2]=opaque invoke
+        uint64_t profile_cfs_cycles_[3] = {};
+        uint64_t profile_cfs_counts_[3] = {};
+        std::map<std::string, uint64_t> profile_cfs_inloop_names_;   // pinned-path callees
+        std::map<std::string, uint64_t> profile_cfs_opaque_cycles_;  // opaque-path cycles by callee
         std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
         // Result-consumer histograms (lanes stage-1 targeting): the opcode FOLLOWING
         // each BINARY_FUSED / LOAD / INDEX_FUSED dispatch — who eats the pushed value

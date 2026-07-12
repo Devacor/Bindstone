@@ -5867,6 +5867,32 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 		}
 	}
 
+	// Bound-method thunk (bare sibling calls): SLICE-enter before any collection —
+	// the args on the stack bind in place, the receiver rides in from the payload,
+	// resolution reads the slice via the span overload. This is the brains-bench
+	// heat: 2a covered mic/pin sites; this is where the arg-vector traffic dies.
+	if (pc.value.raw_storage_index() == script_value::TYPEID_FUNCTION) {
+		const auto* bthunk = pc.value.unchecked_as_function().target<script_callable_thunk>();
+		if (bthunk && bthunk->eng == engine_ &&
+		    bthunk->payload.kind == script_callable::kind_type::bound_method &&
+		    bthunk->payload.this_obj && bthunk->payload.bound_dispatch &&
+		    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+			const auto* dispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
+			if (dispatch && dispatch->eng == engine_) {
+				const size_t slice_base = stack_.size() - argc;
+				auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id,
+					stack_.vec().data() + slice_base, argc);
+				if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+					script_value method_val = *bthunk->payload.bound_dispatch;
+					script_value receiver = *bthunk->payload.this_obj;
+					return enter_script_method_sliced(f, std::move(method_val), *dispatch,
+					                                  resolved.value(), &receiver, slice_base,
+					                                  slice_base, argc, site);
+				}
+			}
+		}
+	}
+
 	// Opaque / arity-window path: today's pooled invoke with the parked value
 #ifdef JAISCRIPT_VM_PROFILE
 	// Who misses the in-loop fast path: count native-boundary callees by site symbol.
@@ -6040,6 +6066,29 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 				}
 			}
 		}
+		// Bound-method thunk at a stack call site: slice-enter while callee + args are
+		// still in place — the callee slot is the frame territory (destroying the thunk
+		// at pop, which pins receiver + dispatcher transitively until then).
+		if (!direct_fn && calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
+			const auto* bthunk = calleeVal.unchecked_as_function().target<script_callable_thunk>();
+			if (bthunk && bthunk->eng == engine_ &&
+			    bthunk->payload.kind == script_callable::kind_type::bound_method &&
+			    bthunk->payload.this_obj && bthunk->payload.bound_dispatch &&
+			    !(parallel_worker_ && !engine_->allow_unsafe_parallel())) {
+				const auto* mdispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
+				if (mdispatch && mdispatch->eng == engine_) {
+					auto resolved = mdispatch->cls->resolve_method_overload(mdispatch->name_id,
+						stack_.vec().data() + args_base, argc);
+					if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+						script_value method_val = *bthunk->payload.bound_dispatch;
+						script_value receiver = *bthunk->payload.this_obj;
+						return enter_script_method_sliced(f, std::move(method_val), *mdispatch,
+						                                  resolved.value(), &receiver, args_base - 1,
+						                                  args_base, argc, site);
+					}
+				}
+			}
+		}
 		if (direct_fn) {
 			// Stateless ref binding: the call site travels as an argument; bind_parameters
 			// resolves ref args against the caller frame/env directly (no metadata channel)
@@ -6087,8 +6136,8 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	const auto* thunk = func.target<script_callable_thunk>();
 	const bool direct = thunk && thunk->eng == engine_ &&
 	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
-	// Bound-method thunk (bare sibling calls; twin of invoke_callee's branch — this
-	// tail is inlined, it never reaches invoke_callee): enter the method IN-LOOP.
+	// Bound-method thunk fallback (args already collected — the slice entry lives in
+	// this op's PEEK section above; this vector path serves arity-window shapes)
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::bound_method &&
 	    thunk->payload.this_obj && thunk->payload.bound_dispatch &&
@@ -7659,7 +7708,8 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							script_value method_val = pin->method_value;
 							const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
 							return enter_script_method_sliced(f, std::move(method_val), *dispatch,
-							                                  pin->resolved, args_base, argc, site);
+							                                  pin->resolved, nullptr, args_base - 1,
+							                                  args_base, argc, site);
 						}
 						// unpinned falls to the vector path below for the identical verdict
 					} else if (cached_global_env_ && site.mic_cd && cd == site.mic_cd &&
@@ -7668,14 +7718,16 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						if (site.mic_static) {
 							script_value method_val = site.mic_method;
 							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
-							                                  site.mic_resolved, args_base, argc, site);
+							                                  site.mic_resolved, nullptr, args_base - 1,
+							                                  args_base, argc, site);
 						}
 						auto resolved = site.mic_dispatch->cls->resolve_method_overload(
 							site.mic_dispatch->name_id, stack_.vec().data() + args_base, argc);
 						if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
 							script_value method_val = site.mic_method;
 							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
-							                                  resolved.value(), args_base, argc, site);
+							                                  resolved.value(), nullptr, args_base - 1,
+							                                  args_base, argc, site);
 						}
 						// resolution declined (arg types): the vector ladder reports identically
 					}
@@ -10476,22 +10528,23 @@ op_status vm_backend::enter_script_method(frame& caller, script_value&& method_v
 op_status vm_backend::enter_script_method_sliced(frame& caller, script_value&& method_val,
                                                  const script_method_dispatch& dispatch,
                                                  const std::shared_ptr<function_decl>& ast,
+                                                 script_value* receiver_owned, size_t frame_base,
                                                  size_t args_base, size_t argc,
                                                  const call_site& site) {
 	try {
 		return push_method_frame_sliced(caller, std::move(method_val), dispatch, ast,
-		                                args_base, argc, &site);
+		                                receiver_owned, frame_base, args_base, argc, &site);
 	} catch (const script_exception& e) {
-		// Receiver + args are still on the stack in slice mode: drop them like the
+		// The frame's stack territory is still live in slice mode: drop it like the
 		// plain slice path's pre-record throw handling (exec_call's in-loop catch)
-		stack_.erase(stack_.begin() + (args_base - 1), stack_.end());
+		stack_.erase(stack_.begin() + frame_base, stack_.end());
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = e;
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
 		return {};
 	} catch (const std::exception& e) {
-		stack_.erase(stack_.begin() + (args_base - 1), stack_.end());
+		stack_.erase(stack_.begin() + frame_base, stack_.end());
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = script_exception(e.what());
 		is_unwinding_ = true;
@@ -10501,12 +10554,17 @@ op_status vm_backend::enter_script_method_sliced(frame& caller, script_value&& m
 }
 
 // KEEP BYTE-PARALLEL with push_method_frame below: identical record/env/lazy/sticky
-// setup — the ONLY differences are the slice-window mechanics (receiver read from its
-// stack slot and COPIED into this/env bindings, args bound in place, receiver slot =
-// stack_base = the pin).
+// setup — the ONLY differences are the slice-window mechanics. Args bind in place as
+// slots 0..argc-1. receiver_owned: null = the receiver sits in the stack slot at
+// args_base-1 (read + COPIED into this/env bindings; the slot stays as the pin);
+// non-null = the receiver rides in from a thunk payload (moved into env, pinned via
+// rec.locals this). frame_base = where this frame's stack territory begins (the
+// receiver/callee slot below the window, or args_base when nothing sits below) — pop
+// truncation destroys territory + pin exactly like stage 2's callee slot.
 op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& method_val,
                                                const script_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast,
+                                               script_value* receiver_owned, size_t frame_base,
                                                size_t args_base, size_t argc,
                                                const call_site* site) {
 	if (current_call_depth_ >= JAI_MAX_CALL_DEPTH) {
@@ -10552,10 +10610,12 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
 	rec.env_untouched = false;
 	try {
-		// The receiver stays in its slot (the pin); this/env bindings take the
-		// deref'd VALUE — a copy where the vector path moved, but the vector path's
-		// caller made that copy itself (objv = object.deref()), so net copies match.
-		const script_value& receiver_v = stack_[args_base - 1].deref();
+		// Slot receivers stay put (the slot is the pin) and this/env bindings COPY the
+		// deref'd value — the vector path's caller made that same copy itself (objv =
+		// object.deref()), so net copies match. Owned receivers (thunk payloads) move
+		// into the env like the vector path moved.
+		const script_value& receiver_v = receiver_owned ? receiver_owned->deref()
+		                                                : stack_[args_base - 1].deref();
 		rec.locals.set_this(receiver_v);
 		if (rec.env_lazy) {
 			environment_ = dispatch.definition_env;
@@ -10564,18 +10624,21 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		    dispatch.definition_env.get() == cached_global_env_) {
 			auto& scope = dispatch.backend_scope_env;
 			if (scope && scope.use_count() == 1) {
-				scope->rebind_method_this(script_value(receiver_v));
+				scope->rebind_method_this(receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v));
 				environment_ = scope;
 			} else if (!scope) {
-				scope = std::make_shared<environment>(dispatch.definition_env, env_symbolizer_, script_value(receiver_v));
+				scope = std::make_shared<environment>(dispatch.definition_env, env_symbolizer_,
+					receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v));
 				scope->set_access_context(dispatch.cls.get());
 				scope->set_vm_pinned_scope(true);
 				environment_ = scope;
 			} else {
-				environment_ = acquire_method_scope_env(dispatch.definition_env, script_value(receiver_v), dispatch.cls.get());
+				environment_ = acquire_method_scope_env(dispatch.definition_env,
+					receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v), dispatch.cls.get());
 			}
 		} else {
-			environment_ = acquire_method_scope_env(dispatch.definition_env, script_value(receiver_v), dispatch.cls.get());
+			environment_ = acquire_method_scope_env(dispatch.definition_env,
+				receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v), dispatch.cls.get());
 		}
 	} catch (...) {
 		rec.callee_pin = make_null();
@@ -10593,12 +10656,13 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;
 	rec.f.entry_env = rec.env_lazy ? nullptr : environment_;
-	// Slice window: the caller's args ARE slots 0..argc-1 in place; the receiver slot
-	// below is frame territory, so pop/unwind truncation destroys window + pin together
+	// Slice window: the caller's args ARE slots 0..argc-1 in place; frame_base marks
+	// this frame's stack territory (receiver/callee slot when one sits below), so
+	// pop/unwind truncation destroys window + pin together
 	rec.f.window_backed = true;
 	rec.f.window_base = args_base;
 	rec.f.window_live = static_cast<uint32_t>(argc);
-	rec.f.stack_base = args_base - 1;
+	rec.f.stack_base = frame_base;
 	rec.f.top_level = false;
 	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
 

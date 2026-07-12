@@ -544,14 +544,19 @@ namespace jai::vm {
         // slots (zero per-arg moves; the receiver slot is the pin, destroyed by pop
         // truncation exactly like the plain path's callee slot). The dispatcher still
         // pins through the record; env setup COPIES the receiver (the slot must live).
+        // receiver_owned: null = receiver in the stack slot at args_base-1 (the slot is
+        // the pin); non-null = thunk-payload receiver (moved into the env binding).
+        // frame_base = first stack index of this frame's territory (pop truncation).
         op_status enter_script_method_sliced(frame& caller, script_value&& method_val,
                                              const script_method_dispatch& dispatch,
                                              const std::shared_ptr<function_decl>& ast,
+                                             script_value* receiver_owned, size_t frame_base,
                                              size_t args_base, size_t argc,
                                              const call_site& site);
         op_status push_method_frame_sliced(frame& caller, script_value&& method_val,
                                            const script_method_dispatch& dispatch,
                                            const std::shared_ptr<function_decl>& ast,
+                                           script_value* receiver_owned, size_t frame_base,
                                            size_t args_base, size_t argc,
                                            const call_site* site);
         op_status push_method_frame(frame& caller, script_value&& method_val,

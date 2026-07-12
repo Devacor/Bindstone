@@ -5434,8 +5434,19 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 				return {};
 			}
 			if (node->is_typed()) {
-				sink(node->get(static_cast<size_t>(index), engine_));   // raw buffer read
-				return {};
+				// Raw-capable sinks take the buffer payload with no value mint at all
+				// (the decl lane lands it straight in the slot)
+				if constexpr (requires(Sink& s, script_int iv) { s.raw_int(iv); }) {
+					if (node->kind() == script_array::kind_t::i64) {
+						sink.raw_int(node->ints()[static_cast<size_t>(index)]);
+					} else {
+						sink.raw_float(node->floats()[static_cast<size_t>(index)]);
+					}
+					return {};
+				} else {
+					sink(node->get(static_cast<size_t>(index), engine_));   // raw buffer read
+					return {};
+				}
 			}
 			sink(script_value(node->values()[index]));
 			return {};
@@ -5502,23 +5513,51 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
 	if (p.decl_slot != k_invalid_u32 && f.locals && !f.top_level) [[likely]] {
-		bool landed = false;
-		VM_TRY(index_fused_read<false>(f, ins, [&](script_value&& v) {
-			const size_t vi = v.raw_storage_index();
-			if (vi == p.decl_expect ||
-			    (p.decl_expect == 0xFF &&
-			     (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
-			      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR))) {
-				if (p.decl_type) {
-					v.set_type_info(type_info_ptr{p.decl_type});
+		// Raw-capable lane sink: typed-array payloads arrive as raw int64/double and
+		// land in the slot with exactly ONE value mint; boxed arrivals keep the
+		// expect-check + general-landing split
+		struct decl_lane_sink {
+			vm_backend* vm;
+			frame& fr;
+			const fused_index_proto& proto;
+			bool landed = false;
+			void land(script_value&& v) {
+				if (proto.decl_type) {
+					v.set_type_info(type_info_ptr{proto.decl_type});
 				}
-				frame_slot_set(f, p.decl_slot, std::move(v));
+				vm->frame_slot_set(fr, proto.decl_slot, std::move(v));
 				landed = true;
-			} else {
-				stack_.push_back(std::move(v));   // general landing below
 			}
-		}));
-		if (landed || is_unwinding_) {
+			void operator()(script_value&& v) {
+				const size_t vi = v.raw_storage_index();
+				if (vi == proto.decl_expect ||
+				    (proto.decl_expect == 0xFF &&
+				     (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+				      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR))) {
+					land(std::move(v));
+				} else {
+					vm->stack_.push_back(std::move(v));   // general landing below
+				}
+			}
+			void raw_int(script_int iv) {
+				if (proto.decl_expect == static_cast<uint8_t>(script_value::TYPEID_INT) ||
+				    proto.decl_expect == 0xFF) {
+					land(script_value(iv, vm->engine_));
+				} else {
+					(*this)(script_value(iv, vm->engine_));   // e.g. float decl: op_decl_var converts
+				}
+			}
+			void raw_float(script_float fv) {
+				if (proto.decl_expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ||
+				    proto.decl_expect == 0xFF) {
+					land(script_value(fv, vm->engine_));
+				} else {
+					(*this)(script_value(fv, vm->engine_));
+				}
+			}
+		} sink{this, f, p};
+		VM_TRY(index_fused_read<false>(f, ins, sink));
+		if (sink.landed || is_unwinding_) {
 			return {};   // unwound: parity states stand, the decl never runs
 		}
 		const vm_instruction decl_ins{opcode::op_decl_var, ins.c, 1, 1};

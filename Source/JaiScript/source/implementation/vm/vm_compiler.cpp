@@ -2176,12 +2176,29 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 			return;
 		}
 		// Subscript-init twin (the INDEX_FUSED→DECL_VAR pair): the read lands straight
-		// in the decl — a/b (proto, flags) stay, c carries the decl node
+		// in the decl — a/b (proto, flags) stay, c carries the decl node. Lane facts
+		// hoist the exec-time landing checks to HERE (decl_fast slot decls land the
+		// scalar read directly; everything else replays op_decl_var).
 		if (!code.empty() && code.back().op == opcode::op_index_fused &&
 		    decl->initializer->get_type() == node_type::binary_expr) {
 			vm_instruction& ins = code.back();
 			ins.op = opcode::op_index_fused_decl;
 			ins.c = add_node(decl);
+			if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
+			    !decl->ref_escaping && decl->slot_index != SIZE_MAX) {
+				auto& proto = chunk_->fused_index_protos[ins.a];
+				proto.decl_slot = static_cast<uint32_t>(decl->slot_index);
+				proto.decl_type = decl->type.get();
+				const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
+				switch (bt) {
+				case script_value_type::jai_int_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_INT); break;
+				case script_value_type::jai_float_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_FLOAT); break;
+				case script_value_type::jai_bool_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_BOOL); break;
+				case script_value_type::jai_char_type: proto.decl_expect = static_cast<uint8_t>(script_value::TYPEID_CHAR); break;
+				case script_value_type::jai_any_type: proto.decl_expect = 0xFF; break;
+				default: proto.decl_slot = k_invalid_u32; proto.decl_type = nullptr; break;   // non-scalar decls: general landing
+				}
+			}
 			return;
 		}
 	}

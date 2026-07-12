@@ -223,6 +223,15 @@ namespace jai::vm {
         // instruction's c=1 elides the result push): ident/literal RHS resolves in-op
         // instead of LOAD+push. Absent (all-invalid) = the value rides the stack.
         fused_operand store_value;
+        // op_index_fused_decl lane facts, proven at the peephole (decl_fast_slot_store,
+        // not ref-escaping, slot-resident): the read lands DIRECTLY in decl_slot when
+        // the runtime value's raw index matches decl_expect (0xFF = any scalar) —
+        // no per-exec decl checks, no landing round-trip. k_invalid_u32 = general
+        // landing. decl_type = the decl's type tag to stamp (raw ptr; the chunk pins
+        // the decl node which pins its type), null = no stamp.
+        uint32_t decl_slot = k_invalid_u32;
+        uint8_t decl_expect = 0xFF;
+        type_info* decl_type = nullptr;
     };
 
     struct chunk {

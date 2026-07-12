@@ -3581,6 +3581,33 @@ public:
 			check(i1.rfind("90:", 0) == 0, "pure in-op reads summed");
 		});
 
+		test("fused_index_chain_pure_and_replay", [this, run_both_backends]() {
+			// Left-spine arithmetic chains in the index: 2- and 3-level raw folds, an
+			// env-global middle operand, mid-chain overflow spelling, and a float
+			// mid-chain (boxed tail replay) — all against the interpreter's spelling
+			auto [i1, v1] = run_both_backends(R"(
+				var vw = 4;
+				var a = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+				int grid(int y, int x) { return a[y * vw + x]; }
+				int deep(int y, int x) { return a[y * vw + x + 1]; }
+				void put(int y, int x, int v) { a[y * vw + x] = v; }
+				var s = 0;
+				for (int y = 0; y < 3; ++y) { for (int x = 0; x < 4; ++x) { s += grid(y, x); } }
+				var d = deep(1, 1);
+				put(2, 1, 99);
+				var out = "" + s + ":" + d + ":" + a[9];
+				var big = 9223372036854775807;
+				try { var q = a[big * 2 + 1]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
+				try { var q2 = a[1 * 2 + big]; out = out + "|ran2"; } catch (er) { out = out + "|" + er; }
+				var f = 1.5;
+				var viaFloat = a[1 * 2 + 1] + a[0 * 2 + 0];
+				try { var q3 = a[1 * 2 + f]; out = out + "|ranF:" + q3; } catch (er) { out = out + "|" + er; }
+				out + ":" + viaFloat;
+			)");
+			check_eq(i1, v1, "index-chain parity (raw fold + boxed tail + spellings)");
+			check(i1.rfind("66:", 0) == 0, "3x4 grid sum through the 2-level chain");
+		});
+
 		test("fused_binary_index_container_snapshot_order", [this, run_both_backends]() {
 			// An operator overload inside the index expression reassigns the container
 			// variable: the unfused twin had already LOADed the container, so the op must

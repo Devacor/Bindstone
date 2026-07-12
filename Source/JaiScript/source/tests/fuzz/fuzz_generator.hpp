@@ -253,7 +253,11 @@ namespace jai::fuzz {
 						if (rng_.chance(30)) {
 							if (const var_info* iv = random_var(vt::i)) {
 								static constexpr const char* const iops[] = {"+", "-", "*", "%", "/"};
-								return a->name + "[" + iv->name + " " + iops[rng_.below(5)] + " " + std::to_string(rng_.range(1, 2)) + "]";
+								std::string idx = iv->name + " " + iops[rng_.below(5)] + " " + std::to_string(rng_.range(1, 2));
+								if (rng_.chance(30)) {   // left-spine chain (fused-INDEX chain shape)
+									idx += std::string(" ") + iops[rng_.below(5)] + " " + std::to_string(rng_.range(1, 2));
+								}
+								return a->name + "[" + idx + "]";
 							}
 						}
 						return a->name + "[" + std::to_string(rng_.range(0, 2)) + "]";

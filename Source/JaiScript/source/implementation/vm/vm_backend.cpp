@@ -5146,6 +5146,33 @@ script_value vm_backend::materialize_constant(const script_value& tmpl) {
 	}
 }
 
+op_status vm_backend::raw_int_arith(token_type op, script_int a, script_int b,
+                                    script_int& out, bool& handled) {
+	handled = true;
+	switch (op) {
+	case token_type::plus:
+		if (!ints::try_add(a, b, out)) return raise_from(vm_int_overflow_v("Integer overflow in '+'"));
+		return {};
+	case token_type::minus:
+		if (!ints::try_sub(a, b, out)) return raise_from(vm_int_overflow_v("Integer overflow in '-'"));
+		return {};
+	case token_type::star:
+		if (!ints::try_mul(a, b, out)) return raise_from(vm_int_overflow_v("Integer overflow in '*'"));
+		return {};
+	case token_type::slash:
+		if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+		if (!ints::try_div(a, b, out)) return raise_from(vm_int_overflow_v("Integer overflow in '/'"));
+		return {};
+	case token_type::percent:
+		if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+		out = ints::mod(a, b);
+		return {};
+	default:
+		handled = false;
+		return {};
+	}
+}
+
 // Fused subscript read: container+index resolve as operands (slot in-place reads - no
 // LOAD dispatches, no operand pushes). The inline path is exec_index's in-bounds array
 // branch VERBATIM; everything else (map/borrow/custom-[]/OOB/non-int index) pushes the
@@ -5195,28 +5222,35 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
 				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
 				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-					const script_int a = pl->unchecked_as_int(), b = pr->unchecked_as_int();
-					switch (bop) {
-					case token_type::plus:
-						if (!ints::try_add(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '+'"));
-						have_raw_index = true; break;
-					case token_type::minus:
-						if (!ints::try_sub(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '-'"));
-						have_raw_index = true; break;
-					case token_type::star:
-						if (!ints::try_mul(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '*'"));
-						have_raw_index = true; break;
-					case token_type::slash:
-						if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-						if (!ints::try_div(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '/'"));
-						have_raw_index = true; break;
-					case token_type::percent:
-						if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-						raw_index = ints::mod(a, b);
-						have_raw_index = true; break;
-					default: break;   // comparisons keep the boxed compute (bool index replays)
-					}
+					VM_TRY(raw_int_arith(bop, pl->unchecked_as_int(), pr->unchecked_as_int(),
+					                     raw_index, have_raw_index));
 				}
+			}
+		}
+		// Left-spine chain: fold raw while rights stay int (fused_ident_value runs no
+		// user code, so the container pointer holds); the first non-int right hands
+		// off to the boxed tail below at the exact accumulator position.
+		const auto& chain = p.index_chain_ext;
+		size_t chain_pos = 0;
+		if (have_raw_index && !chain.empty()) {
+			std::optional<script_value> rscratch;
+			while (chain_pos < chain.size()) {
+				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[chain_pos]];
+				const script_value* rp2;
+				if (sp.right.const_index != k_invalid_u32) {
+					rp2 = &f.code->constants[sp.right.const_index];
+				} else {
+					rscratch.reset();
+					auto resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
+					if (!resolved) return raise_from(resolved);
+					rp2 = resolved.value();
+				}
+				if (rp2->raw_storage_index() != script_value::TYPEID_INT) break;
+				bool step_handled = false;
+				VM_TRY(raw_int_arith(static_cast<token_type>(sp.op), raw_index,
+				                     rp2->unchecked_as_int(), raw_index, step_handled));
+				if (!step_handled) break;   // compiler emits arith-only; defensive
+				++chain_pos;
 			}
 		}
 		if (!have_raw_index) {
@@ -5236,6 +5270,35 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 				return {};
 			}
 			index_ptr = &*computed_index;
+		}
+		if (chain_pos < chain.size() || (!chain.empty() && !have_raw_index)) {
+			// Boxed chain tail: the verbatim unfused stack sequence from the accumulator
+			// — container copy (its push IS the pin), accumulator, then one op_binary
+			// per remaining step, finished by the real op_index. Remaining steps can run
+			// user code (object operands / overloads); everything they see matches the
+			// unfused twin because it IS the unfused twin.
+			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
+			else { stack_.push_back(*container_ptr); }
+			if (computed_index) { stack_.push_back(std::move(*computed_index)); }
+			else { stack_.push_back(script_value(raw_index, engine_)); }
+			for (size_t i = chain_pos; i < chain.size(); ++i) {
+				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[i]];
+				if (sp.right.const_index != k_invalid_u32) {
+					stack_.push_back(materialize_constant(f.code->constants[sp.right.const_index]));
+				} else {
+					std::optional<script_value> rs;
+					auto resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
+					if (!resolved) return raise_from(resolved);
+					stack_.push_back(*resolved.value());
+				}
+				const vm_instruction bin_ins{opcode::op_binary, static_cast<uint32_t>(sp.op), binary_shape_none, 0};
+				VM_TRY(exec_binary(f, bin_ins));
+				if (is_unwinding_) [[unlikely]] {
+					return {};   // pair parity: the partial stack stands, dispatch unwinds
+				}
+			}
+			const vm_instruction index_ins{opcode::op_index, ins.b, 0, 0};
+			return exec_index(f, index_ins);
 		}
 	} else if (p.index.const_index != k_invalid_u32) {
 		index_ptr = &f.code->constants[p.index.const_index];
@@ -5342,10 +5405,8 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	bool have_raw_index = false;
 	script_int raw_index = 0;
 	if (p.index_binary != k_invalid_u32) {
-		// Same purity/snapshot/raw-int discipline as exec_index_fused: int arithmetic
-		// short-circuits to a raw index (no script_value born, binary_fused_compute's
-		// exact int-row spellings), pure numeric shapes keep the container pointer,
-		// everything else snapshots before the compute runs
+		// Same purity/snapshot/raw-int/chain discipline as exec_index_fused (the value
+		// sits below on the stack; the boxed tail pushes above it)
 		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
 		const token_type bop = static_cast<token_type>(bp.op);
 		bool pure = false;
@@ -5357,28 +5418,32 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
 				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
 				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-					const script_int a = pl->unchecked_as_int(), b = pr->unchecked_as_int();
-					switch (bop) {
-					case token_type::plus:
-						if (!ints::try_add(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '+'"));
-						have_raw_index = true; break;
-					case token_type::minus:
-						if (!ints::try_sub(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '-'"));
-						have_raw_index = true; break;
-					case token_type::star:
-						if (!ints::try_mul(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '*'"));
-						have_raw_index = true; break;
-					case token_type::slash:
-						if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-						if (!ints::try_div(a, b, raw_index)) return raise_from(vm_int_overflow_v("Integer overflow in '/'"));
-						have_raw_index = true; break;
-					case token_type::percent:
-						if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-						raw_index = ints::mod(a, b);
-						have_raw_index = true; break;
-					default: break;   // comparisons keep the boxed compute (bool index replays)
-					}
+					VM_TRY(raw_int_arith(bop, pl->unchecked_as_int(), pr->unchecked_as_int(),
+					                     raw_index, have_raw_index));
 				}
+			}
+		}
+		const auto& chain = p.index_chain_ext;
+		size_t chain_pos = 0;
+		if (have_raw_index && !chain.empty()) {
+			std::optional<script_value> rscratch;
+			while (chain_pos < chain.size()) {
+				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[chain_pos]];
+				const script_value* rp2;
+				if (sp.right.const_index != k_invalid_u32) {
+					rp2 = &f.code->constants[sp.right.const_index];
+				} else {
+					rscratch.reset();
+					auto resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
+					if (!resolved) return raise_from(resolved);
+					rp2 = resolved.value();
+				}
+				if (rp2->raw_storage_index() != script_value::TYPEID_INT) break;
+				bool step_handled = false;
+				VM_TRY(raw_int_arith(static_cast<token_type>(sp.op), raw_index,
+				                     rp2->unchecked_as_int(), raw_index, step_handled));
+				if (!step_handled) break;
+				++chain_pos;
 			}
 		}
 		if (!have_raw_index) {
@@ -5396,6 +5461,32 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 				return {};
 			}
 			index_ptr = &*computed_index;
+		}
+		if (chain_pos < chain.size() || (!chain.empty() && !have_raw_index)) {
+			// Boxed chain tail above the pending value: [value, container, acc] then one
+			// op_binary per remaining step, finished by the real op_index_store
+			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
+			else { stack_.push_back(*container_ptr); }
+			if (computed_index) { stack_.push_back(std::move(*computed_index)); }
+			else { stack_.push_back(script_value(raw_index, engine_)); }
+			for (size_t i = chain_pos; i < chain.size(); ++i) {
+				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[i]];
+				if (sp.right.const_index != k_invalid_u32) {
+					stack_.push_back(materialize_constant(f.code->constants[sp.right.const_index]));
+				} else {
+					std::optional<script_value> rs;
+					auto resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
+					if (!resolved) return raise_from(resolved);
+					stack_.push_back(*resolved.value());
+				}
+				const vm_instruction bin_ins{opcode::op_binary, static_cast<uint32_t>(sp.op), binary_shape_none, 0};
+				VM_TRY(exec_binary(f, bin_ins));
+				if (is_unwinding_) [[unlikely]] {
+					return {};
+				}
+			}
+			const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
+			return exec_index_store(f, store_ins);
 		}
 	} else if (p.index.const_index != k_invalid_u32) {
 		index_ptr = &f.code->constants[p.index.const_index];

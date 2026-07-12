@@ -1439,6 +1439,38 @@ script_value* vm_backend::env_arm_fast_head(env_lookup_cache_entry* fast_entry, 
 	return ptr;
 }
 
+env_lookup_cache_entry* vm_backend::worker_env_cache_slot(const chunk* code, size_t cache_slot) {
+	if (worker_env_mru_ < worker_env_caches_.size() &&
+	    worker_env_caches_[worker_env_mru_].code == code) {
+		auto& rec = worker_env_caches_[worker_env_mru_];
+		if (rec.entries.size() < code->code.size() * 3) [[unlikely]] {
+			rec.entries.resize(code->code.size() * 3);
+		}
+		return &rec.entries[cache_slot];
+	}
+	for (size_t i = 0; i < worker_env_caches_.size(); ++i) {
+		if (worker_env_caches_[i].code == code) {
+			worker_env_mru_ = i;
+			auto& rec = worker_env_caches_[i];
+			if (rec.entries.size() < code->code.size() * 3) [[unlikely]] {
+				rec.entries.resize(code->code.size() * 3);
+			}
+			return &rec.entries[cache_slot];
+		}
+	}
+	return nullptr;
+}
+
+void vm_backend::worker_pin_env_cache(const std::shared_ptr<void>& pin, const chunk* code) {
+	for (const auto& rec : worker_env_caches_) {
+		if (rec.code == code) { return; }
+	}
+	worker_chunk_env_cache rec;
+	rec.pin = pin;
+	rec.code = code;
+	worker_env_caches_.push_back(std::move(rec));
+}
+
 script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id) {
 	// SIZE_MAX = caller has no reserved (ip, role) slot for this symbol (e.g. the index
 	// of a fused subscript operand - the 3 roles/ip are taken). Entries are provenance-
@@ -1450,10 +1482,12 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 #endif
 		return nullptr;
 	}
-	// Fast head (main vm only - workers have cached_global_env_ null and must never
-	// touch the shared chunk cache): same current env + unmoved engine-wide env serial
-	// proves the whole chain unmodified since arming, whatever its shape - the armed
-	// cell is returned on two compares. See env_lookup_cache_entry (chunk.hpp).
+	// Entry storage + chain target by role: the main vm memoizes in the SHARED chunk
+	// cache against the engine's global env; a worker memoizes in its PRIVATE tables
+	// (worker_env_cache_slot - never the chunk) against its slot root env, where every
+	// capture is defined and whose epoch survives calls (in-place redefines don't
+	// bump). Same entries, same validation, same arms either way.
+	environment* chain_target = cached_global_env_;
 	env_lookup_cache_entry* fast_entry = nullptr;
 	if (cached_global_env_) {
 		auto& cache = f.code->env_lookup_cache;
@@ -1461,6 +1495,14 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 			cache.resize(f.code->code.size() * 3);
 		}
 		fast_entry = &cache[cache_slot];
+	} else if (parallel_worker_ && worker_root_env_) {
+		fast_entry = worker_env_cache_slot(f.code, cache_slot);
+		chain_target = worker_root_env_;
+	}
+	// Fast head: same current env + unmoved env serial (per-worker sinks are private,
+	// so worker churn only invalidates that worker) proves the whole chain unmodified
+	// since arming, whatever its shape - the armed cell is returned on two compares.
+	if (fast_entry) {
 		if (fast_entry->fast_env == environment_.get() &&
 		    fast_entry->fast_serial == env_symbolizer_->env_epoch()) {
 #ifdef JAISCRIPT_VM_PROFILE
@@ -1469,29 +1511,28 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 			return fast_entry->fast_ptr;
 		}
 	}
+	if (!chain_target) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[1];
+#endif
+		return nullptr;
+	}
 	// Top-level frames, call frames running directly in the global env (lazy-elided
 	// plain functions - fib-style recursion), or a pinned sticky method scope (persistent
 	// per-dispatch env parented on the global env): those environments are stable, so
 	// entries actually hit. Other call frames churn envs (binds/resets bump the epoch),
 	// which made the miss-path provenance work a pure tax on call-heavy code.
 	environment* resolve_env = environment_.get();
-	if (!f.top_level && resolve_env != cached_global_env_ && !environment_->vm_pinned_scope()) {
-		// Scope-env frames: when every env from the frame down to the GLOBAL is
-		// transparent (standard kind, zero own defines), any hit provably lands in
-		// a global cell — so the site caches against the GLOBAL env's identity and
-		// epoch instead of bailing to the per-access hash walk (GLOOM: 3.3M walks
-		// per 200t, 79% of them the framebuffer name). Transparency is re-proved
-		// per access; a mid-body define flips it and the site falls back. Workers
-		// have cached_global_env_ null and must never write the shared chunk cache.
-		if (!cached_global_env_) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_env_resolve_[1];
-#endif
-			return nullptr;
-		}
+	if (!f.top_level && resolve_env != chain_target && !environment_->vm_pinned_scope()) {
+		// Scope-env frames: when every env from the frame down to the chain target
+		// (global env / worker root) is transparent (standard kind, zero own defines),
+		// any hit provably lands in a target cell — so the site caches against the
+		// TARGET's identity and epoch instead of bailing to the per-access hash walk
+		// (GLOOM: 3.3M walks per 200t, 79% of them the framebuffer name). Transparency
+		// is re-proved per access; a mid-body define flips it and the site falls back.
 		environment* e = resolve_env;
 		int hops = 0;
-		while (e != cached_global_env_) {
+		while (e != chain_target) {
 			if (!e->vm_transparent_for_lookup() || ++hops > 4) {
 #ifdef JAISCRIPT_VM_PROFILE
 				++profile_env_resolve_[1];
@@ -1506,13 +1547,17 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 				return env_arm_fast_head(fast_entry, symbol_id);
 			}
 		}
-		resolve_env = cached_global_env_;
+		resolve_env = chain_target;
 	}
-	auto& cache = f.code->env_lookup_cache;
-	if (cache.size() < f.code->code.size() * 3) [[unlikely]] {
-		cache.resize(f.code->code.size() * 3);
+	if (!fast_entry) {
+		// Worker frame on a chunk never pinned here (method/coroutine entry): no
+		// private row to memoize into - full walk as before
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[1];
+#endif
+		return nullptr;
 	}
-	env_lookup_cache_entry& entry = cache[cache_slot];
+	env_lookup_cache_entry& entry = *fast_entry;
 	// Per-env epoch (environment::local_epoch): unrelated scope/method env churn no
 	// longer invalidates entries cached against the stable global/top-level envs
 	const uint64_t epoch = resolve_env->local_epoch();
@@ -6348,7 +6393,11 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		}
 		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
 	}
-	return raise_(make_error_code(runtime_error_code::invalid_reference), "Cannot take reference of non-lvalue expression");
+	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
+	return raise_(make_error_code(runtime_error_code::invalid_reference),
+		"Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals and "
+		"subscript chains like arr[i] or grid[y][x]; object fields like obj.field are not "
+		"ref-bindable here - pass them to a by-reference parameter instead)");
 }
 
 op_status vm_backend::exec_destructure(frame& f, const vm_instruction& ins) {
@@ -6559,6 +6608,11 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count);
 			function.backend_body_cache = compiled;
 			body_chunk = compiled.get();
+		}
+		if (parallel_worker_) {
+			// The owning handle is in hand exactly here: pin the chunk so this
+			// worker's private env-lookup rows stay identity-sound for its life
+			worker_pin_env_cache(function.backend_body_cache, body_chunk);
 		}
 		if (call_records_top_ == call_records_.size()) {
 			call_records_.push_back(std::make_unique<call_record>());
@@ -7414,7 +7468,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		if (methodIt != builtins_.string_methods.end()) {
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-				return method(ctx, capturedValue, args);
+				std::vector<script_value> scratch;
+				return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
 			};
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
@@ -7430,7 +7485,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		if (methodIt != builtins_.array_methods.end()) {
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-				return method(ctx, capturedValue, args);
+				std::vector<script_value> scratch;
+				return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
 			};
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
@@ -7446,7 +7502,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		if (methodIt != builtins_.map_methods.end()) {
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-				return method(ctx, capturedValue, args);
+				std::vector<script_value> scratch;
+				return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
 			};
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
@@ -7469,7 +7526,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		if (methodIt != builtins_.weak_ptr_methods.end()) {
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-				return method(ctx, capturedValue, args);
+				std::vector<script_value> scratch;
+				return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
 			};
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
@@ -7493,7 +7551,8 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			if (!user_shadows) {
 				const builtin_method& method = methodIt->second;
 				script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-					return method(ctx, capturedValue, args);
+					std::vector<script_value> scratch;
+					return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
 				};
 				out = script_value::make_function(boundMethod, engine_);
 				return {};
@@ -8476,6 +8535,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				// self's storage RAW, and in-place mutation must land in the target
 				// (KEEP BYTE-PARALLEL with the interpreter's identifier-receiver path)
 				script_value& var_ref = ref_result.value().get().deref();
+				detail::deref_builtin_args_in_place(arguments);
 #ifdef JAISCRIPT_VM_PROFILE
 				profile_call_method_paths_[3]++;
 #endif
@@ -8728,6 +8788,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				// resolved above; the node is shared so mutation lands the same.
 				// Pending-site arming exactly as invoke_callee's opaque branch (callback
 				// builtins re-enter the vm); the boundary armor is guarded_native_call.
+				detail::deref_builtin_args_in_place(arguments);
 				pending_call_site saved_pending = pending_site_ctx_;
 				pending_site_ctx_ = arguments.empty() ? saved_pending
 				                                      : pending_call_site{&site, &f, f.code};
@@ -11222,6 +11283,11 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 			function.backend_body_cache = compiled;
 			body_chunk = compiled.get();
 		}
+		if (parallel_worker_) {
+			// The owning handle is in hand exactly here: pin the chunk so this
+			// worker's private env-lookup rows stay identity-sound for its life
+			worker_pin_env_cache(function.backend_body_cache, body_chunk);
+		}
 		if (call_records_top_ == call_records_.size()) {
 			call_records_.push_back(std::make_unique<call_record>());
 		}
@@ -12366,6 +12432,11 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	if (!body_chunk) {
 		body_chunk = chunk_for_body(function.name, function.parameters(), function.body, function.local_count);
 		function.backend_body_cache = body_chunk;
+	}
+	if (parallel_worker_) {
+		// The region BODY enters through here (run_worker -> execute_callable), not
+		// the in-loop call sites: pin it too or the hottest chunk never gets a row
+		worker_pin_env_cache(function.backend_body_cache, body_chunk.get());
 	}
 
 	call_frame locals;   // frame-kind metadata only (this/static/closure_env/name); slots live in the window

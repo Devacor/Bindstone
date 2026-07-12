@@ -539,6 +539,21 @@ namespace jai::vm {
                                                  script_value&& receiver,
                                                  const std::vector<script_value>& arguments,
                                                  const call_site& site);
+        // Call-arg window twins (increment 2): the receiver sits at stack_[args_base-1]
+        // and the args at [args_base, args_base+argc) — they bind IN PLACE as frame
+        // slots (zero per-arg moves; the receiver slot is the pin, destroyed by pop
+        // truncation exactly like the plain path's callee slot). The dispatcher still
+        // pins through the record; env setup COPIES the receiver (the slot must live).
+        op_status enter_script_method_sliced(frame& caller, script_value&& method_val,
+                                             const script_method_dispatch& dispatch,
+                                             const std::shared_ptr<function_decl>& ast,
+                                             size_t args_base, size_t argc,
+                                             const call_site& site);
+        op_status push_method_frame_sliced(frame& caller, script_value&& method_val,
+                                           const script_method_dispatch& dispatch,
+                                           const std::shared_ptr<function_decl>& ast,
+                                           size_t args_base, size_t argc,
+                                           const call_site* site);
         op_status push_method_frame(frame& caller, script_value&& method_val,
                                                const script_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast,

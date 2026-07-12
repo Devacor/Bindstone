@@ -1840,6 +1840,9 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_less(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_less(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1854,9 +1857,6 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 		}
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() < right.unchecked_as_string(), engine_);
-		}
-		if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
-			return script_value(left.unchecked_as_char() < right.unchecked_as_char(), engine_);
 		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
 	}
@@ -1900,6 +1900,9 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_less_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_less_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1914,9 +1917,6 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 		}
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() <= right.unchecked_as_string(), engine_);
-		}
-		if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
-			return script_value(left.unchecked_as_char() <= right.unchecked_as_char(), engine_);
 		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
 	}
@@ -1960,6 +1960,9 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_greater(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_greater(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1974,9 +1977,6 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 		}
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() > right.unchecked_as_string(), engine_);
-		}
-		if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
-			return script_value(left.unchecked_as_char() > right.unchecked_as_char(), engine_);
 		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
 	}
@@ -2020,6 +2020,9 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_greater_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_greater_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -2034,9 +2037,6 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 		}
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() >= right.unchecked_as_string(), engine_);
-		}
-		if (li_raw == script_value::TYPEID_CHAR && ri_raw == script_value::TYPEID_CHAR) {
-			return script_value(left.unchecked_as_char() >= right.unchecked_as_char(), engine_);
 		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
 	}
@@ -2074,6 +2074,10 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 }
 
 checked_result<script_value> vm_backend::handle_equal(const script_value& left, const script_value& right) {
+	// Integral promotion: char operands compare as int64 0..255, so 'a' == 97 and the
+	// binary idiom s[i] == 0x1A hold (char_promotion.hpp; was silently false pre-ruling)
+	if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+		return handle_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 	if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
 		bool is_expired = false;
 		if (left.is_weak_ptr()) {
@@ -2117,7 +2121,6 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 
 	if (unwrapped_left.is_string() && unwrapped_right.is_string()) return script_value(unwrapped_left.unchecked_as_string() == unwrapped_right.unchecked_as_string(), engine_);
 	if (unwrapped_left.is_bool() && unwrapped_right.is_bool()) return script_value(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool(), engine_);
-	if (unwrapped_left.is_char() && unwrapped_right.is_char()) return script_value(unwrapped_left.unchecked_as_char() == unwrapped_right.unchecked_as_char(), engine_);
 
 	// Opaque host pointers (unregistered make_value(T*)): identity — equal iff both
 	// alias the SAME live pointer (§13 ruling 2026-07). Bound primitives never reach
@@ -2188,6 +2191,9 @@ checked_result<script_value> vm_backend::handle_not_equal(const script_value& le
 }
 
 checked_result<script_value> vm_backend::handle_spaceship(const script_value& left, const script_value& right) {
+	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+		return handle_spaceship(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 	if (left.raw_storage_index() == script_value::TYPEID_INT && right.raw_storage_index() == script_value::TYPEID_INT) {
 		auto cmp = left.unchecked_as_int() <=> right.unchecked_as_int();
 		return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)), engine_);
@@ -2491,6 +2497,10 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
 		                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+
+	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li, ri)) [[unlikely]]
+		return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_));
 
 	if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
 		script_string joined = value_to_string_with_method(left) + value_to_string_with_method(right);
@@ -3675,6 +3685,24 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 
 		const size_t leftIdx = target.raw_storage_index();
 		const size_t rightIdx = derefRight.raw_storage_index();
+		// Integral promotion (char_promotion.hpp): a char operand leaves the in-place
+		// ladder and takes the general arithmetic path as int64 0..255, storing back
+		// like the %= case does. KEEP BYTE-PARALLEL with the interpreter's in-place switch.
+		if (detail::char_operands_promote(leftIdx, rightIdx)) [[unlikely]] {
+			token_type baseOp = token_type::plus;
+			switch (kind) {
+				case compound_plus: baseOp = token_type::plus; break;
+				case compound_minus: baseOp = token_type::minus; break;
+				case compound_star: baseOp = token_type::star; break;
+				case compound_slash: baseOp = token_type::slash; break;
+				case compound_percent: baseOp = token_type::percent; break;
+				default: return raise_(make_error_code(runtime_error_code::unknown_operator));
+			}
+			VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight));
+			VM_TRY(compound_typed_store_back(target, std::move(promoted)));
+			if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
+			return {};
+		}
 		const bool bothInt = leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT;
 		switch (kind) {
 			case compound_plus: {
@@ -3693,6 +3721,14 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 						return raise_from(detail::raise_memory_cap(*limits_));
 					}
 					target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+				} else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_CHAR) {
+					// string += char appends the char as TEXT (out += to_char(b),
+					// the binary-writer shape) — a char is a text unit. Non-char
+					// rhs keeps the Strong Types raise (string += int stays an
+					// error, unlike binary +, by pinned design). KEEP
+					// BYTE-PARALLEL with the interpreter's in-place switch.
+					VM_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight));
+					VM_TRY(compound_typed_store_back(target, std::move(joined)));
 				} else {
 					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
@@ -5459,35 +5495,39 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 }
 
 // Subscript read landing straight in the declared slot (the 3.59M INDEX_FUSED→DECL_VAR
-// pair): the scalar slot fast path is exec_binary_fused_decl's landing KEPT IN SYNC;
-// every other decl shape (references, typed mismatches, env decls) pushes and runs
-// op_decl_var verbatim with lvalue_init=1 — a subscript initializer is lvalue-shaped.
+// pair). Lane form: the landing facts (slot, expected raw index, type tag) were proven
+// at the peephole, so a matching scalar read writes the slot with zero per-exec decl
+// checks. Every other shape (mismatched scalars, references, env decls) pushes and
+// runs op_decl_var verbatim with lvalue_init=1 — a subscript init is lvalue-shaped.
 op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins) {
+	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
+	if (p.decl_slot != k_invalid_u32 && f.locals && !f.top_level) [[likely]] {
+		bool landed = false;
+		VM_TRY(index_fused_read<false>(f, ins, [&](script_value&& v) {
+			const size_t vi = v.raw_storage_index();
+			if (vi == p.decl_expect ||
+			    (p.decl_expect == 0xFF &&
+			     (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
+			      vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR))) {
+				if (p.decl_type) {
+					v.set_type_info(type_info_ptr{p.decl_type});
+				}
+				frame_slot_set(f, p.decl_slot, std::move(v));
+				landed = true;
+			} else {
+				stack_.push_back(std::move(v));   // general landing below
+			}
+		}));
+		if (landed || is_unwinding_) {
+			return {};   // unwound: parity states stand, the decl never runs
+		}
+		const vm_instruction decl_ins{opcode::op_decl_var, ins.c, 1, 1};
+		return exec_decl_var(f, decl_ins);
+	}
 	std::optional<script_value> computed;
 	VM_TRY(index_fused_read<false>(f, ins, [&](script_value&& v) { computed.emplace(std::move(v)); }));
 	if (!computed) [[unlikely]] {
 		return {};   // the read unwound; the decl never runs (pair parity)
-	}
-	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.c].get());
-	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
-		const size_t vi = computed->raw_storage_index();
-		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT ||
-		    vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
-			const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
-			const bool matches = bt == script_value_type::jai_any_type ||
-				(vi == script_value::TYPEID_INT && bt == script_value_type::jai_int_type) ||
-				(vi == script_value::TYPEID_FLOAT && bt == script_value_type::jai_float_type) ||
-				(vi == script_value::TYPEID_BOOL && bt == script_value_type::jai_bool_type) ||
-				(vi == script_value::TYPEID_CHAR && bt == script_value_type::jai_char_type);
-			if (matches) {
-				if (decl->type) {
-					computed->set_type_info(decl->type);
-				}
-				frame_slot_set(f, decl->slot_index, std::move(*computed));
-				return {};
-			}
-		}
 	}
 	stack_.push_back(std::move(*computed));
 	const vm_instruction decl_ins{opcode::op_decl_var, ins.c, 1, 1};

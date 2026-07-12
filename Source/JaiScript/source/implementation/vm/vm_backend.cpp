@@ -5121,17 +5121,63 @@ script_value vm_backend::materialize_constant(const script_value& tmpl) {
 // resolved operands and replays the unfused op, so every error keeps one spelling.
 op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
-	std::optional<script_value> cscratch, iscratch;
+	std::optional<script_value> cscratch, mscratch, iscratch;
 	const script_value* container_ptr;
 	if (p.container.const_index != k_invalid_u32) {
 		container_ptr = &f.code->constants[p.container.const_index];
 	} else {
-		auto resolved = fused_ident_value(f, p.container, cscratch, f.ip * 3);
+		// binary-index sites park the container at role 2: binary_fused_compute owns
+		// roles 0/1, and cache entries are provenance-checked by {env, epoch}, not symbol
+		auto resolved = fused_ident_value(f, p.container, cscratch,
+		                                  p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
 		if (!resolved) return raise_from(resolved);
 		container_ptr = resolved.value();
+		if (p.container.member_node != k_invalid_u32) {
+			VM_TRY(fused_member_container(f, static_cast<size_t>(&ins - f.code->code.data()),
+			                              *container_ptr, p.container.member_node, mscratch, container_ptr));
+			if (is_unwinding_) [[unlikely]] {
+				// pair parity: GET_MEMBER's out stays pushed, INDEX never runs
+				stack_.push_back(*container_ptr);
+				return {};
+			}
+		}
 	}
 	const script_value* index_ptr;
-	if (p.index.const_index != k_invalid_u32) {
+	std::optional<script_value> computed_index, csnap;
+	if (p.index_binary != k_invalid_u32) {
+		// Provably-pure shapes (raw numeric idents/lits, no custom numeric ops, no
+		// catch-var shadow) run no user code, so the container POINTER stays valid
+		// across the compute. Everything else snapshots the container first — exactly
+		// the copy the unfused LOAD paid — keeping container-before-index order.
+		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
+		bool pure = false;
+		if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0 &&
+		    is_numeric_binary_op(static_cast<token_type>(bp.op))) {
+			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
+			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
+			if (pr) {
+				const size_t li = pl->raw_storage_index(), ri = pr->raw_storage_index();
+				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
+			}
+		}
+		if (!pure) {
+			csnap.emplace(*container_ptr);
+			container_ptr = &*csnap;
+		}
+		VM_TRY(binary_fused_compute(f, p.index_binary,
+		                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
+		if (is_unwinding_) [[unlikely]] {
+			// pair parity: LOAD's container copy and BINARY_FUSED's result (when its
+			// sink ran) stay pushed, INDEX never runs
+			stack_.push_back(*container_ptr);
+			if (computed_index) {
+				stack_.push_back(std::move(*computed_index));
+			}
+			return {};
+		}
+		index_ptr = &*computed_index;
+	} else if (p.index.const_index != k_invalid_u32) {
 		index_ptr = &f.code->constants[p.index.const_index];
 	} else {
 		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
@@ -5193,7 +5239,8 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 	}
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
 	else { stack_.push_back(*container_ptr); }
-	if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
+	if (computed_index) { stack_.push_back(std::move(*computed_index)); }
+	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction index_ins{opcode::op_index, ins.b, 0, 0};
 	return exec_index(f, index_ins);
@@ -5204,17 +5251,57 @@ op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 // pushes the operands above the value and replays the unfused sequence.
 op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
-	std::optional<script_value> cscratch, iscratch;
+	std::optional<script_value> cscratch, mscratch, iscratch;
 	const script_value* container_ptr;
 	if (p.container.const_index != k_invalid_u32) {
 		container_ptr = &f.code->constants[p.container.const_index];
 	} else {
-		auto resolved = fused_ident_value(f, p.container, cscratch, f.ip * 3);
+		auto resolved = fused_ident_value(f, p.container, cscratch,
+		                                  p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
 		if (!resolved) return raise_from(resolved);
 		container_ptr = resolved.value();
+		if (p.container.member_node != k_invalid_u32) {
+			VM_TRY(fused_member_container(f, static_cast<size_t>(&ins - f.code->code.data()),
+			                              *container_ptr, p.container.member_node, mscratch, container_ptr));
+			if (is_unwinding_) [[unlikely]] {
+				// pair parity: [value, GET_MEMBER's out] stay pushed, INDEX_STORE never runs
+				stack_.push_back(*container_ptr);
+				return {};
+			}
+		}
 	}
 	const script_value* index_ptr;
-	if (p.index.const_index != k_invalid_u32) {
+	std::optional<script_value> computed_index, csnap;
+	if (p.index_binary != k_invalid_u32) {
+		// Same purity/snapshot discipline as exec_index_fused: pure numeric shapes keep
+		// the container pointer, everything else snapshots before the compute runs
+		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
+		bool pure = false;
+		if (!has_custom_numeric_ops_ && current_catch_var_id_ == 0 &&
+		    is_numeric_binary_op(static_cast<token_type>(bp.op))) {
+			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
+			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
+			if (pr) {
+				const size_t li = pl->raw_storage_index(), ri = pr->raw_storage_index();
+				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
+			}
+		}
+		if (!pure) {
+			csnap.emplace(*container_ptr);
+			container_ptr = &*csnap;
+		}
+		VM_TRY(binary_fused_compute(f, p.index_binary,
+		                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
+		if (is_unwinding_) [[unlikely]] {
+			stack_.push_back(*container_ptr);
+			if (computed_index) {
+				stack_.push_back(std::move(*computed_index));
+			}
+			return {};
+		}
+		index_ptr = &*computed_index;
+	} else if (p.index.const_index != k_invalid_u32) {
 		index_ptr = &f.code->constants[p.index.const_index];
 	} else {
 		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
@@ -5269,7 +5356,8 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	}
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*container_ptr)); }
 	else { stack_.push_back(*container_ptr); }
-	if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
+	if (computed_index) { stack_.push_back(std::move(*computed_index)); }
+	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*index_ptr)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
 	return exec_index_store(f, store_ins);
@@ -7242,6 +7330,81 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 		"Class '{0}' has no static member '{1}'", name_id, expr->member_id);
 }
 
+uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* expr) {
+	if (expr->member_id == same_as_id_ || cd->chain_has_nonpublic() ||
+	    builtins_.shared_ptr_methods.find(expr->member_id) != builtins_.shared_ptr_methods.end()) {
+		return UINT32_MAX;
+	}
+	const uint32_t fslot = cd->field_slot(expr->member_id);
+	if (fslot == class_definition::k_no_field_slot) {
+		return UINT32_MAX;
+	}
+	if (cd->has_property_getters()) {
+		uint64_t getter_id = expr->getter_id;
+		if (getter_id == UINT64_MAX) {
+			auto [gid, _] = symbolizer_->get_getter_id_with_view(expr->member_id);
+			getter_id = gid;
+			expr->getter_id = getter_id;
+		}
+		// The SYNTHESIZED accessor is verbatim get_field — only a CUSTOM getter shadows
+		// the slot (stage-5a's has_field trick, field-read edition; registration
+		// reclaims overridden ids).
+		if (!cd->is_auto_accessor(getter_id)) {
+			const script_value getter = cd->get_method(getter_id, false);
+			if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
+				return UINT32_MAX;
+			}
+		}
+	}
+	return fslot;
+}
+
+// Mirrors exec_get_member's structure EXACTLY (site IC hit serves the raw cell, the
+// fill round resolves through the ladder once, absent cells fall to the ladder for
+// chain-default materialization) at the fused op's own member_ic row — a fused ip is
+// never a real GET_MEMBER ip, so the row is free. `out` lands deref'd like
+// fused_ident_value's contract; a getter/map/cpp_bound result is scratch-owned.
+op_status vm_backend::fused_member_container(frame& f, size_t site, const script_value& base,
+                                             uint32_t member_node, std::optional<script_value>& scratch,
+                                             const script_value*& out) {
+	auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
+	if (cached_global_env_) {
+		const script_value& objd = base.deref();
+		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
+			auto& holder = const_cast<script_value&>(objd).unchecked_get_object_storage();
+			if (holder && holder->is_class_instance_wrapper && holder->data) {
+				auto* inst = static_cast<class_instance*>(holder->data.get());
+				if (class_definition* cd = inst->get_class_definition()) {
+					auto& code = *f.code;
+					if (code.member_ic.empty()) {
+						code.member_ic.resize(code.code.size());
+					}
+					auto& entry = code.member_ic[site];
+					if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
+						if (entry.slot != UINT32_MAX) {
+							if (script_value* v = inst->field_slot_value(entry.slot)) {
+								out = &v->deref();
+								return {};
+							}
+						}
+					} else {
+						const uint32_t slot = member_read_slot_probe(cd, expr);
+						entry.cd = cd;
+						entry.epoch = cd->method_epoch();
+						entry.slot = slot;
+						// resolve through the ladder this once; hits serve from here on
+					}
+				}
+			}
+		}
+	}
+	script_value member_out = make_null();
+	VM_TRY(member_access_value(f, base, expr, member_out));
+	scratch = std::move(member_out);
+	out = &scratch->deref();
+	return {};
+}
+
 op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value object = std::move(stack_.back());
@@ -7279,34 +7442,7 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 						profile_get_member_paths_[1]++;
 #endif
 					} else {
-						uint32_t slot = UINT32_MAX;
-						if (expr->member_id != same_as_id_ && !cd->chain_has_nonpublic() &&
-						    builtins_.shared_ptr_methods.find(expr->member_id) ==
-						        builtins_.shared_ptr_methods.end()) {
-							const uint32_t fslot = cd->field_slot(expr->member_id);
-							if (fslot != class_definition::k_no_field_slot) {
-								bool getter_shadow = false;
-								if (cd->has_property_getters()) {
-									uint64_t getter_id = expr->getter_id;
-									if (getter_id == UINT64_MAX) {
-										auto [gid, _] = symbolizer_->get_getter_id_with_view(expr->member_id);
-										getter_id = gid;
-										expr->getter_id = getter_id;
-									}
-									// The SYNTHESIZED accessor is verbatim get_field — only a
-									// CUSTOM getter shadows the slot (stage-5a's has_field trick,
-									// field-read edition; registration reclaims overridden ids).
-									if (!cd->is_auto_accessor(getter_id)) {
-										const script_value getter = cd->get_method(getter_id, false);
-										getter_shadow = !getter.is_null() && !getter.is_invalid() &&
-										                getter.is_function();
-									}
-								}
-								if (!getter_shadow) {
-									slot = fslot;
-								}
-							}
-						}
+						const uint32_t slot = member_read_slot_probe(cd, expr);
 						entry.cd = cd;
 						entry.epoch = cd->method_epoch();
 						entry.slot = slot;

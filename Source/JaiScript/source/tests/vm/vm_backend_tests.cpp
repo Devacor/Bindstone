@@ -3451,6 +3451,158 @@ public:
 			)");
 			check_eq(i1, v1, "yield-in-args pending isolation parity");
 		});
+
+		// INDEX operand fusion phase 2: member-base containers (`base.field[i]` resolves
+		// the member inside the op through its own member_ic row) and computed flat-binary
+		// indexes (`a[i + 1]` runs the index through binary_fused_compute in-op). Every
+		// test below runs both backends; the exotic shapes exercise the verbatim replays.
+
+		test("fused_member_index_read_store_hot", [this, run_both_backends]() {
+			// Typed + untyped array fields and a map field, read and stored through hot
+			// loops inside a function frame (the IC-hit shape) and at top level
+			auto [i1, v1] = run_both_backends(R"(
+				class C {
+					array<int> buf = [10, 20, 30, 40];
+					var arr = [1.5, 2.5, 3.5];
+					var lut = {"a": 100, "b": 200};
+				}
+				var c = C();
+				int hot() {
+					int s = 0;
+					for (int i = 0; i < 4; ++i) { s += c.buf[i]; }
+					for (int i = 0; i < 4; ++i) { c.buf[i] = c.buf[i] + 1; }
+					for (int i = 0; i < 4; ++i) { s += c.buf[i]; }
+					return s;
+				}
+				var total = hot();
+				c.arr[1] = c.arr[1] + 10.0;
+				var key = "b";
+				c.lut["a"] = c.lut["a"] + 7;
+				c.lut[key] = c.lut[key] + 1;
+				"" + total + ":" + c.arr[1] + ":" + c.lut["a"] + ":" + c.lut["b"];
+			)");
+			check_eq(std::string("204:12.500000:107:201"), i1, "interp: member-container reads/stores");
+			check_eq(i1, v1, "member-container fusion parity");
+		});
+
+		test("fused_member_index_getter_and_shadow", [this, run_both_backends]() {
+			// A custom getter for a NON-field name fires per access (the fused site stays
+			// negative and rides the ladder); a getter for a DECLARED field is unreachable
+			// (auto-accessor contract) so the raw field wins at the fused site
+			auto [i1, v1] = run_both_backends(R"(
+				class G {
+					var arr = [1, 2, 3];
+					int calls = 0;
+					var _get_virt() { calls = calls + 1; return [7, 8, 9]; }
+					var _get_arr() { return [666]; }
+				}
+				var g = G();
+				int s = 0;
+				for (int i = 0; i < 3; ++i) { s += g.virt[i]; }
+				var declared = g.arr[2];
+				"" + s + ":" + g.calls + ":" + declared;
+			)");
+			check_eq(std::string("24:3:3"), i1, "interp: getter fires per access, declared field stays raw");
+			check_eq(i1, v1, "getter/shadow parity at fused member sites");
+		});
+
+		test("fused_member_index_errors_and_unwind", [this, run_both_backends]() {
+			// OOB read/store, absent member, private access wall, and a getter that
+			// throws mid-op — every spelling and the post-catch engine state must match
+			auto [i1, v1] = run_both_backends(R"(
+				class E {
+					var arr = [1, 2, 3];
+					var _get_boom() { throw "kapow"; }
+				private:
+					var sec = [9];
+				public:
+					int rd() { return sec[0]; }
+				}
+				var e = E();
+				var out = "";
+				try { var t = e.arr[99]; out = out + "ran"; } catch (er) { out = out + er; }
+				try { e.arr[99] = 5; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
+				try { var t = e.nope[0]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
+				try { var t = e.sec[0]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
+				try { var t = e.boom[0]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
+				out = out + "|" + e.rd() + "|" + e.arr[1];
+				out;
+			)");
+			check_eq(i1, v1, "member-site error spelling and unwind parity");
+			check(i1.find("|9|2") != std::string::npos, "engine usable after every member-site error");
+		});
+
+		test("fused_member_index_reload_epoch", [this, run_both_backends]() {
+			// The fused op's member_ic row revalidates on method_epoch: a reload that
+			// removes the field must error at the already-hot subscript site
+			auto [i1, v1] = run_both_backends(R"(
+				class P { var arr = [1, 2, 3]; }
+				var p = P();
+				int hot() { int s = 0; for (int i = 0; i < 3; ++i) { s += p.arr[i]; } return s; }
+				var first = hot();
+				class P { var other = 1; }
+				var msg = "";
+				try { var t = hot(); msg = "ran"; } catch (er) { msg = er; }
+				"" + first + ":" + msg;
+			)");
+			check_eq(i1, v1, "member fused site revalidates across reload");
+			check(i1.rfind("6:", 0) == 0, "hot loop summed before the reload");
+		});
+
+		test("fused_binary_index_pure_and_replay", [this, run_both_backends]() {
+			// Flat computed indexes: pure numeric shapes run in-op; float results, map
+			// containers with computed string keys, div-by-zero and typed-store mismatch
+			// all replay with the unfused spelling
+			auto [i1, v1] = run_both_backends(R"(
+				var a = [10, 20, 30, 40, 50];
+				array<int> t = [1, 2, 3, 4];
+				var m = {"kx": 5};
+				int hot() {
+					int s = 0;
+					for (int i = 0; i < 3; ++i) { s += a[i + 1]; }
+					for (int j = 2; j < 4; ++j) { a[j - 1] = a[j - 1] + 100; }
+					t[1 + 1] = t[2 * 1] + 7;
+					return s;
+				}
+				var total = hot();
+				var suffix = "x";
+				var viaKey = m["k" + suffix];
+				var out = "" + total + ":" + a[1] + ":" + a[2] + ":" + t[2] + ":" + viaKey;
+				var z = 0;
+				try { var q = a[3 / z]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
+				try { var q2 = a[1 + 1.5]; out = out + "|ran2:" + q2; } catch (er) { out = out + "|" + er; }
+				try { t[1 + 0] = "nope"; out = out + "|ran3"; } catch (er) { out = out + "|" + er; }
+				out;
+			)");
+			check_eq(i1, v1, "computed-index fusion parity (pure + replay spellings)");
+			check(i1.rfind("90:", 0) == 0, "pure in-op reads summed");
+		});
+
+		test("fused_binary_index_container_snapshot_order", [this, run_both_backends]() {
+			// An operator overload inside the index expression reassigns the container
+			// variable: the unfused twin had already LOADed the container, so the op must
+			// index the ORIGINAL array (read) and store into it (write) — the snapshot
+			// discipline, observable as the mutation landing in the orphaned array
+			auto [i1, v1] = run_both_backends(R"(
+				var a = [10, 20, 30];
+				class K {
+					int k = 1;
+					function operator+(var o) -> int { a = [77, 88, 99]; return k + o; }
+				}
+				var idx = K();
+				var got = a[idx + 0];
+				var after = a[1];
+				var b = [1, 2, 3, 4];
+				class M {
+					function operator+(var o) -> int { b = [0, 0, 0, 0]; return 1 + o; }
+				}
+				var mi = M();
+				b[mi + 1] = 55;
+				"" + got + ":" + after + ":" + b[0] + ":" + b[2];
+			)");
+			check_eq(i1, v1, "container-before-index order parity under reassigning overloads");
+			check(i1.rfind("20:", 0) == 0, "read indexed the pre-reassignment array");
+		});
 	}
 };
 

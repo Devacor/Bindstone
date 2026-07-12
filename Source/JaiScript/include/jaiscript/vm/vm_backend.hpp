@@ -830,6 +830,15 @@ namespace jai::vm {
         // non-array shapes replay the verbatim unfused ops
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
+        // The getter-shadow/field-slot probe behind every GET_MEMBER-family site cache
+        // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /
+        // custom-getter shadow / no field slot)
+        uint32_t member_read_slot_probe(class_definition* cd, member_expr* expr);
+        // Fused-INDEX member container `base.member[...]`: the GET_MEMBER site IC at the
+        // fused op's own member_ic row, member_access_value ladder for everything else
+        op_status fused_member_container(frame& f, size_t site, const script_value& base,
+                                         uint32_t member_node, std::optional<script_value>& scratch,
+                                         const script_value*& out);
         // op_store's exact post-pop tail, shared with op_binary_fused_store
         op_status store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)

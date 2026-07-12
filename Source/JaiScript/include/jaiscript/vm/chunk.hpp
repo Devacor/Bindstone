@@ -48,6 +48,12 @@ namespace jai::vm {
         // call-site consumers never see one (compiler emits them for binary operands only).
         std::vector<fused_subscript_index> subscript_chain;
         bool is_subscript() const noexcept { return !subscript_chain.empty(); }
+
+        // INDEX-fusion containers only: chunk::nodes index of a member_expr — the operand
+        // is `base.member` where slot/symbol name the base identifier. The exec resolves
+        // the member through its own member_ic row (fill = exec_get_member's exact probe)
+        // or the member_access_value ladder, base→member→index order preserved.
+        uint32_t member_node = k_invalid_u32;
     };
 
     // Per-call-site argument metadata: symbol id per argument (UINT64_MAX = not an identifier)
@@ -202,6 +208,11 @@ namespace jai::vm {
     struct fused_index_proto {
         fused_operand container;
         fused_operand index;
+        // Computed flat-binary index (plain-ident containers only): fused_binary_protos
+        // entry evaluated in-op through binary_fused_compute (the ONE fused-binary body).
+        // Cache roles at these sites: binary left/right own ip*3/ip*3+1, container parks
+        // at ip*3+2 (entries are provenance-checked by {env, epoch} but not symbol).
+        uint32_t index_binary = k_invalid_u32;
     };
 
     struct chunk {

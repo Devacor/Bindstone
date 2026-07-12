@@ -261,6 +261,12 @@ namespace jai {
 
         // current_type() - What type is ACTUALLY stored in the variant right now
         // Use this for runtime type checks (is_null, is_object, etc.)
+        // FORCED inline (WPR: MSVC kept out-of-line instances that cost 262k µs in the
+        // vm window): almost every caller compares the result against ONE enum value,
+        // so inlining lets the switch constant-fold to a raw index compare.
+#if defined(_MSC_VER)
+        __forceinline
+#endif
         script_value_type current_type() const {
             switch (storage_.index()) {
                 case 0: return script_value_type::jai_null_type;        // std::monostate

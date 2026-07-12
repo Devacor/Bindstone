@@ -137,13 +137,15 @@ namespace jai {
         template<typename T>
         script_value(T* ptr, engine* eng) = delete;
 
+        // storage's relocating move already lands the source at TYPEID_NULL (which also
+        // clears any cpp_bound box — the binding lives in the storage), so no second
+        // nulling assignment runs here
         script_value(script_value&& other) noexcept
             : type_info_(std::move(other.type_info_)),
               engine_(other.engine_),
               storage_(std::move(other.storage_)) {
             other.type_info_ = nullptr;
             other.engine_ = nullptr;
-            other.storage_ = std::monostate{};  // also clears any cpp_bound box (binding lives in the variant)
         }
 
         script_value& operator=(script_value&& other) noexcept {
@@ -153,7 +155,6 @@ namespace jai {
                 storage_ = std::move(other.storage_);
                 other.type_info_ = nullptr;
                 other.engine_ = nullptr;
-                other.storage_ = std::monostate{};
             }
             return *this;
         }

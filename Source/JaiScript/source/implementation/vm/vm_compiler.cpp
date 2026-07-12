@@ -838,24 +838,45 @@ void vm_compiler::compile_block(block_stmt* block) {
 	emit(opcode::op_scope_pop);
 }
 
+void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vector<size_t>& false_jumps) {
+	if (cond->get_type() == node_type::binary_expr) {
+		auto* b = static_cast<binary_expr*>(cond.get());
+		if (b->op.type == token_type::ampersand_ampersand) {
+			compile_branch_condition(b->left, false_jumps);
+			compile_branch_condition(b->right, false_jumps);
+			return;
+		}
+		if (b->op.type == token_type::pipe_pipe) {
+			compile_expression(b->left);
+			const uint32_t proved = expression_returns_bool(b->left.get()) ? 1u : 0u;
+			size_t jump_true = emit(opcode::op_jump_if_true, k_invalid_u32, proved);
+			compile_branch_condition(b->right, false_jumps);
+			patch_jump(jump_true, chunk_->code.size());
+			return;
+		}
+	}
+	compile_expression(cond);
+	false_jumps.push_back(emit_cond_jump_false(cond.get()));
+}
+
 void vm_compiler::compile_if(if_stmt* stmt) {
-	compile_expression(stmt->condition);
-	size_t jump_false = emit_cond_jump_false(stmt->condition.get());
+	std::vector<size_t> false_jumps;
+	compile_branch_condition(stmt->condition, false_jumps);
 	compile_statement(stmt->then_statement);
 	if (stmt->else_statement) {
 		size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
-		patch_jump(jump_false, chunk_->code.size());
+		for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
 		compile_statement(stmt->else_statement);
 		patch_jump(jump_end, chunk_->code.size());
 	} else {
-		patch_jump(jump_false, chunk_->code.size());
+		for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
 	}
 }
 
 void vm_compiler::compile_while(while_stmt* stmt) {
 	const size_t top = chunk_->code.size();
-	compile_expression(stmt->condition);
-	size_t exit_jump = emit_cond_jump_false(stmt->condition.get());
+	std::vector<size_t> exit_jumps;
+	compile_branch_condition(stmt->condition, exit_jumps);
 
 	loops_.push_back({});
 	loops_.back().continue_target = top;
@@ -866,7 +887,9 @@ void vm_compiler::compile_while(while_stmt* stmt) {
 	emit(opcode::op_loop_back, static_cast<uint32_t>(top));
 
 	const size_t end = chunk_->code.size();
-	patch_jump(exit_jump, end);
+	for (size_t at : exit_jumps) {
+		patch_jump(at, end);
+	}
 	for (size_t at : loops_.back().break_patches) {
 		patch_jump(at, end);
 	}
@@ -889,10 +912,9 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	}
 
 	const size_t top = chunk_->code.size();
-	size_t exit_jump = k_invalid_u32;
+	std::vector<size_t> exit_jumps;
 	if (stmt->condition) {
-		compile_expression(stmt->condition);
-		exit_jump = emit_cond_jump_false(stmt->condition.get());
+		compile_branch_condition(stmt->condition, exit_jumps);
 	}
 
 	loops_.push_back({});
@@ -913,8 +935,8 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	emit(opcode::op_loop_back, static_cast<uint32_t>(top));
 
 	const size_t end = chunk_->code.size();
-	if (exit_jump != k_invalid_u32) {
-		patch_jump(exit_jump, end);
+	for (size_t at : exit_jumps) {
+		patch_jump(at, end);
 	}
 	for (size_t at : loops_.back().break_patches) {
 		patch_jump(at, end);

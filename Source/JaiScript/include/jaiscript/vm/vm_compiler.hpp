@@ -85,6 +85,10 @@ namespace jai::vm {
         // Fused subscript store shared by the expression and statement (no_result) forms;
         // false = the shape doesn't fuse and the caller compiles the unfused sequence
         bool try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result);
+        // Branch-position condition: &&/|| thread straight to conditional jumps (no bool
+        // materialization; each comparison pairs into fused_cmp_jump). Falsy control lands
+        // on the collected jumps — the caller patches them to the else/exit target.
+        void compile_branch_condition(const expression_ptr& cond, std::vector<size_t>& false_jumps);
 
         void compile_identifier_load(identifier_expr* ident);
         void compile_binary(const std::shared_ptr<binary_expr>& expr);

@@ -7,6 +7,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
+#include <jaiscript/detail/char_promotion.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
@@ -1522,6 +1523,9 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_add(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_add(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1592,6 +1596,9 @@ checked_result<script_value> vm_backend::handle_subtract(const script_value& lef
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_subtract(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_subtract(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1645,6 +1652,9 @@ checked_result<script_value> vm_backend::handle_multiply(const script_value& lef
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_multiply(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_multiply(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1698,6 +1708,9 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_divide(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_divide(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -1763,6 +1776,9 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return handle_modulo(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
 		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
+	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
+		return handle_modulo(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
 
 	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
 	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
@@ -2193,6 +2209,21 @@ checked_result<script_value> vm_backend::handle_spaceship(const script_value& le
 }
 
 checked_result<script_value> vm_backend::handle_binary_op(token_type op, const script_value& left, const script_value& right) {
+	// Integral promotion for the inline bitwise cases below: char operands enter as
+	// int64 0..255 (char_promotion.hpp). Arithmetic ops promote inside their handle_*.
+	switch (op) {
+	case token_type::ampersand:
+	case token_type::pipe:
+	case token_type::caret:
+	case token_type::left_shift:
+	case token_type::right_shift:
+		if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
+			return handle_binary_op(op, detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
+		}
+		break;
+	default:
+		break;
+	}
 	switch (op) {
 		case token_type::plus: return handle_add(left, right);
 		case token_type::minus: return handle_subtract(left, right);
@@ -8191,6 +8222,50 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						}
 						// resolution declined (arg types): the vector ladder reports identically
 					}
+				}
+			} else if (receiver_type == script_value::TYPEID_ARRAY && argc == 1 &&
+			           f.code->builtin_indexed &&
+			           site.bi_array != builtin_method_registries::k_no_builtin) {
+				// ARRAY push, slice edition: the receiver stays IN PLACE at args_base-1
+				// (no copy, no refcount pair) and the single arg is consumed off the
+				// stack — no pooled vector, no boundary armor (the builtin's body
+				// VERBATIM, same spellings/chokepoints as the direct-dispatch inline).
+				// member_id warms lazily on the MAIN thread only (workers get
+				// region-prewarmed ids; unwarmed on a worker falls to the vector path).
+				uint64_t push_member_id = member->member_id;
+				if (push_member_id == UINT64_MAX && !parallel_worker_) {
+					push_member_id = symbolizer_->intern(member->member);
+					member->member_id = push_member_id;
+				}
+				if (push_member_id == builtin_push_id_) {
+#ifdef JAISCRIPT_VM_PROFILE
+					++profile_builtin_direct_names_["<push-sliced>"];
+#endif
+					auto array_type_info = objd.get_type_info();
+					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
+					if (!vm_is_element_type_compatible(stack_[args_base], element_type, objd)) {
+						std::string value_type = vm_value_type_name(stack_[args_base]);
+						std::string expected_type = vm_type_info_name(element_type);
+						uint64_t value_type_id = symbolizer_->intern(value_type);
+						uint64_t expected_type_id = symbolizer_->intern(expected_type);
+						return raise_(
+							make_error_code(runtime_error_code::array_element_type_mismatch),
+							"Cannot push '{0}' to array<{1}>",
+							value_type_id, expected_type_id);
+					}
+					script_value converted = vm_convert_array_element(engine_, stack_[args_base], element_type);
+					const size_t bytes = sizeof(script_value) +
+						(converted.is_string() ? converted.unchecked_as_string().size() : 0);
+					if (!limits_->memory_charge(bytes)) [[unlikely]] {
+						return raise_from(detail::raise_memory_cap(*limits_));
+					}
+					// Conversions can run user code and the stack can move (invariant
+					// 2b): re-resolve the receiver by INDEX before the append
+					script_value& recv_after = stack_[args_base - 1].deref();
+					recv_after.unchecked_get_array_storage()->push(std::move(converted));
+					stack_.pop_back();                    // the arg
+					stack_.back() = make_null();          // receiver slot becomes the call result
+					return {};
 				}
 			}
 		}

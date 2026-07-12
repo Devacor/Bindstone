@@ -164,16 +164,27 @@ namespace jai::vm {
         uint32_t generic_update_ip = k_invalid_u32;
     };
 
-    // Per-instruction env-lookup inline cache: valid while the same environment is in
-    // effect and THAT env's own epoch is unchanged (environment::local_epoch - bumped by
-    // its construction/reset/clear/define/parent change; unrelated env churn elsewhere
-    // no longer invalidates). Stored pointers target stable deque storage in the entry's
-    // env or an ancestor (a parent cannot be pool-recycled while its child chain lives;
-    // the global env is engine-lifetime with in-place redefinition).
+    // Per-instruction env-lookup inline cache, two heads. FAST head {fast_env,
+    // fast_serial, fast_ptr}: valid while the CURRENT env identity and the engine-wide
+    // env serial (string_symbolizer::env_epoch - every env construct/reset/clear/define/
+    // parent change draws from it) are both unchanged, which proves the whole chain
+    // unmodified - two compares, no transparency walk, arbitrary (even shadowing) chains.
+    // Armed only with env-LOCAL cells (vm_storage_lookup cacheable=true), never
+    // this/static-field fallbacks: rebind_method_this deliberately doesn't advance the
+    // serial. SLOW head {env, epoch, ptr}: valid while the resolve env's OWN epoch
+    // (environment::local_epoch) is unchanged - survives the unrelated env churn that
+    // advances the engine serial (method scopes resetting per call), so call-heavy code
+    // keeps hitting when the fast head can't. Stored pointers target stable deque
+    // storage in the entry's env or an ancestor (a parent cannot be pool-recycled while
+    // its child chain lives; the global env is engine-lifetime with in-place
+    // redefinition).
     struct env_lookup_cache_entry {
         const environment* env = nullptr;
         uint64_t epoch = 0;
         script_value* ptr = nullptr;
+        const environment* fast_env = nullptr;
+        uint64_t fast_serial = 0;
+        script_value* fast_ptr = nullptr;
     };
 
     // op_compound_fused: `target op= <rhs>` in one dispatch. Binary mode: rhs_proto indexes

@@ -1416,6 +1416,29 @@ script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, u
 	return environment_->get_value_ptr(symbol_id);
 }
 
+script_value* vm_backend::env_arm_fast_head(env_lookup_cache_entry* fast_entry, uint64_t symbol_id) {
+	// Bail tail for chains the transparency walk refuses (shadowing scope frames):
+	// vm_storage_lookup from the CURRENT env resolves with real shadowing, so no
+	// transparency proof is needed - the engine serial validates arbitrary chains.
+	// Arms env-LOCAL cells only; 'this'/field/static fallbacks stay per-access
+	// (receiver rebinds don't advance the serial). Non-null uncacheable results are
+	// still THE resolution (same pointer get_value_ptr's prefix would hand back).
+	if (!fast_entry) {
+		return nullptr;
+	}
+	bool cacheable = false;
+	script_value* ptr = environment_->vm_storage_lookup(symbol_id, cacheable);
+	if (ptr && cacheable) {
+#ifdef JAISCRIPT_VM_PROFILE
+		++profile_env_resolve_[7];
+#endif
+		fast_entry->fast_env = environment_.get();
+		fast_entry->fast_serial = env_symbolizer_->env_epoch();
+		fast_entry->fast_ptr = ptr;
+	}
+	return ptr;
+}
+
 script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_t symbol_id) {
 	// SIZE_MAX = caller has no reserved (ip, role) slot for this symbol (e.g. the index
 	// of a fused subscript operand - the 3 roles/ip are taken). Entries are provenance-
@@ -1426,6 +1449,25 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 		++profile_env_resolve_[0];
 #endif
 		return nullptr;
+	}
+	// Fast head (main vm only - workers have cached_global_env_ null and must never
+	// touch the shared chunk cache): same current env + unmoved engine-wide env serial
+	// proves the whole chain unmodified since arming, whatever its shape - the armed
+	// cell is returned on two compares. See env_lookup_cache_entry (chunk.hpp).
+	env_lookup_cache_entry* fast_entry = nullptr;
+	if (cached_global_env_) {
+		auto& cache = f.code->env_lookup_cache;
+		if (cache.size() < f.code->code.size() * 3) [[unlikely]] {
+			cache.resize(f.code->code.size() * 3);
+		}
+		fast_entry = &cache[cache_slot];
+		if (fast_entry->fast_env == environment_.get() &&
+		    fast_entry->fast_serial == env_symbolizer_->env_epoch()) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_env_resolve_[6];
+#endif
+			return fast_entry->fast_ptr;
+		}
 	}
 	// Top-level frames, call frames running directly in the global env (lazy-elided
 	// plain functions - fib-style recursion), or a pinned sticky method scope (persistent
@@ -1454,14 +1496,14 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 #ifdef JAISCRIPT_VM_PROFILE
 				++profile_env_resolve_[1];
 #endif
-				return nullptr;   // callers fall through to their original full lookup
+				return env_arm_fast_head(fast_entry, symbol_id);
 			}
 			e = e->parent_raw();
 			if (!e) {
 #ifdef JAISCRIPT_VM_PROFILE
 				++profile_env_resolve_[1];
 #endif
-				return nullptr;
+				return env_arm_fast_head(fast_entry, symbol_id);
 			}
 		}
 		resolve_env = cached_global_env_;
@@ -1478,6 +1520,13 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_env_resolve_[2];
 #endif
+		if (fast_entry) {
+			// Transparency to resolve_env was (re)proved this access, so the current
+			// env resolves to the same cell - arm the two-compare head for next time
+			fast_entry->fast_env = environment_.get();
+			fast_entry->fast_serial = env_symbolizer_->env_epoch();
+			fast_entry->fast_ptr = entry.ptr;
+		}
 		return entry.ptr;
 	}
 	bool cacheable = false;
@@ -1489,6 +1538,11 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 		entry.env = resolve_env;
 		entry.epoch = epoch;
 		entry.ptr = ptr;
+		if (fast_entry) {
+			fast_entry->fast_env = environment_.get();
+			fast_entry->fast_serial = env_symbolizer_->env_epoch();
+			fast_entry->fast_ptr = ptr;
+		}
 	} else {
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_env_resolve_[4];
@@ -5735,15 +5789,22 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	}
 	if ((value_operand || !stack_.empty()) && container.raw_storage_index() == script_value::TYPEID_ARRAY && index_is_int) {
 		const script_int index = index_int;
-		auto storage = container.get_array_storage();
+		script_array* node = container.unchecked_get_array_storage().get();
 		// TYPED raw store (mirrors exec_index_store): numeric rhs coerces straight into
-		// the buffer; non-numeric rhs replays for the exact mismatch error. set() runs
-		// no user code, so operand/stack sources read in place.
-		if (storage && storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
+		// the buffer with set()'s exact casts — no handle copy, no value copy (the raw
+		// node stands in for the strong_ptr because no user code runs here); non-numeric
+		// rhs replays for the exact mismatch error.
+		if (node && node->is_typed() && index >= 0 && index < static_cast<script_int>(node->size())) {
 			const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
 			const size_t ri = rhs_peek.raw_storage_index();
 			if (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) {
-				storage->set(static_cast<size_t>(index), rhs_peek);
+				if (node->kind() == script_array::kind_t::i64) {
+					node->ints()[static_cast<size_t>(index)] = ri == script_value::TYPEID_FLOAT
+						? static_cast<script_int>(rhs_peek.unchecked_as_float()) : rhs_peek.unchecked_as_int();
+				} else {
+					node->floats()[static_cast<size_t>(index)] = ri == script_value::TYPEID_INT
+						? static_cast<script_float>(rhs_peek.unchecked_as_int()) : rhs_peek.unchecked_as_float();
+				}
 				if (value_operand) {
 					if (!no_result) { stack_.push_back(*value_ptr); }
 				} else {
@@ -5754,7 +5815,10 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 				return {};
 			}
 		}
-		if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
+		if (node && !node->is_typed() && index >= 0 && index < static_cast<script_int>(node->size())) {
+			// The HANDLE COPY pins the node: element-type conversion can run user code,
+			// which could reassign the container variable out from under a raw pointer
+			strong_ptr<script_array> storage = container.unchecked_get_array_storage();
 			auto container_type_info = container.get_type_info();
 			type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
 			// Element-type conversion can run user code: pop/copy the value into a local
@@ -10476,12 +10540,13 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_bound_method_paths_[2], (unsigned long long)profile_bound_method_paths_[3]);
 	}
 	const uint64_t er_total = profile_env_resolve_[0] + profile_env_resolve_[1] + profile_env_resolve_[2] +
-	                          profile_env_resolve_[3] + profile_env_resolve_[4];
+	                          profile_env_resolve_[3] + profile_env_resolve_[4] + profile_env_resolve_[6];
 	if (er_total) {
-		fprintf(stderr, "[vm-profile] ENV resolve: no-slot %llu | frame-ineligible %llu | cache-hit %llu | fill %llu | fill-uncacheable %llu | full-walks %llu\n",
+		fprintf(stderr, "[vm-profile] ENV resolve: no-slot %llu | frame-ineligible %llu | cache-hit %llu | fill %llu | fill-uncacheable %llu | full-walks %llu | fast-hit %llu | fast-arm %llu\n",
 			(unsigned long long)profile_env_resolve_[0], (unsigned long long)profile_env_resolve_[1],
 			(unsigned long long)profile_env_resolve_[2], (unsigned long long)profile_env_resolve_[3],
-			(unsigned long long)profile_env_resolve_[4], (unsigned long long)profile_env_resolve_[5]);
+			(unsigned long long)profile_env_resolve_[4], (unsigned long long)profile_env_resolve_[5],
+			(unsigned long long)profile_env_resolve_[6], (unsigned long long)profile_env_resolve_[7]);
 	}
 	if (!profile_env_walk_names_.empty()) {
 		std::vector<std::pair<std::string, uint64_t>> walks(profile_env_walk_names_.begin(), profile_env_walk_names_.end());

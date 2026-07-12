@@ -9313,38 +9313,19 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 		}
 	}
 
-	if (found_constructor) {
-		auto definition_env = global_env;
-
+	{
+		// TYPED ctor value (the bound-method playbook): exec_new / the call paths
+		// recover the payload via target<script_callable_thunk>() and run construction
+		// + the ctor body without the opaque native re-entry; every other caller goes
+		// through operator() (execute_callable with the standard host-boundary rule).
 		script_callable ctor_payload;
 		ctor_payload.kind = script_callable::kind_type::constructor;
 		ctor_payload.cls = class_def;
-		ctor_payload.definition_env = definition_env;
-		engine* ctor_eng = engine_;
-		auto ctor_dispatcher = [ctor_eng, ctor_payload](const std::vector<script_value>& args) -> checked_result<script_value> {
-			execution_backend* backend = ctor_eng ? ctor_eng->get_execution_backend() : nullptr;
-			if (!backend) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Interpreter was destroyed before constructor call");
-			}
-			return backend->execute_callable(ctor_payload, args);
-		};
-
-		global_env->define(decl->name_id, script_value::make_function(ctor_dispatcher, engine_));
-	} else {
-		script_callable ctor_payload;
-		ctor_payload.kind = script_callable::kind_type::constructor;
-		ctor_payload.cls = class_def;
-		engine* ctor_eng = engine_;
-		auto default_ctor_func = [ctor_eng, ctor_payload](const std::vector<script_value>& args) -> checked_result<script_value> {
-			execution_backend* backend = ctor_eng ? ctor_eng->get_execution_backend() : nullptr;
-			if (!backend) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error),
-					"Interpreter was destroyed before constructor call");
-			}
-			return backend->execute_callable(ctor_payload, args);
-		};
-
-		global_env->define(decl->name_id, script_value::make_function(default_ctor_func, engine_));
+		if (found_constructor) {
+			ctor_payload.definition_env = global_env;
+		}
+		global_env->define(decl->name_id,
+			script_value::make_function(script_callable_thunk{engine_, std::move(ctor_payload)}, engine_));
 	}
 
 	if (is_redefinition) {

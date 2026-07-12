@@ -354,6 +354,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		op_caret_id_ = symbolizer_->intern("^");
 		op_left_shift_id_ = symbolizer_->intern("<<");
 		op_right_shift_id_ = symbolizer_->intern(">>");
+		builtin_push_id_ = symbolizer_->intern("push");   // interned HERE: symbolizer freezes during parallel regions
 		this_id_ = symbolizer_->get_this_id();
 		subscript_op_id_ = symbolizer_->intern("[]");
 		assign_operator_id_ = symbolizer_->intern("=");
@@ -8435,7 +8436,47 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			if (direct) {
 #ifdef JAISCRIPT_VM_PROFILE
 				profile_call_method_paths_[6]++;
+				++profile_builtin_direct_names_[std::string(member->member)];
 #endif
+				// ARRAY push inline (95% of builtin-direct calls in array-heavy code):
+				// the builtin's body VERBATIM — same kernels, same error text, same
+				// memory-cap chokepoint — minus the pending-site arming and boundary
+				// armor (an append runs no user code). bi_array already proved the
+				// site is a registered array builtin; push's name id pins WHICH.
+				// member_id warms lazily (interp idiom) — main thread only: workers get
+				// pre-warmed ids from region setup and must never intern (frozen tables).
+				uint64_t direct_member_id = member->member_id;
+				if (direct_member_id == UINT64_MAX && !parallel_worker_) {
+					direct_member_id = symbolizer_->intern(member->member);
+					member->member_id = direct_member_id;
+				}
+				if (receiver_type == script_value::TYPEID_ARRAY &&
+				    direct_member_id == builtin_push_id_ && arguments.size() == 1) {
+#ifdef JAISCRIPT_VM_PROFILE
+					++profile_builtin_direct_names_["<push-inline>"];
+#endif
+					auto array_type_info = objv.get_type_info();
+					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
+					if (!vm_is_element_type_compatible(arguments[0], element_type, objv)) {
+						std::string value_type = vm_value_type_name(arguments[0]);
+						std::string expected_type = vm_type_info_name(element_type);
+						uint64_t value_type_id = symbolizer_->intern(value_type);
+						uint64_t expected_type_id = symbolizer_->intern(expected_type);
+						return raise_(
+							make_error_code(runtime_error_code::array_element_type_mismatch),
+							"Cannot push '{0}' to array<{1}>",
+							value_type_id, expected_type_id);
+					}
+					script_value converted = vm_convert_array_element(engine_, arguments[0], element_type);
+					const size_t bytes = sizeof(script_value) +
+						(converted.is_string() ? converted.unchecked_as_string().size() : 0);
+					if (!limits_->memory_charge(bytes)) [[unlikely]] {
+						return raise_from(detail::raise_memory_cap(*limits_));
+					}
+					objv.unchecked_get_array_storage()->push(std::move(converted));
+					stack_.push_back(make_null());
+					return {};
+				}
 				// objv IS the deref'd copy member_access_value captures (line one of its
 				// body): builtins take self unchecked, reference receivers (pairs[0])
 				// resolved above; the node is shared so mutation lands the same.
@@ -10314,6 +10355,16 @@ void vm_backend::dump_opcode_profile() const {
 	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
 	dump_next_histogram("LOAD", profile_load_next_);
 	dump_next_histogram("INDEX_FUSED", profile_index_fused_next_);
+	if (!profile_builtin_direct_names_.empty()) {
+		std::vector<std::pair<std::string, uint64_t>> bns(profile_builtin_direct_names_.begin(), profile_builtin_direct_names_.end());
+		std::sort(bns.begin(), bns.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		fprintf(stderr, "[vm-profile] builtin-direct calls by name:\n");
+		size_t shown = 0;
+		for (const auto& [name, count] : bns) {
+			fprintf(stderr, "  %-24s %10llu\n", name.c_str(), (unsigned long long)count);
+			if (++shown >= 10) break;
+		}
+	}
 	uint64_t total = 0;
 	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];
 	if (total == 0) return;
